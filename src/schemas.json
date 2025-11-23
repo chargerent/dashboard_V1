@@ -1,0 +1,20 @@
+{
+  "$id": "kioskConfig",
+  "type": "object",
+  "properties": {
+    "info": {
+      "type": "object",
+      "properties": {
+        "location": { "type": "string", "maxLength": 50 },
+        "place": { "type": "string", "maxLength": 50 },
+        "stationaddress": { "type": "string", "maxLength": 100 },
+        "city": { "type": "string", "maxLength": 50 },
+        "state": { "type": "string", "maxLength": 50 },
+        "zip": { "type": "string", "maxLength": 10 },
+        "country": { "type": "string", "enum": ["US", "CA", "FR"] }
+      },
+      "required": ["location", "place", "stationaddress", "city", "state", "zip", "country"]
+    }
+  },
+  "required": ["info"]
+}
