@@ -21,7 +21,7 @@ const ControlButton = ({ icon, label, subLabel, onClick, className = '', status,
     </button>
 );
 
-function KioskControlPanel({ kiosk, t, onCommand, serverUiVersion, serverFlowVersion, clientInfo, disabled = false }) {
+function KioskControlPanel({ kiosk, t, onCommand, serverUiVersion, serverFlowVersion, clientInfo, isOnline, disabled = false }) {
     const flowSubLabel = () => {
         const kioskV = kiosk.fversion ? kiosk.fversion.split(' ')[0] : null;
         const serverV = serverFlowVersion ? serverFlowVersion.split(' ')[0] : null;
@@ -81,7 +81,7 @@ function KioskControlPanel({ kiosk, t, onCommand, serverUiVersion, serverFlowVer
                         <ControlButton onClick={() => onCommand(kiosk.stationid, kiosk.ssh ? 'ssh disconnect' : 'ssh connect')} disabled={disabled} status={kiosk.ssh} label={t('ssh')} className="bg-yellow-100 hover:bg-yellow-200 text-yellow-800" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" /></svg>} />
                         <ControlButton 
                             onClick={() => onCommand(kiosk.stationid, 'hotspot')}
-                            disabled={disabled} 
+                            disabled={false}
                             label={t('hotspot')} 
                             className="bg-yellow-100 hover:bg-yellow-200 text-yellow-800" 
                             icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M8.111 16.556A5.5 5.5 0 0112 15c1.453 0 2.8.54 3.889 1.556M4.889 13.333A9.5 9.5 0 0112 11c2.477 0 4.78.94 6.556 2.667m-13.112-6.222A13.5 13.5 0 0112 7c3.523 0 6.81.94 9.667 2.778" /></svg>} 

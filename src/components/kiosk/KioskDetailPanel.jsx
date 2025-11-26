@@ -162,7 +162,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     const renderCT10 = () => {
         const hardwareType = kiosk.hardware?.type;
         return (
-            <div className="p-2 flex flex-col items-center">
+            <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
                 <div className="w-full flex flex-col gap-3">
                     {kiosk.modules[0] && <Module module={kiosk.modules[0]} />}
                     <PaymentTerminal />
@@ -174,7 +174,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     const renderCK20 = () => {
         const hardwareType = kiosk.hardware?.type;
         return (
-        <div className="p-2 flex flex-col items-center">
+        <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
             <div className="w-full flex flex-col gap-3">
                 <PaymentTerminal />
                 {kiosk.modules[0] && <Module module={kiosk.modules[0]} reverseOrder={true} />}
@@ -187,7 +187,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         const hardwareType = kiosk.hardware?.type;
 
         return (
-        <div className="p-2 flex flex-col items-center">
+        <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
             <div className="w-full flex flex-col gap-3">
                 {kiosk.modules[0] && <Module module={kiosk.modules[0]} reverseOrder={true} />}
                 <PaymentTerminal />
@@ -228,7 +228,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
             <div className="flex flex-col md:flex-row gap-2 p-2 bg-gray-100 rounded-b-lg border-t border-gray-200">
                 {hasAnyCommands && (
                     <div className="flex-shrink-0 w-full md:w-1/2">
-                        <KioskControlPanel kiosk={kiosk} t={t} onCommand={onCommand} serverUiVersion={serverUiVersion} serverFlowVersion={serverFlowVersion} clientInfo={clientInfo} disabled={!isOnline} />
+                        <KioskControlPanel kiosk={kiosk} t={t} onCommand={onCommand} serverUiVersion={serverUiVersion} serverFlowVersion={serverFlowVersion} clientInfo={clientInfo} isOnline={isOnline} disabled={!isOnline} />
                     </div>
                 )}
                 <div className="w-full md:w-1/2">

@@ -1,7 +1,6 @@
 // src/components/Dashboard/RentalStats.jsx
 
 import { useMemo } from 'react';
-import useLongPress from '../../hooks/useLongPress';
 function RentalStats({ rentalData, clientInfo, referenceTime, stationId, kiosks, isGlobal, activeFilters, t, onShowRentalDetails, leaseRevenue, repLeaseCommission }) {
     const stats = useMemo(() => {
         const now = new Date(referenceTime.endsWith('Z') ? referenceTime : referenceTime + 'Z');
@@ -67,20 +66,15 @@ function RentalStats({ rentalData, clientInfo, referenceTime, stationId, kiosks,
     const valueClass = stationId ? "text-xl" : "text-2xl";
     const gapClass = stationId ? "gap-2" : "gap-4";
 
-    const StatBox = ({ period, count, revenue, initialCharge, symbol, onLongPress }) => {
-        // A regular click does nothing, so we provide a no-op function.
-        const handleClick = () => {}; 
-        
-        // The long press hook handles all the event logic reliably.
-        const longPressEvents = useLongPress(onLongPress || handleClick, handleClick, {
-            shouldPreventDefault: true,
-            delay: 500,
-        });
-
+    const StatBox = ({ period, count, revenue, initialCharge, symbol, onClick }) => {
+        const handleClick = (e) => {
+            e.stopPropagation(); // Prevent click from bubbling up to KioskPanel
+            if (onClick) onClick();
+        };
         return (
             <div 
-                className={`bg-gray-100 p-2 rounded-md text-center ${onLongPress ? 'cursor-pointer' : 'cursor-default'}`}
-                {...(onLongPress ? longPressEvents : {})}
+                className={`bg-gray-100 p-2 rounded-md text-center ${onClick ? 'cursor-pointer hover:bg-gray-200 transition-colors' : 'cursor-default'}`}
+                onClick={handleClick}
             >
                 {(clientInfo?.features?.rental_counts || clientInfo?.username === 'chargerent') && (
                     <p className={`${valueClass} font-bold text-gray-700 leading-tight`}>{count}</p>
@@ -105,9 +99,9 @@ function RentalStats({ rentalData, clientInfo, referenceTime, stationId, kiosks,
         <div className="flex flex-col justify-center text-center md:text-left">
             <h3 className={`font-bold text-gray-800 mb-2 ${labelClass}`}>{showLeaseRevenue ? t('revenue_activity') : t('rental_activity')}</h3>
             <div className={`grid ${showLeaseRevenue ? 'grid-cols-4' : 'grid-cols-3'} ${gapClass} items-stretch`}>
-                <StatBox period="today" count={stats.today.count} revenue={stats.today.revenue} initialCharge={stats.today.initialCharge} symbol={stats.symbol} onLongPress={onShowRentalDetails ? () => onShowRentalDetails('today') : null} />
-                <StatBox period="days_7" count={stats.last7Days.count} revenue={stats.last7Days.revenue} initialCharge={stats.last7Days.initialCharge} symbol={stats.symbol} onLongPress={onShowRentalDetails ? () => onShowRentalDetails('7days') : null} />
-                <StatBox period="days_30" count={stats.last30Days.count} revenue={stats.last30Days.revenue} initialCharge={stats.last30Days.initialCharge} symbol={stats.symbol} onLongPress={onShowRentalDetails ? () => onShowRentalDetails('30days') : null} />
+                <StatBox period="today" count={stats.today.count} revenue={stats.today.revenue} initialCharge={stats.today.initialCharge} symbol={stats.symbol} onClick={onShowRentalDetails ? () => onShowRentalDetails('today') : null} />
+                <StatBox period="days_7" count={stats.last7Days.count} revenue={stats.last7Days.revenue} initialCharge={stats.last7Days.initialCharge} symbol={stats.symbol} onClick={onShowRentalDetails ? () => onShowRentalDetails('7days') : null} />
+                <StatBox period="days_30" count={stats.last30Days.count} revenue={stats.last30Days.revenue} initialCharge={stats.last30Days.initialCharge} symbol={stats.symbol} onClick={onShowRentalDetails ? () => onShowRentalDetails('30days') : null} />
                 {showLeaseRevenue && (
                     <div className="bg-gray-100 p-2 rounded-md text-center flex flex-col justify-center">
                         <p className={`${valueClass} font-bold text-purple-600 leading-tight`}>{stats.symbol}{leaseRevenue}</p>

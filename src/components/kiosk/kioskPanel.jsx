@@ -1,11 +1,11 @@
 // src/components/kiosk/KioskPanel.jsx
 
-import { useMemo, useCallback, memo } from 'react';
+import { useMemo, useCallback } from 'react';
 import { isKioskOnline } from '../../utils/helpers';
 import { formatDateTime } from '../../utils/dateFormatter';
 import RentalStats from '../Dashboard/RentalStats';
 import GatewayIcon from './GatewayIcon';
-import { useTap, isTouchDevice } from './useTap';
+import { useTap } from './useTap';
 
 function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rentalData, clientInfo, t, onCommand, onShowRentalDetails }) {
     const isOnline = isKioskOnline(kiosk, mockNow);
@@ -51,19 +51,23 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
     }, [kiosk]);
 
     const handleToggle = useCallback(() => {
-        if (canExpand && isOnline) {
+        if (canExpand) {
             onToggle(kiosk.stationid);
         }
-    }, [canExpand, isOnline, onToggle, kiosk.stationid]);
+    }, [canExpand, onToggle, kiosk.stationid]);
 
     const tapHandlers = useTap(handleToggle);
     
     return (
         <div 
-            className={`${kiosk.count === 0 ? 'bg-yellow-50' : 'bg-white'} shadow-md flex flex-col justify-between transition-all duration-300 rounded-lg ${isExpanded && canExpand ? 'ring-2 ring-blue-500' : ''} ${!isOnline ? 'border-red-400 border-2' : ''}`}>
+            onPointerDown={tapHandlers.onPointerDown}
+            onPointerMove={tapHandlers.onPointerMove}
+            onPointerUp={tapHandlers.onPointerUp}
+            style={tapHandlers.style}
+            className={`${kiosk.count === 0 ? 'bg-yellow-50' : 'bg-white'} shadow-md flex flex-col justify-between transition-all duration-300 rounded-lg ${isExpanded && canExpand ? 'ring-2 ring-blue-500' : ''} ${!isOnline ? 'border-red-400 border-2' : ''} ${canExpand ? 'cursor-pointer' : 'cursor-default'}`}>
             <div 
-                {...tapHandlers}
-                className={`p-4 ${canExpand && isOnline ? 'cursor-pointer' : 'cursor-default'}`}>
+                className="p-4"
+            >
                 <div className="flex justify-between items-start mb-2">
                     <div className="flex items-center gap-1.5">
                         {clientInfo.features.stationid ? (
@@ -188,4 +192,4 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
     );
 };
 
-export default memo(KioskPanel);
+export default KioskPanel;

@@ -155,7 +155,6 @@ useEffect(() => {
                     const ignoreUntil = ignoredKiosksRef.current[kiosk.stationid];
                     if (ignoreUntil && now < ignoreUntil) {
                         // If ignored, keep the previous state of this kiosk.
-                        console.log(`[FIRESTORE IGNORE] Ignoring update for ${kiosk.stationid}`);
                         return prevStationsMap.get(kiosk.stationid) || normalizeKioskData([kiosk])[0];
                     }
                     return normalizeKioskData([kiosk])[0];
@@ -415,18 +414,21 @@ useEffect(() => {
                         const moduleIdNum = data.module ? parseInt(data.module, 10) : null;
                         const slotId = data.slot ? parseInt(data.slot, 10) : null;
 
-                        setCommandStatus({ state: isSuccess ? 'success' : 'error', message: data.status_en || (isSuccess ? 'Command successful!' : 'Command failed.') });
+                        // Determine if this is a lock/unlock status update from the server's response
+                        const isExplicitStatusUpdate = data.status === 'locked' || data.status === 'unlocked';
+                        const isImplicitSuccessUpdate = isSuccess && (data.status_en?.includes('locked') || data.status_en?.includes('unlocked'));
                         
-                        const isStatusUpdate = data.status === 'locked' || data.status === 'unlocked';
+                        if (isExplicitStatusUpdate || isImplicitSuccessUpdate) {
+                            setCommandStatus({ state: 'success', message: data.status_en });
 
-                        if (isStatusUpdate && stationId && (moduleIdNum || moduleIdNum === 0) && (slotId || slotId === 0)) {
-                            let isNowLocked;
+                            let isNowLocked = undefined;
                             if (data.status === 'locked') {
                                 isNowLocked = true;
-                            } else if (data.status === 'unlocked') {
+                            } else if (data.status === 'unlocked' || (isSuccess && data.status_en?.includes('unlocked'))) {
                                 isNowLocked = false;
                             } else {
-                                return; // Do nothing if status is not 'locked' or 'unlocked'
+                                // If we're here, it must be a lock confirmation
+                                isNowLocked = true;
                             }
                             
                             console.log(`[4. CONFIRMATION] Flipping color for ${stationId}-${moduleIdNum}-${slotId}. New state isLocked: ${isNowLocked}`);
@@ -450,6 +452,8 @@ useEffect(() => {
                             // --- CLEANUP ---
                             // Remove the slot from lockingSlots once the command is confirmed
                             setLockingSlots(prev => prev.filter(l => !(l.stationid === stationId && l.moduleid.toString().endsWith(`m${moduleIdNum}`) && l.slotid === slotId)));
+                        } else if (data.status_en) { // Handle other command responses that aren't lock/unlock
+                            setCommandStatus({ state: isSuccess ? 'success' : 'error', message: data.status_en });
                         }
                     } else if (data.action === 'enable' || data.action === 'disable') {
                         const isSuccess = data.status == 1;

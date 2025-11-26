@@ -59,7 +59,6 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
         }, 300);
         return () => clearTimeout(handler);
     }, [searchTerm]);
-
     const handleToggleDetails = (stationid) => {
         setEditingKioskId(null); 
         setRentalDetailView(null);
@@ -306,60 +305,63 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
     }, [allStationsData]);
     
     const preFilteredKiosks = useMemo(() => {
-        let kiosks = clientStations;
-        
-        // The 'Active' filter should only apply for 'chargerent' and 'partner' users.
-        // Regular clients should always see all their kiosks.
-        if (showActiveOnly && (clientInfo.username === 'chargerent' || clientInfo.partner)) {
-            kiosks = kiosks.filter(k => isKioskActive(k, latestTimestamp));
-        }
-
-        // If there's a search term, apply it globally, ignoring country filters.
-        if (clientInfo.username === 'chargerent' && debouncedSearchTerm) {
-            const lowercasedSearch = debouncedSearchTerm.toLowerCase();
-            kiosks = kiosks.filter(k => 
-                k.info.location?.toLowerCase().includes(lowercasedSearch) ||
-                k.stationid.toLowerCase().includes(lowercasedSearch) ||
-                k.info.city?.toLowerCase().includes(lowercasedSearch) ||
-                k.info.place?.toLowerCase().includes(lowercasedSearch) ||
-                k.info.locationtype?.toLowerCase().includes(lowercasedSearch)
-            );
-        } else {
-            // Otherwise, apply country and master filters as usual.
-            const countryFilters = ['us', 'ca', 'fr'];
-            if (activeFilters.master) {
-                kiosks = kiosks.filter(k => k.info.place?.toUpperCase().includes('MASTER'));
-            } else if (activeFilters.disney) {
-                kiosks = kiosks.filter(k => k.info.location?.toLowerCase().includes('disney'));
-            } else {
-                const activeCountry = Object.keys(activeFilters).find(key => activeFilters[key] && countryFilters.includes(key));
-                if (activeCountry && !activeFilters.all) { // Only apply country filter if 'all' is not active
-                    kiosks = kiosks.filter(k => k.info.country?.toLowerCase() === activeCountry.toLowerCase());
-                }
+      let kiosks = clientStations;
+  
+      // The 'Active' filter should only apply for 'chargerent' and 'partner' users.
+      if (showActiveOnly && (clientInfo.username === 'chargerent' || clientInfo.partner)) {
+          kiosks = kiosks.filter(k => isKioskActive(k, latestTimestamp));
+      }
+  
+      return kiosks;
+  }, [clientStations, showActiveOnly, latestTimestamp, clientInfo.username, clientInfo.partner]);
+  
+  const searchedKiosks = useMemo(() => {
+      if (!debouncedSearchTerm) return preFilteredKiosks;
+      const lowercasedSearch = debouncedSearchTerm.toLowerCase();
+      return preFilteredKiosks.filter(k => 
+          k.info.location?.toLowerCase().includes(lowercasedSearch) ||
+          k.stationid.toLowerCase().includes(lowercasedSearch) ||
+          k.info.city?.toLowerCase().includes(lowercasedSearch) ||
+          k.info.place?.toLowerCase().includes(lowercasedSearch) ||
+          k.info.locationtype?.toLowerCase().includes(lowercasedSearch)
+      );
+  }, [preFilteredKiosks, debouncedSearchTerm]);
+  
+  const fullyFilteredKiosks = useMemo(() => {
+      let kiosks = searchedKiosks;
+      const countryFilters = ['us', 'ca', 'fr'];
+      if (activeFilters.master) {
+          kiosks = kiosks.filter(k => k.info.place?.toUpperCase().includes('MASTER'));
+      } else if (activeFilters.disney) {
+          kiosks = kiosks.filter(k => k.info.location?.toLowerCase().includes('disney'));
+      } else {
+          const activeCountry = Object.keys(activeFilters).find(key => activeFilters[key] && countryFilters.includes(key));
+          if (activeCountry && !activeFilters.all) {
+              kiosks = kiosks.filter(k => k.info.country?.toLowerCase() === activeCountry.toLowerCase());
             }
         }
         return kiosks;
-    }, [clientStations, showActiveOnly, debouncedSearchTerm, activeFilters, clientInfo.username, latestTimestamp]);
+  }, [searchedKiosks, activeFilters]);
     
             const offlineKioskCount = useMemo(() => {
-        return preFilteredKiosks.filter(kiosk => !isKioskOnline(kiosk, latestTimestamp)).length;
-    }, [preFilteredKiosks, latestTimestamp]);
+        return fullyFilteredKiosks.filter(kiosk => !isKioskOnline(kiosk, latestTimestamp)).length;
+    }, [fullyFilteredKiosks, latestTimestamp]);
 
     const soldOutKioskCount = useMemo(() => {
-        return preFilteredKiosks.filter(kiosk => kiosk.count === 0).length;
-    }, [preFilteredKiosks]);
+        return fullyFilteredKiosks.filter(kiosk => kiosk.count === 0).length;
+    }, [fullyFilteredKiosks]);
 
     const disconnectedKioskCount = useMemo(() => {
-        return preFilteredKiosks.filter(kiosk => kiosk.modules.some(m => m.output === false)).length;
-    }, [preFilteredKiosks]);
+        return fullyFilteredKiosks.filter(kiosk => kiosk.modules.some(m => m.output === false)).length;
+    }, [fullyFilteredKiosks]);
 
     const totalLeaseRevenue = useMemo(() => {
         if (!clientInfo?.features?.lease_revenue) return 0;
-        return preFilteredKiosks.filter(k => k.pricing?.kioskmode === 'LEASE').reduce((sum, k) => sum + (Number(k.pricing?.leaseamount) || 0), 0);
-    }, [preFilteredKiosks, clientInfo]);
+        return fullyFilteredKiosks.filter(k => k.pricing?.kioskmode === 'LEASE').reduce((sum, k) => sum + (Number(k.pricing?.leaseamount) || 0), 0);
+    }, [fullyFilteredKiosks, clientInfo]);
 
     const filteredLocations = useMemo(() => {
-        const locations = preFilteredKiosks.reduce((acc, station) => {
+        const locations = fullyFilteredKiosks.reduce((acc, station) => {
             const location = station.info.location;
             if (!acc[location]) acc[location] = [];
             acc[location].push(station);
@@ -395,7 +397,7 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
     const countryOrder = { 'CA': 1, 'FR': 2, 'US': 3 };
 
     // 1. Sort kiosks within each location group by stationid
-    for (const [, kiosks] of filteredLocations) {
+    for (const [location, kiosks] of filteredLocations) {
         kiosks.sort((a, b) => a.stationid.localeCompare(b.stationid));
     }
 
@@ -450,8 +452,6 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
 
     const handleFilterChange = (filterKey) => {
         setSearchTerm(''); // Clear search when a filter is clicked
-        setCurrentPage(1);
-
         const countryFilters = ['us', 'ca', 'fr']; // Disney is handled separately
         const specialStatusFilters = ['offline', 'soldout', 'disconnected'];
 
@@ -564,7 +564,7 @@ return (
         <SoldOutKiosksModal
             isOpen={showSoldOutModal}
             onClose={() => setShowSoldOutModal(false)}
-            soldOutKiosks={preFilteredKiosks.filter(kiosk => kiosk.count === 0)}
+            soldOutKiosks={fullyFilteredKiosks.filter(kiosk => kiosk.count === 0)}
             t={t}
         />
         <CommandStatusToast status={commandStatus} onDismiss={() => setCommandStatus(null)} />
@@ -628,8 +628,8 @@ return (
                         <p className="font-bold">{t('connection_error_title')}</p>
                         <p>{firestoreError}</p>
                     </div>
-                ) : (
-                    <>
+            ) : (
+                <>
                         {error && <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">{error}</div>}
                         {clientInfo.features.rentals && (
                             <FilterPanel 
