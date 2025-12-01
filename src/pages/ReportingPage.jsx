@@ -120,6 +120,8 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
         }
 
         return activeRentalData.filter(rental => {
+            if (rental.status === 'purchased') return false;
+
             const rentalDate = new Date(rental.rentalTime);
 
             const isAfterStartDate = start ? rentalDate >= start : true;
@@ -218,6 +220,21 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
     const numberOfKiosksForAverage = useMemo(() => {
         const kiosksWithRentals = new Set(filteredRentals.map(r => r.rentalStationid));
         return kiosksWithRentals.size > 0 ? kiosksWithRentals.size : 1;
+    }, [filteredRentals]);
+
+    const averageRentalPeriod = useMemo(() => {
+        const returnedRentals = filteredRentals.filter(r => r.rentalPeriod > 0);
+        if (returnedRentals.length === 0) return '0m';
+
+        const totalPeriodMs = returnedRentals.reduce((sum, r) => sum + r.rentalPeriod, 0);
+        const avgMs = totalPeriodMs / returnedRentals.length;
+
+        const totalSeconds = Math.floor(avgMs / 1000);
+        const days = Math.floor(totalSeconds / 86400);
+        const hours = Math.floor((totalSeconds % 86400) / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+
+        return `${days > 0 ? `${days}d ` : ''}${hours > 0 ? `${hours}h ` : ''}${minutes}m`;
     }, [filteredRentals]);
 
     const rentalsByKiosk = useMemo(() => {
@@ -461,37 +478,41 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                 <div ref={chartsRef} className="bg-white p-6 rounded-lg shadow-md">
                     {/* Summary Panel */}
                     <div className={`p-4 border border-gray-200 rounded-lg bg-gray-50`}>
-                        <h3 className={`text-lg font-bold text-gray-800 mb-4 text-center ${isExporting ? 'hidden' : ''}`}>Rental Summary</h3>
-                        <div className={`grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 text-center`}>
-                            <div className="p-2">
+                        <h3 className={`text-lg font-bold text-gray-800 mb-4 text-center ${isExporting ? 'hidden' : ''}`}>{t('rental_summary')}</h3>
+                        <div className={`grid grid-cols-1 sm:grid-cols-3 md:grid-cols-5 gap-2 text-center`}>
+                            <div className="p-1">
                                 <p className="text-sm text-gray-500">{t('date_range')}</p>
                                 <p className="text-md font-semibold text-gray-800">
                                     {startDate && endDate ? `${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}` : '...'}
                                 </p>
                                 <p className={`text-xs text-gray-500 ${isExporting ? 'hidden' : ''}`}>({numberOfDaysForAverage} {t('days')})</p>
                             </div>
-                            <div className="p-2">
+                            <div className="p-1">
                                 <p className="text-sm text-gray-500">{t('total_rentals')}</p>
                                 <p className={`font-bold text-blue-600 ${isExporting ? 'text-2xl' : 'text-3xl'}`}>{adjustedTotalRentals}</p>
                                 <p className={`text-xs text-gray-500 ${isExporting ? 'hidden' : ''}`}>{t('original')}: {originalTotalRentals}</p>
                             </div>
-                            <div className="p-2">
+                            <div className="p-1">
                                 <div>
                                     <p className="text-sm text-gray-500">{t('avg_rentals_per_day')}</p>
                                     <p className={`font-bold text-blue-600 ${isExporting ? 'text-2xl' : 'text-3xl'}`}>{isFinite(adjustedTotalRentals / numberOfDaysForAverage) ? Math.ceil(adjustedTotalRentals / numberOfDaysForAverage) : '0'}</p>
                                     <p className={`text-xs text-gray-500 ${isExporting ? 'hidden' : ''}`}>{t('original')}: {isFinite(originalTotalRentals / numberOfDaysForAverage) ? Math.ceil(originalTotalRentals / numberOfDaysForAverage) : '0'}</p>
                                 </div>
-                                <div className={`flex items-center justify-center gap-2 mt-1 ${isExporting ? 'hidden' : ''}`}>
+                                <div className={`flex items-center justify-center gap-1 mt-1 ${isExporting ? 'hidden' : ''}`}>
                                     <label htmlFor="skipDays" className="text-xs text-gray-600">{t('skip_empty_days')}</label>
                                     <input type="checkbox" id="skipDays" checked={skipZeroRentalsDays} onChange={e => setSkipZeroRentalsDays(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
                                 </div>
                             </div>
-                            <div className="p-2 sm:col-span-2 md:col-span-1">
+                            <div className="p-1">
                                 <div>
                                     <p className="text-sm text-gray-500">{t('avg_rentals_per_kiosk')}</p>
                                     <p className={`font-bold text-blue-600 ${isExporting ? 'text-2xl' : 'text-3xl'}`}>{isFinite(adjustedTotalRentals / numberOfKiosksForAverage) ? Math.ceil(adjustedTotalRentals / numberOfKiosksForAverage) : '0'}</p>
                                     <p className={`text-xs text-gray-500 ${isExporting ? 'hidden' : ''}`}>{t('original')}: {isFinite(originalTotalRentals / numberOfKiosksForAverage) ? Math.ceil(originalTotalRentals / numberOfKiosksForAverage) : '0'}</p>
                                 </div>
+                            </div>
+                            <div className="p-1">
+                                <p className="text-sm text-gray-500">Avg. Rental / Period</p>
+                                <p className={`font-bold text-blue-600 ${isExporting ? 'text-2xl' : 'text-3xl'}`}>{averageRentalPeriod}</p>
                             </div>
                         </div>
                     </div>

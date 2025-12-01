@@ -138,7 +138,7 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                     </div>
                 )}
                 {clientInfo.features.rentals && (
-                    <div className={`mt-4 ${isOnline ? 'border-t' : ''} pt-4`}>
+                    <div className={`mt-4 ${isOnline ? 'border-t' : ''} pt-4`} onPointerDown={(e) => e.stopPropagation()}>
                         <RentalStats 
                             rentalData={rentalData} 
                             clientInfo={clientInfo}
