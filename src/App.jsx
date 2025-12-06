@@ -1,5 +1,7 @@
 // src/App.jsx
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useIdleTimer } from './hooks/useIdleTimer';
+import InactivityModal from './components/InactivityModal';
 import { subscribeUserToPush, getOrCreateDeviceId } from './push';
 import { db } from './firebase-config'; // Import Firestore instance
 import { collection, onSnapshot, query, where, getDocs } from 'firebase/firestore';
@@ -74,8 +76,8 @@ function App() {
     const [lockingSlots, setLockingSlots] = useState([]); // Moved from DashboardPage
     const [allStationsData, setAllStationsData] = useState([]); // This state is now managed here.
     const [ngrokInfo, setNgrokInfo] = useState(null);
-    const [rawKioskData, setRawKioskData] = useState([]); // New state for raw kiosk data
-    
+    const [rawKioskData, setRawKioskData] = useState([]); // New state for raw kiosk data    
+
     const handleLogout = useCallback(() => {
         localStorage.removeItem('dashboardToken');
         setToken(null);
@@ -84,6 +86,17 @@ function App() {
         setPage('dashboard');
         setInitialStatusCheck(false);
     }, []);
+
+    const { showWarning, handleStay } = useIdleTimer({
+        onIdle: () => {}, // The hook now returns showWarning, so onIdle can be empty
+        onLogout: handleLogout,
+        idleTimeout: 1000 * 60 * 14, // 14 minutes
+        promptTimeout: 1000 * 60 * 1, // 1 minute
+    });
+
+    const handleStayLoggedIn = () => {
+        handleStay(); // This now correctly calls the function from the hook
+    };
 
     useEffect(() => {
         if (token) {
@@ -563,79 +576,6 @@ useEffect(() => {
         setPage('dashboard');
     };
 
-    if (!token || !clientInfo) {
-        return <LoginPage onLogin={handleLogin} />;
-    }
-    
-    if (page === 'admin') {
-        // This line is now corrected
-        return <AdminPage 
-            token={token} 
-            onLogout={handleLogout} 
-            onNavigateToDashboard={() => setPage('dashboard')} 
-            onNavigateToProvisionPage={() => setPage('provision')} 
-            onNavigateToAgreement={() => setPage('agreement')} 
-            t={t} 
-        />
-    }
-
-    if (page === 'agreement') {
-        return <ProfessionalAgreementPDF 
-            t={t} language={language} setLanguage={setLanguage} onLogout={handleLogout} onNavigateToDashboard={() => setPage('dashboard')}
-        />
-    }
-
-    if (page === 'rentals') {
-        return <RentalsPage 
-            onNavigateToProvisionPage={() => setPage('provision')}
-            onNavigateToDashboard={() => setPage('dashboard')} 
-            clientInfo={clientInfo}
-            rentalData={rentalData} // Rentals page uses raw rental data
-            allStationsData={allStationsData}
-            t={t} language={language} setLanguage={setLanguage} onLogout={handleLogout} onCommand={onCommand} 
-            referenceTime={latestTimestamp}
-        />;
-    }
-
-    if (page === 'chargers') {
-        return <ChargersPage
-            onNavigateToDashboard={() => setPage('dashboard')}
-            rentalData={rentalData}
-            kioskData={allStationsData}
-            t={t}
-            language={language}
-            setLanguage={setLanguage}
-            onLogout={handleLogout}
-            onCommand={onCommand}
-            commandStatus={commandStatus}
-            setCommandStatus={setCommandStatus}
-            clientInfo={clientInfo}
-        />;
-    }
-
-    if (page === 'reporting') {
-        return <ReportingPage
-            onNavigateToDashboard={() => setPage('dashboard')}
-            onNavigateToAnalytics={onNavigateToAnalytics}
-            onLogout={handleLogout}
-            t={t}
-            rentalData={rentalData}
-            allStationsData={allStationsData}
-            clientInfo={clientInfo}
-        />;
-    }
-
-    if (page === 'analytics') {
-        return <AnalyticsPage
-            allStationsData={allStationsData}
-            rentalData={rentalData}
-            initialData={analyticsInitialData}
-            onNavigateToDashboard={() => setPage('dashboard')}
-            onLogout={handleLogout}
-            t={t}
-        />;
-    }
-
     const dashboard = (
         <DashboardPage 
             token={token} 
@@ -660,26 +600,85 @@ useEffect(() => {
             lockingSlots={lockingSlots} // Pass lockingSlots down from App.jsx
             initialStatusCheck={initialStatusCheck}
             setInitialStatusCheck={setInitialStatusCheck}
-            serverFlowVersion={clientInfo.serverFlowVersion}
-            serverUiVersion={clientInfo.serverUiVersion}
+            serverFlowVersion={clientInfo?.serverFlowVersion}
+            serverUiVersion={clientInfo?.serverUiVersion}
             ignoredKiosksRef={ignoredKiosksRef}
             manageIgnoredKiosk={manageIgnoredKiosk}
         />
     );
 
-    if (page === 'dashboard') {
-        return dashboard;
-    }
+    // Centralized Page Router
+    const renderPage = () => {
+        // Publicly accessible pages (or pages that handle their own auth)
+        if (!token || !clientInfo) {
+            return <LoginPage onLogin={handleLogin} />;
+        }
 
-    if (page === 'kiosk-editor') {
-        return <KioskEditorPage token={token} onLogout={handleLogout} onNavigateToDashboard={() => setPage('dashboard')} t={t} kioskData={allStationsData} onCommand={onCommand} />;
-    }
+        // If we have a token and clientInfo, but no data yet, show a loading indicator.
+        if (allStationsData.length === 0) {
+            return <div className="flex items-center justify-center h-screen bg-gray-100"><div className="text-xl font-semibold text-gray-700">Loading Dashboard...</div></div>;
+        }
 
-    if (page === 'provision') {
-        return <ProvisionPage onLogout={handleLogout} onNavigateToDashboard={() => setPage('dashboard')} t={t} onCommand={onCommand} allStationsData={allStationsData} lastProvisionedId={lastProvisionedId} />
-    }
+        // Authenticated Pages
+        switch (page) {
+            case 'admin':
+                return <AdminPage 
+                    token={token} 
+                    onLogout={handleLogout} 
+                    onNavigateToDashboard={() => setPage('dashboard')} 
+                    onNavigateToProvisionPage={() => setPage('provision')} 
+                    onNavigateToAgreement={() => setPage('agreement')} 
+                    t={t} 
+                />;
+            case 'agreement':
+                return <ProfessionalAgreementPDF 
+                    t={t} language={language} setLanguage={setLanguage} onLogout={handleLogout} onNavigateToDashboard={() => setPage('dashboard')}
+                />;
+            case 'rentals':
+                return <RentalsPage 
+                    onNavigateToProvisionPage={() => setPage('provision')}
+                    onNavigateToDashboard={() => setPage('dashboard')} 
+                    clientInfo={clientInfo}
+                    rentalData={rentalData}
+                    allStationsData={allStationsData}
+                    t={t} language={language} setLanguage={setLanguage} onLogout={handleLogout} onCommand={onCommand} 
+                    referenceTime={latestTimestamp}
+                />;
+            case 'chargers':
+                return <ChargersPage
+                    onNavigateToDashboard={() => setPage('dashboard')}
+                    rentalData={rentalData}
+                    kioskData={allStationsData}
+                    t={t} language={language} setLanguage={setLanguage} onLogout={handleLogout} onCommand={onCommand}
+                    commandStatus={commandStatus} setCommandStatus={setCommandStatus} clientInfo={clientInfo}
+                />;
+            case 'reporting':
+                return <ReportingPage
+                    onNavigateToDashboard={() => setPage('dashboard')}
+                    onNavigateToAnalytics={onNavigateToAnalytics}
+                    onLogout={handleLogout} t={t} rentalData={rentalData} allStationsData={allStationsData} clientInfo={clientInfo}
+                />;
+            case 'analytics':
+                return <AnalyticsPage
+                    allStationsData={allStationsData} rentalData={rentalData} initialData={analyticsInitialData}
+                    onNavigateToDashboard={() => setPage('dashboard')} onLogout={handleLogout} t={t}
+                />;
+            case 'kiosk-editor':
+                return <KioskEditorPage token={token} onLogout={handleLogout} onNavigateToDashboard={() => setPage('dashboard')} t={t} kioskData={allStationsData} onCommand={onCommand} />;
+            case 'provision':
+                return <ProvisionPage onLogout={handleLogout} onNavigateToDashboard={() => setPage('dashboard')} t={t} onCommand={onCommand} allStationsData={allStationsData} lastProvisionedId={lastProvisionedId} />;
+            case 'dashboard':
+            default:
+                return dashboard;
+        }
+    };
 
-    return dashboard;
+    return (
+        <>
+            <InactivityModal isOpen={showWarning} onStay={handleStayLoggedIn} onLogout={handleLogout} countdown={60} t={t} />
+            {renderPage()}
+        </>
+    );
 };
 
 export default App;

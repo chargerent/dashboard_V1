@@ -305,63 +305,52 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
     }, [allStationsData]);
     
     const preFilteredKiosks = useMemo(() => {
-      let kiosks = clientStations;
-  
-      // The 'Active' filter should only apply for 'chargerent' and 'partner' users.
-      if (showActiveOnly && (clientInfo.username === 'chargerent' || clientInfo.partner)) {
-          kiosks = kiosks.filter(k => isKioskActive(k, latestTimestamp));
-      }
-  
-      return kiosks;
-  }, [clientStations, showActiveOnly, latestTimestamp, clientInfo.username, clientInfo.partner]);
-  
-  const searchedKiosks = useMemo(() => {
-      if (!debouncedSearchTerm) return preFilteredKiosks;
-      const lowercasedSearch = debouncedSearchTerm.toLowerCase();
-      return preFilteredKiosks.filter(k => 
-          k.info.location?.toLowerCase().includes(lowercasedSearch) ||
-          k.stationid.toLowerCase().includes(lowercasedSearch) ||
-          k.info.city?.toLowerCase().includes(lowercasedSearch) ||
-          k.info.place?.toLowerCase().includes(lowercasedSearch) ||
-          k.info.locationtype?.toLowerCase().includes(lowercasedSearch)
-      );
-  }, [preFilteredKiosks, debouncedSearchTerm]);
-  
-  const fullyFilteredKiosks = useMemo(() => {
-      let kiosks = searchedKiosks;
-      const countryFilters = ['us', 'ca', 'fr'];
-      if (activeFilters.master) {
-          kiosks = kiosks.filter(k => k.info.place?.toUpperCase().includes('MASTER'));
-      } else if (activeFilters.disney) {
-          kiosks = kiosks.filter(k => k.info.location?.toLowerCase().includes('disney'));
-      } else {
-          const activeCountry = Object.keys(activeFilters).find(key => activeFilters[key] && countryFilters.includes(key));
-          if (activeCountry && !activeFilters.all) {
-              kiosks = kiosks.filter(k => k.info.country?.toLowerCase() === activeCountry.toLowerCase());
-            }
+        // If a search term is present, we start with all client stations and ignore other filters.
+        if (debouncedSearchTerm) {
+            const lowercasedSearch = debouncedSearchTerm.toLowerCase();
+            return clientStations.filter(k => 
+                k.info.location?.toLowerCase().includes(lowercasedSearch) ||
+                k.stationid.toLowerCase().includes(lowercasedSearch) ||
+                k.info.city?.toLowerCase().includes(lowercasedSearch) ||
+                k.info.place?.toLowerCase().includes(lowercasedSearch) ||
+                k.info.locationtype?.toLowerCase().includes(lowercasedSearch)
+            );
         }
+
+        // If no search term, apply the standard filters.
+        let kiosks = clientStations;
+        if (showActiveOnly && (clientInfo.username === 'chargerent' || clientInfo.partner)) {
+            kiosks = kiosks.filter(k => isKioskActive(k, latestTimestamp));
+        }
+
+        const countryFilters = ['us', 'ca', 'fr'];
+        const activeCountry = Object.keys(activeFilters).find(key => activeFilters[key] && countryFilters.includes(key));
+        if (activeCountry && !activeFilters.all) {
+            kiosks = kiosks.filter(k => k.info.country?.toLowerCase() === activeCountry.toLowerCase());
+        }
+
         return kiosks;
-  }, [searchedKiosks, activeFilters]);
+    }, [clientStations, debouncedSearchTerm, showActiveOnly, activeFilters, latestTimestamp, clientInfo]);
     
             const offlineKioskCount = useMemo(() => {
-        return fullyFilteredKiosks.filter(kiosk => !isKioskOnline(kiosk, latestTimestamp)).length;
-    }, [fullyFilteredKiosks, latestTimestamp]);
+        return preFilteredKiosks.filter(kiosk => !isKioskOnline(kiosk, latestTimestamp)).length;
+    }, [preFilteredKiosks, latestTimestamp]);
 
     const soldOutKioskCount = useMemo(() => {
-        return fullyFilteredKiosks.filter(kiosk => kiosk.count === 0).length;
-    }, [fullyFilteredKiosks]);
+        return preFilteredKiosks.filter(kiosk => kiosk.count === 0).length;
+    }, [preFilteredKiosks]);
 
     const disconnectedKioskCount = useMemo(() => {
-        return fullyFilteredKiosks.filter(kiosk => kiosk.modules.some(m => m.output === false)).length;
-    }, [fullyFilteredKiosks]);
+        return preFilteredKiosks.filter(kiosk => kiosk.modules.some(m => m.output === false)).length;
+    }, [preFilteredKiosks]);
 
     const totalLeaseRevenue = useMemo(() => {
         if (!clientInfo?.features?.lease_revenue) return 0;
-        return fullyFilteredKiosks.filter(k => k.pricing?.kioskmode === 'LEASE').reduce((sum, k) => sum + (Number(k.pricing?.leaseamount) || 0), 0);
-    }, [fullyFilteredKiosks, clientInfo]);
+        return preFilteredKiosks.filter(k => k.pricing?.kioskmode === 'LEASE').reduce((sum, k) => sum + (Number(k.pricing?.leaseamount) || 0), 0);
+    }, [preFilteredKiosks, clientInfo]);
 
     const filteredLocations = useMemo(() => {
-        const locations = fullyFilteredKiosks.reduce((acc, station) => {
+        const locations = preFilteredKiosks.reduce((acc, station) => {
             const location = station.info.location;
             if (!acc[location]) acc[location] = [];
             acc[location].push(station);
@@ -564,7 +553,7 @@ return (
         <SoldOutKiosksModal
             isOpen={showSoldOutModal}
             onClose={() => setShowSoldOutModal(false)}
-            soldOutKiosks={fullyFilteredKiosks.filter(kiosk => kiosk.count === 0)}
+            soldOutKiosks={preFilteredKiosks.filter(kiosk => kiosk.count === 0)}
             t={t}
         />
         <CommandStatusToast status={commandStatus} onDismiss={() => setCommandStatus(null)} />
