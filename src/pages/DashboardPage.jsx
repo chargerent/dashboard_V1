@@ -451,7 +451,8 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
     const handleFilterChange = (filterKey) => {
         setSearchTerm(''); // Clear search when a filter is clicked
         const countryFilters = ['us', 'ca', 'fr']; // Disney is handled separately
-        const specialStatusFilters = ['offline', 'soldout', 'disconnected'];
+        const statusFilters = ['offline', 'soldout', 'disconnected'];
+        const exclusiveFilters = ['master', 'disney', ...countryFilters];
 
         if (filterKey === 'all') {
             setActiveFilters({ all: true });
@@ -459,46 +460,29 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
         }
 
         setActiveFilters(prev => {
-            let newFilters = { ...prev };
-            delete newFilters.all; // 'all' is mutually exclusive
+            const isCurrentlyActive = !!prev[filterKey];
+            let newFilters = { ...prev, [filterKey]: !isCurrentlyActive };
+            delete newFilters.all;
 
-            const isCurrentlyActive = newFilters[filterKey];
-
-            if (countryFilters.includes(filterKey)) {
-                // If the clicked country filter is already active, do nothing.
-                if (isCurrentlyActive) {
-                    return prev; // Return the existing state without changes
-                }
-
+            if (exclusiveFilters.includes(filterKey) && !isCurrentlyActive) {
                 // Country filters are radio-button-like
                 countryFilters.forEach(cf => delete newFilters[cf]);
                 // Master is also mutually exclusive with countries
                 delete newFilters.master;
                 delete newFilters.disney;
                 if (!isCurrentlyActive) newFilters[filterKey] = true;
-            } else if (specialStatusFilters.includes(filterKey)) {
-                // Offline and Soldout are mutually exclusive
-                delete newFilters.offline;
-                delete newFilters.soldout;
-                delete newFilters.disconnected;
-                if (!isCurrentlyActive) {
-                    newFilters[filterKey] = true;
-                }
-            } else {
-                // Handle master and disney filters
-                if ((filterKey === 'master' || filterKey === 'disney') && !isCurrentlyActive) {
-                    countryFilters.forEach(cf => delete newFilters[cf]);
-                    // Clear both master and disney to ensure only one is active
-                    delete newFilters.master; 
-                    delete newFilters.disney; 
-                }
+            } else if (statusFilters.includes(filterKey)) {
+                // Status filters are also radio-button like in the current UI
+                statusFilters.forEach(sf => {
+                    if (sf !== filterKey) delete newFilters[sf];
+                });
                 newFilters[filterKey] = !isCurrentlyActive;
             }
 
             // If toggling off a filter results in no active filters, default to 'all'
-            // or a specific country if that's the desired default.
-            const anyActive = Object.values(newFilters).some(val => val);
-            if (!anyActive) {
+            const hasActiveFilter = Object.keys(newFilters).some(key => newFilters[key]);
+
+            if (!hasActiveFilter) {
                 // Default to 'all' if no filters are active.
                 return { all: true };
             }
