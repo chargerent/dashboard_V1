@@ -10,12 +10,12 @@ import LoadingSpinner from '../components/UI/LoadingSpinner';
 import InitialStatusPage from '../components/UI/InitialStatusPage';
 import SoldOutKiosksModal from '../components/UI/SoldOutKiosksModal.jsx';
 import TimeoutWarningModal from '../components/UI/TimeoutWarningModal';
-import { normalizeKioskData, isKioskOnline, isKioskActive } from '../utils/helpers';
+import { isKioskOnline, isKioskActive } from '../utils/helpers';
 import GlobalRentalActivity from '../components/Dashboard/GlobalRentalActivity';
 import { useIdleTimer } from '../hooks/useIdleTimer';
 import LocationSummary from '../components/Dashboard/LocationSummary';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
-import { subscribeUserToPush } from '../push'; // This is unused
+import { subscribeUserToPush } from '../push';
 import RentalDetailView from '../components/Dashboard/RentalDetailView';
 
 export default function DashboardPage({ token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToRentals, onNavigateToChargers, onNavigateToReporting, rentalData, allStationsData, setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, setPendingSlots, ejectingSlots, setEjectingSlots, lockingSlots, ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, setNgrokInfo, manageIgnoredKiosk }) {
