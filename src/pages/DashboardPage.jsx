@@ -329,6 +329,15 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
             kiosks = kiosks.filter(k => k.info.country?.toLowerCase() === activeCountry.toLowerCase());
         }
 
+        // Handle 'master' and 'disney' special filters
+        if (activeFilters.master) {
+            kiosks = kiosks.filter(k => k.info.place?.toLowerCase().includes('master'));
+        }
+
+        if (activeFilters.disney) {
+            kiosks = kiosks.filter(k => k.info.location?.toLowerCase().includes('disneyland'));
+        }
+
         return kiosks;
     }, [clientStations, debouncedSearchTerm, showActiveOnly, activeFilters, latestTimestamp, clientInfo]);
     
@@ -456,6 +465,11 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
             const isCurrentlyActive = newFilters[filterKey];
 
             if (countryFilters.includes(filterKey)) {
+                // If the clicked country filter is already active, do nothing.
+                if (isCurrentlyActive) {
+                    return prev; // Return the existing state without changes
+                }
+
                 // Country filters are radio-button-like
                 countryFilters.forEach(cf => delete newFilters[cf]);
                 // Master is also mutually exclusive with countries
@@ -474,21 +488,19 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
                 // Handle master and disney filters
                 if ((filterKey === 'master' || filterKey === 'disney') && !isCurrentlyActive) {
                     countryFilters.forEach(cf => delete newFilters[cf]);
-                    delete newFilters.master;
-                    delete newFilters.disney;
+                    // Clear both master and disney to ensure only one is active
+                    delete newFilters.master; 
+                    delete newFilters.disney; 
                 }
                 newFilters[filterKey] = !isCurrentlyActive;
             }
 
-            // If no filters are active after the change, default to 'ca'
-            if (filterKey === 'master' && !isCurrentlyActive) {
-                // When activating master, clear country filters
-                countryFilters.forEach(cf => delete newFilters[cf]);
-            }
-
+            // If toggling off a filter results in no active filters, default to 'all'
+            // or a specific country if that's the desired default.
             const anyActive = Object.values(newFilters).some(val => val);
             if (!anyActive) {
-                return { ca: true };
+                // Default to 'all' if no filters are active.
+                return { all: true };
             }
 
             return newFilters;
