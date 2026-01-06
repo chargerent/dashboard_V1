@@ -1,6 +1,6 @@
 // src/pages/DashboardPage.jsx
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import FilterPanel from '../components/Dashboard/filterPanel';
+import FilterPanel from '../components/Dashboard/FilterPanel';
 import KioskPanel from '../components/kiosk/kioskPanel';
 import KioskDetailPanel from '../components/kiosk/KioskDetailPanel';
 import KioskEditPanel from '../components/kiosk/KioskEditPanel';
