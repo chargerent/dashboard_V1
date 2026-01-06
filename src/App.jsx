@@ -181,7 +181,11 @@ useEffect(() => {
         });
 
         // Step 2: Real-time listener for Rental Data
-        const rentalQuery = collection(db, 'rentals');
+        // Optimization: Limit to last 30 days to improve initial load performance
+        const thirtyDaysAgo = new Date();
+        thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+        const dateThreshold = thirtyDaysAgo.toISOString();
+        const rentalQuery = query(collection(db, 'rentals'), where('rentalTime', '>=', dateThreshold));
         const unsubscribeRentals = onSnapshot(rentalQuery, (querySnapshot) => {
             const rentals = querySnapshot.docs.map(doc => ({ rawid: doc.id, ...doc.data() }));
             if (firestoreError) setFirestoreError(null); // Clear error on new data
