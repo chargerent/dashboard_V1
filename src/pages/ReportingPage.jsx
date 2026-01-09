@@ -112,8 +112,11 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
     const activeRentalData = uploadedRentalData || rentalData;
 
     const filteredRentals = useMemo(() => {
-        const start = startDate ? new Date(startDate.setHours(0, 0, 0, 0)) : null;
-        const end = endDate ? new Date(endDate.setHours(23, 59, 59, 999)) : null;
+        const start = startDate ? new Date(startDate) : null;
+        if (start) start.setHours(0, 0, 0, 0);
+
+        const end = endDate ? new Date(endDate) : null;
+        if (end) end.setHours(23, 59, 59, 999);
 
         if (!start || !end) {
             return []; // Return empty if no date range is selected
@@ -178,10 +181,16 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
         const byInterval = {};
         filteredRentals.forEach(rental => {
             let intervalKey;
+            const d = new Date(rental.rentalTime);
             if (timeSeriesInterval === 'monthly') {
-                intervalKey = new Date(rental.rentalTime).toISOString().slice(0, 7); // YYYY-MM
+                const year = d.getFullYear();
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                intervalKey = `${year}-${month}`;
             } else {
-                intervalKey = new Date(rental.rentalTime).toISOString().split('T')[0]; // YYYY-MM-DD
+                const year = d.getFullYear();
+                const month = String(d.getMonth() + 1).padStart(2, '0');
+                const day = String(d.getDate()).padStart(2, '0');
+                intervalKey = `${year}-${month}-${day}`;
             }
             byInterval[intervalKey] = (byInterval[intervalKey] || 0) + 1;
         });
@@ -189,13 +198,13 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
 
         return {
             labels: sortedIntervals.map(interval => {
+                const [year, month, day] = interval.split('-').map(Number);
                 if (timeSeriesInterval === 'monthly') {
-                    // Convert YYYY-MM to a Date object (e.g., 2023-01-01) to format it as a month name
-                    return new Date(`${interval}-01`).toLocaleString('default', { month: 'short' });
+                    const date = new Date(year, month - 1);
+                    return date.toLocaleString('default', { month: 'short' });
                 }
-                // For daily, format YYYY-MM-DD to Month-Day
-                const date = new Date(interval);
-                return `${date.toLocaleString('default', { month: 'short' })}-${date.getUTCDate()}`;
+                const date = new Date(year, month - 1, day);
+                return `${date.toLocaleString('default', { month: 'short' })}-${date.getDate()}`;
             }),
             datasets: [{
                 label: t('rentals'),
