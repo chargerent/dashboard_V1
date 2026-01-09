@@ -516,7 +516,7 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                             </div>
                         </div>
                     </div>
-                    <div className={`grid grid-cols-1 ${isExporting ? '' : 'lg:grid-cols-2'} gap-8 mt-8`}>
+                    <div className="grid grid-cols-1 gap-8 mt-8">
                         <div className="flex flex-col">
                             <div className="relative h-96">
                                 <Bar options={{ 
