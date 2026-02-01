@@ -17,6 +17,7 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
             rental_revenue: false,
             client_commission: false,
             rep_commission: false,
+            search: false,
         },
         commands: Object.fromEntries(commandsList.map(k => [k, false])),
         partner: false,

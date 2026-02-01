@@ -23,7 +23,7 @@ const DisneyIcon = () => (
     </svg>
 );
 
-export default function FilterPanel({ activeFilters, onFilterChange, showActiveOnly, onShowActiveOnlyChange, searchTerm, onSearchChange, offlineCount, soldOutCount, disconnectedCount, clientInfo, t }) {
+export default function FilterPanel({ activeFilters, onFilterChange, showActiveOnly, onShowActiveOnlyChange, searchTerm, onSearchChange, offlineCount, soldOutCount, disconnectedCount, clientInfo, t, searchEnabled }) {
     return (
         <div className="bg-white p-4 rounded-lg shadow-md mb-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4"> {/* Removed "filter by:" title */}
@@ -103,6 +103,7 @@ export default function FilterPanel({ activeFilters, onFilterChange, showActiveO
                     </div>
                 </div>
                 <div className="flex items-center gap-4">
+                    {searchEnabled && (
                     <div className="relative flex-grow">
                         <input
                             type="text"
@@ -123,6 +124,7 @@ export default function FilterPanel({ activeFilters, onFilterChange, showActiveO
                             </button>
                         )}
                     </div>
+                    )}
                 </div>
             </div>
         </div>

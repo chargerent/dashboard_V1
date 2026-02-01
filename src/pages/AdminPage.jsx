@@ -8,7 +8,7 @@ import CreateClientForm from './CreateClientForm.jsx';
 import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
 // These are the permission keys that will be displayed as checkboxes
 const API_BASE_URL = '';
-const featuresList = ['rentals', 'details', 'stationid', 'address', 'status', 'reporting', 'lease_revenue', 'rental_counts', 'rental_revenue', 'client_commission', 'rep_commission'];
+const featuresList = ['rentals', 'details', 'stationid', 'address', 'status', 'reporting', 'lease_revenue', 'rental_counts', 'rental_revenue', 'client_commission', 'rep_commission', 'search'];
 const commandsList = ['edit', 'lock', 'eject', 'eject_multiple', 'updates', 'connectivity', 'reboot', 'reload', 'disable', 'client edit'];
 
 

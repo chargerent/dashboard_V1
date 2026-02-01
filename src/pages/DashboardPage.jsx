@@ -306,7 +306,7 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
     
     const preFilteredKiosks = useMemo(() => {
         // If a search term is present, we start with all client stations and ignore other filters.
-        if (debouncedSearchTerm) {
+        if (debouncedSearchTerm && clientInfo.features.search) {
             const lowercasedSearch = debouncedSearchTerm.toLowerCase();
             return clientStations.filter(k => 
                 k.info.location?.toLowerCase().includes(lowercasedSearch) ||
@@ -616,7 +616,7 @@ return (
             ) : (
                 <>
                         {error && <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">{error}</div>}
-                        {clientInfo.features.rentals && (
+                        {(clientInfo.features.rentals || clientInfo.features.search) && (
                             <FilterPanel 
                                 activeFilters={activeFilters} 
                                 onFilterChange={handleFilterChange}
@@ -629,6 +629,7 @@ return (
                                 disconnectedCount={disconnectedKioskCount}
                                 clientInfo={clientInfo}
                                 t={t}
+                                searchEnabled={!!clientInfo.features.search}
                             />
                         )}
                         {clientInfo.features.rentals && (

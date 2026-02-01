@@ -124,12 +124,17 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                         <p className="text-2xl font-bold text-gray-400">{stats.slot}</p>
                         <p className="text-xs text-gray-500">{t('slot')}</p>
                     </div>
-                    {clientInfo.commands.lock && (
+                    {clientInfo.commands.lock ? (
                         <div>
                             <p className="text-2xl font-bold text-red-500">{stats.locked}</p>
                             <p className="text-xs text-gray-500">{t('locked')}</p>
                         </div>
+                    ) : (
+                        <div></div>
                     )}
+                    <div className="flex items-end justify-end select-none -mb-4">
+                        <span className="text-2xl font-black text-gray-300 tracking-widest">{kiosk.hardware?.type}</span>
+                    </div>
                 </div>
                 {kiosk.disabled && <div className="mt-2 p-2 bg-red-100 text-red-700 text-center rounded-md text-sm font-semibold">{t('kiosk_disabled')}</div>}
                 {!isOnline && (
