@@ -306,7 +306,7 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
     
     const preFilteredKiosks = useMemo(() => {
         // If a search term is present, we start with all client stations and ignore other filters.
-        if (debouncedSearchTerm && clientInfo.features.search) {
+        if (debouncedSearchTerm && (clientInfo.features.search || clientInfo.username === 'chargerent')) {
             const lowercasedSearch = debouncedSearchTerm.toLowerCase();
             return clientStations.filter(k => 
                 k.info.location?.toLowerCase().includes(lowercasedSearch) ||
@@ -336,6 +336,10 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
 
         if (activeFilters.disney) {
             kiosks = kiosks.filter(k => k.info.location?.toLowerCase().includes('disneyland'));
+        }
+
+        if (activeFilters.event) {
+            kiosks = kiosks.filter(k => k.info.locationtype === 'EVENT');
         }
 
         return kiosks;
@@ -452,7 +456,7 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
         setSearchTerm(''); // Clear search when a filter is clicked
         const countryFilters = ['us', 'ca', 'fr']; // Disney is handled separately
         const statusFilters = ['offline', 'soldout', 'disconnected'];
-        const exclusiveFilters = ['master', 'disney', ...countryFilters];
+        const exclusiveFilters = ['master', 'disney', 'event', ...countryFilters];
 
         if (filterKey === 'all') {
             setActiveFilters({ all: true });
@@ -470,6 +474,7 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
                 // Master is also mutually exclusive with countries
                 delete newFilters.master;
                 delete newFilters.disney;
+                delete newFilters.event;
                 if (!isCurrentlyActive) newFilters[filterKey] = true;
             } else if (statusFilters.includes(filterKey)) {
                 // Status filters are also radio-button like in the current UI
@@ -573,7 +578,7 @@ return (
                     </div>
                     {/* Action buttons on the right */}
                     <div className="flex items-center gap-4">
-                    {clientInfo.features.rentals && (
+                    {(clientInfo.features.rentals || clientInfo.username === 'chargerent') && (
                         <>
                             <button onClick={onNavigateToRentals} className="p-2 rounded-md bg-green-100 text-green-700 hover:bg-green-200" title={t('rentals_page_title')}>
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -585,7 +590,7 @@ return (
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
                                 </svg>
                             </button>
-                            {clientInfo.features.reporting && (
+                            {(clientInfo.features.reporting || clientInfo.username === 'chargerent') && (
                                 <button onClick={onNavigateToReporting} className="p-2 rounded-md bg-indigo-100 text-indigo-700 hover:bg-indigo-200" title={t('reporting_page_title')}>
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
@@ -594,7 +599,7 @@ return (
                             )}
                         </>
                     )}
-                    {clientInfo.commands['client edit'] && (
+                    {(clientInfo.commands['client edit'] || clientInfo.username === 'chargerent') && (
                         <button onClick={onNavigateToAdmin} className="p-2 rounded-md bg-orange-100 text-orange-700 hover:bg-orange-200" title={t('manage_clients')}>
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
                         </button>
@@ -616,7 +621,7 @@ return (
             ) : (
                 <>
                         {error && <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">{error}</div>}
-                        {(clientInfo.features.rentals || clientInfo.features.search) && (
+                        {(clientInfo.features.rentals || clientInfo.features.search || clientInfo.username === 'chargerent') && (
                             <FilterPanel 
                                 activeFilters={activeFilters} 
                                 onFilterChange={handleFilterChange}
@@ -629,10 +634,10 @@ return (
                                 disconnectedCount={disconnectedKioskCount}
                                 clientInfo={clientInfo}
                                 t={t}
-                                searchEnabled={!!clientInfo.features.search}
+                                searchEnabled={!!clientInfo.features.search || clientInfo.username === 'chargerent'}
                             />
                         )}
-                        {clientInfo.features.rentals && (
+                        {(clientInfo.features.rentals || clientInfo.username === 'chargerent') && (
                             <GlobalRentalActivity
                                 kiosks={filteredKiosksForGlobalStats}
                                 rentalData={enrichedRentalData}

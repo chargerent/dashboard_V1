@@ -11,6 +11,7 @@ import {
 } from '../components/forms/FormFields.jsx';
 import { formatDuration } from '../utils/dateFormatter';
 import ConfirmationModal from '../components/UI/ConfirmationModal';
+import CommandStatusToast from '../components/UI/CommandStatusToast';
 
 const initialFormData = {
     provisionid: '',
@@ -80,7 +81,7 @@ const calculateRateArray = (pricing) => {
     return rentprice;
 };
 
-const ProvisionPage = ({ onNavigateToDashboard, onLogout, t, onCommand, allStationsData, lastProvisionedId }) => {
+const ProvisionPage = ({ onNavigateToDashboard, onLogout, t, onCommand, allStationsData, lastProvisionedId, commandStatus, setCommandStatus }) => {
     const [formData, setFormData] = useState(initialFormData);
     const [showConfirmation, setShowConfirmation] = useState(false);
     const [missingFields, setMissingFields] = useState([]);
@@ -94,6 +95,12 @@ const ProvisionPage = ({ onNavigateToDashboard, onLogout, t, onCommand, allStati
             setFormData(initialFormData);
         }
     }, [lastProvisionedId]);
+
+    useEffect(() => {
+        if (commandStatus && commandStatus.message === 'kiosk provisioned on server') {
+            setFormData(initialFormData);
+        }
+    }, [commandStatus]);
 
     const handleProvisionIdChange = (section, name, value) => {
         const provisionId = value.split(' ')[0];
@@ -397,6 +404,7 @@ const ProvisionPage = ({ onNavigateToDashboard, onLogout, t, onCommand, allStati
                 }}
                 t={t}
             />
+            <CommandStatusToast status={commandStatus} onDismiss={() => setCommandStatus && setCommandStatus(null)} />
         </div>
     );
 };

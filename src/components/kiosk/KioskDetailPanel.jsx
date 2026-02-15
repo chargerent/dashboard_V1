@@ -7,7 +7,7 @@ import { isKioskOnline } from '../../utils/helpers';
 // --- Sub-component for the charger status code ---
 const StatusIndicator = ({ status }) => {
     // Return a placeholder to maintain consistent height
-    if (!status) return <span className="text-xs h-4">&nbsp;</span>;
+    if (!status) return <span className="text-[10px] h-3">&nbsp;</span>;
 
     let colorClass = 'text-red-500';
     if (status === '0C') {
@@ -17,7 +17,7 @@ const StatusIndicator = ({ status }) => {
     }
 
     return (
-        <span className={`text-xs font-mono font-bold ${colorClass}`}>{status || ''}</span>
+        <span className={`text-[10px] font-mono font-bold ${colorClass}`}>{status || ''}</span>
     );
 };
 
@@ -97,11 +97,11 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                     className="flex-grow flex items-center justify-start p-0.5 rounded-l-md disabled:cursor-not-allowed overflow-hidden"
                 >
                     <div className="flex flex-col items-center w-8 mr-2">
-                        <span className="text-sm font-mono text-gray-500">{String(slot.position).padStart(2, '0')}</span>
+                        <span className="text-xs font-mono text-gray-500">{String(slot.position).padStart(2, '0')}</span>
                         <StatusIndicator status={slot.sstat} />
                     </div>
                     <div className="flex flex-col items-start min-w-0">
-                        <span className="text-sm font-mono font-bold">{(slot.sn && slot.sn !== '0000000000') || slot.isSstatError ? `${slot.batteryLevel}%` : t('empty')}</span>
+                        <span className="text-xs font-mono font-bold">{(slot.sn && slot.sn !== '0000000000') || slot.isSstatError ? `${slot.batteryLevel}%` : t('empty')}</span>
                         <span className="text-[10px] text-gray-400 font-mono leading-tight truncate">{((slot.sn && slot.sn !== '0000000000') || slot.isSstatError) ? slot.sn : '\u00A0'}</span>
                     </div>
                 </button>
@@ -137,8 +137,8 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     });
 
     const Module = ({ module, reverseOrder = false }) => (
-        <div className="bg-white p-2 rounded-lg shadow-inner">
-            <div className="flex flex-col gap-1.5">
+        <div className={`${module.output === false ? 'bg-red-100' : 'bg-white'} p-2 rounded-lg shadow-inner`}>
+            <div className="flex flex-col gap-1">
                 {module.slots.slice().sort((a, b) => reverseOrder ? b.position - a.position : a.position - b.position).map(slot => {
                     const style = getSlotStyle(slot, module);
                     return <SlotButton key={slot.position} slot={slot} module={module} style={style} />
@@ -149,12 +149,14 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     );
 
     const PaymentTerminal = () => (
-        <div className="bg-gray-800 text-white p-4 h-24 flex flex-col justify-center rounded-lg shadow-lg">
+        <div className="bg-gray-800 text-white p-4 h-auto flex flex-col justify-center rounded-lg shadow-lg">
             <div className="text-left w-full px-2">
                 <p className="text-xs text-gray-400">UI Mode</p>
                 <p className="text-sm text-white font-semibold truncate">{kiosk.ui?.mode || '---'}</p>
                 <p className="text-xs text-gray-400 mt-2">UI State</p>
                 <p className="text-sm text-white font-semibold truncate">{kiosk.uistate || '---'}</p>
+                <p className="text-xs text-gray-400 mt-2">SN</p>
+                <p className="text-sm text-white font-semibold truncate">{kiosk.hardware?.sn || '---'}</p>
             </div>
         </div>
     );
@@ -197,6 +199,38 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         </div>
     )};
 
+    const renderCK50 = () => {
+        return (
+            <div className="p-2 flex flex-col items-center gap-4 max-h-[60vh] overflow-y-auto pb-4">
+                <div className="bg-gray-900 rounded-lg shadow-lg text-white flex flex-col justify-center border-4 border-gray-700 relative p-4 w-full" style={{ aspectRatio: '9/16' }}>
+                    <div className="text-left w-full space-y-2">
+                        <div>
+                            <p className="text-[10px] text-gray-400 uppercase tracking-wider">UI Mode</p>
+                            <p className="text-xs text-white font-semibold truncate">{kiosk.ui?.mode || '---'}</p>
+                        </div>
+                        <div>
+                            <p className="text-[10px] text-gray-400 uppercase tracking-wider">UI State</p>
+                            <p className="text-xs text-white font-semibold truncate">{kiosk.uistate || '---'}</p>
+                        </div>
+                        <div>
+                            <p className="text-[10px] text-gray-400 uppercase tracking-wider">SN</p>
+                            <p className="text-xs text-white font-semibold truncate">{kiosk.hardware?.sn || '---'}</p>
+                        </div>
+                    </div>
+                </div>
+                <div className="w-full grid grid-cols-2 gap-2">
+                    {kiosk.modules[1] && <Module module={kiosk.modules[1]} reverseOrder={true} />}
+                    {kiosk.modules[0] && <Module module={kiosk.modules[0]} reverseOrder={true} />}
+                </div>
+                <div className="w-full grid grid-cols-3 gap-2">
+                    {kiosk.modules[2] && <Module module={kiosk.modules[2]} reverseOrder={true} />}
+                    {kiosk.modules[3] && <Module module={kiosk.modules[3]} reverseOrder={true} />}
+                    {kiosk.modules[4] && <Module module={kiosk.modules[4]} reverseOrder={true} />}
+                </div>
+            </div>
+        );
+    };
+
     const PlaceholderView = ({ type }) => (
         <div className="p-8 text-center text-gray-500">
             <p>Detailed slot view for <strong>{type}</strong> kiosks is not yet implemented.</p>
@@ -213,7 +247,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
             case 'CK30':
                 return renderCK30();
             case 'CK50':
-                return <PlaceholderView type={hardwareType} />;
+                return renderCK50();
             default:
                 return (
                     <p className="p-8 text-center text-gray-500">
@@ -225,13 +259,13 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     
     return (
             <div className={`detail-panel-enter ${isVisible ? 'detail-panel-enter-active' : ''}`}>
-            <div className="flex flex-col md:flex-row gap-2 p-2 bg-gray-100 rounded-b-lg border-t border-gray-200">
+            <div className="flex flex-col gap-2 p-2 bg-gray-100 rounded-b-lg border-t border-gray-200">
                 {hasAnyCommands && (
-                    <div className="flex-shrink-0 w-full md:w-1/2">
+                    <div className="w-full">
                         <KioskControlPanel kiosk={kiosk} t={t} onCommand={onCommand} serverUiVersion={serverUiVersion} serverFlowVersion={serverFlowVersion} clientInfo={clientInfo} isOnline={isOnline} disabled={!isOnline} />
                     </div>
                 )}
-                <div className="w-full md:w-1/2">
+                <div className="w-full">
                     {renderContent()}
                 </div>
             </div>

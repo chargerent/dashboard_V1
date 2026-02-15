@@ -23,6 +23,12 @@ const DisneyIcon = () => (
     </svg>
 );
 
+const EventIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+    </svg>
+);
+
 export default function FilterPanel({ activeFilters, onFilterChange, showActiveOnly, onShowActiveOnlyChange, searchTerm, onSearchChange, offlineCount, soldOutCount, disconnectedCount, clientInfo, t, searchEnabled }) {
     return (
         <div className="bg-white p-4 rounded-lg shadow-md mb-6">
@@ -31,6 +37,9 @@ export default function FilterPanel({ activeFilters, onFilterChange, showActiveO
                     {clientInfo.username === 'chargerent' && (
                         <>
                             <FilterButton filterKey="master" isActive={activeFilters.master} onClick={onFilterChange} className={activeFilters.master ? 'bg-purple-600 text-white' : 'hover:bg-purple-100'}>MA</FilterButton>
+                            <FilterButton filterKey="event" isActive={activeFilters.event} onClick={onFilterChange} className={activeFilters.event ? 'bg-pink-600 text-white' : 'hover:bg-pink-100'}>
+                                <EventIcon />
+                            </FilterButton>
                             {clientInfo.username === 'chargerent' && (
                                 <FilterButton filterKey="disney" isActive={activeFilters.disney} onClick={onFilterChange} className={activeFilters.disney ? 'bg-yellow-500 text-white' : 'hover:bg-yellow-100'}>
                                     <DisneyIcon />
