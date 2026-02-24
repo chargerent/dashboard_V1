@@ -40,6 +40,7 @@ function AdminPage({ onNavigateToDashboard, onLogout, t, onNavigateToProvisionPa
   const createUserFn = useMemo(() => httpsCallable(functions, 'admin_createAuthUserAndProfile'), []);
   const deleteUserFn = useMemo(() => httpsCallable(functions, 'admin_deleteUser'), []);
   const unlockUserFn = useMemo(() => httpsCallable(functions, 'admin_unlockUser'), []);
+  const setPasswordFn = useMemo(() => httpsCallable(functions, 'admin_setUserPassword'), []);
 
   const fetchClients = useCallback(async () => {
     try {
@@ -118,11 +119,18 @@ function AdminPage({ onNavigateToDashboard, onLogout, t, onNavigateToProvisionPa
 
     setSaveStatus({ state: 'sending', message: 'Updating client...' });
 
+    const newPassword = String(finalData.password || '').trim();
+
     try {
       await upsertUserFn({
         uid: finalData.uid,
         profile: stripUnsafeFields(finalData),
       });
+
+      if (newPassword) {
+        await setPasswordFn({ uid: finalData.uid, password: newPassword });
+      }
+
       setSaveStatus({ state: 'success', message: t('update_success') });
       await fetchClients(); // refresh from source of truth
     } catch (e) {
