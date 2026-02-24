@@ -52,7 +52,8 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         if (slot.isLocked) {
             return { className: 'border-red-500 bg-red-100 text-red-800', glow: false };
         }
-        if (!slot || !slot.sn) {
+        // A slot is empty if its status is '0C' (Open Circuit) and it's not in an error state.
+        if (!slot || (slot.sstat === '0C' && !slot.isSstatError)) {
             return { className: 'border-gray-300 bg-gray-100 text-gray-400', glow: false };
         }
 
@@ -87,13 +88,14 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         const canInteract = clientInfo.commands.eject || clientInfo.commands.lock;
         const canEject = clientInfo.commands.eject;
         const canLock = clientInfo.commands.lock;
+        const hasCharger = (slot.sstat && slot.sstat !== '0C') || slot.isSstatError;
 
         return (
             <div className={`relative flex items-stretch p-0.5 rounded-md border transition-all duration-300 text-left ${style.className} ${style.glow ? 'slot-glow' : ''}`}>
                 {/* Eject Button */}
                 <button
                     onClick={() => onSlotClick(kiosk.stationid, module.id, slot.position)}
-                    disabled={!canEject || !isOnline || !slot.sn}
+                    disabled={!canEject || !isOnline || !hasCharger}
                     className="flex-grow flex items-center justify-start p-0.5 rounded-l-md disabled:cursor-not-allowed overflow-hidden"
                 >
                     <div className="flex flex-col items-center w-8 mr-2">
@@ -101,8 +103,8 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                         <StatusIndicator status={slot.sstat} />
                     </div>
                     <div className="flex flex-col items-start min-w-0">
-                        <span className="text-xs font-mono font-bold">{(slot.sn && slot.sn !== '0000000000') || slot.isSstatError ? `${slot.batteryLevel}%` : t('empty')}</span>
-                        <span className="text-[10px] text-gray-400 font-mono leading-tight truncate">{((slot.sn && slot.sn !== '0000000000') || slot.isSstatError) ? slot.sn : '\u00A0'}</span>
+                        <span className="text-xs font-mono font-bold">{hasCharger ? `${slot.batteryLevel}%` : t('empty')}</span>
+                        <span className="text-[10px] text-gray-400 font-mono leading-tight truncate">{hasCharger ? slot.sn : '\u00A0'}</span>
                     </div>
                 </button>
 

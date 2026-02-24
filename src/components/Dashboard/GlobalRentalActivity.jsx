@@ -24,7 +24,7 @@ function GlobalRentalActivity({ kiosks, rentalData, clientInfo, referenceTime, a
         let finalFilteredRentals;
 
         // For partners (excluding 'chargerent'), first filter by their ID
-        if (clientInfo.partner && clientInfo.username !== 'chargerent') {
+        if (clientInfo.role === 'partner' && !clientInfo.isAdmin) {
             const partnerId = clientInfo.clientId?.toLowerCase();
             const partnerRentals = enrichedRentalData.filter(r => r.repId?.toLowerCase() === partnerId);
             

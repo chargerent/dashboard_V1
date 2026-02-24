@@ -23,6 +23,10 @@ function KioskManager({ token, t, setSuccessMessage, setErrorMessage }) {
     const ws = useRef(null);
 
     useEffect(() => {
+        console.log('[KioskManager] Token updated:', token);
+    }, [token]);
+
+    useEffect(() => {
         const fetchKiosks = async () => {
             try {
                 setLoading(true); // Use API_BASE_URL for consistency
@@ -141,6 +145,7 @@ function KioskManager({ token, t, setSuccessMessage, setErrorMessage }) {
     }, [t, editingKiosk]);
 
     const handleGeneralCommand = useCallback((stationid, action, moduleid = null, provisionid = null, version = null, count = null, reason = null) => {
+        console.log('[KioskManager] handleGeneralCommand called. Action:', action, 'Token:', token);
         let confirmationText = '';
         const command = { stationid, action, moduleid, provisionid, version, count, reason };
 
@@ -177,16 +182,15 @@ function KioskManager({ token, t, setSuccessMessage, setErrorMessage }) {
             default:
                 // For actions without confirmation, send immediately
                 if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+                    console.log('[KioskManager] Sending immediate command with token:', token);
                     const messageToSend = { type: 'command', token: token, data: command };
                     ws.current.send(JSON.stringify(messageToSend));
-                    const message = { type: 'command', token: token, data: command };
-                    ws.current.send(JSON.stringify(message));
                 }
                 return;
         }
         setCommandDetails({ ...command, confirmationText });
         setCommandModalOpen(true);
-    }, [t]);
+    }, [t, token]);
 
     const executeCommand = async () => {
         if (!commandDetails) return;

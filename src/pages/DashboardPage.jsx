@@ -271,8 +271,8 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
     const clientStations = useMemo(() => {
         let stations = allStationsData || [];
 
-        if (clientInfo.username !== 'chargerent') { // For non-admin users
-            if (clientInfo.partner) {
+        if (!clientInfo.isAdmin) { // For non-admin users
+            if (clientInfo.role === 'partner') {
                 stations = stations.filter(s => s.info.rep?.toLowerCase() === clientInfo.clientId?.toLowerCase());
             } else {
                 stations = stations.filter(s => s.info.client === clientInfo.clientId);
@@ -306,7 +306,7 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
     
     const preFilteredKiosks = useMemo(() => {
         // If a search term is present, we start with all client stations and ignore other filters.
-        if (debouncedSearchTerm && (clientInfo.features.search || clientInfo.username === 'chargerent')) {
+        if (debouncedSearchTerm && (clientInfo.features.search || clientInfo.isAdmin)) {
             const lowercasedSearch = debouncedSearchTerm.toLowerCase();
             return clientStations.filter(k => 
                 k.info.location?.toLowerCase().includes(lowercasedSearch) ||
@@ -319,7 +319,7 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
 
         // If no search term, apply the standard filters.
         let kiosks = clientStations;
-        if (showActiveOnly && (clientInfo.username === 'chargerent' || clientInfo.partner)) {
+        if (showActiveOnly && (clientInfo.isAdmin || clientInfo.role === 'partner')) {
             kiosks = kiosks.filter(k => isKioskActive(k, latestTimestamp));
         }
 
@@ -431,7 +431,7 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
         if (!loading && clientInfo?.features?.status && !initialStatusCheck && allStationsData.length > 0) {
             let stations = allStationsData; // Use the already normalized data
 
-            if (clientInfo.username !== 'chargerent') {
+            if (!clientInfo.isAdmin) {
                 stations = stations.filter(s => s.info.client === clientInfo.clientId);
             }
 
@@ -578,7 +578,7 @@ return (
                     </div>
                     {/* Action buttons on the right */}
                     <div className="flex items-center gap-4">
-                    {(clientInfo.features.rentals || clientInfo.username === 'chargerent') && (
+                    {(clientInfo.features.rentals || clientInfo.isAdmin) && (
                         <>
                             <button onClick={onNavigateToRentals} className="p-2 rounded-md bg-green-100 text-green-700 hover:bg-green-200" title={t('rentals_page_title')}>
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -590,7 +590,7 @@ return (
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
                                 </svg>
                             </button>
-                            {(clientInfo.features.reporting || clientInfo.username === 'chargerent') && (
+                            {(clientInfo.features.reporting || clientInfo.isAdmin) && (
                                 <button onClick={onNavigateToReporting} className="p-2 rounded-md bg-indigo-100 text-indigo-700 hover:bg-indigo-200" title={t('reporting_page_title')}>
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
@@ -599,7 +599,7 @@ return (
                             )}
                         </>
                     )}
-                    {(clientInfo.commands['client edit'] || clientInfo.username === 'chargerent') && (
+                    {(clientInfo.commands['client edit'] || clientInfo.isAdmin) && (
                         <button onClick={onNavigateToAdmin} className="p-2 rounded-md bg-orange-100 text-orange-700 hover:bg-orange-200" title={t('manage_clients')}>
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
                         </button>
@@ -621,7 +621,7 @@ return (
             ) : (
                 <>
                         {error && <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">{error}</div>}
-                        {(clientInfo.features.rentals || clientInfo.features.search || clientInfo.username === 'chargerent') && (
+                        {(clientInfo.features.rentals || clientInfo.features.search || clientInfo.isAdmin) && (
                             <FilterPanel 
                                 activeFilters={activeFilters} 
                                 onFilterChange={handleFilterChange}
@@ -634,10 +634,10 @@ return (
                                 disconnectedCount={disconnectedKioskCount}
                                 clientInfo={clientInfo}
                                 t={t}
-                                searchEnabled={!!clientInfo.features.search || clientInfo.username === 'chargerent'}
+                                searchEnabled={!!clientInfo.features.search || clientInfo.isAdmin}
                             />
                         )}
-                        {(clientInfo.features.rentals || clientInfo.username === 'chargerent') && (
+                        {(clientInfo.features.rentals || clientInfo.isAdmin) && (
                             <GlobalRentalActivity
                                 kiosks={filteredKiosksForGlobalStats}
                                 rentalData={enrichedRentalData}

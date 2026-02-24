@@ -5,6 +5,9 @@ import pluginReactHooks from "eslint-plugin-react-hooks";
 import pluginReactRefresh from "eslint-plugin-react-refresh";
 
 export default [
+  // -------------------------
+  // Frontend (React/Vite)
+  // -------------------------
   {
     files: ["**/*.{js,mjs,cjs,jsx}"],
     languageOptions: {
@@ -19,7 +22,7 @@ export default [
     ...pluginReactConfig,
     settings: {
       react: {
-        version: "detect", // Automatically detect the React version
+        version: "detect",
       },
     },
   },
@@ -31,6 +34,19 @@ export default [
     rules: {
       ...pluginReactHooks.configs.recommended.rules,
       "react-refresh/only-export-components": "warn",
+    },
+  },
+
+  // -------------------------
+  // Backend (Firebase Functions - Node/CommonJS)
+  // -------------------------
+  {
+    files: ["functions/**/*.{js,mjs,cjs}"],
+    languageOptions: {
+      sourceType: "commonjs",
+      globals: {
+        ...globals.node,   // ✅ module, require, exports, process, etc.
+      },
     },
   },
 ];

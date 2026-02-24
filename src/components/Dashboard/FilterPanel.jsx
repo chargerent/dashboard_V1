@@ -34,13 +34,13 @@ export default function FilterPanel({ activeFilters, onFilterChange, showActiveO
         <div className="bg-white p-4 rounded-lg shadow-md mb-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4"> {/* Removed "filter by:" title */}
                 <div className="flex flex-wrap items-center gap-2"> {/* Adjusted spacing for badge */}
-                    {clientInfo.username === 'chargerent' && (
+                    {clientInfo.isAdmin && (
                         <>
                             <FilterButton filterKey="master" isActive={activeFilters.master} onClick={onFilterChange} className={activeFilters.master ? 'bg-purple-600 text-white' : 'hover:bg-purple-100'}>MA</FilterButton>
                             <FilterButton filterKey="event" isActive={activeFilters.event} onClick={onFilterChange} className={activeFilters.event ? 'bg-pink-600 text-white' : 'hover:bg-pink-100'}>
                                 <EventIcon />
                             </FilterButton>
-                            {clientInfo.username === 'chargerent' && (
+                            {clientInfo.isAdmin && (
                                 <FilterButton filterKey="disney" isActive={activeFilters.disney} onClick={onFilterChange} className={activeFilters.disney ? 'bg-yellow-500 text-white' : 'hover:bg-yellow-100'}>
                                     <DisneyIcon />
                                 </FilterButton>

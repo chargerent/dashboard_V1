@@ -1,0 +1,2732 @@
+[
+  {
+    "id": "c3d321f5abd325c7",
+    "type": "group",
+    "z": "09af597d0b44144e",
+    "name": "COMMANDS TO NODE_RED",
+    "style": {
+      "stroke": "#0070c0",
+      "fill": "#bfdbef",
+      "label": true,
+      "color": "#777777"
+    },
+    "nodes": [
+      "44112f34098de146",
+      "ef3f746fe798cd2d",
+      "48b9b53519d39493",
+      "065e233d6f0f966f",
+      "c971895d7ca589fc",
+      "6a83286d090ebab9",
+      "da689d788a520397",
+      "4adff7d9b935a7e3",
+      "9e0fb093abe7275a",
+      "580a15dfd1b16304",
+      "feec5dd288b4298d",
+      "cf0d416b2594cc10",
+      "76a5027239e49c90",
+      "c836ce4abd172cc2",
+      "7519ad48fe096cc6",
+      "0a906fcd452b65c0",
+      "7bad270bb71e2b4c",
+      "dc1e7dda0caeca8d",
+      "b70d99d3536947af",
+      "e740cf7ac317c6ff",
+      "47037490c70a1764",
+      "7ef5b32d0ca4de5c",
+      "10778dcd3b2cdab5",
+      "849f1fc1ecd865bc",
+      "2a55bdfa8981b0b8",
+      "734def7f519a19b0",
+      "faa523e3b23b0be4",
+      "f7f73efba806b8ae",
+      "01b96433c14f4884",
+      "1e53b1697440686f",
+      "9d11966870225dab",
+      "3e451709b4b2e8ee",
+      "060b1616b74828e0",
+      "5f23bbbf6fefb6b7",
+      "4d265e3bfb825eb7",
+      "e4742d311071d16f",
+      "e57562dc06b099c5",
+      "e4bdc9389aa5619f",
+      "0a1da5ee84e4351f",
+      "f8e4efd51e740ceb",
+      "49c00b5f559a5c1c",
+      "3e8224e8bbdc483f",
+      "23c90495e9d3b020",
+      "9eb9d40f355efc92",
+      "dac4848ffcf6d7ca",
+      "608b40584d84b29c",
+      "8950c69638148356",
+      "04f3346ffca36deb",
+      "b89ed34d1c59603d",
+      "58367aada468e784",
+      "ae7e20cd45faa944",
+      "9e60c89a0f7b83b2",
+      "a4201d6d7202e2c9",
+      "8b1254303686f41f",
+      "046403456d5ee02b",
+      "2f6e002b47656750",
+      "6437c391bf62a5bb",
+      "6cb376fa3b795d49",
+      "0bf077350cc422a7",
+      "3c7889623df4108c",
+      "f40df7f0092a1d6c",
+      "933d3533f9a07f70",
+      "ba27e114d88db692",
+      "8d94f0896184df29",
+      "d12fd867be90cc87",
+      "49638ad198f4a0ec",
+      "25bf57086712cd0f",
+      "2201254d43b2dfee",
+      "e5ad939670d04d48",
+      "d051ee73f07898de",
+      "a09256fe24399986",
+      "d2f966cc48af5391",
+      "14cfa99cd3208397",
+      "b3930e6f180d1b2b",
+      "2829f1ddb978ebfa",
+      "2ee7de5a9a56d527",
+      "1fadc785a45b18da",
+      "8f3a2a72ecbc3966",
+      "264aa48a3ddb68fe",
+      "a70cd26f08486b1c",
+      "4123aef2c4941e6e",
+      "c99a5a2b6d354e38",
+      "76a90ebbae704511",
+      "e56bd4f7a6b6ee5b",
+      "6d5b39eb3d9e1632",
+      "f262eeb83d7d3f57",
+      "3789157d2ae3fff9",
+      "f31afef548b0e2a0",
+      "968770ce86ba8152",
+      "2ad68c0810a1583f",
+      "d82e45933454b4b9"
+    ],
+    "x": 1754,
+    "y": 59,
+    "w": 2012,
+    "h": 1642
+  },
+  {
+    "id": "44112f34098de146",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "set command",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-eject\"",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"action\":\"eject specific\",\t   \"cmd\":\"61\",\t   \"module\":$$.module,\t   \"slot\":$$.command.slotid,\t   \"admin\":_session.id\t   \t}",
+        "tot": "jsonata"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2760,
+    "y": 600,
+    "wires": [
+      [
+        "065e233d6f0f966f",
+        "da689d788a520397"
+      ]
+    ],
+    "icon": "font-awesome/fa-angle-double-up"
+  },
+  {
+    "id": "ef3f746fe798cd2d",
+    "type": "switch",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "",
+    "property": "command.action",
+    "propertyType": "msg",
+    "rules": [
+      {
+        "t": "eq",
+        "v": "eject specific",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "eject all",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "eject full",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "eject empty",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "eject locked",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "eject module",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "eject count",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "reload ui",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "reboot",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "ngrok connect",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "ngrok disconnect",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "update flow",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "update ui",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "lock slot",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "unlock slot",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "rent",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "disable",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "enable",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "infochange",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "hardwarechange",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "pricechange",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "uichange",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "refund",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "provision",
+        "vt": "str"
+      },
+      {
+        "t": "eq",
+        "v": "hotspot",
+        "vt": "str"
+      }
+    ],
+    "checkall": "true",
+    "repair": false,
+    "outputs": 25,
+    "x": 2090,
+    "y": 1080,
+    "wires": [
+      [
+        "48b9b53519d39493"
+      ],
+      [
+        "0a906fcd452b65c0"
+      ],
+      [
+        "e740cf7ac317c6ff"
+      ],
+      [
+        "dc1e7dda0caeca8d"
+      ],
+      [
+        "b70d99d3536947af"
+      ],
+      [
+        "2a55bdfa8981b0b8"
+      ],
+      [
+        "e57562dc06b099c5"
+      ],
+      [
+        "9e0fb093abe7275a"
+      ],
+      [
+        "4adff7d9b935a7e3"
+      ],
+      [
+        "580a15dfd1b16304"
+      ],
+      [
+        "c836ce4abd172cc2"
+      ],
+      [
+        "734def7f519a19b0"
+      ],
+      [
+        "f7f73efba806b8ae"
+      ],
+      [
+        "1e53b1697440686f"
+      ],
+      [
+        "060b1616b74828e0"
+      ],
+      [
+        "4d265e3bfb825eb7"
+      ],
+      [
+        "e4bdc9389aa5619f"
+      ],
+      [
+        "f8e4efd51e740ceb"
+      ],
+      [
+        "b89ed34d1c59603d"
+      ],
+      [
+        "3e8224e8bbdc483f"
+      ],
+      [
+        "9eb9d40f355efc92"
+      ],
+      [
+        "23c90495e9d3b020"
+      ],
+      [
+        "933d3533f9a07f70"
+      ],
+      [
+        "2f6e002b47656750"
+      ],
+      [
+        "1fadc785a45b18da"
+      ]
+    ]
+  },
+  {
+    "id": "48b9b53519d39493",
+    "type": "string",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "",
+    "methods": [
+      {
+        "name": "delLeftMost",
+        "params": [
+          {
+            "type": "str",
+            "value": "m"
+          }
+        ]
+      },
+      {
+        "name": "toInteger",
+        "params": []
+      }
+    ],
+    "prop": "command.moduleid",
+    "propout": "module",
+    "object": "msg",
+    "objectout": "msg",
+    "x": 2590,
+    "y": 600,
+    "wires": [
+      [
+        "44112f34098de146"
+      ]
+    ]
+  },
+  {
+    "id": "065e233d6f0f966f",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 336",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "false",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3070,
+    "y": 600,
+    "wires": []
+  },
+  {
+    "id": "c971895d7ca589fc",
+    "type": "link in",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "MQTT Command Receiver",
+    "links": [
+      "a09256fe24399986"
+    ],
+    "x": 1955,
+    "y": 1080,
+    "wires": [
+      [
+        "6a83286d090ebab9",
+        "ef3f746fe798cd2d"
+      ]
+    ]
+  },
+  {
+    "id": "6a83286d090ebab9",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "COMMAND",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": true,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "payload",
+    "statusType": "auto",
+    "x": 2110,
+    "y": 860,
+    "wires": []
+  },
+  {
+    "id": "da689d788a520397",
+    "type": "link out",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "Send to MQTT",
+    "mode": "link",
+    "links": [
+      "2746c2f1.5dff7e"
+    ],
+    "x": 3555,
+    "y": 1040,
+    "wires": []
+  },
+  {
+    "id": "4adff7d9b935a7e3",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "reboot cmd",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"action\":\"reboot odroid\",\t   \"admin\":$$._session.id}",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-odroid\"",
+        "tot": "jsonata"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2610,
+    "y": 920,
+    "wires": [
+      [
+        "cf0d416b2594cc10",
+        "da689d788a520397"
+      ]
+    ]
+  },
+  {
+    "id": "9e0fb093abe7275a",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "reload cmd",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-reloadui\"",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "admin",
+        "pt": "msg",
+        "to": "_session.id",
+        "tot": "msg"
+      },
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"action\":\"refresh UI\",\t   \"admin\":$$.admin  }",
+        "tot": "jsonata"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2610,
+    "y": 880,
+    "wires": [
+      [
+        "feec5dd288b4298d",
+        "da689d788a520397"
+      ]
+    ],
+    "icon": "font-awesome/fa-angle-double-up"
+  },
+  {
+    "id": "580a15dfd1b16304",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "connect ngrok",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-ip\"",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "admin",
+        "pt": "msg",
+        "to": "_session.id",
+        "tot": "msg"
+      },
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"action\":\"connect\",\t   \"admin\":$$.admin   }",
+        "tot": "jsonata"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2620,
+    "y": 960,
+    "wires": [
+      [
+        "76a5027239e49c90",
+        "da689d788a520397"
+      ]
+    ],
+    "icon": "font-awesome/fa-angle-double-up"
+  },
+  {
+    "id": "feec5dd288b4298d",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 342",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "false",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3070,
+    "y": 880,
+    "wires": []
+  },
+  {
+    "id": "cf0d416b2594cc10",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 343",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "false",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3070,
+    "y": 920,
+    "wires": []
+  },
+  {
+    "id": "76a5027239e49c90",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 344",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "false",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3070,
+    "y": 960,
+    "wires": []
+  },
+  {
+    "id": "c836ce4abd172cc2",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "disconnect ngrok",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-ip\"",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "admin",
+        "pt": "msg",
+        "to": "_session.id",
+        "tot": "msg"
+      },
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"action\":\"disconnect\",\t   \"admin\":$$.admin   }",
+        "tot": "jsonata"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2630,
+    "y": 1000,
+    "wires": [
+      [
+        "7519ad48fe096cc6",
+        "da689d788a520397"
+      ]
+    ],
+    "icon": "font-awesome/fa-angle-double-up"
+  },
+  {
+    "id": "7519ad48fe096cc6",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 346",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "false",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3070,
+    "y": 1000,
+    "wires": []
+  },
+  {
+    "id": "0a906fcd452b65c0",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "set eject all command",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"action\":\"eject\",\t   \"slot\":\"all\",\t   \"module\":\"all\",\t   \"cmd\":\"61\",\t   \"admin\":$$._session.id}",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-eject\" \t",
+        "tot": "jsonata"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2640,
+    "y": 640,
+    "wires": [
+      [
+        "da689d788a520397",
+        "7bad270bb71e2b4c"
+      ]
+    ]
+  },
+  {
+    "id": "7bad270bb71e2b4c",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 349",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "false",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3070,
+    "y": 640,
+    "wires": []
+  },
+  {
+    "id": "dc1e7dda0caeca8d",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "set eject empty command",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"action\":\"ejectempty\",\t   \"slot\":\"all\",\t   \"module\":\"all\",\t   \"cmd\":\"61\",\t   \"admin\":$$._session.id \t}",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-eject\" \t",
+        "tot": "jsonata"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2650,
+    "y": 720,
+    "wires": [
+      [
+        "da689d788a520397",
+        "7ef5b32d0ca4de5c"
+      ]
+    ]
+  },
+  {
+    "id": "b70d99d3536947af",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "set eject locked command",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"action\":\"ejectlocked\",\t   \"slot\":\"all\",\t   \"module\":\"all\",\t   \"cmd\":\"61\",\t   \"admin\":$$._session.id}",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-eject\" \t",
+        "tot": "jsonata"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2660,
+    "y": 760,
+    "wires": [
+      [
+        "da689d788a520397",
+        "10778dcd3b2cdab5"
+      ]
+    ]
+  },
+  {
+    "id": "e740cf7ac317c6ff",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "set eject full command",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"action\":\"ejectfull\",\t   \"slot\":\"all\",\t   \"module\":\"all\",\t   \"cmd\":\"61\",\t   \"admin\":$$._session.id }",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-eject\" \t",
+        "tot": "jsonata"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2640,
+    "y": 680,
+    "wires": [
+      [
+        "da689d788a520397",
+        "47037490c70a1764"
+      ]
+    ]
+  },
+  {
+    "id": "47037490c70a1764",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 350",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "false",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3070,
+    "y": 680,
+    "wires": []
+  },
+  {
+    "id": "7ef5b32d0ca4de5c",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 351",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "false",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3070,
+    "y": 720,
+    "wires": []
+  },
+  {
+    "id": "10778dcd3b2cdab5",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 352",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "false",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3070,
+    "y": 760,
+    "wires": []
+  },
+  {
+    "id": "849f1fc1ecd865bc",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "set eject module command",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"action\":\"eject\",\t   \"slot\":\"all\",\t   \"module\":$$.module,\t   \"cmd\":\"61\",\t   \"admin\":$$._session.id}",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-eject\" \t",
+        "tot": "jsonata"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2780,
+    "y": 800,
+    "wires": [
+      [
+        "da689d788a520397"
+      ]
+    ]
+  },
+  {
+    "id": "2a55bdfa8981b0b8",
+    "type": "string",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "",
+    "methods": [
+      {
+        "name": "delLeftMost",
+        "params": [
+          {
+            "type": "str",
+            "value": "m"
+          }
+        ]
+      },
+      {
+        "name": "toInteger",
+        "params": []
+      }
+    ],
+    "prop": "command.moduleid",
+    "propout": "module",
+    "object": "msg",
+    "objectout": "msg",
+    "x": 2590,
+    "y": 800,
+    "wires": [
+      [
+        "849f1fc1ecd865bc"
+      ]
+    ]
+  },
+  {
+    "id": "734def7f519a19b0",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "flow update command",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"action\":\"updateflow\",\t   \"provisionid\":$$.command.provisionid,\t   \"admin\":$$._session.id}",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "admin/req-update",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2640,
+    "y": 1040,
+    "wires": [
+      [
+        "faa523e3b23b0be4",
+        "da689d788a520397"
+      ]
+    ]
+  },
+  {
+    "id": "faa523e3b23b0be4",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 353",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "false",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3070,
+    "y": 1040,
+    "wires": []
+  },
+  {
+    "id": "f7f73efba806b8ae",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "ui update command",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"action\":\"updateui\",\t   \"provisionid\":$$.command.provisionid,\t   \"version\":$$.command.uiVersion,\t   \"admin\":$$._session\t}",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "admin/res-update",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2640,
+    "y": 1080,
+    "wires": [
+      [
+        "01b96433c14f4884",
+        "da689d788a520397"
+      ]
+    ]
+  },
+  {
+    "id": "01b96433c14f4884",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 354",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "false",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3070,
+    "y": 1080,
+    "wires": []
+  },
+  {
+    "id": "1e53b1697440686f",
+    "type": "string",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "",
+    "methods": [
+      {
+        "name": "delLeftMost",
+        "params": [
+          {
+            "type": "str",
+            "value": "m"
+          }
+        ]
+      },
+      {
+        "name": "toInteger",
+        "params": []
+      }
+    ],
+    "prop": "command.moduleid",
+    "propout": "module",
+    "object": "msg",
+    "objectout": "msg",
+    "x": 2590,
+    "y": 1120,
+    "wires": [
+      [
+        "9d11966870225dab"
+      ]
+    ]
+  },
+  {
+    "id": "9d11966870225dab",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "set lock command",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-lock\"",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"action\":\"lock\",\t   \"module\":$$.module,\t   \"slot\":$$.command.slotid,\t   \"admin\":$$._session.id,\t   \"info\":$$.command.info\t}",
+        "tot": "jsonata"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2790,
+    "y": 1120,
+    "wires": [
+      [
+        "3e451709b4b2e8ee",
+        "da689d788a520397"
+      ]
+    ],
+    "icon": "font-awesome/fa-angle-double-up"
+  },
+  {
+    "id": "3e451709b4b2e8ee",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 355",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "false",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3070,
+    "y": 1120,
+    "wires": []
+  },
+  {
+    "id": "060b1616b74828e0",
+    "type": "string",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "",
+    "methods": [
+      {
+        "name": "delLeftMost",
+        "params": [
+          {
+            "type": "str",
+            "value": "m"
+          }
+        ]
+      },
+      {
+        "name": "toInteger",
+        "params": []
+      }
+    ],
+    "prop": "command.moduleid",
+    "propout": "module",
+    "object": "msg",
+    "objectout": "msg",
+    "x": 2590,
+    "y": 1160,
+    "wires": [
+      [
+        "5f23bbbf6fefb6b7"
+      ]
+    ]
+  },
+  {
+    "id": "5f23bbbf6fefb6b7",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "set lock command",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-lock\"",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"action\":\"unlock\",\t   \"module\":$$.module,\t   \"slot\":$$.command.slotid,\t   \"admin\":$$._session.id}",
+        "tot": "jsonata"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2790,
+    "y": 1160,
+    "wires": [
+      [
+        "da689d788a520397",
+        "8d94f0896184df29"
+      ]
+    ],
+    "icon": "font-awesome/fa-angle-double-up"
+  },
+  {
+    "id": "4d265e3bfb825eb7",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "rent command",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-eject\"",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\"action\":\"rent\",\"admin\":$$._session.id,\"module\":\"any\",\"slot\":1,\"cmd\":\"61\"}",
+        "tot": "jsonata"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2620,
+    "y": 1200,
+    "wires": [
+      [
+        "e4742d311071d16f",
+        "da689d788a520397"
+      ]
+    ]
+  },
+  {
+    "id": "e4742d311071d16f",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 356",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "false",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3070,
+    "y": 1200,
+    "wires": []
+  },
+  {
+    "id": "e57562dc06b099c5",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "eject count command",
+    "rules": [
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-eject\"",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\"action\":\"eject count\",\"admin\":$$._session.id,\"module\":\"any\",\"slot\":$$.command.slotid,\"cmd\":\"55\"}",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "status_en",
+        "pt": "msg",
+        "to": "\"Ejecting \"&$$.count&\" chargers from \"&$$.kiosk&\" . . .\"",
+        "tot": "jsonata"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2640,
+    "y": 840,
+    "wires": [
+      [
+        "da689d788a520397"
+      ]
+    ]
+  },
+  {
+    "id": "e4bdc9389aa5619f",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "set disable command",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"action\":\"disable\",\t   \"module\":\"all\",\t   \"admin\":$$._session.id\t}",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-disable\" \t",
+        "tot": "jsonata"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2640,
+    "y": 1240,
+    "wires": [
+      [
+        "da689d788a520397"
+      ]
+    ]
+  },
+  {
+    "id": "0a1da5ee84e4351f",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 367",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "false",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3070,
+    "y": 1400,
+    "wires": []
+  },
+  {
+    "id": "f8e4efd51e740ceb",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "set enable command",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"action\":\"enable\",\t   \"module\":\"all\",\t   \"admin\":$$._session.id\t}",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-disable\" \t",
+        "tot": "jsonata"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2640,
+    "y": 1280,
+    "wires": [
+      [
+        "da689d788a520397"
+      ]
+    ]
+  },
+  {
+    "id": "49c00b5f559a5c1c",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "change info command",
+    "rules": [
+      {
+        "t": "set",
+        "p": "command.kiosk.info.lat",
+        "pt": "msg",
+        "to": "payload.lat",
+        "tot": "msg"
+      },
+      {
+        "t": "set",
+        "p": "command.kiosk.info.lon",
+        "pt": "msg",
+        "to": "payload.lon",
+        "tot": "msg"
+      },
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"action\":\"infochange\",\t   \"stationid\":$$.command.stationid,\t   \"admin\":$$._session.id,\t   \"kiosk\":$$.command.kiosk\t}",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "admin/req-change",
+        "tot": "str"
+      },
+      {
+        "t": "set",
+        "p": "status_en",
+        "pt": "msg",
+        "to": "\"Please wait, changing kiosk info on station\"&$$.kiosk.stationid&\"...\"",
+        "tot": "jsonata"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 3040,
+    "y": 1320,
+    "wires": [
+      [
+        "da689d788a520397",
+        "04f3346ffca36deb"
+      ]
+    ]
+  },
+  {
+    "id": "3e8224e8bbdc483f",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "change hardware command",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"action\":\"hardwarechange\",\t   \"stationid\":$$.command.stationid,\t   \"admin\":$$._session.id,\t   \"kiosk\":$$.command.kiosk\t}",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "admin/req-change",
+        "tot": "str"
+      },
+      {
+        "t": "set",
+        "p": "status_en",
+        "pt": "msg",
+        "to": "\"Please wait, changing kiosk hardware on station\"&$$.kiosk.stationid&\"...\"",
+        "tot": "jsonata"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2680,
+    "y": 1400,
+    "wires": [
+      [
+        "da689d788a520397",
+        "0a1da5ee84e4351f"
+      ]
+    ]
+  },
+  {
+    "id": "23c90495e9d3b020",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "change UI command",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"action\":\"uichange\",\t   \"stationid\":$$.command.stationid,\t   \"admin\":$$._session.id,\t   \"kiosk\":$$.command.kiosk\t}",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "admin/req-change",
+        "tot": "str"
+      },
+      {
+        "t": "set",
+        "p": "status_en",
+        "pt": "msg",
+        "to": "\"Please wait, changing kiosk UI on station\"&$$.kiosk.stationid&\"...\"",
+        "tot": "jsonata"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2660,
+    "y": 1480,
+    "wires": [
+      [
+        "da689d788a520397",
+        "dac4848ffcf6d7ca"
+      ]
+    ]
+  },
+  {
+    "id": "9eb9d40f355efc92",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "change pricing command",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"action\":\"pricechange\",\t   \"stationid\":$$.command.stationid,\t   \"admin\":$$._session.id,\t   \"kiosk\":$$.command.kiosk\t}",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "admin/req-change",
+        "tot": "str"
+      },
+      {
+        "t": "set",
+        "p": "status_en",
+        "pt": "msg",
+        "to": "\"Please wait, changing kiosk pricing on station\"&$$.kiosk.stationid&\"...\"",
+        "tot": "jsonata"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2670,
+    "y": 1440,
+    "wires": [
+      [
+        "da689d788a520397",
+        "a4201d6d7202e2c9"
+      ]
+    ]
+  },
+  {
+    "id": "dac4848ffcf6d7ca",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 370",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "false",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3070,
+    "y": 1480,
+    "wires": []
+  },
+  {
+    "id": "608b40584d84b29c",
+    "type": "google geocoding",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "",
+    "geocodeBy": "address",
+    "address": "",
+    "lat": "",
+    "lon": "",
+    "googleAPI": "",
+    "bounds": "",
+    "language": "",
+    "region": "",
+    "components": "",
+    "x": 2820,
+    "y": 1320,
+    "wires": [
+      [
+        "49c00b5f559a5c1c"
+      ]
+    ]
+  },
+  {
+    "id": "8950c69638148356",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "set lat / lon",
+    "rules": [
+      {
+        "t": "set",
+        "p": "add",
+        "pt": "msg",
+        "to": "command.kiosk.info.stationaddress",
+        "tot": "msg"
+      },
+      {
+        "t": "set",
+        "p": "zip",
+        "pt": "msg",
+        "to": "command.kiosk.info.zip",
+        "tot": "msg"
+      },
+      {
+        "t": "set",
+        "p": "state",
+        "pt": "msg",
+        "to": "command.kiosk.info.state",
+        "tot": "msg"
+      },
+      {
+        "t": "set",
+        "p": "city",
+        "pt": "msg",
+        "to": "command.kiosk.info.city",
+        "tot": "msg"
+      },
+      {
+        "t": "set",
+        "p": "location.address",
+        "pt": "msg",
+        "to": "$join([add, city, state, zip], \" \")",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "key",
+        "pt": "msg",
+        "to": "AIzaSyChsTB3bJmtU751bAOO7NPAFY6guSRodyI",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2630,
+    "y": 1320,
+    "wires": [
+      [
+        "608b40584d84b29c"
+      ]
+    ]
+  },
+  {
+    "id": "04f3346ffca36deb",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 376",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3250,
+    "y": 1320,
+    "wires": []
+  },
+  {
+    "id": "b89ed34d1c59603d",
+    "type": "switch",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "",
+    "property": "command.autoGeocode",
+    "propertyType": "msg",
+    "rules": [
+      {
+        "t": "true"
+      },
+      {
+        "t": "false"
+      }
+    ],
+    "checkall": "true",
+    "repair": false,
+    "outputs": 2,
+    "x": 2470,
+    "y": 1340,
+    "wires": [
+      [
+        "8950c69638148356"
+      ],
+      [
+        "58367aada468e784"
+      ]
+    ]
+  },
+  {
+    "id": "58367aada468e784",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "change info command",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"action\":\"infochange\",\t   \"stationid\":$$.command.stationid,\t   \"admin\":$$._session.id,\t   \"kiosk\":$$.command.kiosk\t}",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "admin/req-change",
+        "tot": "str"
+      },
+      {
+        "t": "set",
+        "p": "status_en",
+        "pt": "msg",
+        "to": "\"Please wait, changing kiosk info on station\"&$$.kiosk.stationid&\"...\"",
+        "tot": "jsonata"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2660,
+    "y": 1360,
+    "wires": [
+      [
+        "da689d788a520397"
+      ]
+    ]
+  },
+  {
+    "id": "ae7e20cd45faa944",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "refund command",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"stationid\": command.stationid,\t   \"action\": command.action,\t   \"transactionid\": command.transactionid,\t   \"amount\": command.amount,\t   \"admin\":$$._session.id\t}",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "admin/refundrequest",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2650,
+    "y": 1560,
+    "wires": [
+      [
+        "9e60c89a0f7b83b2",
+        "da689d788a520397"
+      ]
+    ]
+  },
+  {
+    "id": "9e60c89a0f7b83b2",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 382",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3070,
+    "y": 1560,
+    "wires": []
+  },
+  {
+    "id": "a4201d6d7202e2c9",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 385",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3070,
+    "y": 1440,
+    "wires": []
+  },
+  {
+    "id": "8b1254303686f41f",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "send provision",
+    "rules": [
+      {
+        "t": "delete",
+        "p": "command.kiosk.stationid",
+        "pt": "msg"
+      },
+      {
+        "t": "set",
+        "p": "command.kiosk.info.lat",
+        "pt": "msg",
+        "to": "payload.lat",
+        "tot": "msg"
+      },
+      {
+        "t": "set",
+        "p": "command.kiosk.info.lon",
+        "pt": "msg",
+        "to": "payload.lon",
+        "tot": "msg"
+      },
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"admin\":$$._session.id,\t   \"kiosk\":$$.command.kiosk\t}",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "admin/req-provision",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 3040,
+    "y": 1640,
+    "wires": [
+      [
+        "046403456d5ee02b",
+        "da689d788a520397"
+      ]
+    ]
+  },
+  {
+    "id": "046403456d5ee02b",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 421",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3250,
+    "y": 1640,
+    "wires": []
+  },
+  {
+    "id": "2f6e002b47656750",
+    "type": "switch",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "",
+    "property": "command.kiosk.info.autoGeocode",
+    "propertyType": "msg",
+    "rules": [
+      {
+        "t": "true"
+      },
+      {
+        "t": "false"
+      }
+    ],
+    "checkall": "true",
+    "repair": false,
+    "outputs": 2,
+    "x": 2470,
+    "y": 1620,
+    "wires": [
+      [
+        "6437c391bf62a5bb"
+      ],
+      [
+        "8b1254303686f41f"
+      ]
+    ]
+  },
+  {
+    "id": "6437c391bf62a5bb",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "set lat / lon",
+    "rules": [
+      {
+        "t": "set",
+        "p": "add",
+        "pt": "msg",
+        "to": "command.kiosk.info.stationaddress",
+        "tot": "msg"
+      },
+      {
+        "t": "set",
+        "p": "zip",
+        "pt": "msg",
+        "to": "command.kiosk.info.zip",
+        "tot": "msg"
+      },
+      {
+        "t": "set",
+        "p": "state",
+        "pt": "msg",
+        "to": "command.kiosk.info.state",
+        "tot": "msg"
+      },
+      {
+        "t": "set",
+        "p": "city",
+        "pt": "msg",
+        "to": "command.kiosk.info.city",
+        "tot": "msg"
+      },
+      {
+        "t": "set",
+        "p": "location.address",
+        "pt": "msg",
+        "to": "$join([add, city, state, zip], \" \")",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "key",
+        "pt": "msg",
+        "to": "AIzaSyChsTB3bJmtU751bAOO7NPAFY6guSRodyI",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2630,
+    "y": 1600,
+    "wires": [
+      [
+        "6cb376fa3b795d49"
+      ]
+    ]
+  },
+  {
+    "id": "6cb376fa3b795d49",
+    "type": "google geocoding",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "",
+    "geocodeBy": "address",
+    "address": "",
+    "lat": "",
+    "lon": "",
+    "googleAPI": "",
+    "bounds": "",
+    "language": "",
+    "region": "",
+    "components": "",
+    "x": 2840,
+    "y": 1600,
+    "wires": [
+      [
+        "8b1254303686f41f",
+        "0bf077350cc422a7"
+      ]
+    ]
+  },
+  {
+    "id": "0bf077350cc422a7",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 423",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "false",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3070,
+    "y": 1600,
+    "wires": []
+  },
+  {
+    "id": "3c7889623df4108c",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "APO refund command",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"stationid\": command.stationid,\t   \"action\": command.action,\t   \"transactionid\": command.transactionid,\t   \"gateway\":command.gateway,\t   \"amount\": command.amount,\t   \"admin\":$$._session.id\t}",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "admin/aporefundrequest",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2660,
+    "y": 1520,
+    "wires": [
+      [
+        "da689d788a520397",
+        "f40df7f0092a1d6c",
+        "ba27e114d88db692"
+      ]
+    ]
+  },
+  {
+    "id": "f40df7f0092a1d6c",
+    "type": "link out",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "apo refund",
+    "mode": "link",
+    "links": [
+      "0ad042076b5812e9",
+      "3f0f4dcb4d74b447"
+    ],
+    "x": 2835,
+    "y": 1480,
+    "wires": []
+  },
+  {
+    "id": "933d3533f9a07f70",
+    "type": "switch",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "check gateway",
+    "property": "command.gateway",
+    "propertyType": "msg",
+    "rules": [
+      {
+        "t": "eq",
+        "v": "APOLLO",
+        "vt": "str"
+      },
+      {
+        "t": "else"
+      }
+    ],
+    "checkall": "true",
+    "repair": false,
+    "outputs": 2,
+    "x": 2460,
+    "y": 1540,
+    "wires": [
+      [
+        "3c7889623df4108c"
+      ],
+      [
+        "ae7e20cd45faa944"
+      ]
+    ]
+  },
+  {
+    "id": "ba27e114d88db692",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 472",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "false",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3070,
+    "y": 1520,
+    "wires": []
+  },
+  {
+    "id": "8d94f0896184df29",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 501",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "false",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3070,
+    "y": 1160,
+    "wires": []
+  },
+  {
+    "id": "d12fd867be90cc87",
+    "type": "websocket out",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "Send Confirmation to Dashboard",
+    "server": "b23552d6.06c64",
+    "client": "",
+    "x": 3540,
+    "y": 440,
+    "wires": []
+  },
+  {
+    "id": "49638ad198f4a0ec",
+    "type": "comment",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "--- KIOSK COMMANDS ---",
+    "info": "",
+    "x": 2210,
+    "y": 400,
+    "wires": []
+  },
+  {
+    "id": "25bf57086712cd0f",
+    "type": "websocket in",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "WS In",
+    "server": "b23552d6.06c64",
+    "client": "",
+    "x": 1830,
+    "y": 180,
+    "wires": [
+      [
+        "2201254d43b2dfee"
+      ]
+    ]
+  },
+  {
+    "id": "2201254d43b2dfee",
+    "type": "json",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "Parse JSON",
+    "property": "payload",
+    "action": "",
+    "pretty": false,
+    "x": 1970,
+    "y": 180,
+    "wires": [
+      [
+        "e5ad939670d04d48",
+        "2ee7de5a9a56d527"
+      ]
+    ]
+  },
+  {
+    "id": "e5ad939670d04d48",
+    "type": "function",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "Parse WS Command",
+    "func": "if (msg.payload && msg.payload.type === 'command') {\n    // Re-structure the message for the auth flow\n    msg.token = msg.payload.token;\n    msg.payload = msg.payload.data;\n    return msg;\n}\n// If it's not a command message, stop the flow.\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 2160,
+    "y": 180,
+    "wires": [
+      [
+        "d051ee73f07898de",
+        "b3930e6f180d1b2b"
+      ]
+    ]
+  },
+  {
+    "id": "d051ee73f07898de",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "Save Command",
+    "rules": [
+      {
+        "t": "set",
+        "p": "command",
+        "pt": "msg",
+        "to": "payload",
+        "tot": "msg"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2360,
+    "y": 180,
+    "wires": [
+      [
+        "2829f1ddb978ebfa",
+        "e56bd4f7a6b6ee5b"
+      ]
+    ]
+  },
+  {
+    "id": "a09256fe24399986",
+    "type": "link out",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "Send to MQTT",
+    "mode": "link",
+    "links": [
+      "c971895d7ca589fc"
+    ],
+    "x": 3635,
+    "y": 100,
+    "wires": []
+  },
+  {
+    "id": "d2f966cc48af5391",
+    "type": "comment",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "--- KIOSK COMMAND RESPONSES ---",
+    "info": "",
+    "x": 3010,
+    "y": 540,
+    "wires": []
+  },
+  {
+    "id": "14cfa99cd3208397",
+    "type": "http in",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "POST /api/v1/command/response",
+    "url": "/api/v1/command/response",
+    "method": "post",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 3000,
+    "y": 500,
+    "wires": [
+      [
+        "264aa48a3ddb68fe"
+      ]
+    ]
+  },
+  {
+    "id": "b3930e6f180d1b2b",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 338",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 2350,
+    "y": 220,
+    "wires": []
+  },
+  {
+    "id": "2829f1ddb978ebfa",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 339",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 2530,
+    "y": 220,
+    "wires": []
+  },
+  {
+    "id": "2ee7de5a9a56d527",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 337",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 2150,
+    "y": 220,
+    "wires": []
+  },
+  {
+    "id": "1fadc785a45b18da",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "hotspot command",
+    "rules": [
+      {
+        "t": "set",
+        "p": "payload",
+        "pt": "msg",
+        "to": "{\t   \"action\":\"hotspot\",\t   \"stationid\":$$.command.stationid,\t   \"admin\":$$._session.id\t}",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "topic",
+        "pt": "msg",
+        "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-hotspot\"",
+        "tot": "jsonata"
+      },
+      {
+        "t": "set",
+        "p": "status_en",
+        "pt": "msg",
+        "to": "\"Please wait, turning on hotspot on\"&$$.command.stationid&\"...\"",
+        "tot": "jsonata"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2450,
+    "y": 1660,
+    "wires": [
+      [
+        "da689d788a520397",
+        "8f3a2a72ecbc3966"
+      ]
+    ]
+  },
+  {
+    "id": "8f3a2a72ecbc3966",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 502",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 2680,
+    "y": 1660,
+    "wires": []
+  },
+  {
+    "id": "264aa48a3ddb68fe",
+    "type": "function",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "function 56",
+    "func": "// Output 1 -> WebSocket Out (dashboard)\n// Output 2 -> HTTP Response (ACK to caller)\n\n// keep original payload to forward to dashboard\nconst forward = { ...msg };\n\n// Prepare an immediate HTTP ack\nconst ack = {\n  ...msg,\n  statusCode: 200,\n  headers: {\n    \"Content-Type\": \"application/json; charset=utf-8\"\n  },\n  payload: {\n    ok: true,\n    received: true,\n    ts: Date.now()\n  }\n};\n\n// Send to WS (output 1) and finish HTTP request (output 2)\nreturn [forward, ack];",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 3250,
+    "y": 500,
+    "wires": [
+      [
+        "d12fd867be90cc87"
+      ],
+      [
+        "a70cd26f08486b1c"
+      ]
+    ]
+  },
+  {
+    "id": "a70cd26f08486b1c",
+    "type": "http response",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 3450,
+    "y": 640,
+    "wires": []
+  },
+  {
+    "id": "4123aef2c4941e6e",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 523",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 2930,
+    "y": 300,
+    "wires": []
+  },
+  {
+    "id": "c99a5a2b6d354e38",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "debug 524",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3560,
+    "y": 520,
+    "wires": []
+  },
+  {
+    "id": "76a90ebbae704511",
+    "type": "link in",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "link in 41",
+    "links": [
+      "f31afef548b0e2a0"
+    ],
+    "x": 3285,
+    "y": 440,
+    "wires": [
+      [
+        "d12fd867be90cc87",
+        "c99a5a2b6d354e38"
+      ]
+    ]
+  },
+  {
+    "id": "e56bd4f7a6b6ee5b",
+    "type": "function",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "Prepare Firebase Verify Request",
+    "func": "// FIX 1: Save command data BEFORE overwriting msg.payload.\n// Parse WS Command sets msg.payload = command data (stationid, action, etc.)\n// and msg.token = Firebase ID token. We must preserve the command data here\n// or it will be lost when msg.payload is overwritten for the HTTP verify call.\nif (!msg.command) {\n  msg.command = msg.payload;\n}\n\n// Token arrives from WS message (msg.token) or HTTP header\nconst token = msg.token ||\n  (msg.req?.headers?.authorization || '').replace('Bearer ', '');\n\nif (!token) {\n  // No token - log and stop. Legitimate commands always include a token.\n  node.warn('Command received with no token - ignoring');\n  return null;\n}\n\n// Check flow-level cache to avoid a Firebase round-trip on every command\nconst cache = flow.get('tokenCache') || {};\nconst cached = cache[token];\nif (cached && cached.expires > Date.now()) {\n  msg.payload = cached.user;\n  return [msg, null]; // cache hit -> output 1 (Authorize)\n}\n\nmsg._fbToken = token;\nmsg.payload = { idToken: token };\nmsg.headers = { 'Content-Type': 'application/json' };\nreturn [null, msg]; // cache miss -> output 2 (HTTP verify)\n",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 2590,
+    "y": 180,
+    "wires": [
+      [
+        "3789157d2ae3fff9"
+      ],
+      [
+        "6d5b39eb3d9e1632",
+        "4123aef2c4941e6e"
+      ]
+    ]
+  },
+  {
+    "id": "6d5b39eb3d9e1632",
+    "type": "http request",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "Verify with Firebase",
+    "method": "POST",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=AIzaSyDkzUHzsNx5rJCE0i-bQ_g9n0-5L4cKQh4",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": true,
+    "headers": [],
+    "x": 2850,
+    "y": 200,
+    "wires": [
+      [
+        "f262eeb83d7d3f57"
+      ],
+      [
+        "f31afef548b0e2a0"
+      ]
+    ]
+  },
+  {
+    "id": "f262eeb83d7d3f57",
+    "type": "function",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "Extract Firebase Claims",
+    "func": "// Check Firebase returned a valid user\nif (!msg.payload?.users?.length) {\n  node.send([null, { ...msg, statusCode: 401, payload: { error: 'invalid_token' } }]);\n  return null;\n}\n\ntry {\n  const firebaseUser = msg.payload.users[0];\n\n  // Custom claims are stored in customAttributes by the Firebase Admin SDK (syncCustomClaims)\n  let claims = {};\n  try { claims = JSON.parse(firebaseUser.customAttributes || '{}'); } catch (_) {}\n\n  const user = {\n    uid:      firebaseUser.localId || '',\n    username: claims.username || '',\n    clientId: claims.clientId || '',\n    role:     claims.role     || 'user',\n    commands: claims.commands || {},\n  };\n\n  // Cache for 55 min (Firebase ID tokens expire in 60 min; 5 min safety margin)\n  const cache = flow.get('tokenCache') || {};\n  const now = Date.now();\n  cache[msg._fbToken] = { user, expires: now + (55 * 60 * 1000) };\n  // Evict expired entries\n  Object.keys(cache).forEach(k => { if (cache[k].expires < now) delete cache[k]; });\n  flow.set('tokenCache', cache);\n\n  msg.payload = user;\n  return [msg, null]; // success -> output 1 (Authorize Command)\n} catch (e) {\n  node.send([null, { ...msg, statusCode: 401, payload: { error: 'invalid_token' } }]);\n  return null;\n}",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 3110,
+    "y": 180,
+    "wires": [
+      [
+        "3789157d2ae3fff9"
+      ],
+      [
+        "f31afef548b0e2a0"
+      ]
+    ]
+  },
+  {
+    "id": "3789157d2ae3fff9",
+    "type": "function",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "Authorize Command",
+    "func": "const user = msg.payload;\nconst command = msg.command;\nconst allKiosks = global.get('info') || [];\n\n// Admins can do everything\nif (user.role === 'admin' || user.username === 'chargerent') {\n  return [msg, null];\n}\n\n// Map raw command action to the permission key stored in user.commands\nconst ACTION_TO_PERMISSION = {\n  'eject specific': 'eject', 'eject all': 'eject', 'eject full': 'eject',\n  'eject empty': 'eject', 'eject locked': 'eject', 'eject module': 'eject',\n  'eject count': 'eject', 'rent': 'eject', 'refund': 'eject',\n  'lock slot': 'lock', 'unlock slot': 'lock',\n  'reboot': 'reboot',\n  'reload ui': 'reload',\n  'ngrok connect': 'connectivity', 'ngrok disconnect': 'connectivity', 'hotspot': 'connectivity',\n  'update flow': 'updates', 'update ui': 'updates',\n  'disable': 'disable', 'enable': 'disable',\n  'infochange': 'client edit', 'hardwarechange': 'client edit',\n  'pricechange': 'client edit', 'uichange': 'client edit',\n  'provision': 'edit',\n};\n\nconst requiredPerm = ACTION_TO_PERMISSION[command?.action];\nconst userCommands = user.commands || {};\n\n// Check clientId matches kiosk's client or rep\nconst targetKiosk = allKiosks.find(k => k?.stationid === command?.stationid);\nconst userClientId = String(user.clientId || '').trim();\n\nif (!targetKiosk?.info) {\n  node.send([null, { _session: msg._session, payload: { status: 'error', reason: 'Kiosk not found' } }]);\n  return null;\n}\n\nconst kioskClient = String(targetKiosk.info.client || '').trim();\nconst kioskRep    = String(targetKiosk.info.rep || '').trim();\nconst clientMatch = !!(userClientId && (kioskClient === userClientId || kioskRep === userClientId));\n\nif (!clientMatch) {\n  node.send([null, { _session: msg._session, payload: { status: 'error', reason: 'Unauthorized' } }]);\n  return null;\n}\n\n// Check specific command permission\nif (requiredPerm && userCommands[requiredPerm] !== true) {\n  node.send([null, { _session: msg._session, payload: { status: 'error', reason: 'Permission denied' } }]);\n  return null;\n}\n\nreturn [msg, null];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 3340,
+    "y": 120,
+    "wires": [
+      [
+        "968770ce86ba8152",
+        "a09256fe24399986"
+      ],
+      [
+        "f31afef548b0e2a0"
+      ]
+    ]
+  },
+  {
+    "id": "f31afef548b0e2a0",
+    "type": "link out",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "OUT: Auth/Error",
+    "mode": "link",
+    "links": [
+      "2ad68c0810a1583f",
+      "76a90ebbae704511"
+    ],
+    "x": 3635,
+    "y": 160,
+    "wires": []
+  },
+  {
+    "id": "968770ce86ba8152",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "Debug Authorized",
+    "active": false,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3630,
+    "y": 200,
+    "wires": []
+  },
+  {
+    "id": "2ad68c0810a1583f",
+    "type": "link in",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "IN: Auth/Error (optional monitor)",
+    "links": [
+      "f31afef548b0e2a0"
+    ],
+    "x": 3505,
+    "y": 300,
+    "wires": [
+      [
+        "d82e45933454b4b9"
+      ]
+    ]
+  },
+  {
+    "id": "d82e45933454b4b9",
+    "type": "debug",
+    "z": "09af597d0b44144e",
+    "g": "c3d321f5abd325c7",
+    "name": "Debug Errors",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 3630,
+    "y": 280,
+    "wires": []
+  },
+  {
+    "id": "b23552d6.06c64",
+    "type": "websocket-listener",
+    "path": "/ws/commands/",
+    "wholemsg": "false"
+  }
+]

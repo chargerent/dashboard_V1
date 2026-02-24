@@ -112,11 +112,11 @@ export default function ChargersPage({ onNavigateToDashboard, rentalData, kioskD
 
         // 1. Create a map of all chargers currently in any kiosk for quick lookup.
         const kioskChargerLocations = new Map();
-        const clientKiosks = clientInfo.partner
+        const clientKiosks = clientInfo.role === 'partner'
             ? (kioskData || []).filter(k => k.info.rep?.toLowerCase() === clientInfo.clientId?.toLowerCase())
             : (kioskData || []).filter(k => k.info.client === clientInfo.clientId);
 
-        const kiosksToProcess = clientInfo.username === 'chargerent' ? kioskData : clientKiosks;
+        const kiosksToProcess = clientInfo.isAdmin ? kioskData : clientKiosks;
 
         if (kiosksToProcess) {
             for (const kiosk of kiosksToProcess) {
@@ -142,8 +142,8 @@ export default function ChargersPage({ onNavigateToDashboard, rentalData, kioskD
             let clientRentals = rentalData;
 
             // Filter rentals based on client permissions, similar to RentalsPage
-            if (clientInfo.username !== 'chargerent') {
-                if (clientInfo.partner) {
+            if (!clientInfo.isAdmin) {
+                if (clientInfo.role === 'partner') {
                     clientRentals = rentalData.filter(r => r.repId?.toLowerCase() === clientInfo.clientId?.toLowerCase());
                 } else {
                     clientRentals = rentalData.filter(r => r.clientId === clientInfo.clientId);

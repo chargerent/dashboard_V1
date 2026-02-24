@@ -3,8 +3,11 @@
 import { useState, useEffect } from 'react';
 import MultiSwitch from '../utils/MultiSwitch';
 
-const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsList, t, isEditing, editedData, onEdit, onCancel, onSave, onDataChange, onDelete, currentUser }) => {
+const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsList, t, isEditing, editedData, onEdit, onCancel, onSave, onDataChange, onDelete, currentUser, lockoutData, onUnlock }) => {
     if (!client || !currentUser) return null; // Prevent rendering if client or currentUser is undefined
+
+    const now = new Date();
+    const isLocked = !!(lockoutData?.lockedUntil && new Date(lockoutData.lockedUntil) > now);
 
     const [openSection, setOpenSection] = useState(null);
 
@@ -63,8 +66,13 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
 
     const renderEditForm = () => {
         if (!editedData) return null;
-        const allFeatures = { ...Object.fromEntries(featuresList.map(k => [k, false])), ...(editedData.features || {}) };
-        const allCommands = { ...Object.fromEntries(commandsList.map(k => [k, false])), ...(editedData.commands || {}) };
+        const isAdminRole = editedData.role === 'admin';
+        const allFeatures = isAdminRole
+            ? Object.fromEntries(featuresList.map(k => [k, true]))
+            : { ...Object.fromEntries(featuresList.map(k => [k, false])), ...(editedData.features || {}) };
+        const allCommands = isAdminRole
+            ? Object.fromEntries(commandsList.map(k => [k, true]))
+            : { ...Object.fromEntries(commandsList.map(k => [k, false])), ...(editedData.commands || {}) };
 
         return (
             <div className="p-4">
@@ -89,58 +97,52 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
                             <label className="block text-sm font-medium text-gray-700">Contact Email</label>
                             <input type="email" value={editedData.contact?.email || ''} onChange={(e) => onDataChange('contact.email', e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
                         </div>
-                        <div className="flex items-center gap-4 border-t pt-3">
-                            <div className="w-1/2">
-                                <PermissionToggle
-                                    label="Partner"
-                                    isChecked={editedData.partner}
-                                    onChange={(value) => onDataChange('partner', value)}
-                                />
+                        {editedData.role === 'partner' && (
+                            <div className="border-t pt-3">
+                                <label className="block text-sm font-medium text-gray-700">{t('commission_percentage')}</label>
+                                <input type="number" value={editedData.commission || ''} onChange={(e) => onDataChange('commission', e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" min="0" max="100" step="0.1" />
                             </div>
-                            {editedData.partner && (
-                                <div className="w-1/2">
-                                    <label className="block text-sm font-medium text-gray-700">{t('commission_percentage')}</label>
-                                    <input type="number" value={editedData.commission || ''} onChange={(e) => onDataChange('commission', e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" min="0" max="100" step="0.1" />
-                                </div>
-                            )}
-                        </div>                        
-                        {/* Active switch - only visible for partners, disabled for partners themselves */}
-                        {editedData.partner && ( // Only render if the client is a partner
+                        )}
+                        {editedData.role === 'partner' && (
                             <PermissionToggle
                                 label="Active"
                                 isChecked={editedData.active}
-                                onChange={(value) => handlePermissionToggle(null, 'active', value)} // Call handlePermissionToggle for top-level 'active'
+                                onChange={(value) => handlePermissionToggle(null, 'active', value)}
                                 disabled={currentUser.username !== 'chargerent'} />
                         )}
                     </div>
                     <div className={`p-2 mt-4 ${isEditing ? 'border-t' : ''}`}>
                         <SectionButton section="features" isEditing={isEditing} />
                         {openSection === 'features' && (
-                            <div className="bg-gray-50 rounded-md p-2 mt-1">
+                            <div className={`rounded-md p-2 mt-1 ${isAdminRole ? 'bg-gray-100 opacity-60' : 'bg-gray-50'}`}>
+                                {isAdminRole && <p className="text-xs text-gray-500 px-2 pb-2 italic">Admins have all features enabled</p>}
                                 <MultiSwitch
                                     label={t('default_language')}
                                     options={['EN', 'FR']}
-                                    value={editedData.features?.defaultlanguage || 'en'}
+                                    value={(editedData.features?.defaultlanguage || 'en').toLowerCase()}
                                     onChange={(value) => {
-                                        if (isEditing) {
+                                        if (isEditing && !isAdminRole) {
                                             onDataChange('features.defaultlanguage', value);
                                         }
                                     }}
-                                />                                
+                                />
                                 {featuresList.map(key => (
                                     <PermissionToggle
                                         key={key} label={key} isChecked={allFeatures[key]}
-                                        onChange={(value) => handlePermissionToggle('features', key, value)}
+                                        onChange={(value) => !isAdminRole && handlePermissionToggle('features', key, value)}
+                                        disabled={isAdminRole}
                                     />
                                 ))}
                             </div>
                         )}
                         <SectionButton section="commands" isEditing={isEditing} />
                         {openSection === 'commands' && (
-                            <div className="bg-gray-50 rounded-md p-2 mt-1">
+                            <div className={`rounded-md p-2 mt-1 ${isAdminRole ? 'bg-gray-100 opacity-60' : 'bg-gray-50'}`}>
+                                {isAdminRole && <p className="text-xs text-gray-500 px-2 pb-2 italic">Admins have all commands enabled</p>}
                                 {Object.keys(allCommands).map(key => (
                                     <PermissionToggle key={key} label={key} isChecked={allCommands[key]}
-                                        onChange={(value) => handlePermissionToggle('commands', key, value)} />
+                                        onChange={(value) => !isAdminRole && handlePermissionToggle('commands', key, value)}
+                                        disabled={isAdminRole} />
                                 ))}
                             </div>
                         )}
@@ -154,22 +156,39 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
     };
 
     const renderViewMode = () => {
-        const allFeatures = { ...Object.fromEntries((featuresList || []).map(k => [k, false])), ...(client.features || {}) };
-        const allCommands = { ...Object.fromEntries((commandsList || []).map(k => [k, false])), ...(client.commands || {}) };
+        const isAdminRole = client.role === 'admin';
+        const allFeatures = isAdminRole
+            ? Object.fromEntries((featuresList || []).map(k => [k, true]))
+            : { ...Object.fromEntries((featuresList || []).map(k => [k, false])), ...(client.features || {}) };
+        const allCommands = isAdminRole
+            ? Object.fromEntries((commandsList || []).map(k => [k, true]))
+            : { ...Object.fromEntries((commandsList || []).map(k => [k, false])), ...(client.commands || {}) };
         const contact = client.contact || {};
 
         return (
             <>
-                <div className="p-4 border-b border-gray-200">
+                <div className={`p-4 border-b ${isLocked ? 'border-red-200' : 'border-gray-200'}`}>
+                    {isLocked && (
+                        <div className="flex items-center gap-1.5 mb-2">
+                            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                            <span className="text-xs font-semibold text-red-600 uppercase tracking-wide">Account Locked</span>
+                        </div>
+                    )}
                     <div className="flex justify-between items-center">
                         <div className="flex items-center gap-2">
                             <h3 className="font-bold text-lg text-gray-800">{client.username}</h3>
-                            {client.partner && (
+                            {client.role === 'partner' && (
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-blue-600">
                                     <path fillRule="evenodd" d="M8.603 3.799A4.49 4.49 0 0 1 12 2.25c1.357 0 2.573.6 3.397 1.549a4.49 4.49 0 0 1 3.498 1.307 4.491 4.491 0 0 1 1.307 3.497A4.49 4.49 0 0 1 21.75 12c0 1.357-.6 2.573-1.549 3.397a4.49 4.49 0 0 1-1.307 3.498 4.491 4.491 0 0 1-3.497 1.307A4.49 4.49 0 0 1 12 21.75a4.49 4.49 0 0 1-3.397-1.549 4.49 4.49 0 0 1-3.498-1.307 4.491 4.491 0 0 1-1.307-3.497A4.49 4.49 0 0 1 2.25 12c0-1.357.6-2.573 1.549-3.397a4.49 4.49 0 0 1 1.307-3.498 4.491 4.491 0 0 1 3.497-1.307Zm7.007 6.387a.75.75 0 1 0-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 0 0-1.06 1.06l2.25 2.25a.75.75 0 0 0 1.14-.094l3.75-5.25Z" clipRule="evenodd" />
                                 </svg>
                             )}
-                        </div>                        <div className="flex items-center gap-2">
+                            {client.role === 'admin' && (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-700 border border-purple-300">
+                                    Admin
+                                </span>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-2">
                             <button onClick={() => onEdit(client.username)} className="p-1.5 rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-600" title={t('edit_client')}>
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L14.732 3.732z" /></svg>
                             </button>
@@ -184,36 +203,70 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
                         <p><strong>Email:</strong> {contact.email || 'N/A'}</p>
                     </div>
                 </div>
-                {/* Active switch - only visible for partners, disabled for partners themselves */}
-                {client.partner && ( // Only render if the client is a partner
+                {client.role === 'partner' && (
                     <PermissionToggle
                         label="Active"
                         isChecked={client.active}
-                        onChange={(value) => handlePermissionToggle(null, 'active', value)} // Call handlePermissionToggle for top-level 'active'
+                        onChange={(value) => handlePermissionToggle(null, 'active', value)}
                         disabled={currentUser.username !== 'chargerent'} />
                 )}
                 <div className="p-2">
                     <SectionButton section="features" />
                     {openSection === 'features' && (
-                        <div className="bg-gray-50 rounded-md p-2 mt-1">
+                        <div className={`rounded-md p-2 mt-1 ${isAdminRole ? 'bg-gray-100 opacity-60' : 'bg-gray-50'}`}>
+                            {isAdminRole && <p className="text-xs text-gray-500 px-2 pb-2 italic">Admins have all features enabled</p>}
                             <MultiSwitch
                                 label={t('default_language')}
                                 options={['EN', 'FR']}
-                                value={client.features?.defaultlanguage || 'en'}
-                                onChange={(value) => onPermissionChange(client.username, 'features', 'defaultlanguage', value)}
+                                value={(client.features?.defaultlanguage || 'en').toLowerCase()}
+                                onChange={(value) => !isAdminRole && onPermissionChange(client.username, 'features', 'defaultlanguage', value)}
                             />
                             {featuresList.map(key => (
                                 <PermissionToggle
                                     key={key} label={key} isChecked={allFeatures[key]}
-                                    onChange={(value) => handlePermissionToggle('features', key, value)}
+                                    onChange={(value) => !isAdminRole && handlePermissionToggle('features', key, value)}
+                                    disabled={isAdminRole}
                                 />
                             ))}
                         </div>
                     )}
                     <SectionButton section="commands" />
                     {openSection === 'commands' && (
+                        <div className={`rounded-md p-2 mt-1 ${isAdminRole ? 'bg-gray-100 opacity-60' : 'bg-gray-50'}`}>
+                            {isAdminRole && <p className="text-xs text-gray-500 px-2 pb-2 italic">Admins have all commands enabled</p>}
+                            {Object.keys(allCommands).map(key => (
+                                <PermissionToggle key={key} label={key} isChecked={allCommands[key]}
+                                    onChange={(value) => !isAdminRole && handlePermissionToggle('commands', key, value)}
+                                    disabled={isAdminRole} />
+                            ))}
+                        </div>
+                    )}
+                    <SectionButton section="login_history" />
+                    {openSection === 'login_history' && (
                         <div className="bg-gray-50 rounded-md p-2 mt-1">
-                            {Object.keys(allCommands).map(key => (<PermissionToggle key={key} label={key} isChecked={allCommands[key]} onChange={(value) => handlePermissionToggle('commands', key, value)} />))}
+                            {isLocked && (
+                                <div className="flex items-center justify-between bg-red-100 border border-red-300 rounded-md px-3 py-2 mb-2">
+                                    <span className="text-xs font-semibold text-red-700">
+                                        Locked until {new Date(lockoutData.lockedUntil).toLocaleTimeString()}
+                                    </span>
+                                    <button onClick={onUnlock} className="text-xs font-semibold text-white bg-red-600 hover:bg-red-700 px-2 py-1 rounded-md">
+                                        Unlock
+                                    </button>
+                                </div>
+                            )}
+                            {(lockoutData?.logs?.length > 0) ? (
+                                [...lockoutData.logs].reverse().map((log, i) => (
+                                    <div key={i} className={`flex items-start gap-2 py-1.5 px-2 border-b border-gray-100 last:border-b-0 ${log.success ? '' : 'bg-red-50'}`}>
+                                        <span className={`mt-0.5 flex-shrink-0 w-3 h-3 rounded-full ${log.success ? 'bg-green-500' : 'bg-red-500'}`} />
+                                        <div className="min-w-0">
+                                            <p className="text-xs text-gray-700">{log.note}</p>
+                                            <p className="text-xs text-gray-400">{new Date(log.timestamp).toLocaleString()}{log.ip ? ` · ${log.ip}` : ''}</p>
+                                        </div>
+                                    </div>
+                                ))
+                            ) : (
+                                <p className="text-xs text-gray-400 px-2 py-2">No login history.</p>
+                            )}
                         </div>
                     )}
                 </div>
@@ -222,7 +275,7 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
     };
 
     return (
-        <div className="bg-white rounded-lg shadow-md flex flex-col">
+        <div className={`rounded-lg shadow-md flex flex-col ${isLocked ? 'bg-red-50 ring-2 ring-red-300' : 'bg-white'}`}>
             {isEditing ? renderEditForm() : renderViewMode()}
         </div>
     );

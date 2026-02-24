@@ -60,10 +60,10 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
             });
             return Array.from(kioskMap.values());
         }
-        if (clientInfo.username === 'chargerent') {
+        if (clientInfo.isAdmin) {
             return allStationsData;
         }
-        if (clientInfo.partner) {
+        if (clientInfo.role === 'partner') {
             return allStationsData.filter(kiosk => kiosk.info.rep?.toLowerCase() === clientInfo.clientId?.toLowerCase());
         } else {
             return allStationsData.filter(kiosk => kiosk.info.client === clientInfo.clientId);
@@ -147,7 +147,7 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
     const adjustedTotalRentals = Math.round(originalTotalRentals * (adjustmentPercentage / 100));
 
     const reportClientName = useMemo(() => {
-        if (clientInfo.username !== 'chargerent') {
+        if (!clientInfo.isAdmin) {
             return clientInfo.username;
         }
         if (selectedLocations.length > 0) {

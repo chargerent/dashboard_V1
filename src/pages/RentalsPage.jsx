@@ -196,8 +196,8 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
             };
         });
 
-        if (clientInfo && clientInfo.username !== 'chargerent') {
-            if (clientInfo.partner) {
+        if (clientInfo && !clientInfo.isAdmin) {
+            if (clientInfo.role === 'partner') {
                 rentals = rentals.filter(r => r.repId?.toLowerCase() === clientInfo.clientId?.toLowerCase());
             } else {
                 rentals = rentals.filter(r => r.clientId?.toLowerCase() === clientInfo.clientId?.toLowerCase());

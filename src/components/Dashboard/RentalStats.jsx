@@ -76,10 +76,10 @@ function RentalStats({ rentalData, clientInfo, referenceTime, stationId, kiosks,
                 className={`bg-gray-100 p-2 rounded-md text-center ${onClick ? 'cursor-pointer hover:bg-gray-200 transition-colors' : 'cursor-default'}`}
                 onClick={handleClick}
             >
-                {(clientInfo?.features?.rental_counts || clientInfo?.username === 'chargerent') && (
+                {(clientInfo?.features?.rental_counts || clientInfo?.isAdmin) && (
                     <p className={`${valueClass} font-bold text-gray-700 leading-tight`}>{count}</p>
                 )}
-                {(clientInfo?.features?.rental_revenue || clientInfo?.username === 'chargerent') && (
+                {(clientInfo?.features?.rental_revenue || clientInfo?.isAdmin) && (
                     <p className="text-sm font-semibold text-green-600">{symbol}{revenue.toFixed(2)} / {initialCharge.toFixed(2)}</p>
                 )}
                 <p className="text-xs text-gray-500 mt-1">{t(period)}</p>
@@ -87,11 +87,11 @@ function RentalStats({ rentalData, clientInfo, referenceTime, stationId, kiosks,
         );
     };
 
-    const showLeaseRevenue = (clientInfo?.features?.lease_revenue || clientInfo?.username === 'chargerent') && leaseRevenue > 0;
-    const showRepLeaseCommission = clientInfo?.username === 'chargerent' && repLeaseCommission > 0;
+    const showLeaseRevenue = (clientInfo?.features?.lease_revenue || clientInfo?.isAdmin) && leaseRevenue > 0;
+    const showRepLeaseCommission = clientInfo?.isAdmin && repLeaseCommission > 0;
 
     // If no rental/lease features are enabled, don't render anything.
-    if (clientInfo?.username !== 'chargerent' && !clientInfo?.features?.rental_counts && !clientInfo?.features?.rental_revenue && !showLeaseRevenue) {
+    if (!clientInfo?.isAdmin && !clientInfo?.features?.rental_counts && !clientInfo?.features?.rental_revenue && !showLeaseRevenue) {
         return null;
     }
 

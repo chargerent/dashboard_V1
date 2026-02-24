@@ -48,10 +48,10 @@ const CommissionStats = ({ clientInfo, accountMTD, accountYTD, repMTD, repYTD, s
     return (
         <div className="grid grid-cols-2 gap-4">
             {showAccount && <StatBox title={t('client_commission_short')} revenue={accountMTD} period="MTD" />}
-            {showAccount && clientInfo.username === 'chargerent' && <StatBox title={t('client_commission_short')} revenue={accountYTD} period="YTD" />}
+            {showAccount && clientInfo.isAdmin && <StatBox title={t('client_commission_short')} revenue={accountYTD} period="YTD" />}
             
             {showRep && <StatBox title={t('rep_commission_short')} revenue={repMTD} period="MTD" />}
-            {showRep && clientInfo.username === 'chargerent' && <StatBox title={t('rep_commission_short')} revenue={repYTD} period="YTD" />}
+            {showRep && clientInfo.isAdmin && <StatBox title={t('rep_commission_short')} revenue={repYTD} period="YTD" />}
         </div>
     );
 };
@@ -78,8 +78,8 @@ function LocationSummary({ location, kiosks, chargerThreshold, clientInfo, renta
         const stationIdsInLocation = new Set(kiosks.map(k => k.stationid));        
         let locationRentals = (rentalData || []);
         
-        if (clientInfo.username !== 'chargerent') {
-            if (clientInfo.partner) {
+        if (!clientInfo.isAdmin) {
+            if (clientInfo.role === 'partner') {
                 locationRentals = locationRentals.filter(r => r.repId?.toLowerCase() === clientInfo.clientId?.toLowerCase());
             } else {
                 locationRentals = locationRentals.filter(r => r.clientId === clientInfo.clientId);
@@ -138,7 +138,7 @@ function LocationSummary({ location, kiosks, chargerThreshold, clientInfo, renta
 
         // Calculate rep commission specifically from lease revenue
         const repLeaseCommission = leaseKiosks.reduce((sum, k) => {
-            if (clientInfo.username === 'chargerent' || clientInfo.username === k.info.rep) {
+            if (clientInfo.isAdmin || clientInfo.username === k.info.rep) {
                 return sum + ((Number(k.pricing?.leaseamount) || 0) * (Number(k.info.reppercent) || 0) / 100);
             }
             return sum;
@@ -163,8 +163,8 @@ function LocationSummary({ location, kiosks, chargerThreshold, clientInfo, renta
     
     const canShowRentalInfo = clientInfo.features.rentals || clientInfo.features.lease_revenue || clientInfo.features.rental_counts || clientInfo.features.rental_revenue;
 
-    const showAccountCommission = (clientInfo.features.client_commission || clientInfo.username === 'chargerent') && kiosks.some(k => k.info.accountpercent > 0);
-    const showRepCommission = (clientInfo.features.rep_commission || clientInfo.username === 'chargerent') && kiosks.some(k => k.info.reppercent > 0);
+    const showAccountCommission = (clientInfo.features.client_commission || clientInfo.isAdmin) && kiosks.some(k => k.info.accountpercent > 0);
+    const showRepCommission = (clientInfo.features.rep_commission || clientInfo.isAdmin) && kiosks.some(k => k.info.reppercent > 0);
 
     return (
         <div className="bg-white p-6 rounded-lg shadow-md mb-8">

@@ -1,0 +1,35 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Keep users locked down: only owner can read/write their profile
+    match /users/{uid} {
+      allow read, create, update: if request.auth != null && request.auth.uid == uid;
+      allow delete: if false;
+    }
+
+    // TEMP: allow the legacy site to read these without Firebase Auth
+    match /kiosks/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    match /rentals/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Login lockout state — public read so LoginPage can check before auth
+    // Writes are only via Cloud Functions (Admin SDK bypasses these rules)
+    match /loginAttempts/{username} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Everything else: no public read, no writes
+    match /{document=**} {
+      allow read: if request.auth != null; // signed-in only
+      allow write: if false;
+    }
+  }
+}
