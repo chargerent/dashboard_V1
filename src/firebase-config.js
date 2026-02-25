@@ -2,7 +2,7 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFunctions, connectFunctionsEmulator } from "firebase/functions";
-import { initializeFirestore } from "firebase/firestore";
+import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDkzUHzsNx5rJCE0i-bQ_g9n0-5L4cKQh4",
@@ -19,11 +19,7 @@ export const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
 
-// ✅ Force Firestore long polling (fix QUIC flakiness)
-export const db = initializeFirestore(app, {
-  experimentalForceLongPolling: true,
-  useFetchStreams: false,
-});
+export const db = getFirestore(app);
 
 // ✅ IMPORTANT: pin Functions to us-central1
 export const functions = getFunctions(app, "us-central1");
