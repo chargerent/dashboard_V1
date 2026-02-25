@@ -199,7 +199,7 @@ exports.auth_trackAttempt = onCall(async (request) => {
   } else {
     const newCount = (existing.count || 0) + 1;
     const lockedUntil = newCount >= 5
-      ? new Date(now.getTime() + 30 * 60 * 1000).toISOString()
+      ? new Date(now.getTime() + 4 * 60 * 60 * 1000).toISOString()
       : null;
     update = { count: newCount, lockedUntil, logs };
   }
