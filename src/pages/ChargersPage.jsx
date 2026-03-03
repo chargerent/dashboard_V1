@@ -6,7 +6,9 @@ import CommandStatusToast from '../components/UI/CommandStatusToast';
 import { formatDateTime, formatDuration } from '../utils/dateFormatter';
 import { normalizeKioskData } from '../utils/helpers';
 
-const ChargerCard = ({ charger, t, onCommand }) => {
+const ChargerCard = ({ charger, t, onCommand, onNavigateToRentals, onNavigateToDashboard }) => {
+    const [showRentals, setShowRentals] = useState(false);
+
     const statusClass = charger.status === 'rented' ? 'bg-blue-100 text-blue-800' :
                         charger.status === 'in_kiosk' ? 'bg-green-100 text-green-800' :
                         charger.status === 'missing' ? 'bg-red-100 text-red-800' :
@@ -64,7 +66,20 @@ const ChargerCard = ({ charger, t, onCommand }) => {
             {charger.location && (
                 <div className="mt-4 border-t pt-4">
                     <p className="text-xs text-gray-500">{t('current_location')}</p>
-                    <p className="text-sm font-medium text-gray-800">{charger.location.stationId}</p>
+                    <div className="flex items-center gap-1.5">
+                        <p className="text-sm font-medium text-gray-800">{charger.location.stationId}</p>
+                        {onNavigateToDashboard && (
+                            <button
+                                onClick={() => onNavigateToDashboard(charger.location.stationId)}
+                                className="text-blue-500 hover:text-blue-700 transition-colors"
+                                title={t('go_to_kiosk')}
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                                </svg>
+                            </button>
+                        )}
+                    </div>
                     <p className="text-xs text-gray-600">
                         {t('module')}: {charger.location.moduleId.split('m').pop()}, {t('slot')}: {charger.location.slotId}
                     </p>
@@ -79,6 +94,49 @@ const ChargerCard = ({ charger, t, onCommand }) => {
                     </p>
                 </div>
             )}
+            {charger.rentals && charger.rentals.length > 0 && (
+                <div className="mt-4 border-t pt-3">
+                    <button
+                        onClick={() => setShowRentals(prev => !prev)}
+                        className="flex items-center justify-between w-full text-xs font-semibold text-gray-500 hover:text-gray-800 transition-colors"
+                    >
+                        <span>{t('rental_history')} ({charger.rentals.length})</span>
+                        <svg className={`w-4 h-4 transition-transform duration-200 ${showRentals ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
+                        </svg>
+                    </button>
+                    {showRentals && (
+                        <div className="mt-2 max-h-52 overflow-y-auto space-y-1.5">
+                            {charger.rentals.map(rental => (
+                                <div
+                                    key={rental.rawid}
+                                    onClick={() => onNavigateToRentals && onNavigateToRentals(charger.sn)}
+                                    className={`text-xs bg-gray-50 rounded-md p-2 border border-gray-100 ${onNavigateToRentals ? 'cursor-pointer hover:bg-blue-50 hover:border-blue-200 transition-colors' : ''}`}
+                                >
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-gray-600">{formatDateTime(rental.rentalTime)}</span>
+                                        {rental.returnPower != null ? (
+                                            <span className={`font-semibold ${rental.returnPower >= 80 ? 'text-green-600' : rental.returnPower >= 40 ? 'text-yellow-600' : 'text-red-500'}`}>
+                                                {rental.returnPower}%
+                                            </span>
+                                        ) : rental.returnTime ? (
+                                            <span className="text-gray-400">—</span>
+                                        ) : (
+                                            <span className="text-blue-500 font-semibold">In Use</span>
+                                        )}
+                                    </div>
+                                    <div className="text-gray-500 mt-0.5">
+                                        {rental.returnTime
+                                            ? formatDuration(rental.rentalTime, rental.returnTime)
+                                            : '—'}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
+
             <div className="mt-4 pt-4 border-t border-gray-100 flex justify-end">
                 <button
                     onClick={handleLockClick}
@@ -95,8 +153,8 @@ const ChargerCard = ({ charger, t, onCommand }) => {
     );
 };
 
-export default function ChargersPage({ onNavigateToDashboard, rentalData, kioskData, t, language, setLanguage, onLogout, onCommand, commandStatus, setCommandStatus, clientInfo }) {
-    const [searchTerm, setSearchTerm] = useState('');
+export default function ChargersPage({ onNavigateToDashboard, onNavigateToRentals, rentalData, kioskData, t, language, setLanguage, onLogout, onCommand, commandStatus, setCommandStatus, clientInfo, initialSearch = '' }) {
+    const [searchTerm, setSearchTerm] = useState(initialSearch);
     const [activeFilter, setActiveFilter] = useState('all');
 
     const chargers = useMemo(() => {
@@ -168,6 +226,7 @@ export default function ChargersPage({ onNavigateToDashboard, rentalData, kioskD
                         lastRentalDuration: null,
                         rentedFrom: null,
                         isLocked: false,
+                        rentals: [],
                     });
                 }
 
@@ -176,6 +235,7 @@ export default function ChargersPage({ onNavigateToDashboard, rentalData, kioskD
                 if (rental.rentalPeriod && rental.rentalPeriod < 5 * 60 * 1000) {
                     charger.shortRentals += 1;
                 }
+                charger.rentals.push(rental);
             }
             
             // 2. Determine last rental info for all chargers
@@ -210,8 +270,13 @@ export default function ChargersPage({ onNavigateToDashboard, rentalData, kioskD
             // Add chargers that are in kiosks but have no rental history
             for (const [sn, location] of kioskChargerLocations.entries()) {
                 if (!chargerMap.has(sn)) {
-                    chargerMap.set(sn, { sn, totalRentals: 0, shortRentals: 0, status: 'in_kiosk', location, isLocked: location.isLocked });
+                    chargerMap.set(sn, { sn, totalRentals: 0, shortRentals: 0, status: 'in_kiosk', location, isLocked: location.isLocked, rentals: [] });
                 }
+            }
+
+            // Sort each charger's rental history newest first
+            for (const charger of chargerMap.values()) {
+                charger.rentals.sort((a, b) => new Date(b.rentalTime) - new Date(a.rentalTime));
             }
         }
 
@@ -225,6 +290,7 @@ export default function ChargersPage({ onNavigateToDashboard, rentalData, kioskD
 
         if (activeFilter === 'short_rentals') {
             filtered = filtered.filter(charger => charger.shortRentals > 0);
+            filtered.sort((a, b) => b.shortRentals - a.shortRentals);
         } else if (activeFilter === 'in_kiosk') {
             filtered = filtered.filter(charger => charger.status === 'in_kiosk');
         } else if (activeFilter === 'rented') {
@@ -271,7 +337,7 @@ export default function ChargersPage({ onNavigateToDashboard, rentalData, kioskD
                         <button onClick={() => setLanguage('fr')} className={`px-2 py-1 text-sm font-bold rounded-md ${language === 'fr' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}>FR</button>
                     </div>
                     <div className="flex items-center gap-4">
-                        <button onClick={onNavigateToDashboard} className="p-2 rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300" title={t('back_to_dashboard')}>
+                        <button onClick={() => onNavigateToDashboard()} className="p-2 rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300" title={t('back_to_dashboard')}>
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
                         </button>
                         <button onClick={onLogout} className="p-2 rounded-md bg-red-500 text-white hover:bg-red-600" title={t('logout')}>
@@ -319,7 +385,7 @@ export default function ChargersPage({ onNavigateToDashboard, rentalData, kioskD
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                     {filteredChargers.map(charger => (
-                        <ChargerCard key={charger.sn} charger={charger} t={t} onCommand={handleCommand} />
+                        <ChargerCard key={charger.sn} charger={charger} t={t} onCommand={handleCommand} onNavigateToRentals={onNavigateToRentals} onNavigateToDashboard={onNavigateToDashboard} />
                     ))}
                 </div>
             </main>

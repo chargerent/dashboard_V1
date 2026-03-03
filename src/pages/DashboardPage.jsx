@@ -1,5 +1,6 @@
 // src/pages/DashboardPage.jsx
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useDebounce } from '../hooks/useDebounce';
 import FilterPanel from '../components/Dashboard/FilterPanel';
 import KioskPanel from '../components/kiosk/kioskPanel';
 import KioskDetailPanel from '../components/kiosk/KioskDetailPanel';
@@ -18,24 +19,24 @@ import CommandStatusToast from '../components/UI/CommandStatusToast';
 import { subscribeUserToPush } from '../push';
 import RentalDetailView from '../components/Dashboard/RentalDetailView';
 
-export default function DashboardPage({ token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToRentals, onNavigateToChargers, onNavigateToReporting, rentalData, allStationsData, setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, setPendingSlots, ejectingSlots, setEjectingSlots, lockingSlots, ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, setNgrokInfo, manageIgnoredKiosk }) {
+export default function DashboardPage({ token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToRentals, onNavigateToChargers, onNavigateToReporting, rentalData, allStationsData, setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, setPendingSlots, ejectingSlots, setEjectingSlots, lockingSlots, ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, setNgrokInfo, manageIgnoredKiosk, initialSearch = '' }) {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [expandedKioskId, setExpandedKioskId] = useState(null);
     const [editingKioskId, setEditingKioskId] = useState(null);
     const [activeFilters, setActiveFilters] = useState({ all: true });
     const [showActiveOnly, setShowActiveOnly] = useState(true);
-    const [searchTerm, setSearchTerm] = useState('');
+    const [searchTerm, setSearchTerm] = useState(initialSearch);
+    const debouncedSearchTerm = useDebounce(searchTerm, 300);
     const [commandDetails, setCommandDetails] = useState(null);
     const [currentPage, setCurrentPage] = useState(1);
-    const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm);
     const ITEMS_PER_PAGE = 12;
     const [showInitialStatus, setShowInitialStatus] = useState(false);
     const [rentalDetailView, setRentalDetailView] = useState(null); // { kioskId, period }
     const [showSoldOutModal, setShowSoldOutModal] = useState(false);
     const [commandModalOpen, setCommandModalOpen] = useState(false);
 
-    const { showWarning, handleStay } = useIdleTimer({ onLogout, idleTimeout: 540000, warningTimeout: 60000 });
+    const { showWarning, handleStay } = useIdleTimer({ onIdle: () => {}, onLogout, idleTimeout: 540000, promptTimeout: 60000 });
 
     useEffect(() => {
         // Set loading to false once the initial data has arrived.
@@ -51,14 +52,11 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
         }
     }, [clientInfo?.clientId]);
 
-    // Debounce search term
+    // Reset to page 1 whenever the debounced search changes
     useEffect(() => {
-        const handler = setTimeout(() => {
-            setDebouncedSearchTerm(searchTerm);
-            setCurrentPage(1); // Reset to first page on new search
-        }, 300);
-        return () => clearTimeout(handler);
-    }, [searchTerm]);
+        setCurrentPage(1);
+    }, [debouncedSearchTerm]);
+
     const handleToggleDetails = (stationid) => {
         setEditingKioskId(null); 
         setRentalDetailView(null);
@@ -673,7 +671,7 @@ return (
                                                     {editingKioskId === kiosk.stationid && kioskToEdit ? (
                                                         <KioskEditPanel kiosk={kioskToEdit} onSave={handleKioskSave} clientInfo={clientInfo} isVisible={editingKioskId === kiosk.stationid} t={t} onCommand={handleGeneralCommand} />
                                                     ) : (
-                                                        clientInfo.features.details && <KioskDetailPanel kiosk={kiosk} isVisible={expandedKioskId === kiosk.stationid} onSlotClick={handleSlotClick} onLockSlot={handleLockSlotClick} pendingSlots={pendingSlots} ejectingSlots={ejectingSlots} lockingSlots={lockingSlots} t={t} onCommand={handleGeneralCommand} clientInfo={clientInfo} mockNow={latestTimestamp} serverFlowVersion={serverFlowVersion} serverUiVersion={serverUiVersion} />
+                                                        clientInfo.features.details && <KioskDetailPanel kiosk={kiosk} isVisible={expandedKioskId === kiosk.stationid} onSlotClick={handleSlotClick} onLockSlot={handleLockSlotClick} pendingSlots={pendingSlots} ejectingSlots={ejectingSlots} lockingSlots={lockingSlots} t={t} onCommand={handleGeneralCommand} clientInfo={clientInfo} mockNow={latestTimestamp} serverFlowVersion={serverFlowVersion} serverUiVersion={serverUiVersion} onNavigateToChargers={clientInfo.isAdmin ? (sn) => { onNavigateToChargers(sn); } : undefined} />
                                                     )}
                                                     {rentalDetailView?.kioskId === kiosk.stationid && (
                                                         <RentalDetailView kiosk={kiosk} period={rentalDetailView.period} rentalData={enrichedRentalData} onClose={() => setRentalDetailView(null)} onCommand={handleGeneralCommand} t={t} />
