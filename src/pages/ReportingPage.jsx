@@ -8,6 +8,8 @@ import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 import { ChartBarIcon } from '@heroicons/react/24/outline';
 import ChartDataLabels from 'chartjs-plugin-datalabels';
+import { db } from '../firebase-config';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, PointElement, LineElement, Title, Tooltip, Legend, ArcElement, ChartDataLabels);
 
@@ -27,6 +29,8 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
     const [reportPreparedFor, setReportPreparedFor] = useState('');
     const [uploadedRentalData, setUploadedRentalData] = useState(null);
     const [timeSeriesInterval, setTimeSeriesInterval] = useState('daily'); // 'daily' or 'monthly'
+    const [fetchedRentalData, setFetchedRentalData] = useState(null);
+    const [isFetchingRentals, setIsFetchingRentals] = useState(false);
     const chartsRef = useRef(null);
 
     const resetFilters = () => {
@@ -40,11 +44,45 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
         setReportTitle('Rental Report');
         setReportPreparedFor('');
         setUploadedRentalData(null);
+        setFetchedRentalData(null);
     };
 
     useEffect(() => {
         resetFilters();
     }, []);
+
+    // Fetch rental data from Firestore for the selected date range.
+    // The App.jsx rentalData is limited to 30 days; this allows arbitrary historical reporting.
+    useEffect(() => {
+        if (uploadedRentalData) return; // Uploaded file takes priority
+        if (!startDate || !endDate) {
+            setFetchedRentalData(null);
+            return;
+        }
+
+        const start = new Date(startDate);
+        start.setHours(0, 0, 0, 0);
+        const end = new Date(endDate);
+        end.setHours(23, 59, 59, 999);
+
+        setIsFetchingRentals(true);
+        const rentalQuery = query(
+            collection(db, 'rentals'),
+            where('rentalTime', '>=', start.toISOString()),
+            where('rentalTime', '<=', end.toISOString())
+        );
+
+        getDocs(rentalQuery)
+            .then(snapshot => {
+                const rentals = snapshot.docs.map(doc => ({ rawid: doc.id, ...doc.data() }));
+                setFetchedRentalData(rentals);
+            })
+            .catch(err => {
+                console.error('[ReportingPage] Failed to fetch rentals:', err);
+                setFetchedRentalData(null);
+            })
+            .finally(() => setIsFetchingRentals(false));
+    }, [startDate, endDate, uploadedRentalData]);
 
     const clientKiosks = useMemo(() => {
         if (uploadedRentalData) {
@@ -109,7 +147,7 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
         return map;
     }, [allStationsData]);
 
-    const activeRentalData = uploadedRentalData || rentalData;
+    const activeRentalData = uploadedRentalData || fetchedRentalData || rentalData;
 
     const filteredRentals = useMemo(() => {
         const start = startDate ? new Date(startDate) : null;
@@ -469,16 +507,20 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                             </div>
                             <div className="bg-gray-50 p-3 rounded-md border border-gray-200 text-center">
                                 <p className="text-sm text-gray-600">{t('total_rentals')}</p>
-                                <div className="flex justify-center items-baseline gap-4 mt-1">
-                                    <div>
-                                        <span className="text-xs text-gray-500">{t('original')}:</span>
-                                        <p className="text-2xl font-bold text-gray-700">{originalTotalRentals}</p>
+                                {isFetchingRentals ? (
+                                    <p className="text-sm text-gray-500 mt-2">Loading...</p>
+                                ) : (
+                                    <div className="flex justify-center items-baseline gap-4 mt-1">
+                                        <div>
+                                            <span className="text-xs text-gray-500">{t('original')}:</span>
+                                            <p className="text-2xl font-bold text-gray-700">{originalTotalRentals}</p>
+                                        </div>
+                                        <div>
+                                            <span className="text-xs text-gray-500">{t('adjusted')}:</span>
+                                            <p className="text-2xl font-bold text-blue-600">{adjustedTotalRentals}</p>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <span className="text-xs text-gray-500">{t('adjusted')}:</span>
-                                        <p className="text-2xl font-bold text-blue-600">{adjustedTotalRentals}</p>
-                                    </div>
-                                </div>
+                                )}
                             </div>
                         </div>
                     </div>

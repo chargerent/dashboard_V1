@@ -708,7 +708,13 @@ function App() {
             const isSuccess = data.statuscode == 1 || data.statuscode == 2;
             let toastState = isSuccess ? 'success' : 'error';
 
-            if (isMyCommand) setCommandStatus({ state: toastState, message: data.status_en || (isSuccess ? t('command_success') : t('command_failed')) });
+            // Change responses often omit kiosk/stationid fields, so responseStationId may be
+            // undefined and the pendingCommandsRef check in isMyCommand silently fails.
+            // Fall back to: if we have any recently-sent commands, this response is ours.
+            const isMyChangeCommand = isMyCommand || pendingCommandsRef.current.length > 0;
+            console.log('[WS Change]', data.action, '| statuscode:', data.statuscode, '| isMyCommand:', isMyCommand, '| pendingCmds:', pendingCommandsRef.current.length, '| responseStationId:', responseStationId);
+
+            if (isMyChangeCommand) setCommandStatus({ state: toastState, message: data.status_en || (isSuccess ? t('command_success') : t('command_failed')) });
 
             if (isSuccess && data.kiosk) {
               const [normalizedKiosk] = normalizeKioskData([data.kiosk]);

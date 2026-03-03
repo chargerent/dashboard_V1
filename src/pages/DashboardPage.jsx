@@ -35,8 +35,17 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
     const [rentalDetailView, setRentalDetailView] = useState(null); // { kioskId, period }
     const [showSoldOutModal, setShowSoldOutModal] = useState(false);
     const [commandModalOpen, setCommandModalOpen] = useState(false);
+    const pendingChangeCloseRef = useRef(false); // tracks whether to close edit panel on next success
 
     const { showWarning, handleStay } = useIdleTimer({ onIdle: () => {}, onLogout, idleTimeout: 540000, promptTimeout: 60000 });
+
+    // Close edit panel after a change command succeeds
+    useEffect(() => {
+        if (commandStatus?.state === 'success' && pendingChangeCloseRef.current) {
+            pendingChangeCloseRef.current = false;
+            setEditingKioskId(null);
+        }
+    }, [commandStatus]);
 
     useEffect(() => {
         // Set loading to false once the initial data has arrived.
@@ -121,10 +130,10 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
 
         const { stationid, moduleid, slotid, action } = commandDetails;
         
-        // If this is a save action, un-ignore the kiosk and close the edit panel.
+        // If this is a save action, un-ignore the kiosk and mark that the panel should close on success.
         if (action.includes('change')) {
             manageIgnoredKiosk(stationid, false);
-            setEditingKioskId(null);
+            pendingChangeCloseRef.current = true;
         }
 
         if (action.startsWith('eject') || action === 'rent') {
