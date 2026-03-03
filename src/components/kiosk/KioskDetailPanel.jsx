@@ -90,6 +90,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         const canLock = clientInfo.commands.lock;
         const hasCharger = (slot.sstat && slot.sstat !== '0C') || slot.isSstatError;
         const hasUnreadableSn = hasCharger && slot.sn === '0000000000';
+        const hasSearchableSn = slot.sn && slot.sn !== 0 && slot.sn !== '0000000000';
 
         return (
             <div className={`relative flex items-stretch p-0.5 rounded-md border transition-all duration-300 text-left ${style.className} ${style.glow ? 'slot-glow' : ''}`}>
@@ -112,8 +113,8 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                     </div>
                 </button>
 
-                {/* Charger lookup — admin only */}
-                {hasCharger && clientInfo.isAdmin && onNavigateToChargers && (
+                {/* Charger lookup — admin only, only when SN is readable and searchable */}
+                {hasSearchableSn && clientInfo.isAdmin && onNavigateToChargers && (
                     <div className="flex flex-shrink-0 items-center border-l border-gray-300/50">
                         <button
                             onClick={(e) => { e.stopPropagation(); onNavigateToChargers(slot.sn); }}
