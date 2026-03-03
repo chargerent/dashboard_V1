@@ -22,7 +22,7 @@ const StatusIndicator = ({ status }) => {
 };
 
 // --- Main Detail Panel Component ---
-function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSlots, ejectingSlots, lockingSlots, t, onCommand, serverUiVersion, serverFlowVersion, clientInfo, mockNow }) {
+function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSlots, ejectingSlots, lockingSlots, t, onCommand, serverUiVersion, serverFlowVersion, clientInfo, mockNow, onNavigateToChargers }) {
     const isOnline = isKioskOnline(kiosk, mockNow);
     const hasAnyCommands = Object.values(clientInfo.commands).some(v => v === true) || clientInfo.features.rentals;
     
@@ -89,9 +89,13 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         const canEject = clientInfo.commands.eject;
         const canLock = clientInfo.commands.lock;
         const hasCharger = (slot.sstat && slot.sstat !== '0C') || slot.isSstatError;
+        const hasUnreadableSn = hasCharger && slot.sn === '0000000000';
 
         return (
             <div className={`relative flex items-stretch p-0.5 rounded-md border transition-all duration-300 text-left ${style.className} ${style.glow ? 'slot-glow' : ''}`}>
+                {hasUnreadableSn && (
+                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-yellow-400 rounded-l-md"></div>
+                )}
                 {/* Eject Button */}
                 <button
                     onClick={() => onSlotClick(kiosk.stationid, module.id, slot.position)}
@@ -104,9 +108,24 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                     </div>
                     <div className="flex flex-col items-start min-w-0">
                         <span className="text-xs font-mono font-bold">{hasCharger ? `${slot.batteryLevel}%` : t('empty')}</span>
-                        <span className="text-[10px] text-gray-400 font-mono leading-tight truncate">{hasCharger ? slot.sn : '\u00A0'}</span>
+                        <span className="text-[10px] text-gray-400 font-mono leading-tight truncate">{hasCharger ? (hasUnreadableSn ? '----' : slot.sn) : '\u00A0'}</span>
                     </div>
                 </button>
+
+                {/* Charger lookup — admin only */}
+                {hasCharger && clientInfo.isAdmin && onNavigateToChargers && (
+                    <div className="flex flex-shrink-0 items-center border-l border-gray-300/50">
+                        <button
+                            onClick={(e) => { e.stopPropagation(); onNavigateToChargers(slot.sn); }}
+                            className="flex items-center justify-center w-7 h-8 hover:bg-blue-100/70 transition-colors"
+                            title={`Find charger ${slot.sn}`}
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                        </button>
+                    </div>
+                )}
 
                 {/* Lock/Unlock Button */}
                 {canLock && (
@@ -191,7 +210,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         const hardwareType = kiosk.hardware?.type;
 
         return (
-        <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
+        <div className="p-2">
             <div className="w-full flex flex-col gap-3">
                 {kiosk.modules[0] && <Module module={kiosk.modules[0]} reverseOrder={true} />}
                 <PaymentTerminal />
@@ -269,6 +288,20 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                 )}
                 <div className="w-full">
                     {renderContent()}
+                </div>
+                <div className="flex flex-wrap gap-x-3 gap-y-1 px-1 pb-1">
+                    <div className="flex items-center gap-1">
+                        <div className="w-1 h-4 rounded-sm bg-yellow-400"></div>
+                        <span className="text-[10px] text-gray-500">Unreadable SN</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                        <div className="w-1 h-4 rounded-sm bg-red-500"></div>
+                        <span className="text-[10px] text-gray-500">Not charging</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                        <div className="w-1 h-4 rounded-sm bg-purple-500"></div>
+                        <span className="text-[10px] text-gray-500">Status error</span>
+                    </div>
                 </div>
             </div>
         </div>

@@ -1,4 +1,6 @@
 // src/utils/helpers.js
+import { httpsCallable } from "firebase/functions";
+import { functions } from "../firebase-config";
 
 /**
  * Normalizes the raw kiosk data from the API into a more consistent and usable format.
@@ -19,10 +21,15 @@ export const normalizeKioskData = (kiosks) => {
 
                 const slots = slotSource.map(([key, slotData]) => {
                     const position = parseInt(key.replace('slot', ''), 10);
-                    // A charger is present if it has a non-zero CID. This is the simplest, most reliable check.
-                    const hasCharger = slotData && slotData.cid && slotData.cid !== '0000000000' && slotData.cid !== '0';
-                    
-                    const isSstatError = slotData.sstat === '0F' && (!slotData.cid || slotData.cid === '0000000000');
+                    // A charger is present if it has a readable CID, or if voltage (cap) is non-zero.
+                    // Voltage catches real chargers whose SN chip is unreadable (cid stays 0000000000)
+                    // but are electrically confirmed present (e.g. cap=4180mV, batlvl=100).
+                    const hasCid = slotData && slotData.cid && slotData.cid !== '0000000000' && slotData.cid !== '0';
+                    const capValue = parseInt(slotData?.cap, 10);
+                    const hasVoltage = !isNaN(capValue) && capValue > 0;
+                    const hasCharger = hasCid || hasVoltage;
+
+                    const isSstatError = slotData.sstat === '0F' && !hasCharger;
                     const cmos = hasCharger ? slotData.cmos : null;
                     const chargingCurrent = hasCharger ? parseInt(slotData.cstate, 10) : 0;
 
@@ -51,7 +58,7 @@ export const normalizeKioskData = (kiosks) => {
         return {
             stationid: kiosk.stationid,
             provisionid: kiosk.provisionid,
-            hardware: kiosk.hardware || {},
+            hardware: kiosk.hardware ? { ...kiosk.hardware, power: kiosk.hardware.power != null ? Number(kiosk.hardware.power) : undefined } : {},
             info: {
                 location: kiosk.info?.location || '',
                 place: kiosk.info?.place || '',
@@ -88,6 +95,34 @@ export const normalizeKioskData = (kiosks) => {
 };
 
 /**
+ * Parses a kiosk timestamp string into a Date object.
+ * Supports two formats produced by the backend:
+ *   - ISO 8601: "2024-11-15T10:30:00" (with or without Z / offset)
+ *   - Legacy:   "15/11/2024 10:30:00" (DD/MM/YYYY HH:mm:ss, assumed UTC)
+ * Returns null and logs a warning for any unrecognised format.
+ */
+const parseKioskTimestamp = (raw) => {
+    if (!raw || typeof raw !== 'string') return null;
+
+    // ISO 8601 — append Z if no timezone info so Date treats it as UTC
+    const isoCandidate = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(raw)
+        ? new Date(raw.endsWith('Z') || raw.includes('+') ? raw : raw + 'Z')
+        : null;
+    if (isoCandidate && !isNaN(isoCandidate.getTime())) return isoCandidate;
+
+    // Legacy DD/MM/YYYY HH:mm:ss — build an explicit UTC date to avoid local-timezone shifts
+    const legacyParts = raw.match(/^(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2}):(\d{2})$/);
+    if (legacyParts) {
+        const [, dd, mm, yyyy, hh, min, ss] = legacyParts;
+        const legacyCandidate = new Date(Date.UTC(+yyyy, +mm - 1, +dd, +hh, +min, +ss));
+        if (!isNaN(legacyCandidate.getTime())) return legacyCandidate;
+    }
+
+    console.warn(`[parseKioskTimestamp] Unrecognised timestamp format: "${raw}"`);
+    return null;
+};
+
+/**
  * Checks if a kiosk is considered online based on its last update time.
  * @param {Object} kiosk - The kiosk object.
  * @param {string} referenceTime - The reference time (ISO string) to compare against.
@@ -96,22 +131,11 @@ export const normalizeKioskData = (kiosks) => {
 export const isKioskOnline = (kiosk, referenceTime) => {
     if (!kiosk.lastUpdated || !referenceTime) return false;
 
-    // Ensure timestamps are treated as UTC
     const referenceDate = new Date(referenceTime.endsWith('Z') ? referenceTime : referenceTime + 'Z');
+    const kioskDate = parseKioskTimestamp(kiosk.lastUpdated);
+    if (!kioskDate) return false;
+
     const fiveMinutesAgo = new Date(referenceDate.getTime() - 5 * 60 * 1000);
-    
-    let kioskDate = new Date(kiosk.lastUpdated.endsWith('Z') ? kiosk.lastUpdated : kiosk.lastUpdated + 'Z');
-
-    // If the initial parsing is invalid, try to parse it as DD/MM/YYYY HH:mm:ss
-    if (isNaN(kioskDate.getTime())) {
-        const parts = kiosk.lastUpdated.match(/(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2}):(\d{2})/);
-        if (parts) {
-            // new Date(year, monthIndex, day, hour, minute, second)
-            // Note: month is 0-indexed in JavaScript's Date constructor
-            kioskDate = new Date(parts[3], parts[2] - 1, parts[1], parts[4], parts[5], parts[6]);
-        }
-    }
-
     return kioskDate > fiveMinutesAgo;
 };
 
@@ -124,20 +148,11 @@ export const isKioskOnline = (kiosk, referenceTime) => {
 export const isKioskActive = (kiosk, referenceTime) => {
     if (!kiosk.lastUpdated || !referenceTime) return false;
 
-    // Ensure timestamps are treated as UTC
     const referenceDate = new Date(referenceTime.endsWith('Z') ? referenceTime : referenceTime + 'Z');
-    const tenDaysAgo = new Date(referenceDate.getTime() - 10 * 24 * 60 * 60 * 1000); // 10 days
+    const kioskDate = parseKioskTimestamp(kiosk.lastUpdated);
+    if (!kioskDate) return false;
 
-    let kioskDate = new Date(kiosk.lastUpdated.endsWith('Z') ? kiosk.lastUpdated : kiosk.lastUpdated + 'Z');
-
-    // If the initial parsing is invalid, try to parse it as DD/MM/YYYY HH:mm:ss
-    if (isNaN(kioskDate.getTime())) {
-        const parts = kiosk.lastUpdated.match(/(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2}):(\d{2})/);
-        if (parts) {
-            kioskDate = new Date(parts[3], parts[2] - 1, parts[1], parts[4], parts[5], parts[6]);
-        }
-    }
-
+    const tenDaysAgo = new Date(referenceDate.getTime() - 10 * 24 * 60 * 60 * 1000);
     return kioskDate > tenDaysAgo;
 };
 /**
@@ -146,32 +161,15 @@ export const isKioskActive = (kiosk, referenceTime) => {
  * @returns {Promise<Object|null>} - A promise that resolves to an object with lat and lon, or null.
  */
 export const geocodeAddress = async (addressComponents) => {
-    const { stationaddress, city, state, zip } = addressComponents;
-    if (!stationaddress || !city) {
-        return null;
-    }
-
-    const addressString = `${stationaddress}, ${city}, ${state} ${zip}`.trim();
-    // TODO: This key should not be exposed on the client side.
-    // It should be moved to a backend environment variable and accessed
-    // via a dedicated API endpoint on your server.
-    const apiKey = 'AIzaSyB267y0CtDdNwn8aZr-1SWN1TDNgVlzxK8';
-    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(addressString)}&key=${apiKey}`;
+    const { stationaddress, city } = addressComponents;
+    if (!stationaddress || !city) return null;
 
     try {
-        const response = await fetch(url);
-        if (!response.ok) {
-            throw new Error(`Geocoding request failed with status ${response.status}`);
-        }
-
-        const data = await response.json();
-        if (data.status === 'OK' && data.results[0]) {
-            return data.results[0].geometry.location; // { lat, lng: lon }
-        }
-        console.error('Geocoding API did not return OK:', data.status, data.error_message);
-        return null;
+        const fn = httpsCallable(functions, "geocodeAddress");
+        const result = await fn(addressComponents);
+        return result.data.location ?? null; // { lat, lng } or null
     } catch (error) {
-        console.error('Geocoding API error:', error);
+        console.error("Geocoding error:", error);
         return null;
     }
 };
