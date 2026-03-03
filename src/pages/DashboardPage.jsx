@@ -121,9 +121,10 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
 
         const { stationid, moduleid, slotid, action } = commandDetails;
         
-        // If this is a save action, un-ignore the kiosk now that we are sending the command.
+        // If this is a save action, un-ignore the kiosk and close the edit panel.
         if (action.includes('change')) {
             manageIgnoredKiosk(stationid, false);
+            setEditingKioskId(null);
         }
 
         if (action.startsWith('eject') || action === 'rent') {

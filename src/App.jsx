@@ -705,11 +705,8 @@ function App() {
               if (isMyCommand) setCommandStatus({ state: 'success', message: data.status_en });
             }
           } else if (data.action && data.action.includes('change')) {
-            const isSuccess = data.statuscode == 1;
-            const isPending = data.statuscode == 2;
-            let toastState = 'error';
-            if (isSuccess) toastState = 'success';
-            if (isPending) toastState = 'pending';
+            const isSuccess = data.statuscode == 1 || data.statuscode == 2;
+            let toastState = isSuccess ? 'success' : 'error';
 
             if (isMyCommand) setCommandStatus({ state: toastState, message: data.status_en || (isSuccess ? t('command_success') : t('command_failed')) });
 
