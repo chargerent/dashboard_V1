@@ -778,7 +778,7 @@ function App() {
       setLanguage={setLanguage}
       onNavigateToAdmin={() => setPage('admin')}
       onNavigateToRentals={() => { setRentalsInitialSearch(''); setPage('rentals'); }}
-      onNavigateToChargers={(sn) => { console.log('[App] onNavigateToChargers called, sn:', JSON.stringify(sn), typeof sn); if (sn) setChargersInitialSearch(sn); else setChargersInitialSearch(''); setPage('chargers'); }}
+      onNavigateToChargers={(sn) => { if (sn) setChargersInitialSearch(sn); else setChargersInitialSearch(''); setPage('chargers'); }}
       initialSearch={dashboardInitialSearch}
       onNavigateToReporting={() => setPage('reporting')}
       onNavigateToAnalytics={onNavigateToAnalytics}
