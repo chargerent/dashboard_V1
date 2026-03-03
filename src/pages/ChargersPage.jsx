@@ -1,6 +1,6 @@
 // src/pages/ChargersPage.jsx
 
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import ConfirmationModal from '../components/UI/ConfirmationModal';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
 import { formatDateTime, formatDuration } from '../utils/dateFormatter';
@@ -161,10 +161,31 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
         setSearchTerm(initialSearch);
     }, [initialSearch]);
 
+    // Stable fingerprint of charger locations — only changes when a charger SN
+    // actually moves in/out of a slot. Heartbeat-only updates (battery, timestamp)
+    // produce the same string, preventing unnecessary charger recalculation.
+    const kioskChargerFingerprint = useMemo(() => {
+        if (!kioskData) return '';
+        return kioskData
+            .map(k => `${k.stationid}:${
+                (k.modules || []).map(m =>
+                    (m.slots || []).filter(s => s.sn && s.sn !== 0)
+                        .map(s => `${s.sn}@${m.id}/${s.position}:${s.isLocked ? 1 : 0}`)
+                        .join(',')
+                ).join(';')
+            }`)
+            .sort()
+            .join('|');
+    }, [kioskData]);
+
+    // Always-fresh ref so the chargers memo can read kioskData without it
+    // being a reactive dependency (avoids recalculating on every heartbeat).
+    const kioskDataRef = useRef(kioskData);
+    kioskDataRef.current = kioskData;
+
     const chargers = useMemo(() => {
-        console.log('[ChargersPage] Recalculating chargers. Props:', { rentalData, kioskData, clientInfo });
+        const kioskData = kioskDataRef.current;
         if (!rentalData || !kioskData) {
-            console.log('[ChargersPage] Missing rentalData or kioskData.');
             return [];
         }
         if (!clientInfo) {
@@ -197,7 +218,6 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
                 }
             }
         }
-        console.log(`[ChargersPage] Found ${kioskChargerLocations.size} chargers in kiosks.`);
         
         // 1. Process rental data to get rental counts
         if (rentalData && clientInfo) {
@@ -211,7 +231,6 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
                     clientRentals = rentalData.filter(r => r.clientId === clientInfo.clientId);
                 }
             }
-            console.log(`[ChargersPage] Processing ${clientRentals.length} rentals for client.`);
 
             // Sort by time descending to easily find the latest status
             const sortedRentals = [...clientRentals].sort((a, b) => new Date(b.rentalTime) - new Date(a.rentalTime));
@@ -284,10 +303,10 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
             }
         }
 
-        console.log(`[ChargersPage] Final chargerMap has ${chargerMap.size} chargers.`, chargerMap);
 
         return Array.from(chargerMap.values()).sort((a, b) => a.sn.localeCompare(b.sn));
-    }, [rentalData, kioskData, clientInfo]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [rentalData, kioskChargerFingerprint, clientInfo]);
 
     const filteredChargers = useMemo(() => {
         let filtered = [...chargers];
