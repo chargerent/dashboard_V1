@@ -158,6 +158,7 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
     const [activeFilter, setActiveFilter] = useState('all');
 
     useEffect(() => {
+        console.log('[ChargersPage] initialSearch changed:', initialSearch);
         setSearchTerm(initialSearch);
     }, [initialSearch]);
 
@@ -290,6 +291,7 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
     }, [rentalData, kioskData, clientInfo]);
 
     const filteredChargers = useMemo(() => {
+        console.log('[ChargersPage] filteredChargers running. searchTerm:', JSON.stringify(searchTerm));
         let filtered = [...chargers];
 
         if (activeFilter === 'short_rentals') {
