@@ -1,6 +1,6 @@
 // src/pages/ChargersPage.jsx
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import ConfirmationModal from '../components/UI/ConfirmationModal';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
 import { formatDateTime, formatDuration } from '../utils/dateFormatter';
@@ -156,6 +156,10 @@ const ChargerCard = ({ charger, t, onCommand, onNavigateToRentals, onNavigateToD
 export default function ChargersPage({ onNavigateToDashboard, onNavigateToRentals, rentalData, kioskData, t, language, setLanguage, onLogout, onCommand, commandStatus, setCommandStatus, clientInfo, initialSearch = '' }) {
     const [searchTerm, setSearchTerm] = useState(initialSearch);
     const [activeFilter, setActiveFilter] = useState('all');
+
+    useEffect(() => {
+        setSearchTerm(initialSearch);
+    }, [initialSearch]);
 
     const chargers = useMemo(() => {
         console.log('[ChargersPage] Recalculating chargers. Props:', { rentalData, kioskData, clientInfo });
