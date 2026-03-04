@@ -1,5 +1,6 @@
 // src/pages/DashboardPage.jsx
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { VERSION } from '../version';
 import { useDebounce } from '../hooks/useDebounce';
 import FilterPanel from '../components/Dashboard/FilterPanel';
 import KioskPanel from '../components/kiosk/kioskPanel';
@@ -583,6 +584,7 @@ return (
                     <div className="flex items-center gap-2">
                         <button onClick={() => setLanguage('en')} className={`px-2 py-1 text-sm font-bold rounded-md ${language === 'en' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}>EN</button>
                         <button onClick={() => setLanguage('fr')} className={`px-2 py-1 text-sm font-bold rounded-md ${language === 'fr' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}>FR</button>
+                        <span className="text-xs text-gray-400 font-mono ml-1">v{VERSION}</span>
                     </div>
                     {/* Action buttons on the right */}
                     <div className="flex items-center gap-4">
@@ -598,14 +600,14 @@ return (
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
                                 </svg>
                             </button>
-                            {(clientInfo.features.reporting || clientInfo.isAdmin) && (
-                                <button onClick={onNavigateToReporting} className="p-2 rounded-md bg-indigo-100 text-indigo-700 hover:bg-indigo-200" title={t('reporting_page_title')}>
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                                    </svg>
-                                </button>
-                            )}
                         </>
+                    )}
+                    {(clientInfo.features.reporting || clientInfo.isAdmin) && (
+                        <button onClick={onNavigateToReporting} className="p-2 rounded-md bg-indigo-100 text-indigo-700 hover:bg-indigo-200" title={t('reporting_page_title')}>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                            </svg>
+                        </button>
                     )}
                     {(clientInfo.commands['client edit'] || clientInfo.isAdmin) && (
                         <button onClick={onNavigateToAdmin} className="p-2 rounded-md bg-orange-100 text-orange-700 hover:bg-orange-200" title={t('manage_clients')}>

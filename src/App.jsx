@@ -891,7 +891,8 @@ function App() {
             initialSearch={chargersInitialSearch}
           />
         );
-      case 'reporting':
+      case 'reporting': {
+        const isUserMode = !clientInfo.isAdmin && clientInfo.role !== 'partner';
         return (
           <ReportingPage
             onNavigateToDashboard={() => setPage('dashboard')}
@@ -901,8 +902,10 @@ function App() {
             rentalData={rentalData}
             allStationsData={allStationsData}
             clientInfo={clientInfo}
+            userMode={isUserMode}
           />
         );
+      }
       case 'analytics':
         return (
           <AnalyticsPage

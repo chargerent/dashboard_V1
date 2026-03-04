@@ -13,7 +13,7 @@ import { collection, query, where, getDocs } from 'firebase/firestore';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, PointElement, LineElement, Title, Tooltip, Legend, ArcElement, ChartDataLabels);
 
-const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout, t, rentalData, allStationsData, clientInfo }) => {
+const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout, t, rentalData, allStationsData, clientInfo, userMode = false }) => {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
@@ -26,7 +26,7 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
     const [isExporting, setIsExporting] = useState(false);
     const [skipZeroRentalsDays, setSkipZeroRentalsDays] = useState(false);
     const [reportTitle, setReportTitle] = useState('Rental Report');
-    const [reportPreparedFor, setReportPreparedFor] = useState('');
+    const [reportPreparedFor, setReportPreparedFor] = useState(userMode ? (clientInfo?.username || '') : '');
     const [uploadedRentalData, setUploadedRentalData] = useState(null);
     const [timeSeriesInterval, setTimeSeriesInterval] = useState('daily'); // 'daily' or 'monthly'
     const [fetchedRentalData, setFetchedRentalData] = useState(null);
@@ -42,9 +42,20 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
         setAdjustmentPercentage(100);
         setSkipZeroRentalsDays(false);
         setReportTitle('Rental Report');
-        setReportPreparedFor('');
+        setReportPreparedFor(userMode ? (clientInfo?.username || '') : '');
         setUploadedRentalData(null);
         setFetchedRentalData(null);
+    };
+
+    const setLastMonth = () => {
+        const now = new Date();
+        setStartDate(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+        setEndDate(new Date(now.getFullYear(), now.getMonth(), 0));
+    };
+
+    const setYearToDate = () => {
+        setStartDate(new Date(new Date().getFullYear(), 0, 1));
+        setEndDate(new Date());
     };
 
     useEffect(() => {
@@ -132,6 +143,9 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
     }, [clientKiosks, selectedCountry]);
 
     const availableKiosksForFilter = useMemo(() => {
+        if (userMode) {
+            return clientKiosks;
+        }
         if (selectedLocations.length === 0) {
             return [];
         }
@@ -139,7 +153,7 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
             (!selectedCountry || kiosk.info.country === selectedCountry) &&
             selectedLocations.includes(kiosk.info.location)
         );
-    }, [clientKiosks, selectedCountry, selectedLocations]);
+    }, [clientKiosks, selectedCountry, selectedLocations, userMode]);
 
     const stationToLocationMap = useMemo(() => {
         const map = new Map();
@@ -177,9 +191,14 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                 const rentalLocation = rental.rentalLocation || stationToLocationMap.get(rental.rentalStationid);
                 return selectedLocations.includes(rentalLocation);
             }
-            return true; // No location or kiosk filter applied
+            // In user mode, restrict to the user's own kiosks to prevent data leakage
+            if (userMode) {
+                const clientKioskIds = new Set(clientKiosks.map(k => k.stationid));
+                return clientKioskIds.has(rental.rentalStationid);
+            }
+            return true; // No location or kiosk filter applied (admin/partner)
         });
-    }, [activeRentalData, selectedLocations, selectedKiosks, startDate, endDate, stationToLocationMap]);
+    }, [activeRentalData, selectedLocations, selectedKiosks, startDate, endDate, stationToLocationMap, userMode, clientKiosks]);
 
     const originalTotalRentals = filteredRentals.length;
     const adjustedTotalRentals = Math.round(originalTotalRentals * (adjustmentPercentage / 100));
@@ -431,17 +450,19 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
             <main className="max-w-screen-xl mx-auto py-6 sm:px-4 lg:px-6">
                 <div className="bg-white p-4 rounded-lg shadow-md mb-8">
                     <div className="flex flex-wrap justify-between items-center gap-4 mb-4">
-                        <div className="flex items-center gap-4">
-                            <label htmlFor="file-upload" className="cursor-pointer bg-green-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-green-700">
-                                {t('upload_rental_data')}
-                            </label>
-                            <input id="file-upload" type="file" className="hidden" onChange={handleFileUpload} accept=".json" />
-                            {uploadedRentalData && (
-                                <button onClick={() => setUploadedRentalData(null)} className="bg-red-500 text-white font-semibold py-2 px-4 rounded-md hover:bg-red-600">
-                                    {t('clear_uploaded_data')} ({uploadedRentalData.length} {t('rentals')})
-                                </button>
-                            )}
-                        </div>
+                        {!userMode && (
+                            <div className="flex items-center gap-4">
+                                <label htmlFor="file-upload" className="cursor-pointer bg-green-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-green-700">
+                                    {t('upload_rental_data')}
+                                </label>
+                                <input id="file-upload" type="file" className="hidden" onChange={handleFileUpload} accept=".json" />
+                                {uploadedRentalData && (
+                                    <button onClick={() => setUploadedRentalData(null)} className="bg-red-500 text-white font-semibold py-2 px-4 rounded-md hover:bg-red-600">
+                                        {t('clear_uploaded_data')} ({uploadedRentalData.length} {t('rentals')})
+                                    </button>
+                                )}
+                            </div>
+                        )}
                         <button onClick={handleExportToPdf} disabled={isExporting} className="bg-blue-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-400 flex items-center gap-2">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
                             {isExporting ? t('exporting') : t('export_pdf')}
@@ -449,7 +470,7 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <div className="space-y-2">
-                            {clientCountries.length > 1 && (
+                            {!userMode && clientCountries.length > 1 && (
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700">{t('country')}</label>
                                     <div className="flex flex-wrap gap-2 mt-1">
@@ -465,24 +486,30 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                                     </div>
                                 </div>
                             )}
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700">{t('location')}</label>
-                                <select multiple value={selectedLocations} onChange={e => { setSelectedLocations(Array.from(e.target.selectedOptions, option => option.value)); setSelectedKiosks([]); }} className="mt-1 block w-full h-48 border border-gray-300 rounded-md">
-                                    {clientLocations.map(location => <option key={location} value={location}>{location}</option>)}
-                                </select>
-                            </div>
+                            {!userMode && (
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">{t('location')}</label>
+                                    <select multiple value={selectedLocations} onChange={e => { setSelectedLocations(Array.from(e.target.selectedOptions, option => option.value)); setSelectedKiosks([]); }} className="mt-1 block w-full h-48 border border-gray-300 rounded-md">
+                                        {clientLocations.map(location => <option key={location} value={location}>{location}</option>)}
+                                    </select>
+                                </div>
+                            )}
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">{t('kiosk')}</label>
-                                <select multiple value={selectedKiosks} onChange={e => setSelectedKiosks(Array.from(e.target.selectedOptions, option => option.value))} className="mt-1 block w-full h-24 border border-gray-300 rounded-md" disabled={selectedLocations.length === 0}>
+                                <select multiple value={selectedKiosks} onChange={e => setSelectedKiosks(Array.from(e.target.selectedOptions, option => option.value))} className={`mt-1 block w-full ${userMode ? 'h-48' : 'h-24'} border border-gray-300 rounded-md`} disabled={!userMode && selectedLocations.length === 0}>
                                     {availableKiosksForFilter.map(kiosk => <option key={kiosk.stationid} value={kiosk.stationid}>{kiosk.stationid} - {kiosk.info.place}</option>)}
                                 </select>
                                 <div className="flex justify-between mt-1">
-                                    <button onClick={() => setSelectedKiosks(availableKiosksForFilter.map(k => k.stationid))} className="text-xs text-blue-600" disabled={selectedLocations.length === 0}>{t('select_all')}</button>
-                                    <button onClick={() => setSelectedKiosks([])} className="text-xs text-blue-600" disabled={selectedLocations.length === 0}>{t('clear_selection')}</button>
+                                    <button onClick={() => setSelectedKiosks(availableKiosksForFilter.map(k => k.stationid))} className="text-xs text-blue-600" disabled={!userMode && selectedLocations.length === 0}>{t('select_all')}</button>
+                                    <button onClick={() => setSelectedKiosks([])} className="text-xs text-blue-600" disabled={!userMode && selectedLocations.length === 0}>{t('clear_selection')}</button>
                                 </div>
                             </div>
                         </div>
                         <div className="space-y-4">
+                            <div className="flex gap-2">
+                                <button onClick={setLastMonth} className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded-md border border-gray-300">Last Month</button>
+                                <button onClick={setYearToDate} className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded-md border border-gray-300">Year to Date</button>
+                            </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">{t('start_date')}</label>
                                 <DatePicker selected={startDate} onChange={(date) => setStartDate(date)} className="mt-1 block w-full border border-gray-300 rounded-md p-2" />
@@ -497,18 +524,22 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">{t('report_prepared_for')}</label>
-                                <input type="text" value={reportPreparedFor} onChange={(e) => setReportPreparedFor(e.target.value)} placeholder={t('client_name')} className="mt-1 block w-full border border-gray-300 rounded-md p-2" />
+                                <input type="text" value={reportPreparedFor} onChange={(e) => !userMode && setReportPreparedFor(e.target.value)} readOnly={userMode} placeholder={t('client_name')} className={`mt-1 block w-full border border-gray-300 rounded-md p-2 ${userMode ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}`} />
                             </div>
                         </div>
                         <div className="space-y-4">
-                             <div>
-                                <label htmlFor="adjustment" className="block text-sm font-medium text-gray-700">{t('adjust_totals')} ({adjustmentPercentage}%)</label>
-                                <input id="adjustment" type="range" min="0" max="500" value={adjustmentPercentage} onChange={e => setAdjustmentPercentage(e.target.value)} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer mt-2" />
-                            </div>
+                            {!userMode && (
+                                <div>
+                                    <label htmlFor="adjustment" className="block text-sm font-medium text-gray-700">{t('adjust_totals')} ({adjustmentPercentage}%)</label>
+                                    <input id="adjustment" type="range" min="0" max="500" value={adjustmentPercentage} onChange={e => setAdjustmentPercentage(e.target.value)} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer mt-2" />
+                                </div>
+                            )}
                             <div className="bg-gray-50 p-3 rounded-md border border-gray-200 text-center">
                                 <p className="text-sm text-gray-600">{t('total_rentals')}</p>
                                 {isFetchingRentals ? (
                                     <p className="text-sm text-gray-500 mt-2">Loading...</p>
+                                ) : userMode ? (
+                                    <p className="text-2xl font-bold text-gray-700 mt-1">{originalTotalRentals}</p>
                                 ) : (
                                     <div className="flex justify-center items-baseline gap-4 mt-1">
                                         <div>
@@ -540,25 +571,27 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                             </div>
                             <div className="p-1">
                                 <p className="text-sm text-gray-500">{t('total_rentals')}</p>
-                                <p className={`font-bold text-blue-600 ${isExporting ? 'text-2xl' : 'text-3xl'}`}>{adjustedTotalRentals}</p>
-                                <p className={`text-xs text-gray-500 ${isExporting ? 'hidden' : ''}`}>{t('original')}: {originalTotalRentals}</p>
+                                <p className={`font-bold text-blue-600 ${isExporting ? 'text-2xl' : 'text-3xl'}`}>{userMode ? originalTotalRentals : adjustedTotalRentals}</p>
+                                {!userMode && <p className={`text-xs text-gray-500 ${isExporting ? 'hidden' : ''}`}>{t('original')}: {originalTotalRentals}</p>}
                             </div>
                             <div className="p-1">
                                 <div>
                                     <p className="text-sm text-gray-500">{t('avg_rentals_per_day')}</p>
-                                    <p className={`font-bold text-blue-600 ${isExporting ? 'text-2xl' : 'text-3xl'}`}>{isFinite(adjustedTotalRentals / numberOfDaysForAverage) ? Math.ceil(adjustedTotalRentals / numberOfDaysForAverage) : '0'}</p>
-                                    <p className={`text-xs text-gray-500 ${isExporting ? 'hidden' : ''}`}>{t('original')}: {isFinite(originalTotalRentals / numberOfDaysForAverage) ? Math.ceil(originalTotalRentals / numberOfDaysForAverage) : '0'}</p>
+                                    <p className={`font-bold text-blue-600 ${isExporting ? 'text-2xl' : 'text-3xl'}`}>{userMode ? (isFinite(originalTotalRentals / numberOfDaysForAverage) ? Math.ceil(originalTotalRentals / numberOfDaysForAverage) : '0') : (isFinite(adjustedTotalRentals / numberOfDaysForAverage) ? Math.ceil(adjustedTotalRentals / numberOfDaysForAverage) : '0')}</p>
+                                    {!userMode && <p className={`text-xs text-gray-500 ${isExporting ? 'hidden' : ''}`}>{t('original')}: {isFinite(originalTotalRentals / numberOfDaysForAverage) ? Math.ceil(originalTotalRentals / numberOfDaysForAverage) : '0'}</p>}
                                 </div>
-                                <div className={`flex items-center justify-center gap-1 mt-1 ${isExporting ? 'hidden' : ''}`}>
-                                    <label htmlFor="skipDays" className="text-xs text-gray-600">{t('skip_empty_days')}</label>
-                                    <input type="checkbox" id="skipDays" checked={skipZeroRentalsDays} onChange={e => setSkipZeroRentalsDays(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
-                                </div>
+                                {!userMode && (
+                                    <div className={`flex items-center justify-center gap-1 mt-1 ${isExporting ? 'hidden' : ''}`}>
+                                        <label htmlFor="skipDays" className="text-xs text-gray-600">{t('skip_empty_days')}</label>
+                                        <input type="checkbox" id="skipDays" checked={skipZeroRentalsDays} onChange={e => setSkipZeroRentalsDays(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                                    </div>
+                                )}
                             </div>
                             <div className="p-1">
                                 <div>
                                     <p className="text-sm text-gray-500">{t('avg_rentals_per_kiosk')}</p>
-                                    <p className={`font-bold text-blue-600 ${isExporting ? 'text-2xl' : 'text-3xl'}`}>{isFinite(adjustedTotalRentals / numberOfKiosksForAverage) ? Math.ceil(adjustedTotalRentals / numberOfKiosksForAverage) : '0'}</p>
-                                    <p className={`text-xs text-gray-500 ${isExporting ? 'hidden' : ''}`}>{t('original')}: {isFinite(originalTotalRentals / numberOfKiosksForAverage) ? Math.ceil(originalTotalRentals / numberOfKiosksForAverage) : '0'}</p>
+                                    <p className={`font-bold text-blue-600 ${isExporting ? 'text-2xl' : 'text-3xl'}`}>{userMode ? (isFinite(originalTotalRentals / numberOfKiosksForAverage) ? Math.ceil(originalTotalRentals / numberOfKiosksForAverage) : '0') : (isFinite(adjustedTotalRentals / numberOfKiosksForAverage) ? Math.ceil(adjustedTotalRentals / numberOfKiosksForAverage) : '0')}</p>
+                                    {!userMode && <p className={`text-xs text-gray-500 ${isExporting ? 'hidden' : ''}`}>{t('original')}: {isFinite(originalTotalRentals / numberOfKiosksForAverage) ? Math.ceil(originalTotalRentals / numberOfKiosksForAverage) : '0'}</p>}
                                 </div>
                             </div>
                             <div className="p-1">
