@@ -203,6 +203,16 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
     const originalTotalRentals = filteredRentals.length;
     const adjustedTotalRentals = Math.round(originalTotalRentals * (adjustmentPercentage / 100));
 
+    const commission = clientInfo?.commission || 0;
+
+    const { totalRevenue, currencySymbol } = useMemo(() => {
+        const total = filteredRentals.reduce((sum, r) => sum + (parseFloat(r.totalCharged) || 0), 0);
+        const symbol = filteredRentals.find(r => r.symbol)?.symbol || '';
+        return { totalRevenue: total, currencySymbol: symbol };
+    }, [filteredRentals]);
+
+    const userRevenue = totalRevenue * (commission / 100);
+
     const reportClientName = useMemo(() => {
         if (!clientInfo.isAdmin) {
             return clientInfo.username;
@@ -598,6 +608,18 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                                 <p className="text-sm text-gray-500">Avg. Rental / Period</p>
                                 <p className={`font-bold text-blue-600 ${isExporting ? 'text-2xl' : 'text-3xl'}`}>{averageRentalPeriod}</p>
                             </div>
+                            {userMode && (
+                                <>
+                                    <div className="p-1">
+                                        <p className="text-sm text-gray-500">Total Revenue</p>
+                                        <p className={`font-bold text-green-600 ${isExporting ? 'text-2xl' : 'text-3xl'}`}>{currencySymbol}{totalRevenue.toFixed(2)}</p>
+                                    </div>
+                                    <div className="p-1">
+                                        <p className="text-sm text-gray-500">Your Share ({commission}%)</p>
+                                        <p className={`font-bold text-green-700 ${isExporting ? 'text-2xl' : 'text-3xl'}`}>{currencySymbol}{userRevenue.toFixed(2)}</p>
+                                    </div>
+                                </>
+                            )}
                         </div>
                     </div>
                     <div className="grid grid-cols-1 gap-8 mt-8">

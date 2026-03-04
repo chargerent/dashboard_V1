@@ -103,6 +103,7 @@ function buildClientInfoFromProfile(profile, uid) {
     commands,
     role,
     isAdmin: role === 'admin' || username === 'chargerent',
+    commission: parseFloat(profile.commission) || 0,
     serverFlowVersion: profile.serverFlowVersion,
     serverUiVersion: profile.serverUiVersion
   };
@@ -154,6 +155,7 @@ function App() {
   const [lockingSlots, setLockingSlots] = useState([]);
   const [allStationsData, setAllStationsData] = useState([]);
   const [ngrokInfo, setNgrokInfo] = useState(null);
+  const [serverFlowVersion, setServerFlowVersion] = useState(null);
 
   const handleLogout = useCallback(async () => {
     try {
@@ -220,7 +222,11 @@ function App() {
         localStorage.setItem('dashboardToken', idToken);
         setToken(idToken);
 
-        const snap = await getDoc(doc(db, 'users', user.uid));
+        const [snap, flowSnap] = await Promise.all([
+          getDoc(doc(db, 'users', user.uid)),
+          getDoc(doc(db, 'server', 'flow_current')),
+        ]);
+
         if (!snap.exists()) {
           await handleLogout();
           setAuthReady(true);
@@ -232,6 +238,10 @@ function App() {
           await handleLogout();
           setAuthReady(true);
           return;
+        }
+
+        if (flowSnap.exists()) {
+          setServerFlowVersion(flowSnap.data().fversion || null);
         }
 
         const info = buildClientInfoFromProfile(profile, user.uid);
@@ -804,7 +814,7 @@ function App() {
       lockingSlots={lockingSlots}
       initialStatusCheck={initialStatusCheck}
       setInitialStatusCheck={setInitialStatusCheck}
-      serverFlowVersion={clientInfo?.serverFlowVersion}
+      serverFlowVersion={serverFlowVersion}
       serverUiVersion={clientInfo?.serverUiVersion}
       ignoredKiosksRef={ignoredKiosksRef}
       manageIgnoredKiosk={manageIgnoredKiosk}

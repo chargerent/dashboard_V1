@@ -8,6 +8,7 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
 
     const now = new Date();
     const isLocked = !!(lockoutData?.lockedUntil && new Date(lockoutData.lockedUntil) > now);
+    const isInactive = isEditing ? (editedData?.active === false) : (client.active === false);
 
     const [openSection, setOpenSection] = useState(null);
     const [showPassword, setShowPassword] = useState(false);
@@ -108,19 +109,31 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
                             <label className="block text-sm font-medium text-gray-700">Contact Email</label>
                             <input type="email" value={editedData.contact?.email || ''} onChange={(e) => onDataChange('contact.email', e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
                         </div>
-                        {editedData.role === 'partner' && (
-                            <div className="border-t pt-3">
-                                <label className="block text-sm font-medium text-gray-700">{t('commission_percentage')}</label>
-                                <input type="number" value={editedData.commission || ''} onChange={(e) => onDataChange('commission', e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" min="0" max="100" step="0.1" />
+                        <div className="border-t pt-3">
+                            <div className="flex items-center justify-between py-2 px-3 border-b border-gray-100">
+                                <label className="text-sm font-medium text-gray-700">Role</label>
+                                <select
+                                    value={editedData.role}
+                                    onChange={(e) => onDataChange('role', e.target.value)}
+                                    className="border border-gray-300 rounded-md shadow-sm p-1 text-sm"
+                                >
+                                    <option value="user">User</option>
+                                    <option value="partner">Partner</option>
+                                    <option value="admin">Admin</option>
+                                </select>
                             </div>
-                        )}
-                        {editedData.role === 'partner' && (
+                            {(editedData.role === 'partner' || editedData.role === 'user') && (
+                                <div className="py-2 px-3 border-b border-gray-100">
+                                    <label className="block text-sm font-medium text-gray-700">{t('commission_percentage')}</label>
+                                    <input type="number" value={editedData.commission || ''} onChange={(e) => onDataChange('commission', e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" min="0" max="100" step="0.1" />
+                                </div>
+                            )}
                             <PermissionToggle
                                 label="Active"
-                                isChecked={editedData.active}
+                                isChecked={editedData.active !== false}
                                 onChange={(value) => handlePermissionToggle(null, 'active', value)}
                                 disabled={currentUser.username !== 'chargerent'} />
-                        )}
+                        </div>
                     </div>
                     <div className={`p-2 mt-4 ${isEditing ? 'border-t' : ''}`}>
                         <SectionButton section="features" isEditing={isEditing} />
@@ -286,7 +299,7 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
     };
 
     return (
-        <div className={`rounded-lg shadow-md flex flex-col ${isLocked ? 'bg-red-50 ring-2 ring-red-300' : 'bg-white'}`}>
+        <div className={`rounded-lg shadow-md flex flex-col ${isLocked ? 'ring-2 ring-red-300' : ''} ${(isLocked || isInactive) ? 'bg-red-50' : 'bg-white'}`}>
             {isEditing ? renderEditForm() : renderViewMode()}
         </div>
     );
