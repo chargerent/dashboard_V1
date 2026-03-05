@@ -12,6 +12,14 @@ const COLORS = {
   returns: '#f97316' // Orange
 };
 
+const LINE_LABELS = {
+  rentals: 'Rentals',
+  returns: 'Returns',
+  count: 'Available Chargers',
+  total: 'Total Chargers',
+  disconnected: 'Disconnected',
+};
+
 // ---------- GENERIC HELPERS ----------
 
 // Safely turn Firestore TS / string / ms into Date
@@ -276,12 +284,15 @@ const AnalyticsPage = ({ allStationsData, rentalData, onNavigateToDashboard, onL
   // ensure rental dots always have a y
   const chartDisplayData = useMemo(() => {
     let lastKnownCount = null;
+    let cumulativeRentals = 0;
     return memoData.map(d => {
       if (d.count !== undefined) lastKnownCount = d.count;
+      if (d.rentals) cumulativeRentals += 1;
       return {
         ...d,
         rentalMarker: d.rentals ? (d.count ?? lastKnownCount) : null,
         returnMarker: d.returns ? (d.count ?? lastKnownCount) : null,
+        cumulativeRentals: d.rentals ? cumulativeRentals : undefined,
       };
     });
   }, [memoData]);
@@ -399,8 +410,8 @@ const AnalyticsPage = ({ allStationsData, rentalData, onNavigateToDashboard, onL
                       checked={visibleLines[lineKey]}
                       onChange={() => handleToggleLine(lineKey)}
                     />
-                    <span className="ml-2 text-sm capitalize font-medium" style={{ color: COLORS[lineKey] }}>
-                      {lineKey}
+                    <span className="ml-2 text-sm font-medium" style={{ color: COLORS[lineKey] }}>
+                      {LINE_LABELS[lineKey] || lineKey}
                     </span>
                   </label>
                 ))}
@@ -446,7 +457,8 @@ const AnalyticsPage = ({ allStationsData, rentalData, onNavigateToDashboard, onL
                         const { sn, rentalPeriod, originalTimestamp } = props.payload;
 
                         if (name === 'rentalMarker' && sn) {
-                          return [<span style={{ color: COLORS.count, fontWeight: 'bold' }}>{value}</span>, `${t('rental')} (SN: ${sn})`];
+                          const cumulative = props.payload.cumulativeRentals;
+                          return [<span style={{ color: COLORS.count, fontWeight: 'bold' }}>{value}</span>, `${t('rental')} (SN: ${sn}) — Total: ${cumulative}`];
                         }
                         if (name === 'returnMarker' && sn) {
                           const duration = rentalPeriod ? ` - ${formatMsDuration(rentalPeriod)}` : '';
@@ -458,7 +470,7 @@ const AnalyticsPage = ({ allStationsData, rentalData, onNavigateToDashboard, onL
                           dateStyle: 'medium',
                           timeStyle: 'short',
                         });
-                        return [value, `${t(name)} (${formattedTime})`];
+                        return [value, `${LINE_LABELS[name] || t(name)} (${formattedTime})`];
                       }
                       return [value, t(name)];
                     }}

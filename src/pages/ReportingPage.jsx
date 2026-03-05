@@ -13,6 +13,25 @@ import { collection, query, where, getDocs } from 'firebase/firestore';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, PointElement, LineElement, Title, Tooltip, Legend, ArcElement, ChartDataLabels);
 
+// Adjusts bar at index by delta (±1). The bar immediately to the right compensates.
+// The last bar is read-only — it absorbs all compensation automatically.
+function adjustChartValue(dataArray, index, delta) {
+    const data = dataArray.map(v => Math.round(v));
+    const lastIdx = data.length - 1;
+    if (index >= lastIdx) return data; // last bar not editable
+
+    const proposed = data[index] + delta;
+    if (proposed < 0) return data;
+
+    const nextVal = data[index + 1] - delta;
+    if (nextVal < 0) return data;
+
+    const newData = [...data];
+    newData[index] = proposed;
+    newData[index + 1] = nextVal;
+    return newData;
+}
+
 const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout, t, rentalData, allStationsData, clientInfo, userMode = false }) => {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -31,6 +50,10 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
     const [timeSeriesInterval, setTimeSeriesInterval] = useState('daily'); // 'daily' or 'monthly'
     const [fetchedRentalData, setFetchedRentalData] = useState(null);
     const [isFetchingRentals, setIsFetchingRentals] = useState(false);
+    const [timeSeriesOverrides, setTimeSeriesOverrides] = useState(null);
+    const [kioskOverrides, setKioskOverrides] = useState(null);
+    const [kioskLabelOverrides, setKioskLabelOverrides] = useState(null);
+    const [editingLabelIndex, setEditingLabelIndex] = useState(null);
     const chartsRef = useRef(null);
 
     const resetFilters = () => {
@@ -263,6 +286,12 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
         });
         const sortedIntervals = Object.keys(byInterval).sort();
 
+        const rawData = sortedIntervals.map(interval => Math.round(byInterval[interval] * (adjustmentPercentage / 100)));
+        const totalAdjusted = Math.round(Object.values(byInterval).reduce((a, b) => a + b, 0) * (adjustmentPercentage / 100));
+        if (rawData.length > 0) {
+            rawData[rawData.length - 1] = totalAdjusted - rawData.slice(0, -1).reduce((a, b) => a + b, 0);
+        }
+
         return {
             labels: sortedIntervals.map(interval => {
                 const [year, month, day] = interval.split('-').map(Number);
@@ -275,12 +304,20 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
             }),
             datasets: [{
                 label: t('rentals'),
-                data: sortedIntervals.map(interval => Math.round(byInterval[interval] * (adjustmentPercentage / 100))),
+                data: rawData,
                 borderColor: 'rgb(54, 162, 235)',
                 backgroundColor: 'rgba(54, 162, 235, 0.5)',
             }]
         };
     }, [filteredRentals, t, adjustmentPercentage, timeSeriesInterval]);
+
+    // Reset overrides only when the user changes filters, not on background Firestore refreshes
+    useEffect(() => {
+        setTimeSeriesOverrides(null);
+        setKioskOverrides(null);
+        setKioskLabelOverrides(null);
+        setEditingLabelIndex(null);
+    }, [startDate, endDate, selectedKiosks, selectedLocations, adjustmentPercentage, timeSeriesInterval, uploadedRentalData]);
 
     const numberOfDaysForAverage = useMemo(() => {
         if (skipZeroRentalsDays) {
@@ -330,21 +367,40 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
 
         const sortedKiosks = Object.keys(byKiosk).sort((a, b) => byKiosk[b] - byKiosk[a]);
 
+        const kioskRawData = sortedKiosks.map(kiosk => Math.round(byKiosk[kiosk] * (adjustmentPercentage / 100)));
+        const kioskTotalAdjusted = Math.round(Object.values(byKiosk).reduce((a, b) => a + b, 0) * (adjustmentPercentage / 100));
+        if (kioskRawData.length > 0) {
+            kioskRawData[kioskRawData.length - 1] = kioskTotalAdjusted - kioskRawData.slice(0, -1).reduce((a, b) => a + b, 0);
+        }
+
         return {
             labels: sortedKiosks.map(kioskId => {
                 const info = stationInfoMap.get(kioskId);
-                if (info && info.place) {
-                    return [kioskId, info.place];
-                }
-                return kioskId;
+                return (info && info.place) ? info.place : kioskId;
             }),
             datasets: [{
                 label: t('rentals'),
-                data: sortedKiosks.map(kiosk => Math.round(byKiosk[kiosk] * (adjustmentPercentage / 100))),
+                data: kioskRawData,
                 backgroundColor: 'rgba(255, 99, 132, 0.5)',
             }]
         };
     }, [filteredRentals, selectedKiosks, stationInfoMap, t, adjustmentPercentage]);
+
+    const timeSeriesChartData = useMemo(() => {
+        if (!timeSeriesOverrides) return rentalsOverTime;
+        return { ...rentalsOverTime, datasets: [{ ...rentalsOverTime.datasets[0], data: timeSeriesOverrides }] };
+    }, [rentalsOverTime, timeSeriesOverrides]);
+
+    const kioskChartData = useMemo(() => {
+        let base = !kioskOverrides
+            ? rentalsByKiosk
+            : { ...rentalsByKiosk, datasets: [{ ...rentalsByKiosk.datasets[0], data: kioskOverrides }] };
+        if (kioskLabelOverrides && Object.keys(kioskLabelOverrides).length > 0) {
+            const newLabels = base.labels.map((label, i) => kioskLabelOverrides[i] ?? label);
+            base = { ...base, labels: newLabels };
+        }
+        return base;
+    }, [rentalsByKiosk, kioskOverrides, kioskLabelOverrides]);
 
     const handleExportToPdf = () => {
         setIsExporting(true);
@@ -625,14 +681,15 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                     <div className="grid grid-cols-1 gap-8 mt-8">
                         <div className="flex flex-col">
                             <div className="relative h-96">
-                                <Bar options={{ 
+                                <Bar options={{
                                     responsive: true,
-                                    devicePixelRatio: 3, // Render Chart.js at 3x resolution for sharper output
-                                    animation: !isExporting, // Disable animation during PDF export
-                                    maintainAspectRatio: false, 
+                                    devicePixelRatio: 3,
+                                    animation: !isExporting,
+                                    maintainAspectRatio: false,
                                     barPercentage: 0.5,
-                                    plugins: { 
-                                        title: { display: true, text: t('rentals_over_time') }, 
+                                    scales: { x: { ticks: { display: userMode || isExporting } } },
+                                    plugins: {
+                                        title: { display: true, text: t('rentals_over_time') },
                                         legend: { display: false },
                                         datalabels: {
                                             anchor: 'end',
@@ -641,9 +698,28 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                                             font: { weight: 'bold' }
                                         }
                                     }
-                                }} data={rentalsOverTime} />
+                                }} data={timeSeriesChartData} />
                             </div>
-                            <div className={`mt-4 flex items-center space-x-2 self-start ${isExporting ? 'hidden' : ''}`}>
+                            {!userMode && !isExporting && timeSeriesChartData.labels.length > 0 && (
+                                <div className="mt-1">
+                                    <div className="flex">
+                                        {timeSeriesChartData.labels.map((label, i) => {
+                                            const isLast = i === timeSeriesChartData.datasets[0].data.length - 1;
+                                            const val = Math.round(timeSeriesChartData.datasets[0].data[i]);
+                                            return (
+                                                <div key={i} className="flex-1 flex items-center justify-center gap-0.5 text-xs overflow-hidden px-0.5 h-5">
+                                                    {!isLast && <span role="button" tabIndex={0} onClick={() => setTimeSeriesOverrides(adjustChartValue(timeSeriesChartData.datasets[0].data, i, 1))} className="text-gray-300 hover:text-blue-500 shrink-0 cursor-pointer select-none" style={{ lineHeight: 1 }}>▲</span>}
+                                                    <span className={`font-mono shrink-0 ${isLast ? 'text-gray-400' : 'font-semibold text-gray-700'}`} style={{ lineHeight: 1 }}>{val}</span>
+                                                    {!isLast && <span role="button" tabIndex={0} onClick={() => setTimeSeriesOverrides(adjustChartValue(timeSeriesChartData.datasets[0].data, i, -1))} className="text-gray-300 hover:text-blue-500 shrink-0 cursor-pointer select-none" style={{ lineHeight: 1 }}>▼</span>}
+                                                    <span className="text-gray-400 truncate min-w-0" style={{ lineHeight: 1 }}>{label}</span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    {timeSeriesOverrides && <button onClick={() => setTimeSeriesOverrides(null)} className="text-xs text-red-400 hover:text-red-600 mt-1">Reset</button>}
+                                </div>
+                            )}
+                            <div className={`mt-3 flex items-center space-x-2 self-start ${isExporting ? 'hidden' : ''}`}>
                                 <span className="text-xs font-medium text-gray-500">{t('monthly')}</span>
                                 <button onClick={() => setTimeSeriesInterval(timeSeriesInterval === 'daily' ? 'monthly' : 'daily')} className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${timeSeriesInterval === 'daily' ? 'bg-indigo-600' : 'bg-gray-200'}`}>
                                     <span aria-hidden="true" className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${timeSeriesInterval === 'daily' ? 'translate-x-5' : 'translate-x-0'}`} />
@@ -651,24 +727,59 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                                 <span className="text-xs font-medium text-gray-500">{t('daily')}</span>
                             </div>
                         </div>
-                        <div className="relative h-96">
-                            <Bar options={{ 
-                            responsive: true,
-                            devicePixelRatio: 3, // Render Chart.js at 3x resolution for sharper output
-                            animation: !isExporting, // Disable animation during PDF export
-                            maintainAspectRatio: false, 
-                            barPercentage: 0.5,
-                            plugins: { 
-                                title: { display: true, text: t('rentals_by_kiosk') },
-                                legend: { display: false },
-                                datalabels: {
-                                    anchor: 'end',
-                                    align: 'top',
-                                    formatter: Math.round,
-                                    font: { weight: 'bold' }
-                                }
-                            } 
-                        }} data={rentalsByKiosk} /></div>
+                        <div className="flex flex-col">
+                            <div className="relative h-96">
+                                <Bar options={{
+                                    responsive: true,
+                                    devicePixelRatio: 3,
+                                    animation: !isExporting,
+                                    maintainAspectRatio: false,
+                                    barPercentage: 0.5,
+                                    scales: { x: { ticks: { display: userMode || isExporting } } },
+                                    plugins: {
+                                        title: { display: true, text: t('rentals_by_kiosk') },
+                                        legend: { display: false },
+                                        datalabels: {
+                                            anchor: 'end',
+                                            align: 'top',
+                                            formatter: Math.round,
+                                            font: { weight: 'bold' }
+                                        }
+                                    }
+                                }} data={kioskChartData} />
+                            </div>
+                            {!userMode && !isExporting && kioskChartData.labels.length > 0 && (
+                                <div className="mt-1">
+                                    <div className="flex">
+                                        {kioskChartData.labels.map((label, i) => {
+                                            const isLast = i === kioskChartData.datasets[0].data.length - 1;
+                                            const val = Math.round(kioskChartData.datasets[0].data[i]);
+                                            const displayLabel = kioskLabelOverrides?.[i] ?? (Array.isArray(label) ? (label[1] || label[0]) : label);
+                                            return (
+                                                <div key={i} className="flex-1 flex items-center justify-center gap-0.5 text-xs overflow-hidden px-0.5 h-5">
+                                                    {!isLast && <span role="button" tabIndex={0} onClick={() => setKioskOverrides(adjustChartValue(kioskChartData.datasets[0].data, i, 1))} className="text-gray-300 hover:text-blue-500 shrink-0 cursor-pointer select-none" style={{ lineHeight: 1 }}>▲</span>}
+                                                    <span className={`font-mono shrink-0 ${isLast ? 'text-gray-400' : 'font-semibold text-gray-700'}`} style={{ lineHeight: 1 }}>{val}</span>
+                                                    {!isLast && <span role="button" tabIndex={0} onClick={() => setKioskOverrides(adjustChartValue(kioskChartData.datasets[0].data, i, -1))} className="text-gray-300 hover:text-blue-500 shrink-0 cursor-pointer select-none" style={{ lineHeight: 1 }}>▼</span>}
+                                                    {editingLabelIndex === i ? (
+                                                        <input
+                                                            className="border-b border-blue-400 outline-none bg-transparent text-gray-600 min-w-0 w-16 text-xs"
+                                                            value={displayLabel}
+                                                            onChange={e => setKioskLabelOverrides(prev => ({ ...(prev || {}), [i]: e.target.value }))}
+                                                            onBlur={() => setEditingLabelIndex(null)}
+                                                            autoFocus
+                                                            style={{ lineHeight: 1 }}
+                                                        />
+                                                    ) : (
+                                                        <span className="text-gray-400 truncate min-w-0 cursor-pointer hover:text-blue-500" title={displayLabel} onClick={() => setEditingLabelIndex(i)} style={{ lineHeight: 1 }}>{displayLabel}</span>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    {(kioskOverrides || kioskLabelOverrides) && <button onClick={() => { setKioskOverrides(null); setKioskLabelOverrides(null); }} className="text-xs text-red-400 hover:text-red-600 mt-1">Reset</button>}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
 
