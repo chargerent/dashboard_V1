@@ -215,7 +215,7 @@ function prefixForCountry(country) {
 }
 
 function buildQrUrl(stationid) {
-  return `https://chargerent.online/qr?id=${stationid}`;
+  return `https://chargerent.online/stations/qr?id=${stationid}`;
 }
 
 function extractStationId(docSnap) {

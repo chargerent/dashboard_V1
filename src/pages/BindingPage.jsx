@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../firebase-config';
 import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
@@ -11,7 +11,7 @@ const COUNTRY_OPTIONS = [
 ];
 
 function buildQrUrl(stationid) {
-  return stationid ? `https://chargerent.online/qr?id=${stationid}` : '';
+  return stationid ? `https://chargerent.online/stations/qr?id=${stationid}` : '';
 }
 
 function normalizeStationId(stationid) {
@@ -26,6 +26,10 @@ function isNewKioskStation(stationid) {
   return /^(CA|FR|US)8\d{3}$/.test(normalizeStationId(stationid));
 }
 
+function isBindingStationId(stationid) {
+  return /^(CA|FR|US)\d{4}$/.test(normalizeStationId(stationid));
+}
+
 function getCountryFromStationId(stationid) {
   const normalized = normalizeStationId(stationid);
 
@@ -33,6 +37,40 @@ function getCountryFromStationId(stationid) {
   if (normalized.startsWith('FR')) return 'FR';
   if (normalized.startsWith('US')) return 'US';
   return '';
+}
+
+function parseStationQrInput(value) {
+  const rawValue = String(value || '').trim();
+
+  if (!rawValue) {
+    return { mode: 'empty', stationid: '' };
+  }
+
+  const compactValue = rawValue.replace(/\s+/g, '');
+  const idMatch = compactValue.match(/(?:^|[?&])id=([^&#\s]+)/i);
+
+  if (idMatch) {
+    try {
+      return {
+        mode: 'qr',
+        stationid: normalizeStationId(decodeURIComponent(idMatch[1])),
+      };
+    } catch {
+      return {
+        mode: 'qr',
+        stationid: normalizeStationId(idMatch[1]),
+      };
+    }
+  }
+
+  if (/^https?:\/\//i.test(compactValue)) {
+    return { mode: 'invalid-url', stationid: '' };
+  }
+
+  return {
+    mode: 'manual',
+    stationid: normalizeStationId(rawValue),
+  };
 }
 
 export default function BindingPage({
@@ -47,10 +85,11 @@ export default function BindingPage({
     currentUser?.features?.binding === true ||
     currentUser?.commands?.binding === true;
 
-  const [country, setCountry] = useState('');
+  const stationQrInputRef = useRef(null);
+  const moduleIdInputRef = useRef(null);
+  const [stationQrInput, setStationQrInput] = useState('');
   const [moduleId, setModuleId] = useState('');
   const [stationInfo, setStationInfo] = useState({ stationid: '', qrUrl: '' });
-  const [loadingNextStation, setLoadingNextStation] = useState(false);
   const [pageError, setPageError] = useState('');
   const [moveError, setMoveError] = useState('');
   const [status, setStatus] = useState(null);
@@ -70,6 +109,10 @@ export default function BindingPage({
     return () => unsubscribe();
   }, []);
 
+  useEffect(() => {
+    stationQrInputRef.current?.focus();
+  }, []);
+
   const ensureSignedIn = useCallback(async () => {
     if (!auth.currentUser) {
       throw new Error('Not signed in');
@@ -79,14 +122,13 @@ export default function BindingPage({
     return auth.currentUser;
   }, []);
 
-  const syncStationInfo = useCallback((payload) => {
-    const nextStationid = String(payload?.nextStationid || payload?.stationid || '').trim().toUpperCase();
-    const nextQrUrl = String(payload?.nextQrUrl || payload?.qrUrl || buildQrUrl(nextStationid));
-
+  const syncStationInfo = useCallback((nextStationid) => {
+    const normalizedStationid = normalizeStationId(nextStationid);
     setStationInfo({
-      stationid: nextStationid,
-      qrUrl: nextQrUrl,
+      stationid: normalizedStationid,
+      qrUrl: buildQrUrl(normalizedStationid),
     });
+    setStationQrInput(normalizedStationid);
   }, []);
 
   const syncMoveDestinationInfo = useCallback((payload) => {
@@ -98,36 +140,6 @@ export default function BindingPage({
       qrUrl: nextQrUrl,
     });
   }, []);
-
-  const loadNextStation = useCallback(async (selectedCountry) => {
-    if (!canManageBindings || !selectedCountry) {
-      setStationInfo({ stationid: '', qrUrl: '' });
-      return;
-    }
-
-    if (!firebaseUser) {
-      setPageError('Not signed in');
-      setStationInfo({ stationid: '', qrUrl: '' });
-      return;
-    }
-
-    setLoadingNextStation(true);
-    setPageError('');
-
-    try {
-      await ensureSignedIn();
-      const response = await callFunctionWithAuth('stationBinding_getNextStation', {
-        country: selectedCountry,
-      });
-      syncStationInfo(response || {});
-    } catch (error) {
-      console.error(error);
-      setStationInfo({ stationid: '', qrUrl: '' });
-      setPageError(error?.message || t('fetch_next_station_failed'));
-    } finally {
-      setLoadingNextStation(false);
-    }
-  }, [canManageBindings, ensureSignedIn, firebaseUser, syncStationInfo, t]);
 
   const loadMoveNextStation = useCallback(async (selectedCountry) => {
     if (!isAdminUser || !selectedCountry) {
@@ -158,14 +170,6 @@ export default function BindingPage({
       setLoadingMoveNextStation(false);
     }
   }, [ensureSignedIn, firebaseUser, isAdminUser, syncMoveDestinationInfo, t]);
-
-  useEffect(() => {
-    if (!country) {
-      setStationInfo({ stationid: '', qrUrl: '' });
-      return;
-    }
-    loadNextStation(country);
-  }, [country, loadNextStation]);
 
   useEffect(() => {
     if (!moveSourceStationId) {
@@ -239,73 +243,179 @@ export default function BindingPage({
     }
   }, [moveDestinationStationId, moveSourceStationId]);
 
-  const normalizedModuleId = moduleId.trim();
-  const isCountrySelected = Boolean(country);
-  const isFormActive = isCountrySelected && !loadingNextStation;
+  const focusStationQrInput = useCallback(() => {
+    setTimeout(() => {
+      stationQrInputRef.current?.focus();
+    }, 0);
+  }, []);
+
+  const focusModuleInput = useCallback(() => {
+    setTimeout(() => {
+      moduleIdInputRef.current?.focus();
+    }, 0);
+  }, []);
+
+  const resetBindingForm = useCallback(() => {
+    setStationQrInput('');
+    setModuleId('');
+    setStationInfo({ stationid: '', qrUrl: '' });
+    setPageError('');
+    focusStationQrInput();
+  }, [focusStationQrInput]);
+
+  const commitStationQrInput = useCallback((rawValue, shouldFocusModule = false) => {
+    const parsedValue = parseStationQrInput(rawValue);
+
+    if (!isBindingStationId(parsedValue.stationid)) {
+      setStationInfo({ stationid: '', qrUrl: '' });
+      setPageError(t('station_qr_invalid'));
+      return false;
+    }
+
+    syncStationInfo(parsedValue.stationid);
+    setPageError('');
+
+    if (shouldFocusModule) {
+      focusModuleInput();
+    }
+
+    return true;
+  }, [focusModuleInput, syncStationInfo, t]);
+
+  useEffect(() => {
+    const trimmedStationQrInput = stationQrInput.trim();
+
+    if (!trimmedStationQrInput) {
+      setStationInfo({ stationid: '', qrUrl: '' });
+      setPageError('');
+      return;
+    }
+
+    const parsedValue = parseStationQrInput(trimmedStationQrInput);
+
+    if (parsedValue.mode === 'manual') {
+      setStationInfo({
+        stationid: parsedValue.stationid,
+        qrUrl: isBindingStationId(parsedValue.stationid) ? buildQrUrl(parsedValue.stationid) : '',
+      });
+      setPageError('');
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      if (parsedValue.mode === 'qr') {
+        commitStationQrInput(trimmedStationQrInput, true);
+        return;
+      }
+
+      setStationInfo({ stationid: '', qrUrl: '' });
+      setPageError(t('station_qr_invalid'));
+    }, 120);
+
+    return () => clearTimeout(timeoutId);
+  }, [commitStationQrInput, stationQrInput, t]);
+
+  const handleStationQrInputChange = useCallback((event) => {
+    setStationQrInput(event.target.value);
+  }, []);
+
+  const handleStationQrInputKeyDown = useCallback((event) => {
+    if (event.key !== 'Enter' && event.key !== 'Tab') {
+      return;
+    }
+
+    if (commitStationQrInput(event.currentTarget.value, true)) {
+      event.preventDefault();
+    }
+  }, [commitStationQrInput]);
+
+  const normalizedStationId = normalizeStationId(stationInfo.stationid);
+  const normalizedModuleId = normalizeModuleId(moduleId);
+  const bindingCountry = isBindingStationId(normalizedStationId) ?
+    getCountryFromStationId(normalizedStationId) :
+    '';
+  const isFormActive = Boolean(bindingCountry);
   const moveFormReady = Boolean(moveSourceStationId && moveModuleId);
 
   const handleBind = useCallback(async () => {
+    if (!normalizedStationId) {
+      setPageError(t('station_qr_required'));
+      setStatus({ state: 'error', message: t('station_qr_required') });
+      focusStationQrInput();
+      return;
+    }
+
+    if (!bindingCountry) {
+      setPageError(t('station_qr_invalid'));
+      setStatus({ state: 'error', message: t('station_qr_invalid') });
+      focusStationQrInput();
+      return;
+    }
+
     if (!normalizedModuleId) {
       setStatus({ state: 'error', message: t('module_id_required') });
+      moduleIdInputRef.current?.focus();
       return;
     }
 
-    if (!stationInfo.stationid) {
-      setStatus({ state: 'error', message: t('fetch_next_station_failed') });
-      return;
-    }
-
+    setPageError('');
     setStatus({ state: 'sending', message: `${t('bind_module')}...` });
 
     try {
       await ensureSignedIn();
       const payload = await callFunctionWithAuth('stationBinding_bindModule', {
-        country,
-        stationid: stationInfo.stationid,
+        country: bindingCountry,
+        stationid: normalizedStationId,
         moduleId: normalizedModuleId,
       });
 
-      setModuleId('');
-      syncStationInfo(payload);
-      if (!payload?.nextStationid) {
-        await loadNextStation(country);
-      }
+      resetBindingForm();
       setStatus({ state: 'success', message: payload?.message || t('command_success') });
     } catch (error) {
       console.error(error);
       setStatus({ state: 'error', message: error?.message || t('command_failed') });
-      await loadNextStation(country);
     }
-  }, [country, ensureSignedIn, loadNextStation, normalizedModuleId, stationInfo.stationid, syncStationInfo, t]);
+  }, [bindingCountry, ensureSignedIn, focusStationQrInput, normalizedModuleId, normalizedStationId, resetBindingForm, t]);
 
   const handleUnbind = useCallback(async () => {
-    if (!normalizedModuleId) {
-      setStatus({ state: 'error', message: t('module_id_required') });
+    if (!normalizedStationId) {
+      setPageError(t('station_qr_required'));
+      setStatus({ state: 'error', message: t('station_qr_required') });
+      focusStationQrInput();
       return;
     }
 
+    if (!bindingCountry) {
+      setPageError(t('station_qr_invalid'));
+      setStatus({ state: 'error', message: t('station_qr_invalid') });
+      focusStationQrInput();
+      return;
+    }
+
+    if (!normalizedModuleId) {
+      setStatus({ state: 'error', message: t('module_id_required') });
+      moduleIdInputRef.current?.focus();
+      return;
+    }
+
+    setPageError('');
     setStatus({ state: 'sending', message: `${t('unbind_module')}...` });
 
     try {
       await ensureSignedIn();
       const payload = await callFunctionWithAuth('stationBinding_unbindModule', {
-        country,
-        stationid: stationInfo.stationid,
+        country: bindingCountry,
+        stationid: normalizedStationId,
         moduleId: normalizedModuleId,
       });
 
-      setModuleId('');
-      syncStationInfo(payload);
-      if (!payload?.nextStationid) {
-        await loadNextStation(country);
-      }
+      resetBindingForm();
       setStatus({ state: 'success', message: payload?.message || t('command_success') });
     } catch (error) {
       console.error(error);
       setStatus({ state: 'error', message: error?.message || t('command_failed') });
-      await loadNextStation(country);
     }
-  }, [country, ensureSignedIn, loadNextStation, normalizedModuleId, stationInfo.stationid, syncStationInfo, t]);
+  }, [bindingCountry, ensureSignedIn, focusStationQrInput, normalizedModuleId, normalizedStationId, resetBindingForm, t]);
 
   const handleMoveModule = useCallback(async () => {
     if (!moveSourceStationId) {
@@ -424,62 +534,43 @@ export default function BindingPage({
             <div className="rounded-lg bg-white shadow-md">
               <div className="border-b border-gray-200 px-6 py-6">
                 <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('module_binding')}</p>
-                <h2 className="mt-2 text-3xl font-bold text-gray-900">{t('binding_page_title')}</h2>
-                <p className="mt-3 max-w-2xl text-sm leading-6 text-gray-600">{t('binding_page_subtitle')}</p>
               </div>
 
               <div className="space-y-8 px-6 py-6">
-                <div>
-                  <p className="mb-3 text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">{t('binding_country')}</p>
-                  <div className="inline-flex rounded-lg border border-gray-200 bg-gray-100 p-1">
-                    {COUNTRY_OPTIONS.map((option) => {
-                      const active = country === option.code;
-                      return (
-                        <button
-                          key={option.code}
-                          type="button"
-                          onClick={() => setCountry(option.code)}
-                          className={`rounded-md px-5 py-2 text-sm font-bold transition ${
-                            active
-                              ? 'bg-blue-600 text-white shadow-sm'
-                              : 'text-gray-600 hover:bg-white hover:text-gray-900'
-                          }`}
-                        >
-                          {option.label}
-                        </button>
-                      );
-                    })}
-                  </div>
+                <div className="rounded-md border border-blue-200 bg-blue-50 px-4 py-4 text-sm text-blue-800">
+                  {t('station_qr_hint')}
                 </div>
 
-                <div className={`grid gap-5 transition-opacity ${isCountrySelected ? 'opacity-100' : 'opacity-50'}`}>
+                <div className="grid gap-5">
                   <label className="block">
-                    <span className="mb-2 block text-sm font-semibold text-gray-700">{t('next_station_qr')}</span>
+                    <span className="mb-2 block text-sm font-semibold text-gray-700">{t('station_qr_scan')}</span>
                     <input
+                      ref={stationQrInputRef}
                       type="text"
-                      readOnly
-                      value={isCountrySelected ? (loadingNextStation ? t('loading') : stationInfo.qrUrl) : ''}
-                      placeholder={t('select_country_first')}
-                      disabled={!isCountrySelected}
-                      className="w-full rounded-md border border-gray-300 bg-gray-50 px-4 py-3 font-mono text-sm text-gray-700 outline-none disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
+                      value={stationQrInput}
+                      onChange={handleStationQrInputChange}
+                      onKeyDown={handleStationQrInputKeyDown}
+                      placeholder="https://chargerent.online/stations/qr?id=US8001"
+                      className="w-full rounded-md border border-gray-300 bg-white px-4 py-3 font-mono text-sm text-gray-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
                     />
                   </label>
 
                   <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-700">{t('next_station')}</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-700">{t('station_id')}</p>
                     <p className="mt-1 text-2xl font-bold tracking-[0.08em] text-gray-900">
-                      {!isCountrySelected ? '--' : (loadingNextStation ? '...' : (stationInfo.stationid || '--'))}
+                      {normalizedStationId || '--'}
                     </p>
                   </div>
 
                   <label className="block">
                     <span className="mb-2 block text-sm font-semibold text-gray-700">{t('manufacturer_module_id')}</span>
                     <input
+                      ref={moduleIdInputRef}
                       type="text"
                       value={moduleId}
                       onChange={(event) => setModuleId(event.target.value)}
                       placeholder="867652077228617"
-                      disabled={!isCountrySelected}
+                      disabled={!isFormActive}
                       className="w-full rounded-md border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
                     />
                   </label>
@@ -497,7 +588,7 @@ export default function BindingPage({
                   <button
                     type="button"
                     onClick={handleUnbind}
-                    disabled={!isFormActive || !normalizedModuleId}
+                    disabled={!isFormActive || !normalizedModuleId || !normalizedStationId}
                     className="inline-flex flex-1 items-center justify-center rounded-md bg-red-500 px-5 py-3 text-sm font-bold text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:bg-red-300"
                   >
                     {t('unbind_module')}
@@ -681,10 +772,14 @@ export default function BindingPage({
               <dl className="mt-4 space-y-4 text-sm">
                 <div>
                   <dt className="text-gray-500">{t('binding_country')}</dt>
-                  <dd className="mt-1 font-semibold text-gray-900">{country || '--'}</dd>
+                  <dd className="mt-1 font-semibold text-gray-900">{bindingCountry || '--'}</dd>
                 </div>
                 <div>
-                  <dt className="text-gray-500">{t('next_station_qr')}</dt>
+                  <dt className="text-gray-500">{t('station_id')}</dt>
+                  <dd className="mt-1 font-semibold text-gray-900">{normalizedStationId || '--'}</dd>
+                </div>
+                <div>
+                  <dt className="text-gray-500">{t('station_qr_scan')}</dt>
                   <dd className="mt-1 break-all font-mono text-xs text-gray-700">
                     {stationInfo.qrUrl || '--'}
                   </dd>
