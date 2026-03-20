@@ -1,0 +1,4536 @@
+[
+    {
+        "id": "09af597d0b44144e",
+        "type": "tab",
+        "label": "Dashboard API V1",
+        "disabled": false,
+        "info": "",
+        "env": []
+    },
+    {
+        "id": "881d95e69c4c5e9c",
+        "type": "group",
+        "z": "09af597d0b44144e",
+        "style": {
+            "stroke": "#999999",
+            "stroke-opacity": "1",
+            "fill": "none",
+            "fill-opacity": "1",
+            "label": true,
+            "label-position": "nw",
+            "color": "#a4a4a4"
+        },
+        "nodes": [
+            "667e9232523a2eaa",
+            "2173e8834c3526d3",
+            "9b0945aa899cfa6d",
+            "4e32b616baeacfe8",
+            "b59d741abd1bef05",
+            "f101e6372e70f0dd"
+        ],
+        "x": 2094,
+        "y": 2151.5,
+        "w": 892,
+        "h": 149.5
+    },
+    {
+        "id": "ed38194e9a2f3014",
+        "type": "group",
+        "z": "09af597d0b44144e",
+        "name": "COMMANDS TO NODE_RED",
+        "style": {
+            "stroke": "#0070c0",
+            "fill": "#bfdbef",
+            "label": true,
+            "color": "#777777"
+        },
+        "nodes": [
+            "094517ce69c289c2",
+            "116b37065d959aa4",
+            "8acb85d33aa992f4",
+            "bf26eff8e414f618",
+            "bbab7e1cf351f638",
+            "62561d94dd3ae96a",
+            "61cfdf9472485877",
+            "0425869a84a31860",
+            "bf9a582ad96342a9",
+            "d87eb55c042ca892",
+            "ad6f33b84348e670",
+            "924acd1e4ccbf7f7",
+            "f6571093082f000c",
+            "eca28286e538faf9",
+            "98a0f902707c1ca3",
+            "cb456f04fd472516",
+            "cb11afd82152f975",
+            "605a489c3329659e",
+            "1c019925bf01a08b",
+            "1a4b2a1356f8faa1",
+            "aa22d547406a6cf8",
+            "a5f1da125c940e2b",
+            "c2c5462879231573",
+            "f27ecd52ccf0034d",
+            "a48ad35ed51c6f67",
+            "ed37bdf5322ba6b1",
+            "462582e382228570",
+            "6823fc72d718d023",
+            "93d47799805bb6bc",
+            "78120afbe216d94e",
+            "5b59a545887c846f",
+            "fee5e73c84702c69",
+            "040edaa0dc47e987",
+            "e6fc5d99a20fa254",
+            "a585e8cca3f81737",
+            "f830ef30780c8bda",
+            "820b9ee666ee4240",
+            "8d311d9bda437485",
+            "7a0de2fd1d60f35b",
+            "b8e638774a9aa94e",
+            "7f7fadfba04301b1",
+            "d7bf3a797e886c17",
+            "b4d7fc7f0c57becb",
+            "bd9d74e36e643cc9",
+            "ee3749b45c4d50a4",
+            "611ff11f6f79c4fd",
+            "bb19bf804d9824f7",
+            "85b1da4a4e301669",
+            "0d99f597d2b73d0d",
+            "c5aeb58feaa76ff1",
+            "921661b7993f62ee",
+            "f69d05b146786bf3",
+            "d408f5f409b7f2af",
+            "e74560e19564e62f",
+            "c764fd4360400782",
+            "cd1c794ba121f122",
+            "0ad09e16521d8557",
+            "8895b168829c6405",
+            "f12c907e0bec9dd3",
+            "157f0d07e74743f6",
+            "d8b8f99489032db0",
+            "d6b858a8650fb11a",
+            "6931b802c114b3a7",
+            "ba868fe4f3e2569d",
+            "0381a37e369dc656",
+            "8091f0a831ef7d3b",
+            "0154cce8a52a0492",
+            "4b460fd7b10b6e62",
+            "2c7aacd4f6c1e597",
+            "0b562eb25cfbad69",
+            "7357e5e8988a8043",
+            "3ee29eb9a01f693f",
+            "8b8b4409d885cb6a",
+            "d3682b195f091eda",
+            "9302c31f1e9c010b",
+            "0dd4908ce8d4a33d",
+            "117f4d7f7dfa4b43",
+            "121936a8363204a0",
+            "aa10e10cdce0f200",
+            "ca4ec1200a381ab5",
+            "0fc45bcf1a92cae9",
+            "e9111d2c1a22bb12",
+            "32bbeda5576a769a",
+            "539df3b60f672061",
+            "9bf0dde55426461e",
+            "aa3232c5e20e258c",
+            "5e467c338517678c",
+            "7a3a855726118351",
+            "aa3aea788c317f6a",
+            "290c37ee86d97101",
+            "3efca0244787cdc3",
+            "6d3f4a6b2fd0c101",
+            "6d3f4a6b2fd0c102",
+            "6d3f4a6b2fd0c103"
+        ],
+        "x": 1804,
+        "y": 439,
+        "w": 2452,
+        "h": 1502
+    },
+    {
+        "id": "cc8c3e58f271e87c",
+        "type": "http in",
+        "z": "09af597d0b44144e",
+        "name": "OPTIONS /api/*",
+        "url": "/api/*",
+        "method": "options",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 210,
+        "y": 100,
+        "wires": [
+            [
+                "a40f988096907f1e"
+            ]
+        ]
+    },
+    {
+        "id": "a40f988096907f1e",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "name": "Handle CORS Pre-flight",
+        "func": "// Nginx handles the Access-Control-Allow-Origin header.\n// This node just handles the other required pre-flight headers.\nmsg.statusCode = 204; // No Content\nmsg.headers = {\n    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',\n    'Access-Control-Allow-Headers': 'Origin, X-Requested-With, Content-Type, Accept, Authorization',\n    'Access-Control-Max-Age': '600'\n};\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 430,
+        "y": 100,
+        "wires": [
+            [
+                "ceb95653af53d785",
+                "12494d509c35e169"
+            ]
+        ]
+    },
+    {
+        "id": "ceb95653af53d785",
+        "type": "http response",
+        "z": "09af597d0b44144e",
+        "name": "CORS Response",
+        "statusCode": "",
+        "headers": {},
+        "x": 650,
+        "y": 100,
+        "wires": []
+    },
+    {
+        "id": "3ed500a8bfcd4335",
+        "type": "http in",
+        "z": "09af597d0b44144e",
+        "name": "POST /api/login",
+        "url": "/api/login",
+        "method": "post",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 200,
+        "y": 200,
+        "wires": [
+            [
+                "afd4411b2635f513",
+                "48958e502cacb332"
+            ]
+        ]
+    },
+    {
+        "id": "afd4411b2635f513",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "name": "Check Credentials",
+        "func": "// Get the array of client users from the global context\nconst clients = global.get('clients') || [];\n\n// Get server flow and UI versions from the global context.\n// You should set these global variables, e.g., in an inject node on startup.\nconst serverFlowVersion = global.get('latestflow.fversion') || '0.0.0';\nconst serverUiVersion = global.get('uiVersion') || '0.0.0';\n\nconst { username, password } = msg.payload;\n\n// Find the user in the clients array\nconst user = clients.find(client => client.username === username);\n\n// Check if the user exists and the password matches\nif (user && user.password === password) {\n    // Credentials are valid. \n    // Clone the entire user object to create the token payload.\n    const tokenPayload = { ...user };\n\n    // IMPORTANT: Securely remove the password from the payload\n    // before it's sent to the front end or encoded in a token.\n    delete tokenPayload.password;\n\n    // Add server versions to the payload\n    tokenPayload.serverFlowVersion = serverFlowVersion;\n    tokenPayload.serverUiVersion = serverUiVersion;\n\n    // Set the cleaned, complete user profile as the message payload.\n    msg.payload = tokenPayload;\n\n    // Send the message to the next node in the flow (e.g., JWT creation)\n    return msg;\n} else {\n    // Invalid credentials, send 401 Unauthorized\n    msg.statusCode = 401;\n    msg.payload = { error: \"Invalid username or password\" };\n\n    // Send to the second output for error handling\n    node.send([null, msg]);\n\n    // Stop the flow\n    return null;\n}\n",
+        "outputs": 2,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 410,
+        "y": 200,
+        "wires": [
+            [
+                "bf5f2c79b90762c6",
+                "579d945ba31ec434"
+            ],
+            [
+                "e86189d3257ead98",
+                "6339ca336e9fd38c"
+            ]
+        ]
+    },
+    {
+        "id": "bf5f2c79b90762c6",
+        "type": "jwt sign",
+        "z": "09af597d0b44144e",
+        "name": "Create JWT",
+        "alg": "HS256",
+        "exp": "86400000",
+        "jwkurl": "",
+        "jwkkid": "",
+        "secret": "Charger33",
+        "key": "",
+        "signvar": "payload",
+        "storetoken": "payload",
+        "x": 610,
+        "y": 200,
+        "wires": [
+            [
+                "f2de4215d964b192"
+            ]
+        ]
+    },
+    {
+        "id": "f2de4215d964b192",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "name": "Wrap Token in JSON",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"token\": payload}",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 830,
+        "y": 200,
+        "wires": [
+            [
+                "7dbe715b3965cecb",
+                "e5ce4c22970803cf",
+                "55a17df606d2a350"
+            ]
+        ]
+    },
+    {
+        "id": "7dbe715b3965cecb",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "name": "Add Content-Type",
+        "func": "msg.headers = msg.headers || {};\n// The 'Access-Control-Allow-Origin' header is handled by Nginx.\nmsg.headers['Content-Type'] = 'application/json; charset=utf-8';\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1090,
+        "y": 200,
+        "wires": [
+            [
+                "5cdb468cd664f9ee",
+                "ac26ed17ef664d79"
+            ]
+        ]
+    },
+    {
+        "id": "5cdb468cd664f9ee",
+        "type": "http response",
+        "z": "09af597d0b44144e",
+        "name": "Return Token",
+        "statusCode": "200",
+        "headers": {},
+        "x": 1290,
+        "y": 200,
+        "wires": []
+    },
+    {
+        "id": "e86189d3257ead98",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "name": "Add Content-Type (Err)",
+        "func": "msg.headers = msg.headers || {};\n// The 'Access-Control-Allow-Origin' header is handled by Nginx.\nmsg.headers['Content-Type'] = 'application/json; charset=utf-8';\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 680,
+        "y": 260,
+        "wires": [
+            [
+                "9b66cbb1e26a4569"
+            ]
+        ]
+    },
+    {
+        "id": "9b66cbb1e26a4569",
+        "type": "http response",
+        "z": "09af597d0b44144e",
+        "name": "Auth Error",
+        "statusCode": "401",
+        "headers": {},
+        "x": 870,
+        "y": 260,
+        "wires": []
+    },
+    {
+        "id": "f4f41a9f87f789d9",
+        "type": "http in",
+        "z": "09af597d0b44144e",
+        "name": "GET /api/kiosks (Original)",
+        "url": "/api/kiosks",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 220,
+        "y": 380,
+        "wires": [
+            [
+                "56c8f1a35abe252d"
+            ]
+        ]
+    },
+    {
+        "id": "56c8f1a35abe252d",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "name": "Extract Bearer Token",
+        "func": "const authHeader = (msg.req && msg.req.headers && msg.req.headers.authorization) || \"\";\nif (authHeader.startsWith('Bearer ')) {\n    msg.payload = authHeader.slice(7);\n    return [msg, null];\n}\nconst err = {\n    error: \"missing_authorization\",\n    message: \"Authorization header missing or malformed\"\n};\nconst m = { ...msg, payload: err, statusCode: 401 };\nreturn [null, m];",
+        "outputs": 2,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 440,
+        "y": 380,
+        "wires": [
+            [
+                "a3718fd5facb99cd",
+                "11ddfa8588afe508"
+            ],
+            [
+                "4b6eb8d24b547ad9",
+                "5ab62f41342e1d5b"
+            ]
+        ]
+    },
+    {
+        "id": "a3718fd5facb99cd",
+        "type": "jwt verify",
+        "z": "09af597d0b44144e",
+        "name": "Verify JWT (Original)",
+        "alg": [
+            "HS256"
+        ],
+        "jwkurl": "",
+        "secret": "Charger33",
+        "key": "",
+        "signvar": "payload",
+        "storetoken": "payload",
+        "x": 660,
+        "y": 380,
+        "wires": [
+            [
+                "2bfaba0b051dea6f"
+            ]
+        ]
+    },
+    {
+        "id": "2bfaba0b051dea6f",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "name": "Get Kiosk Data (Original)",
+        "func": "const stations = global.get('stations') || [];\nconst chargers = global.get('chargers') || [];\nconst rentalData = global.get('rentalData') || [];\nmsg.payload = { stations, chargers, rentals: rentalData };\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 890,
+        "y": 380,
+        "wires": [
+            [
+                "6e522c199aa6e0c6",
+                "e13188b3d1f47568"
+            ]
+        ]
+    },
+    {
+        "id": "6e522c199aa6e0c6",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "name": "Add Content-Type",
+        "func": "msg.headers = msg.headers || {};\n// The 'Access-Control-Allow-Origin' header is handled by Nginx.\nmsg.headers['Content-Type'] = 'application/json; charset=utf-8';\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1100,
+        "y": 480,
+        "wires": [
+            [
+                "756fdcb35d1b39e3"
+            ]
+        ]
+    },
+    {
+        "id": "756fdcb35d1b39e3",
+        "type": "http response",
+        "z": "09af597d0b44144e",
+        "name": "Return Data",
+        "statusCode": "200",
+        "headers": {},
+        "x": 1280,
+        "y": 480,
+        "wires": []
+    },
+    {
+        "id": "9be2d6c48fc10324",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "name": "Token Error → JSON",
+        "func": "// jwt node usually sets msg.error; normalize JSON error body.\nconst detail = (msg.error && (msg.error.message || msg.error)) || msg.payload || \"invalid_token\";\nmsg.payload = { error: \"invalid_token\", message: String(detail) };\nmsg.statusCode = 401;\nmsg.headers = msg.headers || {};\n// The 'Access-Control-Allow-Origin' header is handled by Nginx.\nmsg.headers['Content-Type'] = 'application/json; charset=utf-8';\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 900,
+        "y": 660,
+        "wires": [
+            [
+                "30b286e49a4488d6"
+            ]
+        ]
+    },
+    {
+        "id": "30b286e49a4488d6",
+        "type": "http response",
+        "z": "09af597d0b44144e",
+        "name": "JWT Error Response",
+        "statusCode": "",
+        "headers": {},
+        "x": 1150,
+        "y": 660,
+        "wires": []
+    },
+    {
+        "id": "4b6eb8d24b547ad9",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "name": "401 Missing/Bad Auth",
+        "func": "msg.headers = msg.headers || {};\n// The 'Access-Control-Allow-Origin' header is handled by Nginx.\nmsg.headers['Content-Type'] = 'application/json; charset=utf-8';\nmsg.statusCode = msg.statusCode || 401;\n// Ensure payload is an error object\nif (!msg.payload || typeof msg.payload !== 'object') {\n    msg.payload = { error: 'missing_authorization', message: 'Authorization header missing or malformed' };\n}\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 660,
+        "y": 420,
+        "wires": [
+            [
+                "915046550a3e7bbd"
+            ]
+        ]
+    },
+    {
+        "id": "915046550a3e7bbd",
+        "type": "http response",
+        "z": "09af597d0b44144e",
+        "name": "Return 401 Missing Auth",
+        "statusCode": "401",
+        "headers": {},
+        "x": 910,
+        "y": 420,
+        "wires": []
+    },
+    {
+        "id": "7a9b3933c62c4243",
+        "type": "comment",
+        "z": "09af597d0b44144e",
+        "name": "--- AUTHENTICATION ---",
+        "info": "",
+        "x": 210,
+        "y": 60,
+        "wires": []
+    },
+    {
+        "id": "af4bef106e2cacc2",
+        "type": "comment",
+        "z": "09af597d0b44144e",
+        "name": "--- ORIGINAL DASHBOARD API ---",
+        "info": "",
+        "x": 240,
+        "y": 340,
+        "wires": []
+    },
+    {
+        "id": "b82b32065a19d3f5",
+        "type": "comment",
+        "z": "09af597d0b44144e",
+        "name": "--- NEW DASHBOARD API (V1) ---",
+        "info": "",
+        "x": 240,
+        "y": 500,
+        "wires": []
+    },
+    {
+        "id": "b5215887f7865379",
+        "type": "http in",
+        "z": "09af597d0b44144e",
+        "name": "GET /api/v1/kiosks (New)",
+        "url": "/api/v1/kiosks",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 170,
+        "y": 540,
+        "wires": [
+            [
+                "bf44409a7e51db96",
+                "cb459baa80ea1727"
+            ]
+        ]
+    },
+    {
+        "id": "ac3f7c171d98bc4c",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "name": "Get Kiosk Data (V1)",
+        "func": "// Assumes the new complex kiosk data is stored in a global variable named 'kiosks_v1'\nconst stations = global.get('info') || [];\n\n// The new dashboard also needs rental data. We can reuse the existing global variable for that.\nconst rentalData = global.get('rentals') || [];\nconst uiversion = global.get('uiVersion');\nconst flowVersion = global.get('latestflow.fversion');\nconst pending = global.get('pending');\n\n// Construct the payload in the format the frontend expects.\nmsg.payload = { stations: stations, rentals: rentalData, flowVersion: flowVersion, uiVersion:uiversion, pending:pending };\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 880,
+        "y": 540,
+        "wires": [
+            [
+                "6e522c199aa6e0c6",
+                "5eb9678a08e89b99"
+            ]
+        ]
+    },
+    {
+        "id": "77d0522d769fd7aa",
+        "type": "comment",
+        "z": "09af597d0b44144e",
+        "name": "--- SETUP & CONFIGURATION ---",
+        "info": "",
+        "x": 240,
+        "y": 720,
+        "wires": []
+    },
+    {
+        "id": "8e41290abb53d08e",
+        "type": "catch",
+        "z": "09af597d0b44144e",
+        "name": "Catch All JWT Errors",
+        "scope": [
+            "a3718fd5facb99cd",
+            "0dae997a9c4dbcdd"
+        ],
+        "uncaught": false,
+        "x": 660,
+        "y": 660,
+        "wires": [
+            [
+                "9be2d6c48fc10324"
+            ]
+        ]
+    },
+    {
+        "id": "bf44409a7e51db96",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "name": "Extract Bearer Token",
+        "func": "const authHeader = (msg.req && msg.req.headers && msg.req.headers.authorization) || \"\";\nif (authHeader.startsWith('Bearer ')) {\n    msg.payload = authHeader.slice(7);\n    return [msg, null];\n}\nconst err = {\n    error: \"missing_authorization\",\n    message: \"Authorization header missing or malformed\"\n};\nconst m = { ...msg, payload: err, statusCode: 401 };\nreturn [null, m];",
+        "outputs": 2,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 440,
+        "y": 540,
+        "wires": [
+            [
+                "0dae997a9c4dbcdd",
+                "550faf10b3d02f59"
+            ],
+            [
+                "4b6eb8d24b547ad9",
+                "dfb214c15aa298c4"
+            ]
+        ]
+    },
+    {
+        "id": "0dae997a9c4dbcdd",
+        "type": "jwt verify",
+        "z": "09af597d0b44144e",
+        "name": "Verify JWT (V1)",
+        "alg": [
+            "HS256"
+        ],
+        "jwkurl": "",
+        "secret": "Charger33",
+        "key": "",
+        "signvar": "payload",
+        "storetoken": "payload",
+        "x": 660,
+        "y": 540,
+        "wires": [
+            [
+                "ac3f7c171d98bc4c",
+                "a4220a7cf731510c"
+            ]
+        ]
+    },
+    {
+        "id": "11ddfa8588afe508",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 317",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 620,
+        "y": 340,
+        "wires": []
+    },
+    {
+        "id": "5ab62f41342e1d5b",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 318",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 640,
+        "y": 480,
+        "wires": []
+    },
+    {
+        "id": "550faf10b3d02f59",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 319",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 670,
+        "y": 600,
+        "wires": []
+    },
+    {
+        "id": "dfb214c15aa298c4",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 320",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 370,
+        "y": 440,
+        "wires": []
+    },
+    {
+        "id": "a4220a7cf731510c",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 321",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 820,
+        "y": 500,
+        "wires": []
+    },
+    {
+        "id": "5eb9678a08e89b99",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 324",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1150,
+        "y": 560,
+        "wires": []
+    },
+    {
+        "id": "e13188b3d1f47568",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 325",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1150,
+        "y": 380,
+        "wires": []
+    },
+    {
+        "id": "579d945ba31ec434",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 326",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 650,
+        "y": 140,
+        "wires": []
+    },
+    {
+        "id": "6339ca336e9fd38c",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 327",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 450,
+        "y": 280,
+        "wires": []
+    },
+    {
+        "id": "e5ce4c22970803cf",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 328",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1070,
+        "y": 160,
+        "wires": []
+    },
+    {
+        "id": "a1b2c3d4e5f6a7b8",
+        "type": "http in",
+        "z": "09af597d0b44144e",
+        "name": "GET /api/public/locations",
+        "url": "/api/public/locations",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 170,
+        "y": 880,
+        "wires": [
+            [
+                "f1e2d3c4b5a6f7e8",
+                "c27a68846638e7e2"
+            ]
+        ]
+    },
+    {
+        "id": "f1e2d3c4b5a6f7e8",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "name": "Process Kiosk Data for Public API",
+        "func": "// --- Configuration ---\n// 1. Set your flow context variable name.\n// Replace \"allKioskData\" if your variable containing the kiosk list has a different name.\nconst sourceData = global.get(\"info\") || [];\n\n// --- Processing Logic ---\n// This function processes each kiosk to calculate availability and strip sensitive data.\nconst processKioskForPublicView = (kiosk) => {\n    try {\n        // --- Filter 1: Skip inactive or misconfigured kiosks ---\n        // If kiosk is marked inactive or has no location data, don't show it to the public.\n        if (kiosk.active === false || !kiosk.info || !kiosk.info.lat || !kiosk.info.lon) {\n            return null;\n        }\n\n        // --- Filter 2: Calculate availability (using logic from your admin dashboard) ---\n        let availableChargersCount = 0; // Chargers ready for rent (e.g., >= 80% battery)\n        let emptySlotsCount = 0;\n        let totalPhysicalSlots = 0;\n        let totalChargersPresent = 0;\n\n        // Iterate through all modules for this kiosk (modules[\"1\"], modules[\"2\"], etc.)\n        Object.values(kiosk.modules || {}).forEach(module => {\n            if (module.id && !module.id.startsWith('disabled') && module.heartbeat) {\n                const slots = Object.values(module.heartbeat);\n                totalPhysicalSlots += slots.length;\n\n                slots.forEach(slotData => {\n                    const hasCharger = slotData.cid && slotData.cid !== '0000000000';\n                    if (hasCharger) {\n                        totalChargersPresent++;\n                        // Rule: Define \"available charger\" as one with >= 80% battery level. Adjust if needed.\n                        if (parseInt(slotData.batlvl, 10) >= 80) {\n                            availableChargersCount++;\n                        }\n                    }\n                });\n            }\n        });\n        \n        emptySlotsCount = totalPhysicalSlots - totalChargersPresent;\n\n        // --- Transform: Create a lean object for the public API ---\n        return {\n            id: kiosk.stationid || kiosk.provisionid,\n            locationName: kiosk.info.location,\n            place: kiosk.info.place,\n            address: kiosk.info.stationaddress,\n            city: kiosk.info.city,\n            zip: kiosk.info.zip,\n            lat: kiosk.info.lat,\n            lon: kiosk.info.lon,\n            availableChargers: availableChargersCount,\n            availableSlots: emptySlotsCount,\n            timestamp: kiosk.timestamp\n        };\n\n    } catch (e) {\n        node.error(`Error processing kiosk ${kiosk.provisionid}: ${e.message}`, msg);\n        return null; // Skip this kiosk if an error occurs during processing\n    }\n};\n\n// Map all source kiosks through the processing function and filter out null entries.\nmsg.payload = sourceData.map(processKioskForPublicView).filter(kiosk => kiosk !== null);\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 440,
+        "y": 880,
+        "wires": [
+            [
+                "c1d2e3f4a5b6c7d8"
+            ]
+        ]
+    },
+    {
+        "id": "c1d2e3f4a5b6c7d8",
+        "type": "json",
+        "z": "09af597d0b44144e",
+        "name": "Format as JSON",
+        "property": "payload",
+        "action": "str",
+        "pretty": false,
+        "x": 730,
+        "y": 880,
+        "wires": [
+            [
+                "b1a2c3d4e5f6g7h8",
+                "69dad0f61e930409"
+            ]
+        ]
+    },
+    {
+        "id": "b1a2c3d4e5f6g7h8",
+        "type": "http response",
+        "z": "09af597d0b44144e",
+        "name": "Send Response",
+        "statusCode": "",
+        "headers": {},
+        "x": 960,
+        "y": 880,
+        "wires": []
+    },
+    {
+        "id": "667e9232523a2eaa",
+        "type": "mqtt-json",
+        "z": "09af597d0b44144e",
+        "g": "881d95e69c4c5e9c",
+        "name": "",
+        "topic": "admin/res-confirmation",
+        "property": "",
+        "qos": "2",
+        "broker": "8597d2b7.ba618",
+        "x": 2220,
+        "y": 2200,
+        "wires": [
+            [
+                "9b0945aa899cfa6d",
+                "f101e6372e70f0dd"
+            ]
+        ]
+    },
+    {
+        "id": "2173e8834c3526d3",
+        "type": "http request",
+        "z": "09af597d0b44144e",
+        "g": "881d95e69c4c5e9c",
+        "name": "",
+        "method": "POST",
+        "ret": "txt",
+        "paytoqs": "ignore",
+        "url": "http://127.0.0.1:1880/api/v1/command/response",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 2870,
+        "y": 2200,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "9b0945aa899cfa6d",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "881d95e69c4c5e9c",
+        "name": "set command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "_session",
+                "pt": "msg",
+                "to": "payload.admin",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2460,
+        "y": 2200,
+        "wires": [
+            [
+                "4e32b616baeacfe8"
+            ]
+        ],
+        "icon": "font-awesome/fa-angle-double-up"
+    },
+    {
+        "id": "4e32b616baeacfe8",
+        "type": "switch",
+        "z": "09af597d0b44144e",
+        "g": "881d95e69c4c5e9c",
+        "name": "",
+        "property": "_session",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "istype",
+                "v": "undefined",
+                "vt": "undefined"
+            },
+            {
+                "t": "eq",
+                "v": "noadmin",
+                "vt": "str"
+            },
+            {
+                "t": "else"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 3,
+        "x": 2650,
+        "y": 2200,
+        "wires": [
+            [],
+            [],
+            [
+                "0381a37e369dc656",
+                "b59d741abd1bef05"
+            ]
+        ]
+    },
+    {
+        "id": "b59d741abd1bef05",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "881d95e69c4c5e9c",
+        "name": "debug 341",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 2870,
+        "y": 2260,
+        "wires": []
+    },
+    {
+        "id": "f101e6372e70f0dd",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "881d95e69c4c5e9c",
+        "name": "confirmation",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 2450,
+        "y": 2240,
+        "wires": []
+    },
+    {
+        "id": "55a17df606d2a350",
+        "type": "link out",
+        "z": "09af597d0b44144e",
+        "name": "link out 66",
+        "mode": "link",
+        "links": [
+            "40cef20219952f4c"
+        ],
+        "x": 1025,
+        "y": 260,
+        "wires": []
+    },
+    {
+        "id": "a1f08b4adf343f24",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 358",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1650,
+        "y": 1320,
+        "wires": []
+    },
+    {
+        "id": "8023a21d81f1886d",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 360",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1190,
+        "y": 1300,
+        "wires": []
+    },
+    {
+        "id": "c27a68846638e7e2",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 361",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 390,
+        "y": 920,
+        "wires": []
+    },
+    {
+        "id": "69dad0f61e930409",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 363",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 950,
+        "y": 840,
+        "wires": []
+    },
+    {
+        "id": "c1a2b3d4.e5f6g7",
+        "type": "http in",
+        "z": "09af597d0b44144e",
+        "name": "GET /api/v1/clients",
+        "url": "/api/v1/clients",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 210,
+        "y": 1340,
+        "wires": [
+            [
+                "h1i2j3k4.l5m6n7",
+                "d6df77b226394759"
+            ]
+        ]
+    },
+    {
+        "id": "d1e2f3g4.h5i6j7",
+        "type": "http in",
+        "z": "09af597d0b44144e",
+        "name": "PUT /api/v1/clients",
+        "url": "/api/v1/clients",
+        "method": "put",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 210,
+        "y": 1380,
+        "wires": [
+            [
+                "dd1c34752473a748",
+                "d368c02d8f48f194"
+            ]
+        ]
+    },
+    {
+        "id": "a9b8c7d6.e5f4g3",
+        "type": "http in",
+        "z": "09af597d0b44144e",
+        "name": "POST /api/v1/clients/create",
+        "url": "/api/v1/clients/create",
+        "method": "post",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 220,
+        "y": 1420,
+        "wires": [
+            [
+                "h1i2j3k4.l5m6n7",
+                "8202d42f18584460"
+            ]
+        ]
+    },
+    {
+        "id": "h1i2j3k4.l5m6n7",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "name": "Extract Bearer Token",
+        "func": "const authHeader = msg.req.headers.authorization || \"\";\n\nif (authHeader.startsWith('Bearer ')) {\n    // Put the token into msg.payload for the JWT node\n    msg.payload = authHeader.substring(7);\n    return [msg, null]; \n}\n\n// If no token, send to the error output\nmsg.statusCode = 401;\nmsg.payload = { error: \"Authorization header missing\" };\nreturn [null, msg];",
+        "outputs": 2,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 600,
+        "y": 1380,
+        "wires": [
+            [
+                "b1c2d3e4.f5g6h7"
+            ],
+            [
+                "v1w2x3y4.z5a6b7"
+            ]
+        ]
+    },
+    {
+        "id": "b1c2d3e4.f5g6h7",
+        "type": "jwt verify",
+        "z": "09af597d0b44144e",
+        "name": "Verify Token",
+        "alg": [
+            "HS256"
+        ],
+        "jwkurl": "",
+        "secret": "Charger33",
+        "key": "",
+        "signvar": "payload",
+        "storetoken": "payload",
+        "x": 810,
+        "y": 1380,
+        "wires": [
+            [
+                "i1j2k3l4.m5n6o7"
+            ]
+        ]
+    },
+    {
+        "id": "i1j2k3l4.m5n6o7",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "name": "Check for Admin",
+        "func": "// The decoded user profile is now in msg.payload\nconst user = msg.payload;\n\nif (user.username === 'chargerent') {\n    // User is admin, continue the flow\n    return [msg, null];\n} else {\n    // User is not admin, send a 403 Forbidden error\n    msg.statusCode = 403;\n    msg.payload = { error: \"Access denied: Admin privileges required\" };\n    return [null, msg];\n}",
+        "outputs": 2,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 990,
+        "y": 1380,
+        "wires": [
+            [
+                "o1p2q3r4.s5t6u7",
+                "8023a21d81f1886d"
+            ],
+            [
+                "v1w2x3y4.z5a6b7"
+            ]
+        ]
+    },
+    {
+        "id": "v1w2x3y4.z5a6b7",
+        "type": "http response",
+        "z": "09af597d0b44144e",
+        "name": "Error Response",
+        "statusCode": "",
+        "headers": {},
+        "x": 940,
+        "y": 1440,
+        "wires": []
+    },
+    {
+        "id": "o1p2q3r4.s5t6u7",
+        "type": "switch",
+        "z": "09af597d0b44144e",
+        "name": "Route by Method",
+        "property": "req.method",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "eq",
+                "v": "GET",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "PUT",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "POST",
+                "vt": "str"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 3,
+        "x": 1210,
+        "y": 1360,
+        "wires": [
+            [
+                "c1d2e3f4.g5h6i7"
+            ],
+            [
+                "j1k2l3m4.n5o6p7"
+            ],
+            [
+                "j1k2l3m4.n5o6p7"
+            ]
+        ]
+    },
+    {
+        "id": "c1d2e3f4.g5h6i7",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "name": "Get All Clients",
+        "func": "const clients = global.get('clients') || [];\n\n// Create a deep copy and remove passwords before sending\nconst safeClients = JSON.parse(JSON.stringify(clients));\nsafeClients.forEach(client => delete client.password);\n\nmsg.payload = safeClients;\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1410,
+        "y": 1320,
+        "wires": [
+            [
+                "q1r2s3t4.u5v6w7",
+                "a1f08b4adf343f24"
+            ]
+        ]
+    },
+    {
+        "id": "j1k2l3m4.n5o6p7",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "name": "Update All Clients",
+        "func": "const updatedClients = msg.clients;\nconst existingClients = global.get('clients') || [];\n\nif (!Array.isArray(updatedClients)) {\n    msg.statusCode = 400;\n    msg.payload = { error: \"Invalid data format. Array expected.\" };\n    return msg;\n}\n\n// Create a map of existing users and their hashed passwords for safety\nconst passwordMap = new Map();\nexistingClients.forEach(client => {\n    passwordMap.set(client.username, client.password);\n});\n\n// Ensure existing passwords are not overwritten\nupdatedClients.forEach(client => {\n    if (passwordMap.has(client.username)) {\n        client.password = passwordMap.get(client.username);\n    }\n});\n\nglobal.set('clients', updatedClients);\n\nmsg.statusCode = 200;\nmsg.payload = { message: \"Clients updated successfully\" };\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1420,
+        "y": 1360,
+        "wires": [
+            [
+                "q1r2s3t4.u5v6w7",
+                "a1f08b4adf343f24"
+            ]
+        ]
+    },
+    {
+        "id": "q1r2s3t4.u5v6w7",
+        "type": "http response",
+        "z": "09af597d0b44144e",
+        "name": "Success Response",
+        "statusCode": "",
+        "headers": {},
+        "x": 1650,
+        "y": 1360,
+        "wires": []
+    },
+    {
+        "id": "d6df77b226394759",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 364",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 510,
+        "y": 1300,
+        "wires": []
+    },
+    {
+        "id": "dd1c34752473a748",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 365",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 510,
+        "y": 1340,
+        "wires": []
+    },
+    {
+        "id": "8202d42f18584460",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 366",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 500,
+        "y": 1480,
+        "wires": []
+    },
+    {
+        "id": "cb459baa80ea1727",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 369",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 370,
+        "y": 600,
+        "wires": []
+    },
+    {
+        "id": "d368c02d8f48f194",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "clients",
+                "pt": "msg",
+                "to": "payload",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 400,
+        "y": 1380,
+        "wires": [
+            [
+                "h1i2j3k4.l5m6n7"
+            ]
+        ]
+    },
+    {
+        "id": "12494d509c35e169",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 409",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 670,
+        "y": 60,
+        "wires": []
+    },
+    {
+        "id": "ac26ed17ef664d79",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 410",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1200,
+        "y": 260,
+        "wires": []
+    },
+    {
+        "id": "48958e502cacb332",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 518",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 120,
+        "y": 280,
+        "wires": []
+    },
+    {
+        "id": "094517ce69c289c2",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "set command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-eject\"",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"action\":\"eject specific\",\t   \"cmd\":\"61\",\t   \"module\":$$.module,\t   \"slot\":$$.command.slotid,\t   \"admin\":_session.id\t   \t}",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2820,
+        "y": 840,
+        "wires": [
+            [
+                "bf26eff8e414f618",
+                "61cfdf9472485877"
+            ]
+        ],
+        "icon": "font-awesome/fa-angle-double-up"
+    },
+    {
+        "id": "116b37065d959aa4",
+        "type": "switch",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "",
+        "property": "command.action",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "eq",
+                "v": "eject specific",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "eject all",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "eject full",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "eject empty",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "eject locked",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "eject module",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "eject count",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "reload ui",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "reboot",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "ngrok connect",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "ngrok disconnect",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "update flow",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "update ui",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "lock slot",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "unlock slot",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "rent",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "disable",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "enable",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "infochange",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "hardwarechange",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "pricechange",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "uichange",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "refund",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "provision",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "hotspot",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "vend",
+                "vt": "str"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 26,
+        "x": 2150,
+        "y": 1240,
+        "wires": [
+            [
+                "8acb85d33aa992f4"
+            ],
+            [
+                "cb456f04fd472516"
+            ],
+            [
+                "1a4b2a1356f8faa1"
+            ],
+            [
+                "605a489c3329659e"
+            ],
+            [
+                "1c019925bf01a08b"
+            ],
+            [
+                "a48ad35ed51c6f67"
+            ],
+            [
+                "820b9ee666ee4240"
+            ],
+            [
+                "bf9a582ad96342a9"
+            ],
+            [
+                "0425869a84a31860"
+            ],
+            [
+                "d87eb55c042ca892"
+            ],
+            [
+                "eca28286e538faf9"
+            ],
+            [
+                "ed37bdf5322ba6b1"
+            ],
+            [
+                "6823fc72d718d023"
+            ],
+            [
+                "78120afbe216d94e"
+            ],
+            [
+                "040edaa0dc47e987"
+            ],
+            [
+                "a585e8cca3f81737"
+            ],
+            [
+                "8d311d9bda437485"
+            ],
+            [
+                "b8e638774a9aa94e"
+            ],
+            [
+                "0d99f597d2b73d0d"
+            ],
+            [
+                "d7bf3a797e886c17"
+            ],
+            [
+                "bd9d74e36e643cc9"
+            ],
+            [
+                "b4d7fc7f0c57becb"
+            ],
+            [
+                "d6b858a8650fb11a"
+            ],
+            [
+                "cd1c794ba121f122"
+            ],
+            [
+                "2c7aacd4f6c1e597"
+            ],
+            [
+                "6d3f4a6b2fd0c101"
+            ]
+        ]
+    },
+    {
+        "id": "8acb85d33aa992f4",
+        "type": "string",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "",
+        "methods": [
+            {
+                "name": "delLeftMost",
+                "params": [
+                    {
+                        "type": "str",
+                        "value": "m"
+                    }
+                ]
+            },
+            {
+                "name": "toInteger",
+                "params": []
+            }
+        ],
+        "prop": "command.moduleid",
+        "propout": "module",
+        "object": "msg",
+        "objectout": "msg",
+        "x": 2650,
+        "y": 840,
+        "wires": [
+            [
+                "094517ce69c289c2"
+            ]
+        ]
+    },
+    {
+        "id": "bf26eff8e414f618",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 336",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3130,
+        "y": 840,
+        "wires": []
+    },
+    {
+        "id": "bbab7e1cf351f638",
+        "type": "link in",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "MQTT Command Receiver",
+        "links": [
+            "d10af3a7998559ee",
+            "7a3a855726118351"
+        ],
+        "x": 1845,
+        "y": 1360,
+        "wires": [
+            [
+                "62561d94dd3ae96a",
+                "117f4d7f7dfa4b43"
+            ]
+        ]
+    },
+    {
+        "id": "62561d94dd3ae96a",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "COMMAND",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": true,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "payload",
+        "statusType": "auto",
+        "x": 1930,
+        "y": 1180,
+        "wires": []
+    },
+    {
+        "id": "61cfdf9472485877",
+        "type": "link out",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "Send to MQTT",
+        "mode": "link",
+        "links": [
+            "2746c2f1.5dff7e"
+        ],
+        "x": 3615,
+        "y": 1280,
+        "wires": []
+    },
+    {
+        "id": "0425869a84a31860",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "reboot cmd",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"action\":\"reboot odroid\",\t   \"admin\":$$._session.id}",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-odroid\"",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2670,
+        "y": 1160,
+        "wires": [
+            [
+                "924acd1e4ccbf7f7",
+                "61cfdf9472485877"
+            ]
+        ]
+    },
+    {
+        "id": "bf9a582ad96342a9",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "reload cmd",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-reloadui\"",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "admin",
+                "pt": "msg",
+                "to": "_session.id",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"action\":\"refresh UI\",\t   \"admin\":$$.admin  }",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2670,
+        "y": 1120,
+        "wires": [
+            [
+                "ad6f33b84348e670",
+                "61cfdf9472485877"
+            ]
+        ],
+        "icon": "font-awesome/fa-angle-double-up"
+    },
+    {
+        "id": "d87eb55c042ca892",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "connect ngrok",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-ip\"",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "admin",
+                "pt": "msg",
+                "to": "_session.id",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"action\":\"connect\",\t   \"admin\":$$.admin   }",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2680,
+        "y": 1200,
+        "wires": [
+            [
+                "f6571093082f000c",
+                "61cfdf9472485877"
+            ]
+        ],
+        "icon": "font-awesome/fa-angle-double-up"
+    },
+    {
+        "id": "ad6f33b84348e670",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 342",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3130,
+        "y": 1120,
+        "wires": []
+    },
+    {
+        "id": "924acd1e4ccbf7f7",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 343",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3130,
+        "y": 1160,
+        "wires": []
+    },
+    {
+        "id": "f6571093082f000c",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 344",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3130,
+        "y": 1200,
+        "wires": []
+    },
+    {
+        "id": "eca28286e538faf9",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "disconnect ngrok",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-ip\"",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "admin",
+                "pt": "msg",
+                "to": "_session.id",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"action\":\"disconnect\",\t   \"admin\":$$.admin   }",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2690,
+        "y": 1240,
+        "wires": [
+            [
+                "98a0f902707c1ca3",
+                "61cfdf9472485877"
+            ]
+        ],
+        "icon": "font-awesome/fa-angle-double-up"
+    },
+    {
+        "id": "98a0f902707c1ca3",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 346",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3130,
+        "y": 1240,
+        "wires": []
+    },
+    {
+        "id": "cb456f04fd472516",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "set eject all command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"action\":\"eject\",\t   \"slot\":\"all\",\t   \"module\":\"all\",\t   \"cmd\":\"61\",\t   \"admin\":$$._session.id}",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-eject\" \t",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2700,
+        "y": 880,
+        "wires": [
+            [
+                "61cfdf9472485877",
+                "cb11afd82152f975"
+            ]
+        ]
+    },
+    {
+        "id": "cb11afd82152f975",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 349",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3130,
+        "y": 880,
+        "wires": []
+    },
+    {
+        "id": "605a489c3329659e",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "set eject empty command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"action\":\"ejectempty\",\t   \"slot\":\"all\",\t   \"module\":\"all\",\t   \"cmd\":\"61\",\t   \"admin\":$$._session.id \t}",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-eject\" \t",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2710,
+        "y": 960,
+        "wires": [
+            [
+                "61cfdf9472485877",
+                "a5f1da125c940e2b"
+            ]
+        ]
+    },
+    {
+        "id": "1c019925bf01a08b",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "set eject locked command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"action\":\"ejectlocked\",\t   \"slot\":\"all\",\t   \"module\":\"all\",\t   \"cmd\":\"61\",\t   \"admin\":$$._session.id}",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-eject\" \t",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2720,
+        "y": 1000,
+        "wires": [
+            [
+                "61cfdf9472485877",
+                "c2c5462879231573"
+            ]
+        ]
+    },
+    {
+        "id": "1a4b2a1356f8faa1",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "set eject full command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"action\":\"ejectfull\",\t   \"slot\":\"all\",\t   \"module\":\"all\",\t   \"cmd\":\"61\",\t   \"admin\":$$._session.id }",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-eject\" \t",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2700,
+        "y": 920,
+        "wires": [
+            [
+                "61cfdf9472485877",
+                "aa22d547406a6cf8"
+            ]
+        ]
+    },
+    {
+        "id": "aa22d547406a6cf8",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 350",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3130,
+        "y": 920,
+        "wires": []
+    },
+    {
+        "id": "a5f1da125c940e2b",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 351",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3130,
+        "y": 960,
+        "wires": []
+    },
+    {
+        "id": "c2c5462879231573",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 352",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3130,
+        "y": 1000,
+        "wires": []
+    },
+    {
+        "id": "f27ecd52ccf0034d",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "set eject module command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"action\":\"eject\",\t   \"slot\":\"all\",\t   \"module\":$$.module,\t   \"cmd\":\"61\",\t   \"admin\":$$._session.id}",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-eject\" \t",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2840,
+        "y": 1040,
+        "wires": [
+            [
+                "61cfdf9472485877"
+            ]
+        ]
+    },
+    {
+        "id": "a48ad35ed51c6f67",
+        "type": "string",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "",
+        "methods": [
+            {
+                "name": "delLeftMost",
+                "params": [
+                    {
+                        "type": "str",
+                        "value": "m"
+                    }
+                ]
+            },
+            {
+                "name": "toInteger",
+                "params": []
+            }
+        ],
+        "prop": "command.moduleid",
+        "propout": "module",
+        "object": "msg",
+        "objectout": "msg",
+        "x": 2650,
+        "y": 1040,
+        "wires": [
+            [
+                "f27ecd52ccf0034d"
+            ]
+        ]
+    },
+    {
+        "id": "ed37bdf5322ba6b1",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "flow update command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"action\":\"updateflow\",\t   \"provisionid\":$$.command.provisionid,\t   \"admin\":$$._session.id}",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "admin/req-update",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2700,
+        "y": 1280,
+        "wires": [
+            [
+                "462582e382228570",
+                "61cfdf9472485877"
+            ]
+        ]
+    },
+    {
+        "id": "462582e382228570",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 353",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3130,
+        "y": 1280,
+        "wires": []
+    },
+    {
+        "id": "6823fc72d718d023",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "ui update command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"action\":\"updateui\",\t   \"provisionid\":$$.command.provisionid,\t   \"version\":$$.command.uiVersion,\t   \"admin\":$$._session\t}",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "admin/res-update",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2700,
+        "y": 1320,
+        "wires": [
+            [
+                "93d47799805bb6bc",
+                "61cfdf9472485877"
+            ]
+        ]
+    },
+    {
+        "id": "93d47799805bb6bc",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 354",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3130,
+        "y": 1320,
+        "wires": []
+    },
+    {
+        "id": "78120afbe216d94e",
+        "type": "string",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "",
+        "methods": [
+            {
+                "name": "delLeftMost",
+                "params": [
+                    {
+                        "type": "str",
+                        "value": "m"
+                    }
+                ]
+            },
+            {
+                "name": "toInteger",
+                "params": []
+            }
+        ],
+        "prop": "command.moduleid",
+        "propout": "module",
+        "object": "msg",
+        "objectout": "msg",
+        "x": 2650,
+        "y": 1360,
+        "wires": [
+            [
+                "5b59a545887c846f"
+            ]
+        ]
+    },
+    {
+        "id": "5b59a545887c846f",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "set lock command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-lock\"",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"action\":\"lock\",\t   \"module\":$$.module,\t   \"slot\":$$.command.slotid,\t   \"admin\":$$._session.id,\t   \"info\":$$.command.info\t}",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2850,
+        "y": 1360,
+        "wires": [
+            [
+                "fee5e73c84702c69",
+                "61cfdf9472485877"
+            ]
+        ],
+        "icon": "font-awesome/fa-angle-double-up"
+    },
+    {
+        "id": "fee5e73c84702c69",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 355",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3130,
+        "y": 1360,
+        "wires": []
+    },
+    {
+        "id": "040edaa0dc47e987",
+        "type": "string",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "",
+        "methods": [
+            {
+                "name": "delLeftMost",
+                "params": [
+                    {
+                        "type": "str",
+                        "value": "m"
+                    }
+                ]
+            },
+            {
+                "name": "toInteger",
+                "params": []
+            }
+        ],
+        "prop": "command.moduleid",
+        "propout": "module",
+        "object": "msg",
+        "objectout": "msg",
+        "x": 2650,
+        "y": 1400,
+        "wires": [
+            [
+                "e6fc5d99a20fa254"
+            ]
+        ]
+    },
+    {
+        "id": "e6fc5d99a20fa254",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "set lock command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-lock\"",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"action\":\"unlock\",\t   \"module\":$$.module,\t   \"slot\":$$.command.slotid,\t   \"admin\":$$._session.id}",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2850,
+        "y": 1400,
+        "wires": [
+            [
+                "61cfdf9472485877",
+                "ba868fe4f3e2569d"
+            ]
+        ],
+        "icon": "font-awesome/fa-angle-double-up"
+    },
+    {
+        "id": "a585e8cca3f81737",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "rent command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-eject\"",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"action\":\"rent\",\"admin\":$$._session.id,\"module\":\"any\",\"slot\":1,\"cmd\":\"61\"}",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2680,
+        "y": 1440,
+        "wires": [
+            [
+                "f830ef30780c8bda",
+                "61cfdf9472485877"
+            ]
+        ]
+    },
+    {
+        "id": "f830ef30780c8bda",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 356",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3130,
+        "y": 1440,
+        "wires": []
+    },
+    {
+        "id": "820b9ee666ee4240",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "eject count command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-eject\"",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\"action\":\"eject count\",\"admin\":$$._session.id,\"module\":\"any\",\"slot\":$$.command.slotid,\"cmd\":\"55\"}",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "status_en",
+                "pt": "msg",
+                "to": "\"Ejecting \"&$$.count&\" chargers from \"&$$.kiosk&\" . . .\"",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2700,
+        "y": 1080,
+        "wires": [
+            [
+                "61cfdf9472485877"
+            ]
+        ]
+    },
+    {
+        "id": "8d311d9bda437485",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "set disable command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"action\":\"disable\",\t   \"module\":\"all\",\t   \"admin\":$$._session.id\t}",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-disable\" \t",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2700,
+        "y": 1480,
+        "wires": [
+            [
+                "61cfdf9472485877"
+            ]
+        ]
+    },
+    {
+        "id": "7a0de2fd1d60f35b",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 367",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3130,
+        "y": 1640,
+        "wires": []
+    },
+    {
+        "id": "b8e638774a9aa94e",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "set enable command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"action\":\"enable\",\t   \"module\":\"all\",\t   \"admin\":$$._session.id\t}",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-disable\" \t",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2700,
+        "y": 1520,
+        "wires": [
+            [
+                "61cfdf9472485877"
+            ]
+        ]
+    },
+    {
+        "id": "7f7fadfba04301b1",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "change info command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "command.kiosk.info.lat",
+                "pt": "msg",
+                "to": "payload.lat",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "command.kiosk.info.lon",
+                "pt": "msg",
+                "to": "payload.lon",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"action\":\"infochange\",\t   \"stationid\":$$.command.stationid,\t   \"admin\":$$._session.id,\t   \"kiosk\":$$.command.kiosk\t}",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "admin/req-change",
+                "tot": "str"
+            },
+            {
+                "t": "set",
+                "p": "status_en",
+                "pt": "msg",
+                "to": "\"Please wait, changing kiosk info on station\"&$$.kiosk.stationid&\"...\"",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 3100,
+        "y": 1560,
+        "wires": [
+            [
+                "61cfdf9472485877",
+                "85b1da4a4e301669"
+            ]
+        ]
+    },
+    {
+        "id": "d7bf3a797e886c17",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "change hardware command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"action\":\"hardwarechange\",\t   \"stationid\":$$.command.stationid,\t   \"admin\":$$._session.id,\t   \"kiosk\":$$.command.kiosk\t}",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "admin/req-change",
+                "tot": "str"
+            },
+            {
+                "t": "set",
+                "p": "status_en",
+                "pt": "msg",
+                "to": "\"Please wait, changing kiosk hardware on station\"&$$.kiosk.stationid&\"...\"",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2740,
+        "y": 1640,
+        "wires": [
+            [
+                "61cfdf9472485877",
+                "7a0de2fd1d60f35b"
+            ]
+        ]
+    },
+    {
+        "id": "b4d7fc7f0c57becb",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "change UI command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"action\":\"uichange\",\t   \"stationid\":$$.command.stationid,\t   \"admin\":$$._session.id,\t   \"kiosk\":$$.command.kiosk\t}",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "admin/req-change",
+                "tot": "str"
+            },
+            {
+                "t": "set",
+                "p": "status_en",
+                "pt": "msg",
+                "to": "\"Please wait, changing kiosk UI on station\"&$$.kiosk.stationid&\"...\"",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2720,
+        "y": 1720,
+        "wires": [
+            [
+                "61cfdf9472485877",
+                "ee3749b45c4d50a4"
+            ]
+        ]
+    },
+    {
+        "id": "bd9d74e36e643cc9",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "change pricing command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"action\":\"pricechange\",\t   \"stationid\":$$.command.stationid,\t   \"admin\":$$._session.id,\t   \"kiosk\":$$.command.kiosk\t}",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "admin/req-change",
+                "tot": "str"
+            },
+            {
+                "t": "set",
+                "p": "status_en",
+                "pt": "msg",
+                "to": "\"Please wait, changing kiosk pricing on station\"&$$.kiosk.stationid&\"...\"",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2730,
+        "y": 1680,
+        "wires": [
+            [
+                "61cfdf9472485877",
+                "d408f5f409b7f2af"
+            ]
+        ]
+    },
+    {
+        "id": "ee3749b45c4d50a4",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 370",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3130,
+        "y": 1720,
+        "wires": []
+    },
+    {
+        "id": "611ff11f6f79c4fd",
+        "type": "google geocoding",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "",
+        "geocodeBy": "address",
+        "address": "",
+        "lat": "",
+        "lon": "",
+        "googleAPI": "",
+        "bounds": "",
+        "language": "",
+        "region": "",
+        "components": "",
+        "x": 2880,
+        "y": 1560,
+        "wires": [
+            [
+                "7f7fadfba04301b1"
+            ]
+        ]
+    },
+    {
+        "id": "bb19bf804d9824f7",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "set lat / lon",
+        "rules": [
+            {
+                "t": "set",
+                "p": "add",
+                "pt": "msg",
+                "to": "command.kiosk.info.stationaddress",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "zip",
+                "pt": "msg",
+                "to": "command.kiosk.info.zip",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "state",
+                "pt": "msg",
+                "to": "command.kiosk.info.state",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "city",
+                "pt": "msg",
+                "to": "command.kiosk.info.city",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "location.address",
+                "pt": "msg",
+                "to": "$join([add, city, state, zip], \" \")",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "key",
+                "pt": "msg",
+                "to": "AIzaSyChsTB3bJmtU751bAOO7NPAFY6guSRodyI",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2690,
+        "y": 1560,
+        "wires": [
+            [
+                "611ff11f6f79c4fd"
+            ]
+        ]
+    },
+    {
+        "id": "85b1da4a4e301669",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 376",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3310,
+        "y": 1560,
+        "wires": []
+    },
+    {
+        "id": "0d99f597d2b73d0d",
+        "type": "switch",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "",
+        "property": "command.autoGeocode",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "true"
+            },
+            {
+                "t": "false"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 2,
+        "x": 2530,
+        "y": 1580,
+        "wires": [
+            [
+                "bb19bf804d9824f7"
+            ],
+            [
+                "c5aeb58feaa76ff1"
+            ]
+        ]
+    },
+    {
+        "id": "c5aeb58feaa76ff1",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "change info command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"action\":\"infochange\",\t   \"stationid\":$$.command.stationid,\t   \"admin\":$$._session.id,\t   \"kiosk\":$$.command.kiosk\t}",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "admin/req-change",
+                "tot": "str"
+            },
+            {
+                "t": "set",
+                "p": "status_en",
+                "pt": "msg",
+                "to": "\"Please wait, changing kiosk info on station\"&$$.kiosk.stationid&\"...\"",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2720,
+        "y": 1600,
+        "wires": [
+            [
+                "61cfdf9472485877"
+            ]
+        ]
+    },
+    {
+        "id": "921661b7993f62ee",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "refund command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"stationid\": command.stationid,\t   \"action\": command.action,\t   \"transactionid\": command.transactionid,\t   \"amount\": command.amount,\t   \"admin\":$$._session.id\t}",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "admin/refundrequest",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2710,
+        "y": 1800,
+        "wires": [
+            [
+                "f69d05b146786bf3",
+                "61cfdf9472485877"
+            ]
+        ]
+    },
+    {
+        "id": "f69d05b146786bf3",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 382",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3130,
+        "y": 1800,
+        "wires": []
+    },
+    {
+        "id": "d408f5f409b7f2af",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 385",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3130,
+        "y": 1680,
+        "wires": []
+    },
+    {
+        "id": "e74560e19564e62f",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "send provision",
+        "rules": [
+            {
+                "t": "delete",
+                "p": "command.kiosk.stationid",
+                "pt": "msg"
+            },
+            {
+                "t": "set",
+                "p": "command.kiosk.info.lat",
+                "pt": "msg",
+                "to": "payload.lat",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "command.kiosk.info.lon",
+                "pt": "msg",
+                "to": "payload.lon",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"admin\":$$._session.id,\t   \"kiosk\":$$.command.kiosk\t}",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "admin/req-provision",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 3100,
+        "y": 1880,
+        "wires": [
+            [
+                "c764fd4360400782",
+                "61cfdf9472485877"
+            ]
+        ]
+    },
+    {
+        "id": "c764fd4360400782",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 421",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3310,
+        "y": 1880,
+        "wires": []
+    },
+    {
+        "id": "cd1c794ba121f122",
+        "type": "switch",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "",
+        "property": "command.kiosk.info.autoGeocode",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "true"
+            },
+            {
+                "t": "false"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 2,
+        "x": 2530,
+        "y": 1860,
+        "wires": [
+            [
+                "0ad09e16521d8557"
+            ],
+            [
+                "e74560e19564e62f"
+            ]
+        ]
+    },
+    {
+        "id": "0ad09e16521d8557",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "set lat / lon",
+        "rules": [
+            {
+                "t": "set",
+                "p": "add",
+                "pt": "msg",
+                "to": "command.kiosk.info.stationaddress",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "zip",
+                "pt": "msg",
+                "to": "command.kiosk.info.zip",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "state",
+                "pt": "msg",
+                "to": "command.kiosk.info.state",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "city",
+                "pt": "msg",
+                "to": "command.kiosk.info.city",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "location.address",
+                "pt": "msg",
+                "to": "$join([add, city, state, zip], \" \")",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "key",
+                "pt": "msg",
+                "to": "AIzaSyChsTB3bJmtU751bAOO7NPAFY6guSRodyI",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2690,
+        "y": 1840,
+        "wires": [
+            [
+                "8895b168829c6405"
+            ]
+        ]
+    },
+    {
+        "id": "8895b168829c6405",
+        "type": "google geocoding",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "",
+        "geocodeBy": "address",
+        "address": "",
+        "lat": "",
+        "lon": "",
+        "googleAPI": "",
+        "bounds": "",
+        "language": "",
+        "region": "",
+        "components": "",
+        "x": 2900,
+        "y": 1840,
+        "wires": [
+            [
+                "e74560e19564e62f",
+                "f12c907e0bec9dd3"
+            ]
+        ]
+    },
+    {
+        "id": "f12c907e0bec9dd3",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 423",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3130,
+        "y": 1840,
+        "wires": []
+    },
+    {
+        "id": "157f0d07e74743f6",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "APO refund command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"stationid\": command.stationid,\t   \"action\": command.action,\t   \"transactionid\": command.transactionid,\t   \"gateway\":command.gateway,\t   \"amount\": command.amount,\t   \"admin\":$$._session.id\t}",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "admin/aporefundrequest",
+                "tot": "str"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2720,
+        "y": 1760,
+        "wires": [
+            [
+                "61cfdf9472485877",
+                "d8b8f99489032db0",
+                "6931b802c114b3a7"
+            ]
+        ]
+    },
+    {
+        "id": "d8b8f99489032db0",
+        "type": "link out",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "apo refund",
+        "mode": "link",
+        "links": [
+            "0ad042076b5812e9",
+            "3f0f4dcb4d74b447"
+        ],
+        "x": 2895,
+        "y": 1720,
+        "wires": []
+    },
+    {
+        "id": "d6b858a8650fb11a",
+        "type": "switch",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "check gateway",
+        "property": "command.gateway",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "eq",
+                "v": "APOLLO",
+                "vt": "str"
+            },
+            {
+                "t": "else"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 2,
+        "x": 2520,
+        "y": 1780,
+        "wires": [
+            [
+                "157f0d07e74743f6"
+            ],
+            [
+                "921661b7993f62ee"
+            ]
+        ]
+    },
+    {
+        "id": "6931b802c114b3a7",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 472",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3130,
+        "y": 1760,
+        "wires": []
+    },
+    {
+        "id": "ba868fe4f3e2569d",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 501",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3130,
+        "y": 1400,
+        "wires": []
+    },
+    {
+        "id": "0381a37e369dc656",
+        "type": "websocket out",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "Send Confirmation to Dashboard",
+        "server": "b23552d6.06c64",
+        "client": "",
+        "x": 3600,
+        "y": 680,
+        "wires": []
+    },
+    {
+        "id": "8091f0a831ef7d3b",
+        "type": "comment",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "--- KIOSK COMMANDS ---",
+        "info": "",
+        "x": 2270,
+        "y": 640,
+        "wires": []
+    },
+    {
+        "id": "0154cce8a52a0492",
+        "type": "comment",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "--- KIOSK COMMAND RESPONSES ---",
+        "info": "",
+        "x": 3070,
+        "y": 780,
+        "wires": []
+    },
+    {
+        "id": "4b460fd7b10b6e62",
+        "type": "http in",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "POST /api/v1/command/response",
+        "url": "/api/v1/command/response",
+        "method": "post",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 3060,
+        "y": 740,
+        "wires": [
+            [
+                "7357e5e8988a8043"
+            ]
+        ]
+    },
+    {
+        "id": "2c7aacd4f6c1e597",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "hotspot command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "{\t   \"action\":\"hotspot\",\t   \"stationid\":$$.command.stationid,\t   \"admin\":$$._session.id\t}",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "topic",
+                "pt": "msg",
+                "to": "\"cmd/ck/\"&$$.command.stationid&\"/req-hotspot\"",
+                "tot": "jsonata"
+            },
+            {
+                "t": "set",
+                "p": "status_en",
+                "pt": "msg",
+                "to": "\"Please wait, turning on hotspot on\"&$$.command.stationid&\"...\"",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2510,
+        "y": 1900,
+        "wires": [
+            [
+                "61cfdf9472485877",
+                "0b562eb25cfbad69"
+            ]
+        ]
+    },
+    {
+        "id": "0b562eb25cfbad69",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 502",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 2740,
+        "y": 1900,
+        "wires": []
+    },
+    {
+        "id": "7357e5e8988a8043",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "function 56",
+        "func": "// Output 1 -> WebSocket Out (dashboard)\n// Output 2 -> HTTP Response (ACK to caller)\n\n// keep original payload to forward to dashboard\nconst forward = { ...msg };\n\n// Prepare an immediate HTTP ack\nconst ack = {\n  ...msg,\n  statusCode: 200,\n  headers: {\n    \"Content-Type\": \"application/json; charset=utf-8\"\n  },\n  payload: {\n    ok: true,\n    received: true,\n    ts: Date.now()\n  }\n};\n\n// Send to WS (output 1) and finish HTTP request (output 2)\nreturn [forward, ack];",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 3310,
+        "y": 740,
+        "wires": [
+            [
+                "0381a37e369dc656"
+            ],
+            [
+                "3ee29eb9a01f693f"
+            ]
+        ]
+    },
+    {
+        "id": "3ee29eb9a01f693f",
+        "type": "http response",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "",
+        "statusCode": "",
+        "headers": {},
+        "x": 3510,
+        "y": 880,
+        "wires": []
+    },
+    {
+        "id": "8b8b4409d885cb6a",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 524",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3620,
+        "y": 760,
+        "wires": []
+    },
+    {
+        "id": "d3682b195f091eda",
+        "type": "link in",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "link in 41",
+        "links": [
+            "cb2f0e3c71be99f6",
+            "290c37ee86d97101"
+        ],
+        "x": 3345,
+        "y": 680,
+        "wires": [
+            [
+                "0381a37e369dc656",
+                "8b8b4409d885cb6a"
+            ]
+        ]
+    },
+    {
+        "id": "9302c31f1e9c010b",
+        "type": "link in",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "IN: Auth/Error (optional monitor)",
+        "links": [
+            "cb2f0e3c71be99f6",
+            "290c37ee86d97101"
+        ],
+        "x": 3565,
+        "y": 540,
+        "wires": [
+            [
+                "0dd4908ce8d4a33d"
+            ]
+        ]
+    },
+    {
+        "id": "0dd4908ce8d4a33d",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "Debug Errors",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3690,
+        "y": 520,
+        "wires": []
+    },
+    {
+        "id": "117f4d7f7dfa4b43",
+        "type": "switch",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "",
+        "property": "command.stationid",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "cont",
+                "v": "CAB",
+                "vt": "str"
+            },
+            {
+                "t": "cont",
+                "v": "FRB",
+                "vt": "str"
+            },
+            {
+                "t": "cont",
+                "v": "USB",
+                "vt": "str"
+            },
+            {
+                "t": "else"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 4,
+        "x": 1950,
+        "y": 1360,
+        "wires": [
+            [
+                "121936a8363204a0",
+                "aa10e10cdce0f200"
+            ],
+            [
+                "121936a8363204a0",
+                "aa10e10cdce0f200"
+            ],
+            [
+                "121936a8363204a0",
+                "aa10e10cdce0f200"
+            ],
+            [
+                "116b37065d959aa4"
+            ]
+        ]
+    },
+    {
+        "id": "121936a8363204a0",
+        "type": "link out",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "new kiosk cmd",
+        "mode": "link",
+        "links": [
+            "ce73e96d279fd273",
+            "8b9fe8b7500de432"
+        ],
+        "x": 2055,
+        "y": 1280,
+        "wires": []
+    },
+    {
+        "id": "aa10e10cdce0f200",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "debug 543",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1950,
+        "y": 1000,
+        "wires": []
+    },
+    {
+        "id": "ca4ec1200a381ab5",
+        "type": "websocket in",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "WS In",
+        "server": "b23552d6.06c64",
+        "client": "",
+        "x": 1890,
+        "y": 580,
+        "wires": [
+            [
+                "0fc45bcf1a92cae9"
+            ]
+        ]
+    },
+    {
+        "id": "0fc45bcf1a92cae9",
+        "type": "json",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "Parse JSON",
+        "property": "payload",
+        "action": "",
+        "pretty": false,
+        "x": 2030,
+        "y": 580,
+        "wires": [
+            [
+                "e9111d2c1a22bb12"
+            ]
+        ]
+    },
+    {
+        "id": "e9111d2c1a22bb12",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "Parse WS Command",
+        "func": "if (msg.payload && msg.payload.type === 'command') {\n    msg.token = msg.payload.token;\n    msg.payload = msg.payload.data;\n    return msg;\n}\nreturn null;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2220,
+        "y": 580,
+        "wires": [
+            [
+                "32bbeda5576a769a"
+            ]
+        ]
+    },
+    {
+        "id": "32bbeda5576a769a",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "Save Command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "command",
+                "pt": "msg",
+                "to": "payload",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 2420,
+        "y": 580,
+        "wires": [
+            [
+                "539df3b60f672061"
+            ]
+        ]
+    },
+    {
+        "id": "539df3b60f672061",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "Prepare Firebase Verify Request",
+        "func": "if (!msg.command) {\n  msg.command = msg.payload;\n}\n\nconst token = msg.token ||\n  (msg.req?.headers?.authorization || '').replace('Bearer ', '');\n\nif (!token) {\n  node.warn('Command received with no token - ignoring');\n  return null;\n}\n\nconst cache = flow.get('tokenCache') || {};\nconst cached = cache[token];\nif (cached && cached.expires > Date.now()) {\n  msg.payload = cached.user;\n  return [msg, null];\n}\n\nmsg._fbToken = token;\nmsg.payload = { idToken: token };\nmsg.headers = { 'Content-Type': 'application/json' };\nreturn [null, msg];",
+        "outputs": 2,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2680,
+        "y": 580,
+        "wires": [
+            [
+                "9bf0dde55426461e"
+            ],
+            [
+                "aa3232c5e20e258c"
+            ]
+        ]
+    },
+    {
+        "id": "aa3232c5e20e258c",
+        "type": "http request",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "Verify with Firebase",
+        "method": "POST",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=AIzaSyDkzUHzsNx5rJCE0i-bQ_g9n0-5L4cKQh4",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": true,
+        "headers": [],
+        "x": 2930,
+        "y": 580,
+        "wires": [
+            [
+                "5e467c338517678c"
+            ]
+        ]
+    },
+    {
+        "id": "5e467c338517678c",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "Extract Firebase Claims",
+        "func": "if (!msg.payload?.users?.length) {\n  node.send([null, { ...msg, statusCode: 401, payload: { error: 'invalid_token' } }]);\n  return null;\n}\n\ntry {\n  const firebaseUser = msg.payload.users[0];\n\n  let claims = {};\n  try { claims = JSON.parse(firebaseUser.customAttributes || '{}'); } catch (_) {}\n\n  const user = {\n    uid: firebaseUser.localId || '',\n    username: claims.username || '',\n    clientId: claims.clientId || '',\n    role: claims.role || 'user',\n    commands: claims.commands || {}\n  };\n\n  const cache = flow.get('tokenCache') || {};\n  const now = Date.now();\n  cache[msg._fbToken] = { user, expires: now + (55 * 60 * 1000) };\n  Object.keys(cache).forEach((k) => {\n    if (cache[k].expires < now) delete cache[k];\n  });\n  flow.set('tokenCache', cache);\n\n  msg.payload = user;\n  return [msg, null];\n} catch (e) {\n  node.send([null, { ...msg, statusCode: 401, payload: { error: 'invalid_token' } }]);\n  return null;\n}",
+        "outputs": 2,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 3170,
+        "y": 580,
+        "wires": [
+            [
+                "9bf0dde55426461e"
+            ],
+            [
+                "290c37ee86d97101"
+            ]
+        ]
+    },
+    {
+        "id": "9bf0dde55426461e",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "Prepare Command Authorization",
+        "func": "const user = msg.payload || {};\nconst command = msg.command || {};\n\nconst ACTION_TO_PERMISSION = {\n  'eject specific': 'eject',\n  'eject all': 'eject',\n  'eject full': 'eject',\n  'eject empty': 'eject',\n  'eject locked': 'eject',\n  'eject module': 'eject',\n  'eject count': 'eject',\n  'rent': 'eject',\n  'vend': 'eject',\n  'refund': 'eject',\n  'lock slot': 'lock',\n  'unlock slot': 'lock',\n  'reboot': 'reboot',\n  'reload ui': 'reload',\n  'ngrok connect': 'connectivity',\n  'ngrok disconnect': 'connectivity',\n  'hotspot': 'connectivity',\n  'update flow': 'updates',\n  'update ui': 'updates',\n  'disable': 'disable',\n  'enable': 'disable',\n  'infochange': 'client edit',\n  'hardwarechange': 'client edit',\n  'pricechange': 'client edit',\n  'uichange': 'client edit',\n  'provision': 'edit'\n};\n\nconst requiredPerm = ACTION_TO_PERMISSION[String(command.action || '')];\nconst userCommands = user.commands || {};\nconst isAdmin = user.role === 'admin' || user.username === 'chargerent';\n\nif (!isAdmin && requiredPerm && userCommands[requiredPerm] !== true) {\n  return [null, null, { _session: msg._session, payload: { status: 'error', reason: 'Permission denied' } }];\n}\n\nif (isAdmin) {\n  return [msg, null, null];\n}\n\nconst stationid = String(command.stationid || command.kiosk?.stationid || '').trim();\nif (!stationid) {\n  return [null, null, { _session: msg._session, payload: { status: 'error', reason: 'Kiosk not found' } }];\n}\n\nmsg._authContext = {\n  user,\n  command,\n  stationid\n};\nmsg.payload = {\n  path: 'kiosks',\n  query: [{ fieldPath: 'stationid', opStr: '==', value: stationid }]\n};\nreturn [null, msg, null];",
+        "outputs": 3,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 3440,
+        "y": 520,
+        "wires": [
+            [
+                "7a3a855726118351"
+            ],
+            [
+                "aa3aea788c317f6a"
+            ],
+            [
+                "290c37ee86d97101"
+            ]
+        ]
+    },
+    {
+        "id": "aa3aea788c317f6a",
+        "type": "google-cloud-firestore",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "account": "",
+        "keyFilename": "/home/george/firestore/firestore-key.json",
+        "name": "Query kiosk in Firebase",
+        "projectId": "node-red-alerts",
+        "mode": "query",
+        "x": 3700,
+        "y": 480,
+        "wires": [
+            [
+                "3efca0244787cdc3"
+            ]
+        ]
+    },
+    {
+        "id": "3efca0244787cdc3",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "Authorize Kiosk Access",
+        "func": "const docs = Array.isArray(msg.payload) ? msg.payload : [];\nconst ctx = msg._authContext || {};\nconst user = ctx.user || {};\nconst command = ctx.command || {};\n\nif (docs.length === 0) {\n  return [null, { _session: msg._session, payload: { status: 'error', reason: 'Kiosk not found' } }];\n}\n\nconst kiosk = docs[0] || {};\nconst info = kiosk.info || {};\nconst normalize = (value) => String(value || '').trim().toLowerCase();\n\nconst userClientId = normalize(user.clientId);\nconst kioskClient = normalize(info.client || info.clientId);\nconst kioskRep = normalize(info.rep);\nconst clientMatch = !!(userClientId && (kioskClient === userClientId || kioskRep === userClientId));\n\nif (!clientMatch) {\n  return [null, { _session: msg._session, payload: { status: 'error', reason: 'Unauthorized' } }];\n}\n\nmsg.payload = user;\nmsg.command = command;\nreturn [msg, null];",
+        "outputs": 2,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 3950,
+        "y": 480,
+        "wires": [
+            [
+                "7a3a855726118351"
+            ],
+            [
+                "290c37ee86d97101"
+            ]
+        ]
+    },
+    {
+        "id": "7a3a855726118351",
+        "type": "link out",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "Send to MQTT",
+        "mode": "link",
+        "links": [
+            "bbab7e1cf351f638"
+        ],
+        "x": 4215,
+        "y": 480,
+        "wires": []
+    },
+    {
+        "id": "290c37ee86d97101",
+        "type": "link out",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "OUT: Auth/Error",
+        "mode": "link",
+        "links": [
+            "9302c31f1e9c010b",
+            "d3682b195f091eda"
+        ],
+        "x": 4215,
+        "y": 540,
+        "wires": []
+    },
+    {
+        "id": "76c85f53ada257bb",
+        "type": "websocket in",
+        "z": "09af597d0b44144e",
+        "d": true,
+        "name": "WS In",
+        "server": "b23552d6.06c64",
+        "client": "",
+        "x": 5130,
+        "y": 520,
+        "wires": [
+            [
+                "da05670361955758"
+            ]
+        ]
+    },
+    {
+        "id": "da05670361955758",
+        "type": "json",
+        "z": "09af597d0b44144e",
+        "name": "Parse JSON",
+        "property": "payload",
+        "action": "",
+        "pretty": false,
+        "x": 5270,
+        "y": 520,
+        "wires": [
+            [
+                "4e337d9aeb1e7641",
+                "23e7fbdd9ddc908d"
+            ]
+        ]
+    },
+    {
+        "id": "4e337d9aeb1e7641",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "name": "Parse WS Command",
+        "func": "if (msg.payload && msg.payload.type === 'command') {\n    // Re-structure the message for the auth flow\n    msg.token = msg.payload.token;\n    msg.payload = msg.payload.data;\n    return msg;\n}\n// If it's not a command message, stop the flow.\nreturn null;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 5460,
+        "y": 520,
+        "wires": [
+            [
+                "e8fbe4f5b2a05fc8",
+                "490d903242e6f2de"
+            ]
+        ]
+    },
+    {
+        "id": "23e7fbdd9ddc908d",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 337",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 5450,
+        "y": 560,
+        "wires": []
+    },
+    {
+        "id": "e8fbe4f5b2a05fc8",
+        "type": "change",
+        "z": "09af597d0b44144e",
+        "name": "Save Command",
+        "rules": [
+            {
+                "t": "set",
+                "p": "command",
+                "pt": "msg",
+                "to": "payload",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 5660,
+        "y": 520,
+        "wires": [
+            [
+                "cd9d634fc798c703",
+                "67b0ea012931c9b7"
+            ]
+        ]
+    },
+    {
+        "id": "490d903242e6f2de",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 338",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 5650,
+        "y": 560,
+        "wires": []
+    },
+    {
+        "id": "cd9d634fc798c703",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 339",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 5830,
+        "y": 560,
+        "wires": []
+    },
+    {
+        "id": "67b0ea012931c9b7",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "name": "Prepare Firebase Verify Request",
+        "func": "// FIX 1: Save command data BEFORE overwriting msg.payload.\n// Parse WS Command sets msg.payload = command data (stationid, action, etc.)\n// and msg.token = Firebase ID token. We must preserve the command data here\n// or it will be lost when msg.payload is overwritten for the HTTP verify call.\nif (!msg.command) {\n  msg.command = msg.payload;\n}\n\n// Token arrives from WS message (msg.token) or HTTP header\nconst token = msg.token ||\n  (msg.req?.headers?.authorization || '').replace('Bearer ', '');\n\nif (!token) {\n  // No token - log and stop. Legitimate commands always include a token.\n  node.warn('Command received with no token - ignoring');\n  return null;\n}\n\n// Check flow-level cache to avoid a Firebase round-trip on every command\nconst cache = flow.get('tokenCache') || {};\nconst cached = cache[token];\nif (cached && cached.expires > Date.now()) {\n  msg.payload = cached.user;\n  return [msg, null]; // cache hit -> output 1 (Authorize)\n}\n\nmsg._fbToken = token;\nmsg.payload = { idToken: token };\nmsg.headers = { 'Content-Type': 'application/json' };\nreturn [null, msg]; // cache miss -> output 2 (HTTP verify)\n",
+        "outputs": 2,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 5890,
+        "y": 520,
+        "wires": [
+            [
+                "4f7d2bc4490781e8"
+            ],
+            [
+                "57443771afe986cd",
+                "f35edc37eb640a8a"
+            ]
+        ]
+    },
+    {
+        "id": "4f7d2bc4490781e8",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "name": "Authorize Command",
+        "func": "const user = msg.payload;\nconst command = msg.command;\nconst allKiosks = global.get('info') || [];\n\n// Admins can do everything\nif (user.role === 'admin' || user.username === 'chargerent') {\n  return [msg, null];\n}\n\n// Map raw command action to the permission key stored in user.commands\nconst ACTION_TO_PERMISSION = {\n  'eject specific': 'eject', 'eject all': 'eject', 'eject full': 'eject',\n  'eject empty': 'eject', 'eject locked': 'eject', 'eject module': 'eject',\n  'eject count': 'eject', 'rent': 'eject', 'refund': 'eject',\n  'lock slot': 'lock', 'unlock slot': 'lock',\n  'reboot': 'reboot',\n  'reload ui': 'reload',\n  'ngrok connect': 'connectivity', 'ngrok disconnect': 'connectivity', 'hotspot': 'connectivity',\n  'update flow': 'updates', 'update ui': 'updates',\n  'disable': 'disable', 'enable': 'disable',\n  'infochange': 'client edit', 'hardwarechange': 'client edit',\n  'pricechange': 'client edit', 'uichange': 'client edit',\n  'provision': 'edit',\n};\n\nconst requiredPerm = ACTION_TO_PERMISSION[command?.action];\nconst userCommands = user.commands || {};\n\n// Check clientId matches kiosk's client or rep\nconst targetKiosk = allKiosks.find(k => k?.stationid === command?.stationid);\nconst userClientId = String(user.clientId || '').trim();\n\nif (!targetKiosk?.info) {\n  node.send([null, { _session: msg._session, payload: { status: 'error', reason: 'Kiosk not found' } }]);\n  return null;\n}\n\nconst kioskClient = String(targetKiosk.info.client || '').trim();\nconst kioskRep    = String(targetKiosk.info.rep || '').trim();\nconst clientMatch = !!(userClientId && (kioskClient === userClientId || kioskRep === userClientId));\n\nif (!clientMatch) {\n  node.send([null, { _session: msg._session, payload: { status: 'error', reason: 'Unauthorized' } }]);\n  return null;\n}\n\n// Check specific command permission\nif (requiredPerm && userCommands[requiredPerm] !== true) {\n  node.send([null, { _session: msg._session, payload: { status: 'error', reason: 'Permission denied' } }]);\n  return null;\n}\n\nreturn [msg, null];",
+        "outputs": 2,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 6640,
+        "y": 540,
+        "wires": [
+            [
+                "35438468182ceec5",
+                "d10af3a7998559ee"
+            ],
+            [
+                "cb2f0e3c71be99f6"
+            ]
+        ]
+    },
+    {
+        "id": "57443771afe986cd",
+        "type": "http request",
+        "z": "09af597d0b44144e",
+        "name": "Verify with Firebase",
+        "method": "POST",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=AIzaSyDkzUHzsNx5rJCE0i-bQ_g9n0-5L4cKQh4",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": true,
+        "headers": [],
+        "x": 6150,
+        "y": 540,
+        "wires": [
+            [
+                "74130c9b2e8361e1"
+            ]
+        ]
+    },
+    {
+        "id": "f35edc37eb640a8a",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "debug 523",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 6230,
+        "y": 640,
+        "wires": []
+    },
+    {
+        "id": "74130c9b2e8361e1",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "name": "Extract Firebase Claims",
+        "func": "// Check Firebase returned a valid user\nif (!msg.payload?.users?.length) {\n  node.send([null, { ...msg, statusCode: 401, payload: { error: 'invalid_token' } }]);\n  return null;\n}\n\ntry {\n  const firebaseUser = msg.payload.users[0];\n\n  // Custom claims are stored in customAttributes by the Firebase Admin SDK (syncCustomClaims)\n  let claims = {};\n  try { claims = JSON.parse(firebaseUser.customAttributes || '{}'); } catch (_) {}\n\n  const user = {\n    uid:      firebaseUser.localId || '',\n    username: claims.username || '',\n    clientId: claims.clientId || '',\n    role:     claims.role     || 'user',\n    commands: claims.commands || {},\n  };\n\n  // Cache for 55 min (Firebase ID tokens expire in 60 min; 5 min safety margin)\n  const cache = flow.get('tokenCache') || {};\n  const now = Date.now();\n  cache[msg._fbToken] = { user, expires: now + (55 * 60 * 1000) };\n  // Evict expired entries\n  Object.keys(cache).forEach(k => { if (cache[k].expires < now) delete cache[k]; });\n  flow.set('tokenCache', cache);\n\n  msg.payload = user;\n  return [msg, null]; // success -> output 1 (Authorize Command)\n} catch (e) {\n  node.send([null, { ...msg, statusCode: 401, payload: { error: 'invalid_token' } }]);\n  return null;\n}",
+        "outputs": 2,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 6410,
+        "y": 520,
+        "wires": [
+            [
+                "4f7d2bc4490781e8"
+            ],
+            [
+                "cb2f0e3c71be99f6"
+            ]
+        ]
+    },
+    {
+        "id": "35438468182ceec5",
+        "type": "debug",
+        "z": "09af597d0b44144e",
+        "name": "Debug Authorized",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 6930,
+        "y": 540,
+        "wires": []
+    },
+    {
+        "id": "d10af3a7998559ee",
+        "type": "link out",
+        "z": "09af597d0b44144e",
+        "name": "Send to MQTT",
+        "mode": "link",
+        "links": [
+            "bbab7e1cf351f638"
+        ],
+        "x": 6935,
+        "y": 440,
+        "wires": []
+    },
+    {
+        "id": "cb2f0e3c71be99f6",
+        "type": "link out",
+        "z": "09af597d0b44144e",
+        "name": "OUT: Auth/Error",
+        "mode": "link",
+        "links": [
+            "9302c31f1e9c010b",
+            "d3682b195f091eda"
+        ],
+        "x": 6935,
+        "y": 500,
+        "wires": []
+    },
+    {
+        "id": "8597d2b7.ba618",
+        "type": "mqtt-broker",
+        "name": "Mosquito Broker",
+        "broker": "chargerent.io",
+        "port": "1884",
+        "tls": "",
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "compatmode": false,
+        "protocolVersion": "4",
+        "keepalive": "60",
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "server",
+        "birthQos": "0",
+        "birthPayload": "Module connected",
+        "birthMsg": {},
+        "closeTopic": "server",
+        "closeQos": "0",
+        "closePayload": "Module about to disconnect",
+        "closeMsg": {},
+        "willTopic": "server",
+        "willQos": "0",
+        "willPayload": "Module disconnected",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "b23552d6.06c64",
+        "type": "websocket-listener",
+        "path": "/ws/commands/",
+        "wholemsg": "false"
+    },
+    {
+        "id": "6d3f4a6b2fd0c101",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "Prepare vend command",
+        "func": "const STORE_KEY = 'dashboardPendingVendCommands';\nconst TTL_MS = 5 * 60 * 1000;\nconst ID_MAP = {\n  'CS0001': 'USB0001',\n  'CS0002': 'CAB0001',\n  'CS0003': 'CAB0002',\n  'CS0004': 'CAB0003',\n  'CS0005': 'CAB0004',\n  'CS0006': 'CAB0005',\n  'CS0007': 'CAB0006',\n  'CS0008': 'CAB0007',\n  'CS0009': 'CAB0008',\n  'CS0010': 'CAB0009',\n  'CS0011': 'CAB0010'\n};\n\nfunction normalizeStationId(value) {\n  const stationid = String(value || '').trim();\n  return ID_MAP[stationid] || stationid;\n}\n\nfunction prune(store, now) {\n  const next = {};\n  Object.entries(store || {}).forEach(([key, queue]) => {\n    const items = Array.isArray(queue) ? queue.filter((item) => item && (now - Number(item.createdAt || 0)) < TTL_MS) : [];\n    if (items.length > 0) next[key] = items;\n  });\n  return next;\n}\n\nconst command = msg.command || {};\nconst stationidRaw = String(command.stationid || '').trim();\nconst stationid = normalizeStationId(stationidRaw);\nconst moduleid = String(command.moduleid || command.moduleId || '').trim();\nconst chargerid = Number(command.chargerid || command.sn || 0);\nconst slotValue = command.slotid ?? command.slot;\nconst slotid = Number(slotValue);\nconst now = Date.now();\nconst timerequested = Number(command.timerequested || now);\nconst sessionId = msg._session?.id || msg._session || command.admin || null;\n\nif (!stationid || !moduleid || !Number.isFinite(chargerid) || chargerid <= 0) {\n  node.error('Vend command is missing stationid, moduleid, or chargerid', msg);\n  return null;\n}\n\nif (sessionId === null || sessionId === undefined || sessionId === '') {\n  node.error('Vend command is missing websocket session context', msg);\n  return null;\n}\n\nconst requestId = String(command.requestId || `vend-${stationid}-${moduleid}-${chargerid}-${now}`).trim();\nconst pendingKey = `vend:${stationid}:${moduleid}:${chargerid}`;\nconst entry = {\n  requestId,\n  sessionId,\n  stationid,\n  stationidRaw,\n  moduleid,\n  chargerid,\n  slotid: Number.isFinite(slotid) ? slotid : null,\n  timerequested,\n  createdAt: now\n};\n\nconst store = prune(flow.get(STORE_KEY) || {}, now);\nconst queue = Array.isArray(store[pendingKey]) ? store[pendingKey] : [];\nqueue.push(entry);\nstore[pendingKey] = queue.slice(-5);\nflow.set(STORE_KEY, store);\n\nmsg.requestId = requestId;\nmsg.timerequested = timerequested;\nmsg.payload = {\n  action: 'vend',\n  stationid,\n  stationidRaw,\n  moduleid,\n  slotid: entry.slotid,\n  chargerid,\n  requestId,\n  timerequested,\n  admin: sessionId\n};\nmsg.topic = 'CSTA/get';\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2700,
+        "y": 1520,
+        "wires": [
+            [
+                "61cfdf9472485877"
+            ]
+        ]
+    },
+    {
+        "id": "6d3f4a6b2fd0c102",
+        "type": "mqtt-json",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "New kiosk confirmations",
+        "topic": "CSTA/post/+",
+        "property": "",
+        "qos": "2",
+        "broker": "8597d2b7.ba618",
+        "x": 3090,
+        "y": 620,
+        "wires": [
+            [
+                "6d3f4a6b2fd0c103"
+            ]
+        ]
+    },
+    {
+        "id": "6d3f4a6b2fd0c103",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "g": "ed38194e9a2f3014",
+        "name": "Hydrate vend confirmation",
+        "func": "const STORE_KEY = 'dashboardPendingVendCommands';\nconst RECENT_KEY = 'dashboardRecentVendConfirmations';\nconst TTL_MS = 5 * 60 * 1000;\nconst RECENT_TTL_MS = 60 * 1000;\nconst ID_MAP = {\n  'CS0001': 'USB0001',\n  'CS0002': 'CAB0001',\n  'CS0003': 'CAB0002',\n  'CS0004': 'CAB0003',\n  'CS0005': 'CAB0004',\n  'CS0006': 'CAB0005',\n  'CS0007': 'CAB0006',\n  'CS0008': 'CAB0007',\n  'CS0009': 'CAB0008',\n  'CS0010': 'CAB0009',\n  'CS0011': 'CAB0010'\n};\n\nfunction normalizeStationId(value) {\n  const stationid = String(value || '').trim();\n  return ID_MAP[stationid] || stationid;\n}\n\nfunction normalizeModuleId(value) {\n  return String(value || '').trim();\n}\n\nfunction pruneQueues(store, now) {\n  const next = {};\n  Object.entries(store || {}).forEach(([key, queue]) => {\n    const items = Array.isArray(queue) ? queue.filter((item) => item && (now - Number(item.createdAt || 0)) < TTL_MS) : [];\n    if (items.length > 0) next[key] = items;\n  });\n  return next;\n}\n\nfunction pruneRecent(store, now) {\n  const next = {};\n  Object.entries(store || {}).forEach(([key, item]) => {\n    if (item && (now - Number(item.seenAt || 0)) < RECENT_TTL_MS) {\n      next[key] = item;\n    }\n  });\n  return next;\n}\n\nfunction parseStationId(topic) {\n  const parts = String(topic || '').split('/').filter(Boolean);\n  return String(parts[2] || '').trim();\n}\n\nfunction modulesMatch(left, right) {\n  const a = normalizeModuleId(left);\n  const b = normalizeModuleId(right);\n  if (!a || !b) return false;\n  if (a === b) return true;\n  return a.replace(/^m/i, '') === b.replace(/^m/i, '');\n}\n\nfunction dequeue(store, key) {\n  const queue = Array.isArray(store[key]) ? store[key] : [];\n  const pending = queue.shift();\n  if (queue.length > 0) store[key] = queue;\n  else delete store[key];\n  return pending || null;\n}\n\nfunction findPending(store, stationid, moduleid, chargerid) {\n  const exactKey = `vend:${stationid}:${moduleid}:${chargerid}`;\n  const exactPending = dequeue(store, exactKey);\n  if (exactPending) {\n    return { pending: exactPending, key: exactKey };\n  }\n\n  const matchingKeys = Object.keys(store).filter((key) => {\n    const parts = key.split(':');\n    if (parts.length !== 4 || parts[0] !== 'vend') return false;\n    const keyStationid = normalizeStationId(parts[1]);\n    const keyModuleid = normalizeModuleId(parts[2]);\n    const keyChargerid = Number(parts[3]);\n    return keyStationid === stationid && modulesMatch(keyModuleid, moduleid) && keyChargerid === chargerid;\n  });\n\n  for (const key of matchingKeys) {\n    const pending = dequeue(store, key);\n    if (pending) return { pending, key };\n  }\n\n  const relaxedKeys = Object.keys(store).filter((key) => {\n    const parts = key.split(':');\n    if (parts.length !== 4 || parts[0] !== 'vend') return false;\n    const keyModuleid = normalizeModuleId(parts[2]);\n    const keyChargerid = Number(parts[3]);\n    return modulesMatch(keyModuleid, moduleid) && keyChargerid === chargerid;\n  });\n\n  for (const key of relaxedKeys) {\n    const pending = dequeue(store, key);\n    if (pending) return { pending, key };\n  }\n\n  return { pending: null, key: exactKey };\n}\n\nconst incoming = msg.payload || {};\nif (String(incoming.action || '').toLowerCase() !== 'vend') {\n  return null;\n}\n\nconst stationid = normalizeStationId(incoming.stationid || incoming.kiosk || parseStationId(msg.topic));\nconst moduleid = normalizeModuleId(incoming.moduleid || incoming.module);\nconst chargerid = Number(incoming.chargerid || incoming.sn || 0);\nconst now = Date.now();\n\nif (!stationid || !moduleid || !Number.isFinite(chargerid) || chargerid <= 0) {\n  node.warn('Vend confirmation missing stationid, moduleid, or chargerid');\n  return null;\n}\n\nconst recentKey = `vend:${stationid}:${moduleid}:${chargerid}`;\nconst store = pruneQueues(flow.get(STORE_KEY) || {}, now);\nconst recent = pruneRecent(flow.get(RECENT_KEY) || {}, now);\nconst match = findPending(store, stationid, moduleid, chargerid);\nconst pending = match.pending;\n\nflow.set(STORE_KEY, store);\n\nif (!pending || pending.sessionId === null || pending.sessionId === undefined || pending.sessionId === '') {\n  if (recent[recentKey]) {\n    flow.set(RECENT_KEY, recent);\n    return null;\n  }\n  node.warn(`No pending vend context for ${match.key}`);\n  return null;\n}\n\nconst status = Number(incoming.status);\nconst isSuccess = status === 1;\nrecent[recentKey] = {\n  seenAt: now,\n  requestId: pending.requestId\n};\nflow.set(RECENT_KEY, recent);\n\nmsg._session = pending.sessionId;\nmsg.payload = {\n  action: 'vend',\n  stationid,\n  moduleid,\n  slotid: pending.slotid,\n  chargerid,\n  status: incoming.status,\n  status_en: incoming.status_en || (isSuccess ? 'charger ejected' : 'charger eject failed'),\n  timerequested: pending.timerequested,\n  timeresponded: Number(incoming.timeresponded || now),\n  requestId: pending.requestId\n};\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 3340,
+        "y": 620,
+        "wires": [
+            [
+                "0381a37e369dc656"
+            ]
+        ]
+    }
+]

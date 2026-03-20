@@ -1,0 +1,351 @@
+[
+    {
+        "id": "ss-import-tab",
+        "type": "tab",
+        "label": "Send Status Firebase Only",
+        "disabled": false,
+        "info": "Importable Firebase-only status request flow for Besiter kiosks.",
+        "env": []
+    },
+    {
+        "id": "ss-import-group",
+        "type": "group",
+        "z": "ss-import-tab",
+        "name": "send status to server firebase only",
+        "style": {
+            "stroke": "#1d4ed8",
+            "fill": "#dbeafe",
+            "label": true,
+            "color": "#000000"
+        },
+        "nodes": [
+            "ss-link-in",
+            "ss-switch",
+            "ss-poll-prep",
+            "ss-poll-query",
+            "ss-poll-resolve",
+            "ss-check-modules",
+            "ss-poll-out",
+            "ss-trigger",
+            "ss-refresh-prep",
+            "ss-refresh-query",
+            "ss-refresh-resolve",
+            "ss-build-status",
+            "ss-response-out",
+            "ss-debug-request",
+            "ss-debug-response"
+        ],
+        "x": 54,
+        "y": 99,
+        "w": 1692,
+        "h": 302
+    },
+    {
+        "id": "ss-comment-1",
+        "type": "comment",
+        "z": "ss-import-tab",
+        "name": "Connect Status request input from your command flow",
+        "info": "",
+        "x": 230,
+        "y": 80,
+        "wires": []
+    },
+    {
+        "id": "ss-comment-2",
+        "type": "comment",
+        "z": "ss-import-tab",
+        "name": "Connect Module poll out to MQTT publish and Status response out to your server publish path",
+        "info": "",
+        "x": 740,
+        "y": 80,
+        "wires": []
+    },
+    {
+        "id": "ss-link-in",
+        "type": "link in",
+        "z": "ss-import-tab",
+        "g": "ss-import-group",
+        "name": "Status request input",
+        "links": [],
+        "x": 130,
+        "y": 240,
+        "wires": [
+            [
+                "ss-switch"
+            ]
+        ]
+    },
+    {
+        "id": "ss-switch",
+        "type": "switch",
+        "z": "ss-import-tab",
+        "g": "ss-import-group",
+        "name": "chk status",
+        "property": "payload.action",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "eq",
+                "v": "status",
+                "vt": "str"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 1,
+        "x": 290,
+        "y": 240,
+        "wires": [
+            [
+                "ss-poll-prep",
+                "ss-trigger",
+                "ss-debug-request"
+            ]
+        ]
+    },
+    {
+        "id": "ss-debug-request",
+        "type": "debug",
+        "z": "ss-import-tab",
+        "g": "ss-import-group",
+        "name": "status request",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "x": 500,
+        "y": 320,
+        "wires": []
+    },
+    {
+        "id": "ss-poll-prep",
+        "type": "function",
+        "z": "ss-import-tab",
+        "g": "ss-import-group",
+        "name": "Prepare Poll Query",
+        "func": "const ID_MAP = {\n    'CS0001': 'USB0001',\n    'CS0002': 'CAB0001',\n    'CS0003': 'CAB0002',\n    'CS0004': 'CAB0003',\n    'CS0005': 'CAB0004',\n    'CS0006': 'CAB0005',\n    'CS0007': 'CAB0006',\n    'CS0008': 'CAB0007',\n    'CS0009': 'CAB0008',\n    'CS0010': 'CAB0009',\n    'CS0011': 'CAB0010'\n};\n\nfunction normalizeStationId(value) {\n    const stationid = String(value || '').trim();\n    return ID_MAP[stationid] || stationid;\n}\n\nconst originalPayload = (msg.payload && typeof msg.payload === 'object')\n    ? JSON.parse(JSON.stringify(msg.payload))\n    : {};\n\nconst stationid = normalizeStationId(originalPayload.stationid || msg.stationid || msg.id || '');\nif (!stationid) {\n    node.error('No stationid provided in payload', msg);\n    return null;\n}\n\nmsg._statusRequest = originalPayload;\nmsg._statusStationId = stationid;\nmsg.payload = {\n    path: 'kiosks',\n    query: [{ fieldPath: 'stationid', opStr: '==', value: stationid }]\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 500,
+        "y": 180,
+        "wires": [
+            [
+                "ss-poll-query"
+            ]
+        ]
+    },
+    {
+        "id": "ss-poll-query",
+        "type": "google-cloud-firestore",
+        "z": "ss-import-tab",
+        "g": "ss-import-group",
+        "account": "",
+        "keyFilename": "/home/george/firestore/firestore-key.json",
+        "name": "Query kiosk for poll",
+        "projectId": "node-red-alerts",
+        "mode": "query",
+        "x": 720,
+        "y": 180,
+        "wires": [
+            [
+                "ss-poll-resolve"
+            ]
+        ]
+    },
+    {
+        "id": "ss-poll-resolve",
+        "type": "function",
+        "z": "ss-import-tab",
+        "g": "ss-import-group",
+        "name": "Resolve Kiosk For Poll",
+        "func": "const ID_MAP = {\n    'CS0001': 'USB0001',\n    'CS0002': 'CAB0001',\n    'CS0003': 'CAB0002',\n    'CS0004': 'CAB0003',\n    'CS0005': 'CAB0004',\n    'CS0006': 'CAB0005',\n    'CS0007': 'CAB0006',\n    'CS0008': 'CAB0007',\n    'CS0009': 'CAB0008',\n    'CS0010': 'CAB0009',\n    'CS0011': 'CAB0010'\n};\n\nfunction normalizeStationId(value) {\n    const stationid = String(value || '').trim();\n    return ID_MAP[stationid] || stationid;\n}\n\nconst docs = Array.isArray(msg.payload) ? msg.payload : [];\nconst stationid = normalizeStationId(msg._statusStationId || '');\nconst matched = docs.find((doc) => normalizeStationId(doc?.stationid || '') === stationid) || null;\n\nif (!matched) {\n    node.warn('No station found with stationid: ' + stationid);\n    return null;\n}\n\nmsg.kioskDoc = JSON.parse(JSON.stringify(matched));\nmsg.stationid = matched.stationid || stationid;\nmsg.payload = msg._statusRequest || {};\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 950,
+        "y": 180,
+        "wires": [
+            [
+                "ss-check-modules"
+            ]
+        ]
+    },
+    {
+        "id": "ss-check-modules",
+        "type": "function",
+        "z": "ss-import-tab",
+        "g": "ss-import-group",
+        "name": "check modules (Firebase)",
+        "func": "const station = msg.kioskDoc || {};\nconst stationId = station.stationid || msg._statusStationId || '';\nconst modules = Array.isArray(station.modules) ? station.modules : [];\n\nif (!stationId) {\n    node.error('No stationid available for module polling', msg);\n    return null;\n}\n\nif (modules.length === 0) {\n    node.warn('No modules found for stationid: ' + stationId);\n    return null;\n}\n\nmodules.forEach((mod, index) => {\n    if (!mod || !mod.id) return;\n\n    const pollMsg = {\n        topic: '/' + stationId + '/' + mod.id + '/user/get',\n        payload: { cmd: 'check_all' }\n    };\n\n    setTimeout(() => {\n        node.send(pollMsg);\n    }, index * 2000);\n});\n\nreturn null;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1190,
+        "y": 180,
+        "wires": [
+            [
+                "ss-poll-out"
+            ]
+        ]
+    },
+    {
+        "id": "ss-poll-out",
+        "type": "link out",
+        "z": "ss-import-tab",
+        "g": "ss-import-group",
+        "name": "Module poll out",
+        "mode": "link",
+        "links": [],
+        "x": 1385,
+        "y": 180,
+        "wires": []
+    },
+    {
+        "id": "ss-trigger",
+        "type": "trigger",
+        "z": "ss-import-tab",
+        "g": "ss-import-group",
+        "name": "Wait 8s",
+        "op1": "",
+        "op2": "",
+        "op1type": "nul",
+        "op2type": "pay",
+        "duration": "8",
+        "extend": false,
+        "overrideDelay": false,
+        "units": "s",
+        "reset": "",
+        "bytopic": "topic",
+        "topic": "payload.stationid",
+        "outputs": 1,
+        "x": 500,
+        "y": 260,
+        "wires": [
+            [
+                "ss-refresh-prep"
+            ]
+        ]
+    },
+    {
+        "id": "ss-refresh-prep",
+        "type": "function",
+        "z": "ss-import-tab",
+        "g": "ss-import-group",
+        "name": "Prepare Refresh Query",
+        "func": "const ID_MAP = {\n    'CS0001': 'USB0001',\n    'CS0002': 'CAB0001',\n    'CS0003': 'CAB0002',\n    'CS0004': 'CAB0003',\n    'CS0005': 'CAB0004',\n    'CS0006': 'CAB0005',\n    'CS0007': 'CAB0006',\n    'CS0008': 'CAB0007',\n    'CS0009': 'CAB0008',\n    'CS0010': 'CAB0009',\n    'CS0011': 'CAB0010'\n};\n\nfunction normalizeStationId(value) {\n    const stationid = String(value || '').trim();\n    return ID_MAP[stationid] || stationid;\n}\n\nconst originalPayload = (msg.payload && typeof msg.payload === 'object')\n    ? JSON.parse(JSON.stringify(msg.payload))\n    : {};\n\nconst stationid = normalizeStationId(originalPayload.stationid || msg.stationid || msg.id || '');\nif (!stationid) {\n    node.error('No stationid provided in payload', msg);\n    return null;\n}\n\nmsg._statusRequest = originalPayload;\nmsg._statusStationId = stationid;\nmsg.payload = {\n    path: 'kiosks',\n    query: [{ fieldPath: 'stationid', opStr: '==', value: stationid }]\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 720,
+        "y": 260,
+        "wires": [
+            [
+                "ss-refresh-query"
+            ]
+        ]
+    },
+    {
+        "id": "ss-refresh-query",
+        "type": "google-cloud-firestore",
+        "z": "ss-import-tab",
+        "g": "ss-import-group",
+        "account": "",
+        "keyFilename": "/home/george/firestore/firestore-key.json",
+        "name": "Query refreshed kiosk",
+        "projectId": "node-red-alerts",
+        "mode": "query",
+        "x": 950,
+        "y": 260,
+        "wires": [
+            [
+                "ss-refresh-resolve"
+            ]
+        ]
+    },
+    {
+        "id": "ss-refresh-resolve",
+        "type": "function",
+        "z": "ss-import-tab",
+        "g": "ss-import-group",
+        "name": "Resolve Kiosk For Response",
+        "func": "const ID_MAP = {\n    'CS0001': 'USB0001',\n    'CS0002': 'CAB0001',\n    'CS0003': 'CAB0002',\n    'CS0004': 'CAB0003',\n    'CS0005': 'CAB0004',\n    'CS0006': 'CAB0005',\n    'CS0007': 'CAB0006',\n    'CS0008': 'CAB0007',\n    'CS0009': 'CAB0008',\n    'CS0010': 'CAB0009',\n    'CS0011': 'CAB0010'\n};\n\nfunction normalizeStationId(value) {\n    const stationid = String(value || '').trim();\n    return ID_MAP[stationid] || stationid;\n}\n\nconst docs = Array.isArray(msg.payload) ? msg.payload : [];\nconst stationid = normalizeStationId(msg._statusStationId || '');\nconst matched = docs.find((doc) => normalizeStationId(doc?.stationid || '') === stationid) || null;\n\nmsg.kioskDoc = matched ? JSON.parse(JSON.stringify(matched)) : null;\nmsg.stationid = (matched && matched.stationid) || stationid;\nmsg.payload = msg._statusRequest || {};\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1190,
+        "y": 260,
+        "wires": [
+            [
+                "ss-build-status"
+            ]
+        ]
+    },
+    {
+        "id": "ss-build-status",
+        "type": "function",
+        "z": "ss-import-tab",
+        "g": "ss-import-group",
+        "name": "Build status from Firebase",
+        "func": "if (!msg.payload?.timerequested || !msg._statusStationId) {\n    node.error('Missing required fields (timerequested or stationid)', msg);\n    return null;\n}\n\nconst stationId = msg._statusStationId;\nconst station = msg.kioskDoc;\n\nif (!station) {\n    msg.payload = {\n        stationid: stationId,\n        moduleid: null,\n        action: 'status',\n        status: 'offline',\n        vendbattery: null,\n        timeresponded: Date.now(),\n        timerequested: msg.payload.timerequested\n    };\n    msg.topic = 'CSTA/post/' + stationId;\n    return msg;\n}\n\nlet latestModuleTime = 0;\nconst modules = Array.isArray(station.modules) ? station.modules : [];\nmodules.forEach((mod) => {\n    const moduleTime = new Date(mod?.lastUpdated).getTime();\n    if (!isNaN(moduleTime) && moduleTime > latestModuleTime) {\n        latestModuleTime = moduleTime;\n    }\n});\n\nlet recentModuleFound = false;\nmodules.forEach((mod) => {\n    const moduleTime = new Date(mod?.lastUpdated).getTime();\n    if (!isNaN(moduleTime) && (Date.now() - moduleTime) < 10000) {\n        recentModuleFound = true;\n    }\n});\n\nlet finalSNs = [];\nlet firstModuleId = null;\nlet vendBatteryCandidate = null;\n\nconst vendSlotStr = String(station.vendslot || '0.1');\nconst vendParts = vendSlotStr.split('.');\nconst vendModuleIndex = parseInt(vendParts[0], 10);\nconst vendSlotNumber = parseInt(vendParts[1], 10);\n\nconst globalSlots = [];\nmodules.forEach((stationModule, modIndex) => {\n    const slots = Array.isArray(stationModule?.slots) ? stationModule.slots : [];\n    slots.forEach((slot) => {\n        globalSlots.push({\n            modIndex,\n            slotPosition: Number(slot?.position)\n        });\n    });\n});\n\nglobalSlots.sort((left, right) => {\n    if (left.modIndex === right.modIndex) {\n        return left.slotPosition - right.slotPosition;\n    }\n    return left.modIndex - right.modIndex;\n});\n\nlet vendIndex = globalSlots.findIndex((slot) =>\n    slot.modIndex === vendModuleIndex && slot.slotPosition === vendSlotNumber\n);\nif (vendIndex === -1) vendIndex = 0;\n\nconst totalSlots = globalSlots.length;\nlet qualifyingSlots = [];\n\nmodules.forEach((stationModule, modIndex) => {\n    const moduleTime = new Date(stationModule?.lastUpdated).getTime();\n    const slots = Array.isArray(stationModule?.slots) ? stationModule.slots : [];\n\n    if (isNaN(moduleTime) || (Date.now() - moduleTime) >= 10000) {\n        return;\n    }\n\n    slots.forEach((slot) => {\n        const sn = Number(slot?.sn || 0);\n        const batteryLevel = Number(slot?.batteryLevel || 0);\n        if (Number(slot?.status) !== 1) return;\n        if (batteryLevel < 80) return;\n        if (!sn || sn === 0 || String(sn) === '00000000') return;\n\n        const globalIndex = globalSlots.findIndex((entry) =>\n            entry.modIndex === modIndex && entry.slotPosition === Number(slot?.position)\n        );\n\n        qualifyingSlots.push({\n            sn,\n            batteryLevel,\n            globalIndex,\n            modIndex,\n            moduleid: stationModule.id || modIndex,\n            position: Number(slot?.position)\n        });\n    });\n});\n\nlet candidateSlot = null;\nlet maxBattery = -1;\nqualifyingSlots.forEach((slot) => {\n    const distance = totalSlots > 0\n        ? ((slot.globalIndex - vendIndex) + totalSlots) % totalSlots\n        : 0;\n\n    if (distance > 0 && slot.batteryLevel > maxBattery) {\n        maxBattery = slot.batteryLevel;\n        candidateSlot = slot;\n    }\n});\n\nif (candidateSlot) {\n    vendBatteryCandidate = vendBatteryCandidate || candidateSlot;\n    firstModuleId = firstModuleId || candidateSlot.moduleid;\n    finalSNs.push(candidateSlot.sn);\n    qualifyingSlots = qualifyingSlots.filter((slot) => slot !== candidateSlot);\n}\n\nqualifyingSlots.forEach((slot) => {\n    vendBatteryCandidate = vendBatteryCandidate || slot;\n    firstModuleId = firstModuleId || slot.moduleid;\n    finalSNs.push(slot.sn);\n});\n\nconst statusValue = finalSNs.length === 0\n    ? (recentModuleFound ? 'soldout' : 'offline')\n    : finalSNs;\n\nmsg.payload = {\n    stationid: station.stationid || stationId,\n    moduleid: firstModuleId,\n    action: 'status',\n    status: statusValue,\n    vendbattery: vendBatteryCandidate ? {\n        powerlevel: vendBatteryCandidate.batteryLevel,\n        slot: vendBatteryCandidate.position,\n        sn: vendBatteryCandidate.sn\n    } : null,\n    timeresponded: Date.now(),\n    timerequested: msg.payload.timerequested\n};\nmsg.topic = 'CSTA/post/' + (station.stationid || stationId);\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1430,
+        "y": 260,
+        "wires": [
+            [
+                "ss-response-out",
+                "ss-debug-response"
+            ]
+        ]
+    },
+    {
+        "id": "ss-response-out",
+        "type": "link out",
+        "z": "ss-import-tab",
+        "g": "ss-import-group",
+        "name": "Status response out",
+        "mode": "link",
+        "links": [],
+        "x": 1645,
+        "y": 260,
+        "wires": []
+    },
+    {
+        "id": "ss-debug-response",
+        "type": "debug",
+        "z": "ss-import-tab",
+        "g": "ss-import-group",
+        "name": "status response",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "x": 1440,
+        "y": 320,
+        "wires": []
+    }
+]

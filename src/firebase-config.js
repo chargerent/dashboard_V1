@@ -2,7 +2,7 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFunctions, connectFunctionsEmulator } from "firebase/functions";
-import { getFirestore } from "firebase/firestore";
+import { initializeFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: "AIzaSyDkzUHzsNx5rJCE0i-bQ_g9n0-5L4cKQh4",
@@ -19,7 +19,26 @@ export const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
 
-export const db = getFirestore(app);
+const shouldForceLongPolling = (() => {
+  if (typeof window === "undefined") {
+    return !import.meta.env.DEV;
+  }
+
+  const forcedValue = window.localStorage.getItem("firestoreForceLongPolling");
+  if (forcedValue === "1") return true;
+  if (forcedValue === "0") return false;
+
+  return !import.meta.env.DEV;
+})();
+
+const firestoreSettings = shouldForceLongPolling ? {
+  experimentalForceLongPolling: true,
+  useFetchStreams: false,
+} : {
+  useFetchStreams: false,
+};
+
+export const db = initializeFirestore(app, firestoreSettings);
 
 // ✅ IMPORTANT: pin Functions to us-central1
 export const functions = getFunctions(app, "us-central1");
@@ -28,5 +47,5 @@ export const functions = getFunctions(app, "us-central1");
 export const FUNCTIONS_REGION = "us-central1";
 
 if (typeof window !== "undefined") {
-  window.__FIREBASE__ = { app, auth, db, functions, FUNCTIONS_REGION };
+  window.__FIREBASE__ = { app, auth, db, functions, FUNCTIONS_REGION, firestoreSettings };
 }

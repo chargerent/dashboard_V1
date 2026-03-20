@@ -1,6 +1,60 @@
 // src/utils/helpers.js
-import { httpsCallable } from "firebase/functions";
-import { functions } from "../firebase-config";
+
+const NEW_KIOSK_TYPES = new Set(['CT3', 'CT4', 'CT8', 'CT12', 'CK48']);
+const ONLINE_WINDOW_MS = 10 * 60 * 1000;
+const LEGACY_TIMESTAMP_PATTERN = /(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2}):(\d{2})/;
+const HAS_TIMEZONE_PATTERN = /(Z|[+-]\d{2}:?\d{2})$/i;
+
+const parseDashboardTimestamp = (value) => {
+    if (!value) return null;
+
+    if (value instanceof Date) {
+        return Number.isNaN(value.getTime()) ? null : value;
+    }
+
+    if (typeof value !== 'string') return null;
+
+    const normalizedValue = HAS_TIMEZONE_PATTERN.test(value) ? value : `${value}Z`;
+    let parsed = new Date(normalizedValue);
+
+    if (Number.isNaN(parsed.getTime())) {
+        const parts = value.match(LEGACY_TIMESTAMP_PATTERN);
+        if (parts) {
+            parsed = new Date(parts[3], parts[2] - 1, parts[1], parts[4], parts[5], parts[6]);
+        }
+    }
+
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const getMostRecentTimestamp = (timestamps) => {
+    const parsedDates = timestamps
+        .map(parseDashboardTimestamp)
+        .filter(Boolean);
+
+    if (parsedDates.length === 0) return null;
+
+    return new Date(Math.max(...parsedDates.map(date => date.getTime())));
+};
+
+const hasRecentTimestamp = (timestamp, referenceTime, windowMs) => {
+    const parsedTimestamp = parseDashboardTimestamp(timestamp);
+    const parsedReference = parseDashboardTimestamp(referenceTime);
+
+    if (!parsedTimestamp || !parsedReference) return false;
+
+    return parsedTimestamp.getTime() >= (parsedReference.getTime() - windowMs);
+};
+
+export const isNewSchemaKiosk = (kiosk) => {
+    if (!kiosk) return false;
+    if (kiosk.isNewSchema === true) return true;
+    return NEW_KIOSK_TYPES.has(String(kiosk.hardware?.type || '').toUpperCase());
+};
+
+export const isModuleOnline = (module, referenceTime) => (
+    hasRecentTimestamp(module?.lastUpdated, referenceTime, ONLINE_WINDOW_MS)
+);
 
 /**
  * Normalizes the raw kiosk data from the API into a more consistent and usable format.
@@ -9,34 +63,57 @@ import { functions } from "../firebase-config";
  */
 export const normalizeKioskData = (kiosks) => {
     if (!Array.isArray(kiosks)) return [];
-    
+
     return kiosks.map(kiosk => {
-        const normalizedModules = Object.values(kiosk.modules || {})
-            .filter(module => module.id && !module.id.startsWith('disabled'))
-            .map(module => {
-                let slotSource = []; // The `heartbeat` object is the reliable source for raw slot data.
-                if (module.heartbeat && typeof module.heartbeat === 'object') {
-                    slotSource = Object.entries(module.heartbeat);
-                }
+        const modulesSource = Object.values(kiosk.modules || {})
+            .filter(module => module.id && !module.id.startsWith('disabled'));
 
-                const slots = slotSource.map(([key, slotData]) => {
+        // Detect schema: new kiosks (CT3/CK48) have a `slots` array directly on the module.
+        // Old kiosks use a `heartbeat` object with raw slot data.
+        const isNewSchema = modulesSource.length > 0 && Array.isArray(modulesSource[0].slots);
+
+        const normalizedModules = modulesSource.map(module => {
+            let slots = [];
+
+            if (isNewSchema) {
+                // New schema: slots array with status/sn/lock/holeDetection fields
+                slots = (module.slots || []).map(slotData => {
+                    const hasCharger = slotData.status === 1 && slotData.sn !== 0;
+                    const chargingCurrent = slotData.chargingCurrent || 0;
+                    const isSstatError = slotData.holeDetection === 192;
+                    return {
+                        position: slotData.position,
+                        sn: hasCharger ? slotData.sn : 0,
+                        batteryLevel: hasCharger ? slotData.batteryLevel : null,
+                        chargingCurrent: chargingCurrent,
+                        isLocked: !!slotData.lock,
+                        lockReason: slotData.lockReason || '',
+                        cmos: null,
+                        sstat: hasCharger ? '0F' : '0C', // map to old convention for UI compatibility
+                        isFullNotCharging: hasCharger && slotData.batteryLevel >= 80 && chargingCurrent === 0,
+                        isSstatError: isSstatError,
+                        // Extra new-schema fields preserved for display
+                        temperature: slotData.temperature,
+                        cellVoltage: slotData.cellVoltage,
+                        cycle: slotData.cycle,
+                    };
+                });
+            } else {
+                // Old schema: heartbeat object with cid/sstat/cmos/cstate fields
+                const slotSource = module.heartbeat && typeof module.heartbeat === 'object'
+                    ? Object.entries(module.heartbeat)
+                    : [];
+
+                slots = slotSource.map(([key, slotData]) => {
                     const position = parseInt(key.replace('slot', ''), 10);
-                    // A charger is present if it has a readable CID, or if voltage (cap) is non-zero.
-                    // Voltage catches real chargers whose SN chip is unreadable (cid stays 0000000000)
-                    // but are electrically confirmed present (e.g. cap=4180mV, batlvl=100).
-                    const hasCid = slotData && slotData.cid && slotData.cid !== '0000000000' && slotData.cid !== '0';
-                    const capValue = parseInt(slotData?.cap, 10);
-                    const hasVoltage = !isNaN(capValue) && capValue > 0;
-                    const hasCharger = hasCid || hasVoltage;
-
-                    const isSstatError = slotData.sstat === '0F' && !hasCharger;
+                    const hasCharger = slotData && slotData.cid && slotData.cid !== '0000000000' && slotData.cid !== '0';
+                    const isSstatError = slotData.sstat === '0F' && (!slotData.cid || slotData.cid === '0000000000');
                     const cmos = hasCharger ? slotData.cmos : null;
                     const chargingCurrent = hasCharger ? parseInt(slotData.cstate, 10) : 0;
-
                     return {
                         position: position,
                         sn: hasCharger ? slotData.cid : 0,
-                        batteryLevel: hasCharger ? slotData.batlvl : null, // Correctly set to null for empty slots
+                        batteryLevel: hasCharger ? slotData.batlvl : null,
                         chargingCurrent: chargingCurrent,
                         isLocked: !!(module.lock && module.lock[`slot${position}`]),
                         lockReason: (module.lock && module.lock[`info${position}`]) || '',
@@ -46,28 +123,57 @@ export const normalizeKioskData = (kiosks) => {
                         isSstatError: isSstatError,
                     };
                 });
-                return {
-                    id: module.id,
-                    lastUpdated: kiosk.timestamp,
-                    slots: slots, 
-                    output: module.output,
-                    heartbeat: module.heartbeat, // Keep the original heartbeat data
-                };
-            });
+            }
+
+            const lastUpdated = module.lastUpdated || kiosk.timestamp;
+            return {
+                id: module.id,
+                lastUpdated,
+                slots,
+                output: module.output,
+                heartbeat: module.heartbeat,
+                isNewSchema,
+            };
+        });
+
+        const lastUpdated = getMostRecentTimestamp([
+            kiosk.timestamp,
+            ...normalizedModules.map(module => module.lastUpdated),
+        ])?.toISOString() || kiosk.timestamp || modulesSource[0]?.lastUpdated || null;
+
+        // Infer hardware.type for new-schema kiosks that don't have it set (e.g. migrated V2 kiosks)
+        let hardware = kiosk.hardware || {};
+        if (isNewSchema && !hardware.type) {
+            const totalSlots = normalizedModules.reduce((sum, m) => sum + m.slots.length, 0);
+            hardware = { ...hardware, type: totalSlots >= 20 ? 'CK48' : 'CT3' };
+        }
+
+        const configuredPower = Number(hardware?.power);
+        const fullThreshold = Number.isFinite(configuredPower) ? configuredPower : 80;
+        const derivedCount = normalizedModules.reduce((sum, module) => (
+            sum + module.slots.filter(slot => (
+                slot.sn &&
+                slot.sn !== 0 &&
+                !slot.isLocked &&
+                typeof slot.batteryLevel === 'number' &&
+                slot.batteryLevel >= fullThreshold
+            )).length
+        ), 0);
+        const kioskCount = Number(kiosk.count);
 
         return {
             stationid: kiosk.stationid,
             provisionid: kiosk.provisionid,
-            hardware: kiosk.hardware ? { ...kiosk.hardware, power: kiosk.hardware.power != null ? Number(kiosk.hardware.power) : undefined } : {},
+            hardware,
             info: {
                 location: kiosk.info?.location || '',
                 place: kiosk.info?.place || '',
-                stationaddress: kiosk.info?.stationaddress || '',
+                stationaddress: kiosk.info?.stationaddress || kiosk.info?.address || '',
                 city: kiosk.info?.city || '',
                 state: kiosk.info?.state || '',
                 zip: kiosk.info?.zip || '',
                 country: kiosk.info?.country || '',
-                client: kiosk.info?.client || '',
+                client: kiosk.info?.client || kiosk.info?.clientId || '',
                 group: kiosk.info?.group || '',
                 locationtype: kiosk.info?.locationtype || '',
                 lat: kiosk.info?.lat || null,
@@ -79,47 +185,20 @@ export const normalizeKioskData = (kiosks) => {
             },
             pricing: kiosk.pricing || {},
             ui: kiosk.ui || {},
-            modules: normalizedModules.sort((a,b) => a.id.localeCompare(b.id)),
+            modules: normalizedModules.sort((a, b) => a.id.localeCompare(b.id)),
             uistate: kiosk.uistate,
-            lastUpdated: kiosk.timestamp,
+            lastUpdated,
             active: kiosk.active !== false,
-            count: kiosk.count,
+            count: Number.isFinite(kioskCount) ? kioskCount : derivedCount,
             ngrok: !!kiosk.ngrok,
             ssh: !!kiosk.ssh,
             fversion: kiosk.fversion,
             uiVersion: kiosk.ui?.version,
             disabled: kiosk.disabled,
             status: kiosk.status,
+            isNewSchema,
         };
     });
-};
-
-/**
- * Parses a kiosk timestamp string into a Date object.
- * Supports two formats produced by the backend:
- *   - ISO 8601: "2024-11-15T10:30:00" (with or without Z / offset)
- *   - Legacy:   "15/11/2024 10:30:00" (DD/MM/YYYY HH:mm:ss, assumed UTC)
- * Returns null and logs a warning for any unrecognised format.
- */
-const parseKioskTimestamp = (raw) => {
-    if (!raw || typeof raw !== 'string') return null;
-
-    // ISO 8601 — append Z if no timezone info so Date treats it as UTC
-    const isoCandidate = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(raw)
-        ? new Date(raw.endsWith('Z') || raw.includes('+') ? raw : raw + 'Z')
-        : null;
-    if (isoCandidate && !isNaN(isoCandidate.getTime())) return isoCandidate;
-
-    // Legacy DD/MM/YYYY HH:mm:ss — build an explicit UTC date to avoid local-timezone shifts
-    const legacyParts = raw.match(/^(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2}):(\d{2})$/);
-    if (legacyParts) {
-        const [, dd, mm, yyyy, hh, min, ss] = legacyParts;
-        const legacyCandidate = new Date(Date.UTC(+yyyy, +mm - 1, +dd, +hh, +min, +ss));
-        if (!isNaN(legacyCandidate.getTime())) return legacyCandidate;
-    }
-
-    console.warn(`[parseKioskTimestamp] Unrecognised timestamp format: "${raw}"`);
-    return null;
 };
 
 /**
@@ -129,14 +208,15 @@ const parseKioskTimestamp = (raw) => {
  * @returns {boolean} - True if the kiosk is online, false otherwise.
  */
 export const isKioskOnline = (kiosk, referenceTime) => {
-    if (!kiosk.lastUpdated || !referenceTime) return false;
+    if (!referenceTime) return false;
 
-    const referenceDate = new Date(referenceTime.endsWith('Z') ? referenceTime : referenceTime + 'Z');
-    const kioskDate = parseKioskTimestamp(kiosk.lastUpdated);
-    if (!kioskDate) return false;
+    if (isNewSchemaKiosk(kiosk)) {
+        const modules = Array.isArray(kiosk?.modules) ? kiosk.modules : [];
+        if (modules.length === 0) return false;
+        return modules.some(module => isModuleOnline(module, referenceTime));
+    }
 
-    const fiveMinutesAgo = new Date(referenceDate.getTime() - 5 * 60 * 1000);
-    return kioskDate > fiveMinutesAgo;
+    return hasRecentTimestamp(kiosk?.lastUpdated, referenceTime, ONLINE_WINDOW_MS);
 };
 
 /**
@@ -146,14 +226,7 @@ export const isKioskOnline = (kiosk, referenceTime) => {
  * @returns {boolean} - True if the kiosk is active, false otherwise.
  */
 export const isKioskActive = (kiosk, referenceTime) => {
-    if (!kiosk.lastUpdated || !referenceTime) return false;
-
-    const referenceDate = new Date(referenceTime.endsWith('Z') ? referenceTime : referenceTime + 'Z');
-    const kioskDate = parseKioskTimestamp(kiosk.lastUpdated);
-    if (!kioskDate) return false;
-
-    const tenDaysAgo = new Date(referenceDate.getTime() - 10 * 24 * 60 * 60 * 1000);
-    return kioskDate > tenDaysAgo;
+    return hasRecentTimestamp(kiosk?.lastUpdated, referenceTime, 10 * 24 * 60 * 60 * 1000);
 };
 /**
  * Fetches coordinates for a given address using Google Geocoding API.
@@ -161,15 +234,32 @@ export const isKioskActive = (kiosk, referenceTime) => {
  * @returns {Promise<Object|null>} - A promise that resolves to an object with lat and lon, or null.
  */
 export const geocodeAddress = async (addressComponents) => {
-    const { stationaddress, city } = addressComponents;
-    if (!stationaddress || !city) return null;
+    const { stationaddress, city, state, zip } = addressComponents;
+    if (!stationaddress || !city) {
+        return null;
+    }
+
+    const addressString = `${stationaddress}, ${city}, ${state} ${zip}`.trim();
+    // TODO: This key should not be exposed on the client side.
+    // It should be moved to a backend environment variable and accessed
+    // via a dedicated API endpoint on your server.
+    const apiKey = 'AIzaSyB267y0CtDdNwn8aZr-1SWN1TDNgVlzxK8';
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(addressString)}&key=${apiKey}`;
 
     try {
-        const fn = httpsCallable(functions, "geocodeAddress");
-        const result = await fn(addressComponents);
-        return result.data.location ?? null; // { lat, lng } or null
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`Geocoding request failed with status ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (data.status === 'OK' && data.results[0]) {
+            return data.results[0].geometry.location; // { lat, lng: lon }
+        }
+        console.error('Geocoding API did not return OK:', data.status, data.error_message);
+        return null;
     } catch (error) {
-        console.error("Geocoding error:", error);
+        console.error('Geocoding API error:', error);
         return null;
     }
 };

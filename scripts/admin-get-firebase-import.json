@@ -1,0 +1,434 @@
+[
+    {
+        "id": "agfb-tab",
+        "type": "tab",
+        "label": "Admin Get Firebase Only",
+        "disabled": false,
+        "info": "Firebase-only rewrite of admin/get control and get_info snapshot flow.",
+        "env": []
+    },
+    {
+        "id": "agfb-group",
+        "type": "group",
+        "z": "agfb-tab",
+        "name": "admin/get firebase only",
+        "style": {
+            "stroke": "#1d4ed8",
+            "fill": "#dbeafe",
+            "label": true,
+            "color": "#000000"
+        },
+        "nodes": [
+            "agfb-in",
+            "agfb-debug-in",
+            "agfb-switch",
+            "agfb-lock-prep",
+            "agfb-lock-query",
+            "agfb-lock-build",
+            "agfb-lock-set",
+            "agfb-lock-debug",
+            "agfb-lock-downstream",
+            "agfb-lock-out",
+            "agfb-hq-prep",
+            "agfb-kiosk-query",
+            "agfb-pending-prep",
+            "agfb-pending-query",
+            "agfb-hq-build",
+            "agfb-hq-debug",
+            "agfb-out"
+        ],
+        "x": 44,
+        "y": 79,
+        "w": 1942,
+        "h": 302
+    },
+    {
+        "id": "agfb-comment-1",
+        "type": "comment",
+        "z": "agfb-tab",
+        "name": "MQTT admin/get in, Firebase kiosk snapshot out",
+        "info": "",
+        "x": 220,
+        "y": 60,
+        "wires": []
+    },
+    {
+        "id": "agfb-comment-2",
+        "type": "comment",
+        "z": "agfb-tab",
+        "name": "Connect Downstream lock command out to your existing kiosk lock/unlock flow",
+        "info": "",
+        "x": 840,
+        "y": 60,
+        "wires": []
+    },
+    {
+        "id": "agfb-broker",
+        "type": "mqtt-broker",
+        "name": "",
+        "broker": "http://34.56.244.66/",
+        "port": "1883",
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": "4",
+        "keepalive": "60",
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "agfb-in",
+        "type": "mqtt-json",
+        "z": "agfb-tab",
+        "g": "agfb-group",
+        "name": "admin/get",
+        "topic": "admin/get",
+        "property": "",
+        "qos": "2",
+        "broker": "agfb-broker",
+        "x": 150,
+        "y": 220,
+        "wires": [
+            [
+                "agfb-switch",
+                "agfb-debug-in"
+            ]
+        ]
+    },
+    {
+        "id": "agfb-debug-in",
+        "type": "debug",
+        "z": "agfb-tab",
+        "g": "agfb-group",
+        "name": "admin/get in",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "x": 330,
+        "y": 300,
+        "wires": []
+    },
+    {
+        "id": "agfb-switch",
+        "type": "switch",
+        "z": "agfb-tab",
+        "g": "agfb-group",
+        "name": "cmd switch",
+        "property": "payload.cmd",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "eq",
+                "v": "lock",
+                "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "unlock",
+                "vt": "str"
+            },
+            {
+                "t": "else"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 3,
+        "x": 340,
+        "y": 220,
+        "wires": [
+            [
+                "agfb-lock-prep"
+            ],
+            [
+                "agfb-lock-prep"
+            ],
+            [
+                "agfb-hq-prep"
+            ]
+        ]
+    },
+    {
+        "id": "agfb-lock-prep",
+        "type": "function",
+        "z": "agfb-tab",
+        "g": "agfb-group",
+        "name": "Prepare lock query",
+        "func": "const payload = (msg.payload && typeof msg.payload === 'object') ? msg.payload : {};\nconst stationid = String(payload.stationid || '').trim();\nconst moduleId = String(payload.moduleId || payload.moduleid || '').trim();\nconst slot = Number(payload.slot);\nconst cmd = String(payload.cmd || '').trim().toLowerCase();\n\nif (!stationid || !moduleId || !Number.isFinite(slot)) {\n    node.error('Lock/unlock payload must include stationid, moduleId, and slot', msg);\n    return null;\n}\n\nmsg._adminPayload = JSON.parse(JSON.stringify(payload));\nmsg._lockContext = {\n    stationid,\n    moduleId,\n    slot,\n    explicitLock: cmd === 'lock' ? true : (cmd === 'unlock' ? false : null),\n    lockReason: typeof payload.info === 'string' ? payload.info : (payload.lockReason || '')\n};\n\nmsg.payload = {\n    path: 'kiosks',\n    query: [{ fieldPath: 'stationid', opStr: '==', value: stationid }]\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 560,
+        "y": 160,
+        "wires": [
+            [
+                "agfb-lock-query"
+            ]
+        ]
+    },
+    {
+        "id": "agfb-lock-query",
+        "type": "google-cloud-firestore",
+        "z": "agfb-tab",
+        "g": "agfb-group",
+        "name": "Query kiosk for lock",
+        "account": "",
+        "keyFilename": "/home/george/firestore/firestore-key.json",
+        "projectId": "node-red-alerts",
+        "mode": "query",
+        "x": 770,
+        "y": 160,
+        "wires": [
+            [
+                "agfb-lock-build"
+            ]
+        ]
+    },
+    {
+        "id": "agfb-lock-build",
+        "type": "function",
+        "z": "agfb-tab",
+        "g": "agfb-group",
+        "name": "Apply lock in Firebase",
+        "func": "const docs = Array.isArray(msg.payload) ? msg.payload : [];\nconst ctx = msg._lockContext;\n\nif (!ctx) {\n    node.error('Missing msg._lockContext', msg);\n    return null;\n}\n\nif (docs.length === 0) {\n    node.error('No kiosk found for stationid: ' + ctx.stationid, msg);\n    return null;\n}\n\nfunction moduleMatches(left, right) {\n    const a = String(left || '').trim();\n    const b = String(right || '').trim();\n    if (!a || !b) return false;\n    if (a === b) return true;\n    return ('1000' + a) === b || a === b.replace(/^1000/, '');\n}\n\nfunction chargingCurrent(slot) {\n    return Number(slot?.chargingCurrent ?? slot?.chargeCurrent ?? 0);\n}\n\nconst doc = JSON.parse(JSON.stringify(docs[0]));\nconst provisionid = String(doc.provisionid || '').trim();\nif (!provisionid) {\n    node.error('Kiosk document is missing provisionid', msg);\n    return null;\n}\n\nconst modules = Array.isArray(doc.modules) ? doc.modules : [];\nconst targetModule = modules.find((mod) => moduleMatches(mod?.id, ctx.moduleId));\nif (!targetModule) {\n    node.error('Module not found for moduleId: ' + ctx.moduleId, msg);\n    return null;\n}\n\nconst slots = Array.isArray(targetModule.slots) ? targetModule.slots : [];\nconst targetSlot = slots.find((slot) => Number(slot?.position) === ctx.slot);\nif (!targetSlot) {\n    node.error('Slot not found for moduleId ' + ctx.moduleId + ' slot ' + ctx.slot, msg);\n    return null;\n}\n\nconst nextLock = ctx.explicitLock === null ? !Boolean(targetSlot.lock) : ctx.explicitLock;\ntargetSlot.lock = nextLock;\nif (nextLock) {\n    targetSlot.lockReason = ctx.lockReason || targetSlot.lockReason || '';\n} else {\n    delete targetSlot.lockReason;\n}\n\nconst configuredPower = Number(doc.hardware?.power);\nconst fullThreshold = Number.isFinite(configuredPower) ? configuredPower : 80;\nlet count = 0;\nlet slotscount = 0;\nlet lockcount = 0;\nlet total = 0;\nlet full = 0;\nlet empty = 0;\nlet slotCount = 0;\nlet charging = 0;\n\nmodules.forEach((mod) => {\n    const modSlots = Array.isArray(mod?.slots) ? mod.slots : [];\n    mod.lock = modSlots.reduce((sum, entry) => sum + (entry?.lock ? 1 : 0), 0);\n    slotscount += modSlots.length;\n    lockcount += mod.lock;\n\n    mod.total = 0;\n    mod.full = 0;\n    mod.empty = 0;\n    mod.slot = 0;\n    mod.charging = 0;\n\n    modSlots.forEach((entry) => {\n        const status = Number(entry?.status);\n        const batteryLevel = Number(entry?.batteryLevel || 0);\n        const sn = Number(entry?.sn || 0);\n        const isCharging = chargingCurrent(entry) > 0;\n\n        if (status === 1) {\n            total += 1;\n            mod.total += 1;\n            if (batteryLevel >= fullThreshold) {\n                full += 1;\n                mod.full += 1;\n                if (!entry?.lock && sn !== 0) count += 1;\n            } else {\n                empty += 1;\n                mod.empty += 1;\n            }\n        } else if (status === 0) {\n            slotCount += 1;\n            mod.slot += 1;\n        }\n\n        if (isCharging) {\n            charging += 1;\n            mod.charging += 1;\n        }\n    });\n});\n\nconst nowIso = new Date().toISOString();\nmsg._adminPayload = msg._adminPayload || {};\nmsg.payload = {\n    path: 'kiosks/' + provisionid,\n    content: {\n        modules,\n        count,\n        slotscount,\n        lockcount,\n        zerocount: Number(doc.zerocount || 0),\n        chargers: count === 0 ? 'soldout' : count,\n        total,\n        full,\n        empty,\n        slot: slotCount,\n        charging,\n        lastUpdate: nowIso,\n        timestamp: nowIso\n    }\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 990,
+        "y": 160,
+        "wires": [
+            [
+                "agfb-lock-set"
+            ]
+        ]
+    },
+    {
+        "id": "agfb-lock-set",
+        "type": "google-cloud-firestore",
+        "z": "agfb-tab",
+        "g": "agfb-group",
+        "name": "Update lock in Firebase",
+        "account": "",
+        "keyFilename": "/home/george/firestore/firestore-key.json",
+        "projectId": "node-red-alerts",
+        "mode": "update",
+        "x": 1210,
+        "y": 160,
+        "wires": [
+            [
+                "agfb-lock-downstream",
+                "agfb-lock-debug"
+            ]
+        ]
+    },
+    {
+        "id": "agfb-lock-debug",
+        "type": "debug",
+        "z": "agfb-tab",
+        "g": "agfb-group",
+        "name": "lock Firebase write",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "x": 1240,
+        "y": 100,
+        "wires": []
+    },
+    {
+        "id": "agfb-lock-downstream",
+        "type": "function",
+        "z": "agfb-tab",
+        "g": "agfb-group",
+        "name": "Prepare downstream lock command",
+        "func": "msg.payload = msg._adminPayload || msg.payload || {};\nmsg.id = msg.payload.stationid;\nmsg.module = msg.payload.moduleId || msg.payload.moduleid;\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1450,
+        "y": 160,
+        "wires": [
+            [
+                "agfb-lock-out"
+            ]
+        ]
+    },
+    {
+        "id": "agfb-lock-out",
+        "type": "link out",
+        "z": "agfb-tab",
+        "g": "agfb-group",
+        "name": "Downstream lock command out",
+        "mode": "link",
+        "links": [],
+        "x": 1685,
+        "y": 160,
+        "wires": []
+    },
+    {
+        "id": "agfb-hq-prep",
+        "type": "function",
+        "z": "agfb-tab",
+        "g": "agfb-group",
+        "name": "Prepare kiosk list query",
+        "func": "msg._adminPayload = (msg.payload && typeof msg.payload === 'object')\n    ? JSON.parse(JSON.stringify(msg.payload))\n    : {};\n\nmsg.payload = {\n    path: 'kiosks',\n    query: []\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 560,
+        "y": 260,
+        "wires": [
+            [
+                "agfb-kiosk-query"
+            ]
+        ]
+    },
+    {
+        "id": "agfb-kiosk-query",
+        "type": "google-cloud-firestore",
+        "z": "agfb-tab",
+        "g": "agfb-group",
+        "name": "Query kiosks",
+        "account": "",
+        "keyFilename": "/home/george/firestore/firestore-key.json",
+        "projectId": "node-red-alerts",
+        "mode": "query",
+        "x": 770,
+        "y": 260,
+        "wires": [
+            [
+                "agfb-pending-prep"
+            ]
+        ]
+    },
+    {
+        "id": "agfb-pending-prep",
+        "type": "function",
+        "z": "agfb-tab",
+        "g": "agfb-group",
+        "name": "Prepare pending query",
+        "func": "msg._hqKiosks = Array.isArray(msg.payload) ? JSON.parse(JSON.stringify(msg.payload)) : [];\nmsg.payload = {\n    path: 'pending',\n    query: []\n};\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 980,
+        "y": 260,
+        "wires": [
+            [
+                "agfb-pending-query"
+            ]
+        ]
+    },
+    {
+        "id": "agfb-pending-query",
+        "type": "google-cloud-firestore",
+        "z": "agfb-tab",
+        "g": "agfb-group",
+        "name": "Query pending modules",
+        "account": "",
+        "keyFilename": "/home/george/firestore/firestore-key.json",
+        "projectId": "node-red-alerts",
+        "mode": "query",
+        "x": 1210,
+        "y": 260,
+        "wires": [
+            [
+                "agfb-hq-build"
+            ]
+        ]
+    },
+    {
+        "id": "agfb-hq-build",
+        "type": "function",
+        "z": "agfb-tab",
+        "g": "agfb-group",
+        "name": "Build HQ info from Firebase",
+        "func": "function chargingCurrent(slot) {\n    return Number(slot?.chargingCurrent ?? slot?.chargeCurrent ?? 0);\n}\n\nconst kiosks = Array.isArray(msg._hqKiosks) ? msg._hqKiosks : [];\nconst pendingModules = Array.isArray(msg.payload) ? msg.payload : [];\nconst adminPayload = msg._adminPayload || {};\nconst chargers = [];\n\nkiosks.forEach((kiosk) => {\n    const stationId = String(kiosk?.stationid || '').trim();\n    const modules = Array.isArray(kiosk?.modules) ? kiosk.modules : [];\n    const location = kiosk?.info?.location || '';\n    const place = kiosk?.info?.place || '';\n\n    modules.forEach((module) => {\n        const moduleId = String(module?.id || '').trim();\n        const slots = Array.isArray(module?.slots) ? module.slots : [];\n        const lastUpdated = module?.lastUpdated || kiosk?.lastUpdate || kiosk?.timestamp || null;\n\n        slots.forEach((slot) => {\n            const sn = Number(slot?.sn || 0);\n            if (!sn) return;\n\n            const batteryLevel = Number(slot?.batteryLevel || 0);\n            const current = chargingCurrent(slot);\n            chargers.push({\n                sn,\n                position: Number(slot?.position || 0),\n                state: batteryLevel >= 80 ? 'available' : 'pending',\n                dischargeCurrent: Number(slot?.dischargeCurrent || 0),\n                cellVoltage: Number(slot?.cellVoltage || 0),\n                areaCode: Number(slot?.areaCode || 0),\n                batteryLevel,\n                temperature: Number(slot?.temperature || 0),\n                chargeVoltage: Number(slot?.chargeVoltage ?? slot?.chargingVoltage ?? 0),\n                chargeCurrent: current,\n                chargingVoltage: Number(slot?.chargingVoltage ?? slot?.chargeVoltage ?? 0),\n                chargingCurrent: current,\n                softwareVersion: Number(slot?.softwareVersion || 0),\n                holeDetection: Number(slot?.holeDetection || 0),\n                moduleId,\n                stationId,\n                rented: Boolean(slot?.rented),\n                cycle: Number(slot?.cycle || 0),\n                lastUpdated,\n                location,\n                place,\n                lock: Boolean(slot?.lock),\n                isCharging: current > 0\n            });\n        });\n    });\n});\n\nmsg.topic = 'admin/receive';\nmsg.payload = {\n    action: 'get_info',\n    admin: adminPayload.admin,\n    hq_info: {\n        stations: kiosks,\n        pending_modules: pendingModules,\n        chargers\n    }\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1450,
+        "y": 260,
+        "wires": [
+            [
+                "agfb-out",
+                "agfb-hq-debug"
+            ]
+        ]
+    },
+    {
+        "id": "agfb-hq-debug",
+        "type": "debug",
+        "z": "agfb-tab",
+        "g": "agfb-group",
+        "name": "admin/receive out",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "x": 1460,
+        "y": 320,
+        "wires": []
+    },
+    {
+        "id": "agfb-out",
+        "type": "mqtt out",
+        "z": "agfb-tab",
+        "g": "agfb-group",
+        "name": "admin/receive",
+        "topic": "",
+        "qos": "2",
+        "retain": "false",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "agfb-broker",
+        "x": 1680,
+        "y": 260,
+        "wires": []
+    }
+]

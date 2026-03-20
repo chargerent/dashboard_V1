@@ -12,69 +12,71 @@ self.addEventListener('activate', (event) => {
 // ------------------------------------------------------
 // 1️⃣ Unified Push Notification Handler
 // ------------------------------------------------------
-self.addEventListener('push', async (event) => {
-  console.log('[SW] Push event received.');
+self.addEventListener('push', (event) => {
+  event.waitUntil((async () => {
+    console.log('[SW] Push event received.');
 
-  // --- Optional Hard Filter: ignore stray Firebase or duplicate messages ---
-  try {
-    const rawText = event.data?.text?.() || '';
-    if (rawText.includes('"FCM_MSG"') || rawText.includes('fcmOptions')) {
-      console.log('[SW] Ignored Firebase synthetic duplicate push');
+    // --- Optional Hard Filter: ignore stray Firebase or duplicate messages ---
+    try {
+      const rawText = event.data?.text?.() || '';
+      if (rawText.includes('"FCM_MSG"') || rawText.includes('fcmOptions')) {
+        console.log('[SW] Ignored Firebase synthetic duplicate push');
+        return;
+      }
+    } catch (e) {
+      console.warn('[SW] Hard filter check failed:', e);
+    }
+
+    // --- Parse incoming data safely ---
+    let data = {};
+    try {
+      data = event.data ? event.data.json() : {};
+    } catch {
+      console.warn('[SW] Could not parse push data.');
+    }
+
+    const title = data?.notification?.title || data?.title || 'Chargerent Dashboard';
+    const body = data?.notification?.body || data?.body || 'You have a new notification.';
+    const key = `${title}:${body}`;
+
+    // --- Prevent showing duplicates already visible ---
+    const alreadyDisplayed = await self.registration.getNotifications().then((n) =>
+      n.some((x) => x.title === title && x.body === body)
+    );
+    if (alreadyDisplayed) {
+      console.log('[SW] Notification already displayed — skipping duplicate.');
       return;
     }
-  } catch (e) {
-    console.warn('[SW] Hard filter check failed:', e);
-  }
 
-  // --- Parse incoming data safely ---
-  let data = {};
-  try {
-    data = event.data ? event.data.json() : {};
-  } catch {
-    console.warn('[SW] Could not parse push data.');
-  }
+    // --- Skip rapid duplicates (within 4 seconds) ---
+    if (self.lastPushKey === key && Date.now() - self.lastPushTime < 4000) {
+      console.log('[SW] Rapid duplicate — skipping.');
+      return;
+    }
+    self.lastPushKey = key;
+    self.lastPushTime = Date.now();
 
-  const title = data?.notification?.title || data?.title || 'Chargerent Dashboard';
-  const body = data?.notification?.body || data?.body || 'You have a new notification.';
-  const key = `${title}:${body}`;
+    const icon = data?.notification?.icon || data?.icon || '/portal/logo.png';
+    const image = data?.notification?.image;
+    const clickUrl =
+      data?.notification?.click_action ||
+      data?.data?.url ||
+      'https://chargerentstations.com/portal/';
 
-  // --- Prevent showing duplicates already visible ---
-  const alreadyDisplayed = await self.registration.getNotifications().then((n) =>
-    n.some((x) => x.title === title && x.body === body)
-  );
-  if (alreadyDisplayed) {
-    console.log('[SW] Notification already displayed — skipping duplicate.');
-    return;
-  }
+    const options = {
+      body,
+      icon,
+      image,
+      badge: '/portal/pwa-192x192.png',
+      vibrate: [200, 100, 200],
+      requireInteraction: false,
+      data: { url: clickUrl },
+      tag: key, // Helps merge duplicates on Android
+    };
 
-  // --- Skip rapid duplicates (within 4 seconds) ---
-  if (self.lastPushKey === key && Date.now() - self.lastPushTime < 4000) {
-    console.log('[SW] Rapid duplicate — skipping.');
-    return;
-  }
-  self.lastPushKey = key;
-  self.lastPushTime = Date.now();
-
-  const icon = data?.notification?.icon || data?.icon || '/portal/logo.png';
-  const image = data?.notification?.image;
-  const clickUrl =
-    data?.notification?.click_action ||
-    data?.data?.url ||
-    'https://chargerentstations.com/portal/';
-
-  const options = {
-    body,
-    icon,
-    image,
-    badge: '/portal/pwa-192x192.png',
-    vibrate: [200, 100, 200],
-    requireInteraction: false,
-    data: { url: clickUrl },
-    tag: key, // Helps merge duplicates on Android
-  };
-
-  console.log('[SW] Showing notification:', title);
-  event.waitUntil(self.registration.showNotification(title, options));
+    console.log('[SW] Showing notification:', title);
+    await self.registration.showNotification(title, options);
+  })());
 });
 
 // ------------------------------------------------------

@@ -1,0 +1,257 @@
+[
+  {
+    "id": "76c85f53ada257bb",
+    "type": "websocket in",
+    "z": "09af597d0b44144e",
+    "g": "ed38194e9a2f3014",
+    "name": "WS In",
+    "server": "b23552d6.06c64",
+    "client": "",
+    "x": 1890,
+    "y": 420,
+    "wires": [
+      [
+        "da05670361955758"
+      ]
+    ]
+  },
+  {
+    "id": "da05670361955758",
+    "type": "json",
+    "z": "09af597d0b44144e",
+    "g": "ed38194e9a2f3014",
+    "name": "Parse JSON",
+    "property": "payload",
+    "action": "",
+    "pretty": false,
+    "x": 2030,
+    "y": 420,
+    "wires": [
+      [
+        "4e337d9aeb1e7641"
+      ]
+    ]
+  },
+  {
+    "id": "4e337d9aeb1e7641",
+    "type": "function",
+    "z": "09af597d0b44144e",
+    "g": "ed38194e9a2f3014",
+    "name": "Parse WS Command",
+    "func": "if (msg.payload && msg.payload.type === 'command') {\n    msg.token = msg.payload.token;\n    msg.payload = msg.payload.data;\n    return msg;\n}\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 2220,
+    "y": 420,
+    "wires": [
+      [
+        "e8fbe4f5b2a05fc8"
+      ]
+    ]
+  },
+  {
+    "id": "e8fbe4f5b2a05fc8",
+    "type": "change",
+    "z": "09af597d0b44144e",
+    "g": "ed38194e9a2f3014",
+    "name": "Save Command",
+    "rules": [
+      {
+        "t": "set",
+        "p": "command",
+        "pt": "msg",
+        "to": "payload",
+        "tot": "msg"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 2420,
+    "y": 420,
+    "wires": [
+      [
+        "67b0ea012931c9b7"
+      ]
+    ]
+  },
+  {
+    "id": "67b0ea012931c9b7",
+    "type": "function",
+    "z": "09af597d0b44144e",
+    "g": "ed38194e9a2f3014",
+    "name": "Prepare Firebase Verify Request",
+    "func": "if (!msg.command) {\n  msg.command = msg.payload;\n}\n\nconst token = msg.token ||\n  (msg.req?.headers?.authorization || '').replace('Bearer ', '');\n\nif (!token) {\n  node.warn('Command received with no token - ignoring');\n  return null;\n}\n\nconst cache = flow.get('tokenCache') || {};\nconst cached = cache[token];\nif (cached && cached.expires > Date.now()) {\n  msg.payload = cached.user;\n  return [msg, null];\n}\n\nmsg._fbToken = token;\nmsg.payload = { idToken: token };\nmsg.headers = { 'Content-Type': 'application/json' };\nreturn [null, msg];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 2680,
+    "y": 420,
+    "wires": [
+      [
+        "4f7d2bc4490781e8"
+      ],
+      [
+        "57443771afe986cd"
+      ]
+    ]
+  },
+  {
+    "id": "57443771afe986cd",
+    "type": "http request",
+    "z": "09af597d0b44144e",
+    "g": "ed38194e9a2f3014",
+    "name": "Verify with Firebase",
+    "method": "POST",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=AIzaSyDkzUHzsNx5rJCE0i-bQ_g9n0-5L4cKQh4",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": true,
+    "headers": [],
+    "x": 2930,
+    "y": 420,
+    "wires": [
+      [
+        "74130c9b2e8361e1"
+      ]
+    ]
+  },
+  {
+    "id": "74130c9b2e8361e1",
+    "type": "function",
+    "z": "09af597d0b44144e",
+    "g": "ed38194e9a2f3014",
+    "name": "Extract Firebase Claims",
+    "func": "if (!msg.payload?.users?.length) {\n  node.send([null, { ...msg, statusCode: 401, payload: { error: 'invalid_token' } }]);\n  return null;\n}\n\ntry {\n  const firebaseUser = msg.payload.users[0];\n\n  let claims = {};\n  try { claims = JSON.parse(firebaseUser.customAttributes || '{}'); } catch (_) {}\n\n  const user = {\n    uid: firebaseUser.localId || '',\n    username: claims.username || '',\n    clientId: claims.clientId || '',\n    role: claims.role || 'user',\n    commands: claims.commands || {}\n  };\n\n  const cache = flow.get('tokenCache') || {};\n  const now = Date.now();\n  cache[msg._fbToken] = { user, expires: now + (55 * 60 * 1000) };\n  Object.keys(cache).forEach((k) => {\n    if (cache[k].expires < now) delete cache[k];\n  });\n  flow.set('tokenCache', cache);\n\n  msg.payload = user;\n  return [msg, null];\n} catch (e) {\n  node.send([null, { ...msg, statusCode: 401, payload: { error: 'invalid_token' } }]);\n  return null;\n}",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 3170,
+    "y": 420,
+    "wires": [
+      [
+        "4f7d2bc4490781e8"
+      ],
+      [
+        "cb2f0e3c71be99f6"
+      ]
+    ]
+  },
+  {
+    "id": "4f7d2bc4490781e8",
+    "type": "function",
+    "z": "09af597d0b44144e",
+    "g": "ed38194e9a2f3014",
+    "name": "Prepare Command Authorization",
+    "func": "const user = msg.payload || {};\nconst command = msg.command || {};\n\nconst ACTION_TO_PERMISSION = {\n  'eject specific': 'eject',\n  'eject all': 'eject',\n  'eject full': 'eject',\n  'eject empty': 'eject',\n  'eject locked': 'eject',\n  'eject module': 'eject',\n  'eject count': 'eject',\n  'rent': 'eject',\n  'vend': 'eject',\n  'refund': 'eject',\n  'lock slot': 'lock',\n  'unlock slot': 'lock',\n  'reboot': 'reboot',\n  'reload ui': 'reload',\n  'ngrok connect': 'connectivity',\n  'ngrok disconnect': 'connectivity',\n  'hotspot': 'connectivity',\n  'update flow': 'updates',\n  'update ui': 'updates',\n  'disable': 'disable',\n  'enable': 'disable',\n  'infochange': 'client edit',\n  'hardwarechange': 'client edit',\n  'pricechange': 'client edit',\n  'uichange': 'client edit',\n  'provision': 'edit'\n};\n\nconst requiredPerm = ACTION_TO_PERMISSION[String(command.action || '')];\nconst userCommands = user.commands || {};\nconst isAdmin = user.role === 'admin' || user.username === 'chargerent';\n\nif (!isAdmin && requiredPerm && userCommands[requiredPerm] !== true) {\n  return [null, null, { _session: msg._session, payload: { status: 'error', reason: 'Permission denied' } }];\n}\n\nif (isAdmin) {\n  return [msg, null, null];\n}\n\nconst stationid = String(command.stationid || command.kiosk?.stationid || '').trim();\nif (!stationid) {\n  return [null, null, { _session: msg._session, payload: { status: 'error', reason: 'Kiosk not found' } }];\n}\n\nmsg._authContext = {\n  user,\n  command,\n  stationid\n};\nmsg.payload = {\n  path: 'kiosks',\n  query: [{ fieldPath: 'stationid', opStr: '==', value: stationid }]\n};\nreturn [null, msg, null];",
+    "outputs": 3,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 3440,
+    "y": 360,
+    "wires": [
+      [
+        "d10af3a7998559ee"
+      ],
+      [
+        "fb-auth-kiosk-query"
+      ],
+      [
+        "cb2f0e3c71be99f6"
+      ]
+    ]
+  },
+  {
+    "id": "fb-auth-kiosk-query",
+    "type": "google-cloud-firestore",
+    "z": "09af597d0b44144e",
+    "g": "ed38194e9a2f3014",
+    "name": "Query kiosk in Firebase",
+    "account": "",
+    "keyFilename": "/home/george/firestore/firestore-key.json",
+    "projectId": "node-red-alerts",
+    "mode": "query",
+    "x": 3700,
+    "y": 320,
+    "wires": [
+      [
+        "fb-authorize-kiosk-access"
+      ]
+    ]
+  },
+  {
+    "id": "fb-authorize-kiosk-access",
+    "type": "function",
+    "z": "09af597d0b44144e",
+    "g": "ed38194e9a2f3014",
+    "name": "Authorize Kiosk Access",
+    "func": "const docs = Array.isArray(msg.payload) ? msg.payload : [];\nconst ctx = msg._authContext || {};\nconst user = ctx.user || {};\nconst command = ctx.command || {};\n\nif (docs.length === 0) {\n  return [null, { _session: msg._session, payload: { status: 'error', reason: 'Kiosk not found' } }];\n}\n\nconst kiosk = docs[0] || {};\nconst info = kiosk.info || {};\nconst normalize = (value) => String(value || '').trim().toLowerCase();\n\nconst userClientId = normalize(user.clientId);\nconst kioskClient = normalize(info.client || info.clientId);\nconst kioskRep = normalize(info.rep);\nconst clientMatch = !!(userClientId && (kioskClient === userClientId || kioskRep === userClientId));\n\nif (!clientMatch) {\n  return [null, { _session: msg._session, payload: { status: 'error', reason: 'Unauthorized' } }];\n}\n\nmsg.payload = user;\nmsg.command = command;\nreturn [msg, null];",
+    "outputs": 2,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 3950,
+    "y": 320,
+    "wires": [
+      [
+        "d10af3a7998559ee"
+      ],
+      [
+        "cb2f0e3c71be99f6"
+      ]
+    ]
+  },
+  {
+    "id": "d10af3a7998559ee",
+    "type": "link out",
+    "z": "09af597d0b44144e",
+    "g": "ed38194e9a2f3014",
+    "name": "Send to MQTT",
+    "mode": "link",
+    "links": [
+      "bbab7e1cf351f638"
+    ],
+    "x": 4215,
+    "y": 320,
+    "wires": []
+  },
+  {
+    "id": "cb2f0e3c71be99f6",
+    "type": "link out",
+    "z": "09af597d0b44144e",
+    "g": "ed38194e9a2f3014",
+    "name": "OUT: Auth/Error",
+    "mode": "link",
+    "links": [
+      "9302c31f1e9c010b",
+      "d3682b195f091eda"
+    ],
+    "x": 4215,
+    "y": 380,
+    "wires": []
+  },
+  {
+    "id": "b23552d6.06c64",
+    "type": "websocket-listener",
+    "path": "/ws/commands/",
+    "wholemsg": "false"
+  }
+]

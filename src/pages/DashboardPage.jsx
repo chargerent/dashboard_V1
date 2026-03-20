@@ -1,7 +1,5 @@
 // src/pages/DashboardPage.jsx
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { VERSION } from '../version';
-import { useDebounce } from '../hooks/useDebounce';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import FilterPanel from '../components/Dashboard/FilterPanel';
 import KioskPanel from '../components/kiosk/kioskPanel';
 import KioskDetailPanel from '../components/kiosk/KioskDetailPanel';
@@ -12,61 +10,47 @@ import LoadingSpinner from '../components/UI/LoadingSpinner';
 import InitialStatusPage from '../components/UI/InitialStatusPage';
 import SoldOutKiosksModal from '../components/UI/SoldOutKiosksModal.jsx';
 import TimeoutWarningModal from '../components/UI/TimeoutWarningModal';
-import { isKioskOnline, isKioskActive } from '../utils/helpers';
+import { isKioskOnline, isKioskActive, isNewSchemaKiosk } from '../utils/helpers';
 import GlobalRentalActivity from '../components/Dashboard/GlobalRentalActivity';
 import { useIdleTimer } from '../hooks/useIdleTimer';
 import LocationSummary from '../components/Dashboard/LocationSummary';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
-import { subscribeUserToPush } from '../push';
 import RentalDetailView from '../components/Dashboard/RentalDetailView';
+import { CpuChipIcon } from '@heroicons/react/24/outline';
 
-export default function DashboardPage({ token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToRentals, onNavigateToChargers, onNavigateToReporting, rentalData, allStationsData, setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, setPendingSlots, ejectingSlots, setEjectingSlots, lockingSlots, ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, setNgrokInfo, manageIgnoredKiosk, initialSearch = '' }) {
-    const [loading, setLoading] = useState(true);
+export default function DashboardPage({ token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToReporting, rentalData, allStationsData, setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, setNgrokInfo, manageIgnoredKiosk, kiosksReady }) {
+    const [loading, setLoading] = useState(!kiosksReady);
     const [error, setError] = useState(null);
     const [expandedKioskId, setExpandedKioskId] = useState(null);
     const [editingKioskId, setEditingKioskId] = useState(null);
     const [activeFilters, setActiveFilters] = useState({ all: true });
     const [showActiveOnly, setShowActiveOnly] = useState(true);
-    const [searchTerm, setSearchTerm] = useState(initialSearch);
-    const debouncedSearchTerm = useDebounce(searchTerm, 300);
+    const [showV1, setShowV1] = useState(true);
+    const [showV2, setShowV2] = useState(true);
+    const [searchTerm, setSearchTerm] = useState('');
     const [commandDetails, setCommandDetails] = useState(null);
     const [currentPage, setCurrentPage] = useState(1);
+    const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm);
     const ITEMS_PER_PAGE = 12;
     const [showInitialStatus, setShowInitialStatus] = useState(false);
     const [rentalDetailView, setRentalDetailView] = useState(null); // { kioskId, period }
     const [showSoldOutModal, setShowSoldOutModal] = useState(false);
     const [commandModalOpen, setCommandModalOpen] = useState(false);
-    const pendingChangeCloseRef = useRef(false); // tracks whether to close edit panel on next success
 
-    const { showWarning, handleStay } = useIdleTimer({ onIdle: () => {}, onLogout, idleTimeout: 540000, promptTimeout: 60000 });
-
-    // Close edit panel after a change command succeeds
-    useEffect(() => {
-        if (commandStatus?.state === 'success' && pendingChangeCloseRef.current) {
-            pendingChangeCloseRef.current = false;
-            setEditingKioskId(null);
-        }
-    }, [commandStatus]);
+    const { showWarning, handleStay } = useIdleTimer({ onLogout, idleTimeout: 540000, warningTimeout: 60000 });
 
     useEffect(() => {
-        // Set loading to false once the initial data has arrived.
-        if (allStationsData.length > 0) setLoading(false);
-    }, [allStationsData]);
+        setLoading(!kiosksReady);
+    }, [kiosksReady]);
 
+    // Debounce search term
     useEffect(() => {
-        // When the dashboard loads, subscribe to push notifications
-        if (clientInfo?.clientId && 'serviceWorker' in navigator && 'PushManager' in window) {
-            subscribeUserToPush(clientInfo.clientId).catch(err => {
-                console.error('Failed to subscribe to push notifications', err);
-            });
-        }
-    }, [clientInfo?.clientId]);
-
-    // Reset to page 1 whenever the debounced search changes
-    useEffect(() => {
-        setCurrentPage(1);
-    }, [debouncedSearchTerm]);
-
+        const handler = setTimeout(() => {
+            setDebouncedSearchTerm(searchTerm);
+            setCurrentPage(1); // Reset to first page on new search
+        }, 300);
+        return () => clearTimeout(handler);
+    }, [searchTerm]);
     const handleToggleDetails = (stationid) => {
         setEditingKioskId(null); 
         setRentalDetailView(null);
@@ -103,7 +87,20 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
 
     const handleSlotClick = (stationid, moduleid, slotid) => {
         const confirmationText = `${t('eject_confirmation')} ${slotid}?`;
-        setCommandDetails({ stationid, moduleid, slotid, action: 'eject specific', confirmationText });
+        const targetKiosk = allStationsData.find(kiosk => kiosk.stationid === stationid);
+        const targetModule = targetKiosk?.modules?.find(module => module.id === moduleid);
+        const targetSlot = targetModule?.slots?.find(slot => slot.position === slotid);
+        const chargerid = Number(targetSlot?.sn || 0);
+        const action = isNewSchemaKiosk(targetKiosk) && chargerid ? 'vend' : 'eject specific';
+
+        setCommandDetails({
+            stationid,
+            moduleid,
+            slotid,
+            action,
+            chargerid: action === 'vend' ? chargerid : undefined,
+            confirmationText,
+        });
         setCommandModalOpen(true);
     };
     
@@ -131,13 +128,12 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
 
         const { stationid, moduleid, slotid, action } = commandDetails;
         
-        // If this is a save action, un-ignore the kiosk and mark that the panel should close on success.
+        // If this is a save action, un-ignore the kiosk now that we are sending the command.
         if (action.includes('change')) {
             manageIgnoredKiosk(stationid, false);
-            pendingChangeCloseRef.current = true;
         }
 
-        if (action.startsWith('eject') || action === 'rent') {
+        if (action.startsWith('eject') || action === 'rent' || action === 'vend') {
             const targetKiosk = allStationsData.find(k => k.stationid === stationid);
             if (!targetKiosk) return;
 
@@ -147,6 +143,7 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
             switch (action) {
                 case 'eject specific':
                 case 'rent':
+                case 'vend':
                     slotsToEject.push({ stationid, moduleid, slotid });
                     break;
                 case 'eject module':
@@ -203,7 +200,8 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
 
         const details = {
             ...(commandDetails.action.includes('change') && { kiosk: commandDetails.kiosk, autoGeocode: commandDetails.autoGeocode }),
-            ...((commandDetails.action === 'lock slot' || commandDetails.action === 'unlock slot' || commandDetails.action === 'eject specific' || commandDetails.action === 'rent') && { slotid: commandDetails.slotid, info: reason }),
+            ...((commandDetails.action === 'lock slot' || commandDetails.action === 'unlock slot' || commandDetails.action === 'eject specific' || commandDetails.action === 'rent' || commandDetails.action === 'vend') && { slotid: commandDetails.slotid, info: reason }),
+            ...(commandDetails.action === 'vend' && { chargerid: commandDetails.chargerid }),
             ...(commandDetails.action === 'eject count' && { slotid: commandDetails.slotid }),
             ...(reason && typeof reason === 'object' && { ...reason })
         };
@@ -280,8 +278,8 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
     const clientStations = useMemo(() => {
         let stations = allStationsData || [];
 
-        if (!clientInfo.isAdmin) { // For non-admin users
-            if (clientInfo.role === 'partner') {
+        if (clientInfo.username !== 'chargerent') { // For non-admin users
+            if (clientInfo.partner) {
                 stations = stations.filter(s => s.info.rep?.toLowerCase() === clientInfo.clientId?.toLowerCase());
             } else {
                 stations = stations.filter(s => s.info.client === clientInfo.clientId);
@@ -315,7 +313,7 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
     
     const preFilteredKiosks = useMemo(() => {
         // If a search term is present, we start with all client stations and ignore other filters.
-        if (debouncedSearchTerm && (clientInfo.features.search || clientInfo.isAdmin)) {
+        if (debouncedSearchTerm && (clientInfo.features.search || clientInfo.username === 'chargerent')) {
             const lowercasedSearch = debouncedSearchTerm.toLowerCase();
             return clientStations.filter(k => 
                 k.info.location?.toLowerCase().includes(lowercasedSearch) ||
@@ -328,7 +326,7 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
 
         // If no search term, apply the standard filters.
         let kiosks = clientStations;
-        if (showActiveOnly && (clientInfo.isAdmin || clientInfo.role === 'partner')) {
+        if (showActiveOnly && (clientInfo.username === 'chargerent' || clientInfo.partner)) {
             kiosks = kiosks.filter(k => isKioskActive(k, latestTimestamp));
         }
 
@@ -351,8 +349,18 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
             kiosks = kiosks.filter(k => k.info.locationtype === 'EVENT');
         }
 
+        const V2_TYPES = ['CT3', 'CT4', 'CT8', 'CT12', 'CK48'];
+        if (!showV1 || !showV2) {
+            kiosks = kiosks.filter(k => {
+                const isV2 = V2_TYPES.includes(k.hardware?.type);
+                if (!showV1 && !isV2) return false;
+                if (!showV2 && isV2) return false;
+                return true;
+            });
+        }
+
         return kiosks;
-    }, [clientStations, debouncedSearchTerm, showActiveOnly, activeFilters, latestTimestamp, clientInfo]);
+    }, [clientStations, debouncedSearchTerm, showActiveOnly, showV1, showV2, activeFilters, latestTimestamp, clientInfo]);
     
             const offlineKioskCount = useMemo(() => {
         return preFilteredKiosks.filter(kiosk => !isKioskOnline(kiosk, latestTimestamp)).length;
@@ -440,7 +448,7 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
         if (!loading && clientInfo?.features?.status && !initialStatusCheck && allStationsData.length > 0) {
             let stations = allStationsData; // Use the already normalized data
 
-            if (!clientInfo.isAdmin) {
+            if (clientInfo.username !== 'chargerent') {
                 stations = stations.filter(s => s.info.client === clientInfo.clientId);
             }
 
@@ -584,33 +592,37 @@ return (
                     <div className="flex items-center gap-2">
                         <button onClick={() => setLanguage('en')} className={`px-2 py-1 text-sm font-bold rounded-md ${language === 'en' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}>EN</button>
                         <button onClick={() => setLanguage('fr')} className={`px-2 py-1 text-sm font-bold rounded-md ${language === 'fr' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}>FR</button>
-                        <span className="text-xs text-gray-400 font-mono ml-1">v{VERSION}</span>
                     </div>
                     {/* Action buttons on the right */}
                     <div className="flex items-center gap-4">
-                    {(clientInfo.features.rentals || clientInfo.isAdmin) && (
+                    {(clientInfo.features.rentals || clientInfo.username === 'chargerent') && (
                         <>
                             <button onClick={onNavigateToRentals} className="p-2 rounded-md bg-green-100 text-green-700 hover:bg-green-200" title={t('rentals_page_title')}>
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
                                 </svg>
                             </button>
-                            <button onClick={() => onNavigateToChargers()} className="p-2 rounded-md bg-yellow-100 text-yellow-700 hover:bg-yellow-200" title={t('chargers_page_title')}>
+                            <button onClick={onNavigateToChargers} className="p-2 rounded-md bg-yellow-100 text-yellow-700 hover:bg-yellow-200" title={t('chargers_page_title')}>
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
                                 </svg>
                             </button>
+                            {(clientInfo.features.reporting || clientInfo.username === 'chargerent') && (
+                                <button onClick={onNavigateToReporting} className="p-2 rounded-md bg-indigo-100 text-indigo-700 hover:bg-indigo-200" title={t('reporting_page_title')}>
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                                    </svg>
+                                </button>
+                            )}
                         </>
                     )}
-                    {(clientInfo.features.reporting || clientInfo.isAdmin) && (
-                        <button onClick={onNavigateToReporting} className="p-2 rounded-md bg-indigo-100 text-indigo-700 hover:bg-indigo-200" title={t('reporting_page_title')}>
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                            </svg>
+                    {((clientInfo.features.binding || clientInfo.commands.binding) || clientInfo.username === 'chargerent') && (
+                        <button onClick={onNavigateToBinding} className="p-2 rounded-md bg-blue-100 text-blue-700 hover:bg-blue-200" title={t('module_binding')}>
+                            <CpuChipIcon className="h-6 w-6" />
                         </button>
                     )}
-                    {(clientInfo.commands['client edit'] || clientInfo.isAdmin) && (
-                        <button onClick={onNavigateToAdmin} className="p-2 rounded-md bg-orange-100 text-orange-700 hover:bg-orange-200" title={t('manage_clients')}>
+                    {((clientInfo.commands['client edit']) || clientInfo.username === 'chargerent') && (
+                        <button onClick={onNavigateToAdmin} className="p-2 rounded-md bg-orange-100 text-orange-700 hover:bg-orange-200" title={t('admin_tools')}>
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
                         </button>
                     )}
@@ -631,12 +643,16 @@ return (
             ) : (
                 <>
                         {error && <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">{error}</div>}
-                        {(clientInfo.features.rentals || clientInfo.features.search || clientInfo.isAdmin) && (
-                            <FilterPanel 
-                                activeFilters={activeFilters} 
+                        {(clientInfo.features.rentals || clientInfo.features.search || clientInfo.username === 'chargerent') && (
+                            <FilterPanel
+                                activeFilters={activeFilters}
                                 onFilterChange={handleFilterChange}
                                 showActiveOnly={showActiveOnly}
                                 onShowActiveOnlyChange={setShowActiveOnly}
+                                showV1={showV1}
+                                onShowV1Change={setShowV1}
+                                showV2={showV2}
+                                onShowV2Change={setShowV2}
                                 searchTerm={searchTerm}
                                 onSearchChange={handleSearchChange}
                                 offlineCount={offlineKioskCount}
@@ -644,10 +660,10 @@ return (
                                 disconnectedCount={disconnectedKioskCount}
                                 clientInfo={clientInfo}
                                 t={t}
-                                searchEnabled={!!clientInfo.features.search || clientInfo.isAdmin}
+                                searchEnabled={!!clientInfo.features.search || clientInfo.username === 'chargerent'}
                             />
                         )}
-                        {(clientInfo.features.rentals || clientInfo.isAdmin) && (
+                        {(clientInfo.features.rentals || clientInfo.username === 'chargerent') && (
                             <GlobalRentalActivity
                                 kiosks={filteredKiosksForGlobalStats}
                                 rentalData={enrichedRentalData}
@@ -683,7 +699,7 @@ return (
                                                     {editingKioskId === kiosk.stationid && kioskToEdit ? (
                                                         <KioskEditPanel kiosk={kioskToEdit} onSave={handleKioskSave} clientInfo={clientInfo} isVisible={editingKioskId === kiosk.stationid} t={t} onCommand={handleGeneralCommand} />
                                                     ) : (
-                                                        clientInfo.features.details && <KioskDetailPanel kiosk={kiosk} isVisible={expandedKioskId === kiosk.stationid} onSlotClick={handleSlotClick} onLockSlot={handleLockSlotClick} pendingSlots={pendingSlots} ejectingSlots={ejectingSlots} lockingSlots={lockingSlots} t={t} onCommand={handleGeneralCommand} clientInfo={clientInfo} mockNow={latestTimestamp} serverFlowVersion={serverFlowVersion} serverUiVersion={serverUiVersion} onNavigateToChargers={clientInfo.isAdmin ? (sn) => { onNavigateToChargers(sn); } : undefined} />
+                                                        clientInfo.features.details && <KioskDetailPanel kiosk={kiosk} isVisible={expandedKioskId === kiosk.stationid} onSlotClick={handleSlotClick} onLockSlot={handleLockSlotClick} pendingSlots={pendingSlots} ejectingSlots={ejectingSlots} failedEjectSlots={failedEjectSlots} lockingSlots={lockingSlots} t={t} onCommand={handleGeneralCommand} clientInfo={clientInfo} mockNow={latestTimestamp} serverFlowVersion={serverFlowVersion} serverUiVersion={serverUiVersion} />
                                                     )}
                                                     {rentalDetailView?.kioskId === kiosk.stationid && (
                                                         <RentalDetailView kiosk={kiosk} period={rentalDetailView.period} rentalData={enrichedRentalData} onClose={() => setRentalDetailView(null)} onCommand={handleGeneralCommand} t={t} />

@@ -12,6 +12,8 @@ import {
 import { geocodeAddress } from '../../utils/helpers';
 import KioskControlPanel from './KioskControlPanel';
 
+const isNewBoundKioskStation = (stationid) => /^(CA|FR|US)8\d{3}$/.test(String(stationid || '').trim().toUpperCase());
+
 export const Section = ({ title, sectionKey, children, isOpen, onToggle, onSave, data }) => (
         <div className="bg-white rounded-lg shadow-sm mb-2">
             <button
@@ -87,6 +89,7 @@ const calculateRateArray = (pricing) => {
 };
 
 function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersion, serverFlowVersion }) {
+    const isNewBoundKiosk = isNewBoundKioskStation(kiosk?.stationid);
     const [formData, setFormData] = useState({
         info: kiosk.info || {},
         hardware: kiosk.hardware || {},
@@ -282,14 +285,6 @@ function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersi
                 </Section>
 
                 <Section title="Hardware" sectionKey="hardware" isOpen={openSection === 'hardware'} onToggle={handleToggleSection} onSave={handleSave} data={formData.hardware} isChanged={JSON.stringify(formData.hardware) !== JSON.stringify(originalData.hardware)}>
-                    <FormInput label="Type" name="type" value={formData.hardware?.type} section="hardware" onDataChange={onDataChange} disabled />
-                    <FormInput label="Module Version" name="modversion" value={formData.hardware?.modversion} section="hardware" onDataChange={onDataChange} />
-                    <FormInput label="Mode" name="mode" value={formData.hardware?.mode} section="hardware" onDataChange={onDataChange} />
-                    <div className="grid grid-cols-2 gap-4">
-                        <FormInput label="Modules" name="modules" value={formData.hardware?.modules} section="hardware" onDataChange={onDataChange} disabled />
-                        <FormInput label="CPU" name="cpu" value={formData.hardware?.cpu} section="hardware" onDataChange={onDataChange} disabled />
-                    </div>
-                    <FormMultiSwitch label="Heartbeat Rate" name="hrate" options={['20', '40', '60']} value={String(formData.hardware?.hrate)} section="hardware" onDataChange={onDataChange} />
                     <FormMultiSwitch 
                         label="Gateway" 
                         name="gateway" 
@@ -305,21 +300,33 @@ function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersi
                         section="hardware" 
                         onDataChange={handleGatewayOptionsChange} 
                     />
-                    <FormMultiSwitch
-                        label="Screen"
-                        name="screen"
-                        options={['NO', '7', '10', '21', '32']}
-                        value={formData.hardware?.screen?.toUpperCase() === 'NO SCREEN' ? 'NO' : formData.hardware?.screen?.toUpperCase().replace('IN', '')}
-                        section="hardware"
-                        onDataChange={handleScreenChange} />
                     <FormInput label="Quarantine Time" name="quarantine.time" value={formData.hardware?.quarantine?.time} section="hardware" onDataChange={onDataChange} />
                     <FormMultiSwitch label="Quarantine Unit" name="quarantine.unit" options={['min', 'hours', 'days']} value={formData.hardware?.quarantine?.unit} section="hardware" onDataChange={onDataChange} />
                     <FormMultiSwitch label="Audio" name="audio" options={['on', 'off']} value={formData.hardware?.audio} section="hardware" onDataChange={onDataChange} />
-                    <FormSlider label="Volume" name="volume" value={formData.hardware?.volume} section="hardware" min="0" max="100" onDataChange={onDataChange} />
-                    <FormSlider label="Power Threshold" name="power" value={formData.hardware?.power} section="hardware" min="0" max="100" onDataChange={onDataChange} />
-                    <FormInput label="Port" name="port" value={formData.hardware?.port} section="hardware" onDataChange={onDataChange} />
-                    <FormInput label="Server" name="server" value={formData.hardware?.server} section="hardware" onDataChange={onDataChange} />
-                    <FormInput label="SN" name="sn" value={formData.hardware?.sn} section="hardware" onDataChange={onDataChange} />
+                    {!isNewBoundKiosk && (
+                        <>
+                            <FormInput label="Type" name="type" value={formData.hardware?.type} section="hardware" onDataChange={onDataChange} disabled />
+                            <FormInput label="Module Version" name="modversion" value={formData.hardware?.modversion} section="hardware" onDataChange={onDataChange} />
+                            <FormInput label="Mode" name="mode" value={formData.hardware?.mode} section="hardware" onDataChange={onDataChange} />
+                            <div className="grid grid-cols-2 gap-4">
+                                <FormInput label="Modules" name="modules" value={formData.hardware?.modules} section="hardware" onDataChange={onDataChange} disabled />
+                                <FormInput label="CPU" name="cpu" value={formData.hardware?.cpu} section="hardware" onDataChange={onDataChange} disabled />
+                            </div>
+                            <FormMultiSwitch label="Heartbeat Rate" name="hrate" options={['20', '40', '60']} value={String(formData.hardware?.hrate)} section="hardware" onDataChange={onDataChange} />
+                            <FormMultiSwitch
+                                label="Screen"
+                                name="screen"
+                                options={['NO', '7', '10', '21', '32']}
+                                value={formData.hardware?.screen?.toUpperCase() === 'NO SCREEN' ? 'NO' : formData.hardware?.screen?.toUpperCase().replace('IN', '')}
+                                section="hardware"
+                                onDataChange={handleScreenChange} />
+                            <FormSlider label="Volume" name="volume" value={formData.hardware?.volume} section="hardware" min="0" max="100" onDataChange={onDataChange} />
+                            <FormSlider label="Power Threshold" name="power" value={formData.hardware?.power} section="hardware" min="0" max="100" onDataChange={onDataChange} />
+                            <FormInput label="Port" name="port" value={formData.hardware?.port} section="hardware" onDataChange={onDataChange} />
+                            <FormInput label="Server" name="server" value={formData.hardware?.server} section="hardware" onDataChange={onDataChange} />
+                            <FormInput label="SN" name="sn" value={formData.hardware?.sn} section="hardware" onDataChange={onDataChange} />
+                        </>
+                    )}
                 </Section>
                 
                 <Section title="Pricing" sectionKey="pricing" isOpen={openSection === 'pricing'} onToggle={handleToggleSection} onSave={handleSave} data={formData.pricing} isChanged={JSON.stringify(formData.pricing) !== JSON.stringify(originalData.pricing)}>
@@ -364,36 +371,38 @@ function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersi
                     </div>
                 </Section>
                 
-                <Section title="UI" sectionKey="ui" isOpen={openSection === 'ui'} onToggle={handleToggleSection} onSave={handleSave} data={formData.ui} isChanged={JSON.stringify(formData.ui) !== JSON.stringify(originalData.ui)}>
-                    <FormInput label="UI Version" name="version" value={formData.ui?.version} section="ui" onDataChange={onDataChange} disabled />
-                    <div className="grid grid-cols-2 gap-4">
-                        <FormColorPicker label="Background Color 1" name="colors.bcolor1" value={formData.ui?.colors?.bcolor1} section="ui" onDataChange={onDataChange} />
-                        <FormColorPicker label="Background Color 2" name="colors.bcolor2" value={formData.ui?.colors?.bcolor2} section="ui" onDataChange={onDataChange} />
-                    </div>
-                    <FormInput label="Idle Time (seconds)" name="idletime" value={formData.ui?.idletime} section="ui" onDataChange={onDataChange} />
-                    <div className="grid grid-cols-2 gap-4">
-                        <FormMultiSwitch
-                            label="Default Language"
-                            name="defaultlanguage"
-                            options={['EN', 'FR', 'ES']}
-                            value={{'ENGLISH': 'EN', 'FRENCH': 'FR', 'SPANISH': 'ES'}[formData.ui?.defaultlanguage] || formData.ui?.defaultlanguage}
-                            section="ui"
-                            onDataChange={handleLanguageChange} />
-                        <FormMultiSwitch label="Mode" name="mode" options={['MEDIA', 'UI']} value={formData.ui?.mode} section="ui" onDataChange={onDataChange} />
-                    </div>
-                    <div className="grid grid-cols-2 gap-x-8 gap-y-4 mt-4 pt-4 border-t">
-                        <FormToggle label="Screensaver" name="screensaver.active" checked={formData.ui?.screensaver?.active} section="ui" onDataChange={onDataChange} />
-                        <FormToggle label="Show Map" name="map.active" checked={formData.ui?.map?.active} section="ui" onDataChange={onDataChange} />
-                        <FormToggle label="Show Terms" name="terms.active" checked={formData.ui?.terms?.active} section="ui" onDataChange={onDataChange} />
-                        <FormToggle label="Show Languages" name="languages.active" checked={formData.ui?.languages?.active} section="ui" onDataChange={onDataChange} />
-                        <FormToggle label="Show Information" name="information.active" checked={formData.ui?.information?.active} section="ui" onDataChange={onDataChange} />
-                        <FormToggle label="Enable Coupons" name="coupons.active" checked={formData.ui?.coupons?.active} section="ui" onDataChange={onDataChange} />
-                        <FormToggle label="Enable Receipt" name="receipt.active" checked={formData.ui?.receipt?.active} section="ui" onDataChange={onDataChange} />
-                        <FormToggle label="Enable Reminder" name="reminder.active" checked={formData.ui?.reminder?.active} section="ui" onDataChange={onDataChange} />
-                        <FormInput label="Reminder Delay (min)" name="reminder.delay" value={formData.ui?.reminder?.delay} section="ui" onDataChange={onDataChange} />
-                        <FormToggle label="Reminder includes Receipt" name="reminder.receipt" checked={formData.ui?.reminder?.receipt} section="ui" onDataChange={onDataChange} />
-                    </div>
-                </Section>
+                {!isNewBoundKiosk && (
+                    <Section title="UI" sectionKey="ui" isOpen={openSection === 'ui'} onToggle={handleToggleSection} onSave={handleSave} data={formData.ui} isChanged={JSON.stringify(formData.ui) !== JSON.stringify(originalData.ui)}>
+                        <FormInput label="UI Version" name="version" value={formData.ui?.version} section="ui" onDataChange={onDataChange} disabled />
+                        <div className="grid grid-cols-2 gap-4">
+                            <FormColorPicker label="Background Color 1" name="colors.bcolor1" value={formData.ui?.colors?.bcolor1} section="ui" onDataChange={onDataChange} />
+                            <FormColorPicker label="Background Color 2" name="colors.bcolor2" value={formData.ui?.colors?.bcolor2} section="ui" onDataChange={onDataChange} />
+                        </div>
+                        <FormInput label="Idle Time (seconds)" name="idletime" value={formData.ui?.idletime} section="ui" onDataChange={onDataChange} />
+                        <div className="grid grid-cols-2 gap-4">
+                            <FormMultiSwitch
+                                label="Default Language"
+                                name="defaultlanguage"
+                                options={['EN', 'FR', 'ES']}
+                                value={{'ENGLISH': 'EN', 'FRENCH': 'FR', 'SPANISH': 'ES'}[formData.ui?.defaultlanguage] || formData.ui?.defaultlanguage}
+                                section="ui"
+                                onDataChange={handleLanguageChange} />
+                            <FormMultiSwitch label="Mode" name="mode" options={['MEDIA', 'UI']} value={formData.ui?.mode} section="ui" onDataChange={onDataChange} />
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-8 gap-y-4 mt-4 pt-4 border-t">
+                            <FormToggle label="Screensaver" name="screensaver.active" checked={formData.ui?.screensaver?.active} section="ui" onDataChange={onDataChange} />
+                            <FormToggle label="Show Map" name="map.active" checked={formData.ui?.map?.active} section="ui" onDataChange={onDataChange} />
+                            <FormToggle label="Show Terms" name="terms.active" checked={formData.ui?.terms?.active} section="ui" onDataChange={onDataChange} />
+                            <FormToggle label="Show Languages" name="languages.active" checked={formData.ui?.languages?.active} section="ui" onDataChange={onDataChange} />
+                            <FormToggle label="Show Information" name="information.active" checked={formData.ui?.information?.active} section="ui" onDataChange={onDataChange} />
+                            <FormToggle label="Enable Coupons" name="coupons.active" checked={formData.ui?.coupons?.active} section="ui" onDataChange={onDataChange} />
+                            <FormToggle label="Enable Receipt" name="receipt.active" checked={formData.ui?.receipt?.active} section="ui" onDataChange={onDataChange} />
+                            <FormToggle label="Enable Reminder" name="reminder.active" checked={formData.ui?.reminder?.active} section="ui" onDataChange={onDataChange} />
+                            <FormInput label="Reminder Delay (min)" name="reminder.delay" value={formData.ui?.reminder?.delay} section="ui" onDataChange={onDataChange} />
+                            <FormToggle label="Reminder includes Receipt" name="reminder.receipt" checked={formData.ui?.reminder?.receipt} section="ui" onDataChange={onDataChange} />
+                        </div>
+                    </Section>
+                )}
             </div>
         </div>
     );

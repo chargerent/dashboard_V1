@@ -1,7 +1,7 @@
 // src/components/kiosk/KioskPanel.jsx
 
 import { useMemo, useCallback } from 'react';
-import { isKioskOnline } from '../../utils/helpers';
+import { isKioskOnline, isModuleOnline } from '../../utils/helpers';
 import { formatDateTime } from '../../utils/dateFormatter';
 import RentalStats from '../Dashboard/RentalStats';
 import GatewayIcon from './GatewayIcon';
@@ -86,7 +86,12 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                             <GatewayIcon gateway={kiosk.hardware?.gateway} t={t} />
                         </div>
                         <div className="flex items-center gap-1.5" title={t('module_output_status')}>
-                            {kiosk.modules.map(module => (<div key={module.id} className={`w-2 h-2 rounded-sm ${module.output ? 'bg-green-500' : 'bg-red-500'}`} />))}
+                            {kiosk.modules.map(module => {
+                                const outputOk = kiosk.isNewSchema
+                                    ? isModuleOnline(module, mockNow)
+                                    : !!module.output;
+                                return <div key={module.id} className={`w-2 h-2 rounded-sm ${outputOk ? 'bg-green-500' : 'bg-red-500'}`} />;
+                            })}
                         </div>
                         <div className="flex flex-col items-center">
                             {clientInfo.commands.reboot ? (

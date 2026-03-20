@@ -29,18 +29,18 @@ const EventIcon = () => (
     </svg>
 );
 
-export default function FilterPanel({ activeFilters, onFilterChange, showActiveOnly, onShowActiveOnlyChange, searchTerm, onSearchChange, offlineCount, soldOutCount, disconnectedCount, clientInfo, t, searchEnabled }) {
+export default function FilterPanel({ activeFilters, onFilterChange, showActiveOnly, onShowActiveOnlyChange, showV1 = true, onShowV1Change, showV2 = true, onShowV2Change, searchTerm, onSearchChange, offlineCount, soldOutCount, disconnectedCount, clientInfo, t, searchEnabled }) {
     return (
         <div className="bg-white p-4 rounded-lg shadow-md mb-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4"> {/* Removed "filter by:" title */}
-                <div className="flex flex-wrap items-center gap-2"> {/* Adjusted spacing for badge */}
-                    {clientInfo.isAdmin && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex flex-wrap items-center gap-2">
+                    {clientInfo.username === 'chargerent' && (
                         <>
                             <FilterButton filterKey="master" isActive={activeFilters.master} onClick={onFilterChange} className={activeFilters.master ? 'bg-purple-600 text-white' : 'hover:bg-purple-100'}>MA</FilterButton>
                             <FilterButton filterKey="event" isActive={activeFilters.event} onClick={onFilterChange} className={activeFilters.event ? 'bg-pink-600 text-white' : 'hover:bg-pink-100'}>
                                 <EventIcon />
                             </FilterButton>
-                            {clientInfo.isAdmin && (
+                            {clientInfo.username === 'chargerent' && (
                                 <FilterButton filterKey="disney" isActive={activeFilters.disney} onClick={onFilterChange} className={activeFilters.disney ? 'bg-yellow-500 text-white' : 'hover:bg-yellow-100'}>
                                     <DisneyIcon />
                                 </FilterButton>
@@ -99,17 +99,6 @@ export default function FilterPanel({ activeFilters, onFilterChange, showActiveO
                             )}
                         </div>
                     </FilterButton>
-                    <div className="h-6 border-l border-gray-300 mx-2"></div>
-                    <div className="flex items-center">
-                        <input
-                            id="active-only"
-                            type="checkbox"
-                            checked={showActiveOnly}
-                            onChange={(e) => onShowActiveOnlyChange(e.target.checked)}
-                            className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                        />
-                        <label htmlFor="active-only" className="ml-2 block text-sm text-gray-900">{t('active')}</label> {/* Changed label text */}
-                    </div>
                 </div>
                 <div className="flex items-center gap-4">
                     {searchEnabled && (
@@ -134,6 +123,39 @@ export default function FilterPanel({ activeFilters, onFilterChange, showActiveO
                         )}
                     </div>
                     )}
+                </div>
+            </div>
+            <div className="flex items-center gap-4 mt-3 pt-3 border-t border-gray-100">
+                <div className="flex items-center">
+                    <input
+                        id="active-only"
+                        type="checkbox"
+                        checked={showActiveOnly}
+                        onChange={(e) => onShowActiveOnlyChange(e.target.checked)}
+                        className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="active-only" className="ml-2 text-sm text-gray-900">{t('active')}</label>
+                </div>
+                <div className="h-4 border-l border-gray-300"></div>
+                <div className="flex items-center">
+                    <input
+                        id="show-v1"
+                        type="checkbox"
+                        checked={showV1}
+                        onChange={(e) => onShowV1Change(e.target.checked)}
+                        className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="show-v1" className="ml-2 text-sm text-gray-900">V1</label>
+                </div>
+                <div className="flex items-center">
+                    <input
+                        id="show-v2"
+                        type="checkbox"
+                        checked={showV2}
+                        onChange={(e) => onShowV2Change(e.target.checked)}
+                        className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="show-v2" className="ml-2 text-sm text-gray-900">V2</label>
                 </div>
             </div>
         </div>

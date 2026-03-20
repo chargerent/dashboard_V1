@@ -1,0 +1,117 @@
+[
+    {
+        "id": "mig-tab",
+        "type": "tab",
+        "label": "Firebase Migration",
+        "disabled": false,
+        "info": ""
+    },
+    {
+        "id": "mig-comment-1",
+        "type": "comment",
+        "z": "mig-tab",
+        "name": "Migrate kiosks from global.info → Firestore 'kiosks' collection",
+        "info": "Reads global.info, remaps stationids to USB/CAB/FRB prefix format,\nnormalises field names to match the old kiosk schema, then writes\neach kiosk as a document in the Firestore 'kiosks' collection.\n\nRequires: node-red-contrib-google-cloud-firestore\nKey file:  /home/george/firestore/firestore-key.json",
+        "x": 340,
+        "y": 60,
+        "wires": []
+    },
+    {
+        "id": "mig-inject",
+        "type": "inject",
+        "z": "mig-tab",
+        "name": "Run Migration",
+        "props": [{ "p": "payload", "v": "", "vt": "date" }],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "topic": "",
+        "x": 160,
+        "y": 140,
+        "wires": [["mig-fn-transform"]]
+    },
+    {
+        "id": "mig-fn-transform",
+        "type": "function",
+        "z": "mig-tab",
+        "name": "Transform Kiosk IDs & Fields",
+        "func": "// ── Stationid remapping ──────────────────────────────────────────\n// Country prefix logic:\n//   US kiosks  → USB####\n//   CA kiosks  → CAB####\n//   FR kiosks  → FRB####\n// Counters restart at 0001 per country.\nconst ID_MAP = {\n    'CS0001': 'USB0001',\n    'CS0002': 'CAB0001',\n    'CS0003': 'CAB0002',\n    'CS0004': 'CAB0003',\n    'CS0005': 'CAB0004',\n    'CS0006': 'CAB0005',\n    'CS0007': 'CAB0006',\n    'CS0008': 'CAB0007',\n    'CS0009': 'CAB0008',\n    'CS0010': 'CAB0009',\n    'CS0011': 'CAB0010'\n};\n\nconst kiosks = global.get('stations') || [];\nif (kiosks.length === 0) {\n    node.warn('global.stations is empty — nothing to migrate');\n    return null;\n}\n\nconst baseTs = Math.floor(Date.now() / 1000);\n\nmsg.payload = kiosks.map((kiosk, index) => {\n    const newId = ID_MAP[kiosk.stationid] || kiosk.stationid;\n    const provisionid = 'id-' + String(baseTs + index).padStart(10, '0');\n    const modulesRaw = Array.isArray(kiosk.modules) ? kiosk.modules : Object.values(kiosk.modules || {});\n    const mod0  = modulesRaw[0];\n\n    // ── info block: normalise field names to match old kiosk schema ──\n    const info = {\n        location:       kiosk.info.location       || '',\n        place:          kiosk.info.place           || '',\n        locationtype:   kiosk.info.locationtype    || '',\n        stationaddress: kiosk.info.stationaddress  || kiosk.info.address || '',\n        city:           kiosk.info.city            || '',\n        state:          kiosk.info.state           || '',\n        zip:            kiosk.info.zip             || '',\n        country:        kiosk.info.country         || '',\n        lat:            kiosk.info.lat             || null,\n        lon:            kiosk.info.lon             || null,\n        client:         kiosk.info.clientId        || kiosk.info.client  || '',\n        clientId:       kiosk.info.clientId        || kiosk.info.client  || '',\n        group:          kiosk.info.group           || '',\n        rep:            kiosk.info.rep             || '',\n        account:        kiosk.info.account         || '',\n        accountpercent: kiosk.info.accountpercent  || 0,\n        reppercent:     kiosk.info.reppercent      || 0\n    };\n\n    const modules = modulesRaw.map(mod => ({\n        ...mod,\n        lastUpdated: mod.lastUpdated || new Date().toISOString()\n    }));\n\n    const timestamp = mod0\n        ? (mod0.lastUpdated || new Date().toISOString())\n        : new Date().toISOString();\n\n    return {\n        stationid:   newId,\n        provisionid,\n        hardware:    kiosk.hardware  || {},\n        pricing:     kiosk.pricing   || {},\n        ui:          kiosk.ui        || {},\n        info,\n        modules,\n        total:       kiosk.total    || 0,\n        full:        kiosk.full     || 0,\n        slot:        kiosk.slot     || 0,\n        empty:       kiosk.empty    || 0,\n        charging:    kiosk.charging || 0,\n        active:      kiosk.active   !== false,\n        enabled:     kiosk.enabled  !== false,\n        vendslot:    kiosk.vendslot || '',\n        timestamp\n    };\n});\n\nnode.status({ fill: 'blue', shape: 'dot', text: msg.payload.length + ' kiosks queued' });\nreturn msg;",
+        "outputs": 1,
+        "x": 390,
+        "y": 140,
+        "wires": [["mig-split"]]
+    },
+    {
+        "id": "mig-split",
+        "type": "split",
+        "z": "mig-tab",
+        "name": "One kiosk per message",
+        "splt": "\\n",
+        "spltType": "str",
+        "arraySplt": 1,
+        "arraySpltType": "len",
+        "stream": false,
+        "addname": "",
+        "x": 620,
+        "y": 140,
+        "wires": [["mig-fn-enrich"]]
+    },
+    {
+        "id": "mig-fn-enrich",
+        "type": "function",
+        "z": "mig-tab",
+        "name": "Add Legacy Aggregate Fields",
+        "func": "const kiosk = msg.payload || {};\nconst modules = Array.isArray(kiosk.modules) ? kiosk.modules : [];\nconst configuredPower = Number(kiosk.hardware?.power);\nconst fullThreshold = Number.isFinite(configuredPower) ? configuredPower : 80;\n\nlet count = 0;\nlet slotscount = 0;\nlet lockcount = 0;\n\nmodules.forEach(mod => {\n    const slots = Array.isArray(mod.slots) ? mod.slots : [];\n    slotscount += slots.length;\n    slots.forEach(slot => {\n        if (slot?.lock) lockcount++;\n        if (\n            slot &&\n            slot.status === 1 &&\n            slot.sn &&\n            slot.sn !== 0 &&\n            typeof slot.batteryLevel === 'number' &&\n            slot.batteryLevel >= fullThreshold &&\n            !slot.lock\n        ) {\n            count++;\n        }\n    });\n});\n\nkiosk.count = count;\nkiosk.slotscount = slotscount;\nkiosk.lockcount = lockcount;\nkiosk.zerocount = kiosk.zerocount || 0;\nkiosk.lastUpdate = kiosk.timestamp;\nkiosk.chargers = count === 0 ? 'soldout' : count;\n\nmsg.payload = kiosk;\nreturn msg;",
+        "outputs": 1,
+        "x": 820,
+        "y": 140,
+        "wires": [["mig-fn-prepare"]]
+    },
+    {
+        "id": "mig-fn-prepare",
+        "type": "function",
+        "z": "mig-tab",
+        "name": "Prepare Firestore Payload",
+        "func": "const kiosk = msg.payload;\n\nmsg.stationid = kiosk.stationid;\nmsg.provisionid = kiosk.provisionid;\nmsg.payload = {\n    path: 'kiosks/' + kiosk.provisionid,\n    content: kiosk\n};\n\nnode.status({ fill: 'yellow', shape: 'ring', text: 'Writing ' + kiosk.provisionid });\nreturn msg;",
+        "outputs": 1,
+        "x": 830,
+        "y": 140,
+        "wires": [["mig-firestore-set"]]
+    },
+    {
+        "id": "mig-firestore-set",
+        "type": "google-cloud-firestore",
+        "z": "mig-tab",
+        "name": "Write to Firestore",
+        "account": "",
+        "keyFilename": "/home/george/firestore/firestore-key.json",
+        "projectId": "node-red-alerts",
+        "mode": "set",
+        "x": 1040,
+        "y": 140,
+        "wires": [["mig-fn-result"]]
+    },
+    {
+        "id": "mig-fn-result",
+        "type": "function",
+        "z": "mig-tab",
+        "name": "Log Result",
+        "func": "const stationid  = msg.stationid  || '?';\nconst provisionid = msg.provisionid || '?';\n\nif (msg.error) {\n    node.status({ fill: 'red', shape: 'ring', text: 'Error: ' + provisionid });\n    node.error('Firestore write failed: ' + JSON.stringify(msg.error), msg);\n    msg.payload = { ok: false, provisionid, stationid, error: msg.error };\n} else {\n    node.status({ fill: 'green', shape: 'dot', text: '✓ ' + provisionid });\n    msg.payload = { ok: true, provisionid, stationid };\n}\nreturn msg;",
+        "outputs": 1,
+        "x": 1240,
+        "y": 140,
+        "wires": [["mig-debug"]]
+    },
+    {
+        "id": "mig-debug",
+        "type": "debug",
+        "z": "mig-tab",
+        "name": "Write Result",
+        "active": true,
+        "tosidebar": true,
+        "complete": "payload",
+        "x": 1420,
+        "y": 140,
+        "wires": []
+    }
+]
