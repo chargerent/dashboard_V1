@@ -30,17 +30,19 @@ const EventIcon = () => (
 );
 
 export default function FilterPanel({ activeFilters, onFilterChange, showActiveOnly, onShowActiveOnlyChange, showV1 = true, onShowV1Change, showV2 = true, onShowV2Change, searchTerm, onSearchChange, offlineCount, soldOutCount, disconnectedCount, clientInfo, t, searchEnabled }) {
+    const isAdminUser = !!clientInfo?.isAdmin;
+
     return (
         <div className="bg-white p-4 rounded-lg shadow-md mb-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="flex flex-wrap items-center gap-2">
-                    {clientInfo.username === 'chargerent' && (
+                    {isAdminUser && (
                         <>
                             <FilterButton filterKey="master" isActive={activeFilters.master} onClick={onFilterChange} className={activeFilters.master ? 'bg-purple-600 text-white' : 'hover:bg-purple-100'}>MA</FilterButton>
                             <FilterButton filterKey="event" isActive={activeFilters.event} onClick={onFilterChange} className={activeFilters.event ? 'bg-pink-600 text-white' : 'hover:bg-pink-100'}>
                                 <EventIcon />
                             </FilterButton>
-                            {clientInfo.username === 'chargerent' && (
+                            {isAdminUser && (
                                 <FilterButton filterKey="disney" isActive={activeFilters.disney} onClick={onFilterChange} className={activeFilters.disney ? 'bg-yellow-500 text-white' : 'hover:bg-yellow-100'}>
                                     <DisneyIcon />
                                 </FilterButton>

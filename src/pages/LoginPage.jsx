@@ -4,7 +4,9 @@ import { EyeIcon, EyeSlashIcon } from "@heroicons/react/24/outline";
 import { translations } from "../utils/translations";
 
 import { signInWithEmailAndPassword } from "firebase/auth";
-import { auth } from "../firebase-config";
+import { doc, getDoc } from "firebase/firestore";
+import { auth, db } from "../firebase-config";
+import { callFunctionPublic } from "../utils/callableRequest";
 import { markStartupStep, measureStartupDuration, resetStartupTrace } from "../utils/startupTrace";
 
 // Change if you picked a different mapping domain
@@ -42,8 +44,28 @@ function LoginPage({ onLogin }) {
       resetStartupTrace(`login:${u}`);
       markStartupStep("login.submit", { username: u });
 
+      const trackAttempt = (success) => {
+        callFunctionPublic("auth_trackAttempt", { username: u, success }).catch(() => {});
+      };
+
+      const lockSnap = await getDoc(doc(db, "loginAttempts", u));
+      if (lockSnap.exists()) {
+        const lockData = lockSnap.data() || {};
+        if (lockData.lockedUntil && new Date(lockData.lockedUntil) > new Date()) {
+          trackAttempt(false);
+          throw new Error(t("login_error"));
+        }
+      }
+
       const signInStartedAt = performance.now();
-      await signInWithEmailAndPassword(auth, email, password);
+      try {
+        await signInWithEmailAndPassword(auth, email, password);
+      } catch (authError) {
+        trackAttempt(false);
+        throw authError;
+      }
+
+      trackAttempt(true);
       markStartupStep("login.signIn.resolved", {
         durationMs: measureStartupDuration(signInStartedAt),
       });

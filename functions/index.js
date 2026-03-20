@@ -644,6 +644,73 @@ async function setUserPasswordImpl(data) {
   return { ok: true };
 }
 
+async function trackLoginAttemptImpl(data, req = null) {
+  const username = normalizeUsername(data?.username);
+  const success = data?.success === true;
+
+  if (!username || !isValidUsername(username)) {
+    throw new functions.https.HttpsError("invalid-argument", "valid username required");
+  }
+
+  const ref = db.collection("loginAttempts").doc(username);
+  const snap = await ref.get();
+  const existing = snap.exists ? (snap.data() || {}) : {};
+
+  const now = new Date();
+  const forwardedFor = String(req?.headers?.["x-forwarded-for"] || "")
+      .split(",")[0]
+      .trim();
+  const ip = forwardedFor || String(req?.ip || "").trim() || null;
+  const newLog = {
+    timestamp: now.toISOString(),
+    success,
+    note: success ? "Login successful" : "Login failed",
+    ...(ip ? {ip} : {}),
+  };
+
+  const logs = [...(existing.logs || []), newLog].slice(-50);
+
+  let update;
+  if (success) {
+    update = {count: 0, lockedUntil: null, logs};
+  } else {
+    const newCount = Number(existing.count || 0) + 1;
+    const lockedUntil = newCount >= 5 ?
+      new Date(now.getTime() + 30 * 60 * 1000).toISOString() :
+      null;
+    update = {count: newCount, lockedUntil, logs};
+  }
+
+  await ref.set(update, {merge: true});
+  return {
+    ok: true,
+    count: Number(update.count || 0),
+    lockedUntil: update.lockedUntil || null,
+  };
+}
+
+async function unlockUserImpl(data) {
+  const username = normalizeUsername(data?.username);
+
+  if (!username) {
+    throw new functions.https.HttpsError("invalid-argument", "username required");
+  }
+
+  const ref = db.collection("loginAttempts").doc(username);
+  const snap = await ref.get();
+  const existing = snap.exists ? (snap.data() || {}) : {};
+
+  const unlockLog = {
+    timestamp: new Date().toISOString(),
+    success: true,
+    note: "Account unlocked by admin",
+  };
+
+  const logs = [...(existing.logs || []), unlockLog].slice(-50);
+  await ref.set({count: 0, lockedUntil: null, logs}, {merge: true});
+  return {ok: true};
+}
+
 async function stationBindingGetNextStationImpl(data) {
   const country = normalizeCountry(data?.country);
   const snapshot = await db.collection("kiosks").get();
@@ -1104,6 +1171,15 @@ exports.admin_setUserPassword = functions.https.onCall(async (data, context) => 
   return setUserPasswordImpl(data);
 });
 
+exports.auth_trackAttempt = functions.https.onCall(async (data, context) => (
+  trackLoginAttemptImpl(data, context?.rawRequest || null)
+));
+
+exports.admin_unlockUser = functions.https.onCall(async (data, context) => {
+  await assertAdminFromContext(context);
+  return unlockUserImpl(data);
+});
+
 exports.admin_httpListUsers = handleHttpFunction(async (data, req) => {
   await assertAdmin(req, data);
   return listUsersImpl();
@@ -1127,6 +1203,15 @@ exports.admin_httpCreateAuthUserAndProfile = handleHttpFunction(async (data, req
 exports.admin_httpSetUserPassword = handleHttpFunction(async (data, req) => {
   await assertAdmin(req, data);
   return setUserPasswordImpl(data);
+});
+
+exports.auth_httpTrackAttempt = handleHttpFunction(async (data, req) => (
+  trackLoginAttemptImpl(data, req)
+));
+
+exports.admin_httpUnlockUser = handleHttpFunction(async (data, req) => {
+  await assertAdmin(req, data);
+  return unlockUserImpl(data);
 });
 
 exports.admin_upsertUser = exports.admin_upsertUserProfile;

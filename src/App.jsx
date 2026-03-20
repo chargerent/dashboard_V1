@@ -89,7 +89,8 @@ function buildClientInfoFromProfile(profile, uid) {
   const username = profile.username || '';
   const clientId = profile.clientId || '';
   const partner = !!profile.partner;
-  const role = profile.role || (username === 'chargerent' ? 'admin' : 'user');
+  const role = String(profile.role || (username === 'chargerent' ? 'admin' : 'user')).toLowerCase();
+  const isAdmin = role === 'admin' || username === 'chargerent';
 
   const defaultFeatures = {
     rentals: false,
@@ -121,7 +122,7 @@ function buildClientInfoFromProfile(profile, uid) {
   let commands = { ...defaultCommands, ...(payloadCommands || {}) };
 
   // Admin override
-  if (role === 'admin' || username === 'chargerent') {
+  if (isAdmin) {
     features = {
       rentals: true,
       details: true,
@@ -160,6 +161,7 @@ function buildClientInfoFromProfile(profile, uid) {
     features,
     commands,
     partner,
+    isAdmin,
     role,
     serverFlowVersion: profile.serverFlowVersion,
     serverUiVersion: profile.serverUiVersion
@@ -418,7 +420,7 @@ function App() {
   // ---------------------------------------------
   useEffect(() => {
     // ✅ Require actual firebase session too
-    if (!token || !auth.currentUser) return;
+    if (!token || !auth.currentUser || !clientInfo) return;
 
     setKiosksReady(false);
     startupListenerRef.current = { kiosksLogged: false, rentalsLogged: false };
@@ -493,7 +495,7 @@ function App() {
       unsubscribeKiosks();
       unsubscribeRentals();
     };
-  }, [token, firestoreError]);
+  }, [token, clientInfo, firestoreError]);
 
   // Failsafe Effect: Cleans up lingering UI effects when Firestore data confirms the state.
   useEffect(() => {
@@ -623,7 +625,7 @@ function App() {
   // WebSocket connect (FULL HANDLER INCLUDED)
   // ---------------------------------------------
   useEffect(() => {
-    if (!token) return;
+    if (!token || !clientInfo) return;
 
     let isCleaningUp = false;
 
@@ -864,7 +866,7 @@ function App() {
         }
       }
     };
-  }, [token, t, clearEjectCommandState, flashFailedEjectSlot]);
+  }, [token, clientInfo, t, clearEjectCommandState, flashFailedEjectSlot]);
 
   // Login handler (kept for LoginPage)
   const handleLogin = () => {

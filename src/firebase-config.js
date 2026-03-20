@@ -1,7 +1,7 @@
 // src/firebase-config.js
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFunctions, connectFunctionsEmulator } from "firebase/functions";
+import { getFunctions } from "firebase/functions";
 import { initializeFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -21,14 +21,10 @@ export const auth = getAuth(app);
 
 const shouldForceLongPolling = (() => {
   if (typeof window === "undefined") {
-    return !import.meta.env.DEV;
+    return false;
   }
 
-  const forcedValue = window.localStorage.getItem("firestoreForceLongPolling");
-  if (forcedValue === "1") return true;
-  if (forcedValue === "0") return false;
-
-  return !import.meta.env.DEV;
+  return window.localStorage.getItem("firestoreForceLongPolling") === "1";
 })();
 
 const firestoreSettings = shouldForceLongPolling ? {

@@ -3,11 +3,14 @@
 import { useState, useEffect } from 'react';
 import MultiSwitch from '../utils/MultiSwitch';
 
-const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsList, t, isEditing, editedData, onEdit, onCancel, onSave, onDataChange, onDelete, currentUser }) => {
+const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsList, t, isEditing, editedData, onEdit, onCancel, onSave, onDataChange, onDelete, currentUser, lockoutData, onUnlock }) => {
     if (!client || !currentUser) return null; // Prevent rendering if client or currentUser is undefined
 
     const [openSection, setOpenSection] = useState(null);
     const showActiveToggle = String((isEditing ? editedData?.username : client.username) || '').toLowerCase() !== 'chargerent';
+    const canManageActiveState = !!(currentUser?.isAdmin || currentUser?.role === 'admin' || currentUser?.username === 'chargerent');
+    const lockoutDate = lockoutData?.lockedUntil ? new Date(lockoutData.lockedUntil) : null;
+    const isLocked = !!(lockoutDate && !Number.isNaN(lockoutDate.getTime()) && lockoutDate > new Date());
 
     useEffect(() => {
         setOpenSection(null); // Reset open sections when edit mode changes
@@ -36,6 +39,13 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
                 onPermissionChange(client.uid, 'features', 'details', true);
             }
         }
+    };
+
+    const formatDateTime = (value) => {
+        if (!value) return null;
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) return null;
+        return parsed.toLocaleString();
     };
 
     const SectionButton = ({ section, isEditing }) => (
@@ -111,7 +121,7 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
                                 label="Active"
                                 isChecked={editedData.active}
                                 onChange={(value) => handlePermissionToggle(null, 'active', value)}
-                                disabled={currentUser.username !== 'chargerent'} />
+                                disabled={!canManageActiveState} />
                         )}
                     </div>
                     <div className={`p-2 mt-4 ${isEditing ? 'border-t' : ''}`}>
@@ -158,10 +168,17 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
         const allFeatures = { ...Object.fromEntries((featuresList || []).map(k => [k, false])), ...(client.features || {}) };
         const allCommands = { ...Object.fromEntries((commandsList || []).map(k => [k, false])), ...(client.commands || {}) };
         const contact = client.contact || {};
+        const loginLogs = Array.isArray(lockoutData?.logs) ? [...lockoutData.logs].reverse() : [];
 
         return (
             <>
-                <div className="p-4 border-b border-gray-200">
+                <div className={`p-4 border-b ${isLocked ? 'border-red-200' : 'border-gray-200'}`}>
+                    {isLocked && (
+                        <div className="mb-2 flex items-center gap-1.5">
+                            <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+                            <span className="text-xs font-semibold uppercase tracking-wide text-red-600">{t('account_locked')}</span>
+                        </div>
+                    )}
                     <div className="flex justify-between items-center">
                         <div className="flex items-center gap-2">
                             <h3 className="font-bold text-lg text-gray-800">{client.username}</h3>
@@ -190,7 +207,7 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
                         label="Active"
                         isChecked={client.active}
                         onChange={(value) => handlePermissionToggle(null, 'active', value)}
-                        disabled={currentUser.username !== 'chargerent'} />
+                        disabled={!canManageActiveState} />
                 )}
                 <div className="p-2">
                     <SectionButton section="features" />
@@ -216,13 +233,51 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
                             {commandsList.map(key => (<PermissionToggle key={key} label={key} isChecked={allCommands[key]} onChange={(value) => handlePermissionToggle('commands', key, value)} />))}
                         </div>
                     )}
+                    <SectionButton section="login_history" />
+                    {openSection === 'login_history' && (
+                        <div className="bg-gray-50 rounded-md p-2 mt-1">
+                            {isLocked && (
+                                <div className="mb-2 flex items-center justify-between rounded-md border border-red-300 bg-red-100 px-3 py-2">
+                                    <span className="text-xs font-semibold text-red-700">
+                                        {t('locked_until')}: {formatDateTime(lockoutData?.lockedUntil) || '-'}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={onUnlock}
+                                        className="rounded-md bg-red-600 px-2 py-1 text-xs font-semibold text-white hover:bg-red-700"
+                                    >
+                                        {t('unlock_user')}
+                                    </button>
+                                </div>
+                            )}
+                            {loginLogs.length > 0 ? (
+                                loginLogs.map((log, index) => (
+                                    <div
+                                        key={`${log.timestamp || 'log'}-${index}`}
+                                        className={`flex items-start gap-2 border-b border-gray-100 px-2 py-1.5 last:border-b-0 ${log.success ? '' : 'bg-red-50'}`}
+                                    >
+                                        <span className={`mt-0.5 h-3 w-3 shrink-0 rounded-full ${log.success ? 'bg-green-500' : 'bg-red-500'}`} />
+                                        <div className="min-w-0">
+                                            <p className="text-xs text-gray-700">{log.note}</p>
+                                            <p className="text-xs text-gray-400">
+                                                {formatDateTime(log.timestamp) || '-'}
+                                                {log.ip ? ` · ${log.ip}` : ''}
+                                            </p>
+                                        </div>
+                                    </div>
+                                ))
+                            ) : (
+                                <p className="px-2 py-2 text-xs text-gray-400">{t('no_login_history')}</p>
+                            )}
+                        </div>
+                    )}
                 </div>
             </>
         );
     };
 
     return (
-        <div className="bg-white rounded-lg shadow-md flex flex-col">
+        <div className={`rounded-lg shadow-md flex flex-col ${isLocked ? 'bg-red-50 ring-2 ring-red-300' : 'bg-white'}`}>
             {isEditing ? renderEditForm() : renderViewMode()}
         </div>
     );

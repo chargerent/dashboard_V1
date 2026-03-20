@@ -6,6 +6,8 @@ const HTTP_FUNCTION_NAME_MAP = {
   admin_upsertUserProfile: 'admin_httpUpsertUserProfile',
   admin_createAuthUserAndProfile: 'admin_httpCreateAuthUserAndProfile',
   admin_setUserPassword: 'admin_httpSetUserPassword',
+  admin_unlockUser: 'admin_httpUnlockUser',
+  auth_trackAttempt: 'auth_httpTrackAttempt',
   stationBinding_getNextStation: 'stationBinding_httpGetNextStation',
   stationBinding_bindModule: 'stationBinding_httpBindModule',
   stationBinding_unbindModule: 'stationBinding_httpUnbindModule',
@@ -49,6 +51,29 @@ export async function callFunctionWithAuth(functionName, data = {}) {
         __authToken: idToken,
       },
     }),
+  });
+
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch (_) {
+    payload = null;
+  }
+
+  if (!response.ok || payload?.error) {
+    throw new Error(getErrorMessage(payload, `Request failed (${response.status})`));
+  }
+
+  return payload?.result ?? payload?.data ?? payload ?? {};
+}
+
+export async function callFunctionPublic(functionName, data = {}) {
+  const response = await fetch(getCallableUrl(functionName), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ data }),
   });
 
   let payload = null;

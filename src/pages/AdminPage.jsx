@@ -7,8 +7,9 @@ import CreateClientForm from './CreateClientForm.jsx';
 import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
 import { callFunctionWithAuth } from '../utils/callableRequest.js';
 
-import { auth } from '../firebase-config';
+import { auth, db } from '../firebase-config';
 import { onAuthStateChanged } from 'firebase/auth';
+import { collection, getDocs } from 'firebase/firestore';
 
 // permission keys
 const featuresList = ['rentals', 'details', 'stationid', 'address', 'status', 'reporting', 'lease_revenue', 'rental_counts', 'rental_revenue', 'client_commission', 'rep_commission', 'search', 'binding'];
@@ -25,6 +26,7 @@ function AdminPage({
 }) {
   const [clients, setClients] = useState([]);
   const [originalClients, setOriginalClients] = useState([]);
+  const [loginAttempts, setLoginAttempts] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [saveStatus, setSaveStatus] = useState(null);
@@ -63,12 +65,14 @@ function AdminPage({
     if (!canManageClients) {
       setClients([]);
       setOriginalClients([]);
+      setLoginAttempts({});
       setError('');
       setLoading(false);
       return;
     }
 
     if (!firebaseUser) {
+      setLoginAttempts({});
       setLoading(false);
       setError('Not signed in');
       return;
@@ -79,13 +83,21 @@ function AdminPage({
       setError('');
 
       await ensureSignedIn();
-      const res = await callFunctionWithAuth('admin_listUsers');
+      const [res, attemptsSnap] = await Promise.all([
+        callFunctionWithAuth('admin_listUsers'),
+        getDocs(collection(db, 'loginAttempts')),
+      ]);
       const data = (res?.users || []).map(normalizeBindingClient);
+      const attemptsMap = {};
+      attemptsSnap.forEach((docSnap) => {
+        attemptsMap[docSnap.id] = docSnap.data();
+      });
 
       // Normalize for your existing UI components:
       // Each client object includes uid + profile fields.
       setClients(data);
       setOriginalClients(JSON.parse(JSON.stringify(data)));
+      setLoginAttempts(attemptsMap);
     } catch (e) {
       console.error(e);
       setError(e?.message || 'Failed to fetch clients (permission denied or backend not deployed).');
@@ -270,6 +282,21 @@ function AdminPage({
     }
   };
 
+  const handleUnlockUser = async (username) => {
+    if (!canManageClients) return;
+
+    setSaveStatus({ state: 'sending', message: 'Unlocking user...' });
+    try {
+      await ensureSignedIn();
+      await callFunctionWithAuth('admin_unlockUser', { username });
+      setSaveStatus({ state: 'success', message: 'User unlocked.' });
+      await fetchClients();
+    } catch (e) {
+      console.error(e);
+      setSaveStatus({ state: 'error', message: e?.message || 'Failed to unlock user' });
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-100">
       <ConfirmationModal
@@ -357,7 +384,9 @@ function AdminPage({
                   <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
                     {clients
                       .filter(client => client && client.username !== undefined)
-                      .map(client => (
+                      .map(client => {
+                        const usernameKey = String(client.username || '').trim().toLowerCase();
+                        return (
                         <ClientAdminCard
                           key={client.uid}
                           client={client}
@@ -372,9 +401,12 @@ function AdminPage({
                           featuresList={featuresList}
                           currentUser={currentUser}
                           commandsList={commandsList}
+                          lockoutData={loginAttempts[usernameKey] || loginAttempts[client.username] || null}
+                          onUnlock={() => handleUnlockUser(client.username)}
                           t={t}
                         />
-                      ))}
+                        );
+                      })}
 
                     <div
                       className="flex min-h-[180px] cursor-pointer items-center justify-center rounded-lg bg-white p-6 shadow-md transition-colors duration-200 hover:bg-gray-50"
