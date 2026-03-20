@@ -203,6 +203,32 @@ function isValidUsername(u) {
   return /^[a-z0-9._-]+$/.test(u);
 }
 
+function buildCustomClaimsFromProfile(profile) {
+  const source = profile || {};
+  const username = normalizeUsername(source.username);
+  const clientId = String(source.clientId || "").trim().toUpperCase();
+  const role = String(
+      source.role || (username === "chargerent" ? "admin" : "user"),
+  ).trim().toLowerCase() || "user";
+  const rawCommands = source.commands || source.Commands || {};
+  const commands = Object.fromEntries(
+      Object.entries(rawCommands).map(([key, value]) => [key, value === true]),
+  );
+
+  return {
+    username,
+    clientId,
+    role,
+    commands,
+  };
+}
+
+async function syncCustomClaimsForProfile(uid, profile) {
+  const claims = buildCustomClaimsFromProfile(profile);
+  await admin.auth().setCustomUserClaims(uid, claims);
+  return claims;
+}
+
 function normalizeCountry(country) {
   const value = String(country || "").trim().toUpperCase();
   if (value === "CA" || value === "CAN") return "CA";
@@ -543,6 +569,7 @@ async function upsertUserProfileImpl(data) {
   if (!clean.createdAt) clean.createdAt = admin.firestore.FieldValue.serverTimestamp();
 
   await db.collection("users").doc(uid).set(clean, { merge: true });
+  await syncCustomClaimsForProfile(uid, clean);
   return { ok: true };
 }
 
@@ -616,6 +643,7 @@ async function createAuthUserAndProfileImpl(data) {
 
   try {
     await db.collection("users").doc(uid).set(clean, { merge: true });
+    await syncCustomClaimsForProfile(uid, clean);
   } catch (e) {
     console.error("createAuthUserAndProfileImpl profile write failed", {
       uid,
@@ -694,6 +722,17 @@ async function trackLoginAttemptImpl(data, req = null) {
     ok: true,
     count: Number(update.count || 0),
     lockedUntil: update.lockedUntil || null,
+  };
+}
+
+async function syncOwnClaimsImpl(authState) {
+  const claims = await syncCustomClaimsForProfile(
+      authState.uid,
+      authState.profile,
+  );
+  return {
+    ok: true,
+    claims,
   };
 }
 
@@ -1235,6 +1274,11 @@ exports.auth_trackAttempt = functions.https.onCall(async (data, context) => (
   trackLoginAttemptImpl(data, context?.rawRequest || null)
 ));
 
+exports.auth_syncOwnClaims = functions.https.onCall(async (data, context) => {
+  const authState = await getAuthorizedProfileFromContext(context);
+  return syncOwnClaimsImpl(authState);
+});
+
 exports.admin_unlockUser = functions.https.onCall(async (data, context) => {
   await assertAdminFromContext(context);
   return unlockUserImpl(data);
@@ -1268,6 +1312,11 @@ exports.admin_httpSetUserPassword = handleHttpFunction(async (data, req) => {
 exports.auth_httpTrackAttempt = handleHttpFunction(async (data, req) => (
   trackLoginAttemptImpl(data, req)
 ));
+
+exports.auth_httpSyncOwnClaims = handleHttpFunction(async (data, req) => {
+  const authState = await getAuthorizedProfileFromRequest(req, data);
+  return syncOwnClaimsImpl(authState);
+});
 
 exports.admin_httpUnlockUser = handleHttpFunction(async (data, req) => {
   await assertAdmin(req, data);

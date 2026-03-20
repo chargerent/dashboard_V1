@@ -201,6 +201,25 @@ export const normalizeKioskData = (kiosks) => {
     });
 };
 
+export const filterStationsForClient = (stations, clientInfo) => {
+    const stationList = Array.isArray(stations) ? stations : [];
+
+    if (!clientInfo) {
+        return [];
+    }
+
+    if (clientInfo.isAdmin) {
+        return stationList;
+    }
+
+    if (clientInfo.partner) {
+        const partnerId = clientInfo.clientId?.toLowerCase();
+        return stationList.filter((station) => station.info.rep?.toLowerCase() === partnerId);
+    }
+
+    return stationList.filter((station) => station.info.client === clientInfo.clientId);
+};
+
 /**
  * Checks if a kiosk is considered online based on its last update time.
  * @param {Object} kiosk - The kiosk object.

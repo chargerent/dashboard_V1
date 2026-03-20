@@ -8,6 +8,7 @@ const HTTP_FUNCTION_NAME_MAP = {
   admin_setUserPassword: 'admin_httpSetUserPassword',
   admin_unlockUser: 'admin_httpUnlockUser',
   auth_trackAttempt: 'auth_httpTrackAttempt',
+  auth_syncOwnClaims: 'auth_httpSyncOwnClaims',
   stationBinding_getNextStation: 'stationBinding_httpGetNextStation',
   stationBinding_bindModule: 'stationBinding_httpBindModule',
   stationBinding_unbindModule: 'stationBinding_httpUnbindModule',
@@ -56,7 +57,7 @@ export async function callFunctionWithAuth(functionName, data = {}) {
   let payload = null;
   try {
     payload = await response.json();
-  } catch (_) {
+  } catch {
     payload = null;
   }
 
@@ -79,7 +80,7 @@ export async function callFunctionPublic(functionName, data = {}) {
   let payload = null;
   try {
     payload = await response.json();
-  } catch (_) {
+  } catch {
     payload = null;
   }
 

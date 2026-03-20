@@ -1,5 +1,5 @@
 // src/pages/DashboardPage.jsx
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import FilterPanel from '../components/Dashboard/FilterPanel';
 import KioskPanel from '../components/kiosk/kioskPanel';
 import KioskDetailPanel from '../components/kiosk/KioskDetailPanel';
@@ -10,15 +10,16 @@ import LoadingSpinner from '../components/UI/LoadingSpinner';
 import InitialStatusPage from '../components/UI/InitialStatusPage';
 import SoldOutKiosksModal from '../components/UI/SoldOutKiosksModal.jsx';
 import TimeoutWarningModal from '../components/UI/TimeoutWarningModal';
-import { isKioskOnline, isKioskActive, isNewSchemaKiosk } from '../utils/helpers';
+import { filterStationsForClient, isKioskOnline, isKioskActive } from '../utils/helpers';
 import GlobalRentalActivity from '../components/Dashboard/GlobalRentalActivity';
 import { useIdleTimer } from '../hooks/useIdleTimer';
 import LocationSummary from '../components/Dashboard/LocationSummary';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
 import RentalDetailView from '../components/Dashboard/RentalDetailView';
-import { CpuChipIcon } from '@heroicons/react/24/outline';
+import { CpuChipIcon, QrCodeIcon } from '@heroicons/react/24/outline';
+import useKioskCommandFlow from '../hooks/useKioskCommandFlow';
 
-export default function DashboardPage({ token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToReporting, rentalData, allStationsData, setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, setNgrokInfo, manageIgnoredKiosk, kiosksReady }) {
+export default function DashboardPage({ token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToReporting, onNavigateToTesting, rentalData, allStationsData, setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, setNgrokInfo, manageIgnoredKiosk, kiosksReady }) {
     const [loading, setLoading] = useState(!kiosksReady);
     const [error, setError] = useState(null);
     const [expandedKioskId, setExpandedKioskId] = useState(null);
@@ -28,17 +29,32 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
     const [showV1, setShowV1] = useState(true);
     const [showV2, setShowV2] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
-    const [commandDetails, setCommandDetails] = useState(null);
     const [currentPage, setCurrentPage] = useState(1);
     const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm);
     const ITEMS_PER_PAGE = 12;
     const [showInitialStatus, setShowInitialStatus] = useState(false);
     const [rentalDetailView, setRentalDetailView] = useState(null); // { kioskId, period }
     const [showSoldOutModal, setShowSoldOutModal] = useState(false);
-    const [commandModalOpen, setCommandModalOpen] = useState(false);
     const isAdminUser = !!clientInfo?.isAdmin;
+    const hasTestingAccess = clientInfo?.username === 'chargerent' || clientInfo?.features?.testing === true;
 
     const { showWarning, handleStay } = useIdleTimer({ onLogout, idleTimeout: 540000, warningTimeout: 60000 });
+    const {
+        commandDetails,
+        commandModalOpen,
+        setCommandModalOpen,
+        handleGeneralCommand,
+        handleKioskSave,
+        handleLockSlotClick,
+        handleSendCommand,
+        handleSlotClick,
+    } = useKioskCommandFlow({
+        allStationsData,
+        setEjectingSlots,
+        manageIgnoredKiosk,
+        onCommand,
+        t,
+    });
 
     useEffect(() => {
         setLoading(!kiosksReady);
@@ -86,217 +102,9 @@ export default function DashboardPage({ token, onLogout, clientInfo, t, language
         });
     };
 
-    const handleSlotClick = (stationid, moduleid, slotid) => {
-        const confirmationText = `${t('eject_confirmation')} ${slotid}?`;
-        const targetKiosk = allStationsData.find(kiosk => kiosk.stationid === stationid);
-        const targetModule = targetKiosk?.modules?.find(module => module.id === moduleid);
-        const targetSlot = targetModule?.slots?.find(slot => slot.position === slotid);
-        const chargerid = Number(targetSlot?.sn || 0);
-        const action = isNewSchemaKiosk(targetKiosk) && chargerid ? 'vend' : 'eject specific';
-
-        setCommandDetails({
-            stationid,
-            moduleid,
-            slotid,
-            action,
-            chargerid: action === 'vend' ? chargerid : undefined,
-            confirmationText,
-        });
-        setCommandModalOpen(true);
-    };
-    
-    const handleLockSlotClick = (stationid, moduleid, slotid, isCurrentlyLocked) => {
-        const action = isCurrentlyLocked ? 'unlock slot' : 'lock slot';
-        const confirmationText = `${isCurrentlyLocked ? t('unlock_confirmation') : t('lock_confirmation')} ${slotid}?`;
-
-        // Always get the latest kiosk data from the state to avoid stale closures
-        const targetKiosk = allStationsData.find(k => k.stationid === stationid);
-
-        let lockReason = '';
-        if (isCurrentlyLocked) {
-            const targetModule = targetKiosk?.modules.find(m => m.id === moduleid);
-            const targetSlot = targetModule?.slots.find(s => s.position === slotid);
-            if (targetSlot && targetSlot.lockReason) {
-                lockReason = targetSlot.lockReason;
-            }
-        }
-        setCommandDetails({ stationid, moduleid, slotid, action, confirmationText, lockReason });
-        setCommandModalOpen(true);
-    };
-
-    const handleSendCommand = (reason = null) => {
-        setCommandModalOpen(false);
-
-        const { stationid, moduleid, slotid, action } = commandDetails;
-        
-        // If this is a save action, un-ignore the kiosk now that we are sending the command.
-        if (action.includes('change')) {
-            manageIgnoredKiosk(stationid, false);
-        }
-
-        if (action.startsWith('eject') || action === 'rent' || action === 'vend') {
-            const targetKiosk = allStationsData.find(k => k.stationid === stationid);
-            if (!targetKiosk) return;
-
-            let slotsToEject = [];
-            const powerThreshold = targetKiosk.hardware?.power || 80;
-
-            switch (action) {
-                case 'eject specific':
-                case 'rent':
-                case 'vend':
-                    slotsToEject.push({ stationid, moduleid, slotid });
-                    break;
-                case 'eject module':
-                    const targetModule = targetKiosk.modules.find(m => m.id === moduleid);
-                    if (targetModule) {
-                        targetModule.slots.forEach(slot => {
-                            if (slot.sn && slot.sn !== 0) {
-                                slotsToEject.push({ stationid, moduleid: targetModule.id, slotid: slot.position });
-                            }
-                        });
-                    }
-                    break;
-                case 'eject all':
-                    targetKiosk.modules.forEach(module => {
-                        module.slots.forEach(slot => {
-                            if (slot.sn && slot.sn !== 0 && !slot.isLocked) {
-                                slotsToEject.push({ stationid, moduleid: module.id, slotid: slot.position });
-                            }
-                        });
-                    });
-                    break;
-                case 'eject full':
-                        targetKiosk.modules.forEach(module => {
-                        module.slots.forEach(slot => {
-                            if (slot.sn && slot.sn !== 0 && slot.batteryLevel >= powerThreshold) {
-                                slotsToEject.push({ stationid, moduleid: module.id, slotid: slot.position });
-                            }
-                        });
-                    });
-                    break;
-                case 'eject empty':
-                        targetKiosk.modules.forEach(module => {
-                        module.slots.forEach(slot => {
-                            if (slot.sn && slot.sn !== 0 && typeof slot.batteryLevel === 'number' && slot.batteryLevel < powerThreshold && !slot.isLocked) {
-                                slotsToEject.push({ stationid, moduleid: module.id, slotid: slot.position });
-                            }
-                        });
-                    });
-                    break;
-                case 'eject locked':
-                        targetKiosk.modules.forEach(module => {
-                        module.slots.forEach(slot => {
-                            if (slot.isLocked) {
-                                slotsToEject.push({ stationid, moduleid: module.id, slotid: slot.position });
-                            }
-                        });
-                    });
-                    break;
-            }
-            if (slotsToEject.length > 0) { // This condition already covers all eject actions
-                setEjectingSlots(prev => [...prev, ...slotsToEject]);
-            }
-        }
-
-        const details = {
-            ...(commandDetails.action.includes('change') && { kiosk: commandDetails.kiosk, autoGeocode: commandDetails.autoGeocode }),
-            ...((commandDetails.action === 'lock slot' || commandDetails.action === 'unlock slot' || commandDetails.action === 'eject specific' || commandDetails.action === 'rent' || commandDetails.action === 'vend') && { slotid: commandDetails.slotid, info: reason }),
-            ...(commandDetails.action === 'vend' && { chargerid: commandDetails.chargerid }),
-            ...(commandDetails.action === 'eject count' && { slotid: commandDetails.slotid }),
-            ...(reason && typeof reason === 'object' && { ...reason })
-        };
-        onCommand(commandDetails.stationid, commandDetails.action, commandDetails.moduleid, commandDetails.provisionid, commandDetails.uiVersion, details);
-    };
-
-    const handleKioskSave = (stationid, section, data, autoGeocode) => {
-        const confirmationText = t('save_info_confirmation');
-
-        let action;
-        if (section === 'pricing') {
-            action = 'pricechange';
-        } else if (section === 'hardware') {
-            action = 'hardwarechange';
-        } else if (section === 'ui') {
-            action = 'uichange';
-        } else {
-            action = 'infochange';
-        }
-
-        setCommandDetails({
-            stationid,
-            action: action,
-            kiosk: data, // Use the updated data from the form
-            autoGeocode: autoGeocode,
-            confirmationText,
-        });
-        setCommandModalOpen(true);
-    };
-    const handleGeneralCommand = (stationid, action, moduleid = null, provisionid = null, uiVersion = null, details = null) => {
-        let confirmationText = `Are you sure you want to ${action}?`;
-        let commandDetailsPayload = { stationid, action, moduleid, provisionid, uiVersion, ...details };
-        const targetKiosk = allStationsData.find(k => k.stationid === stationid);
-
-        if (action === 'disable' && targetKiosk?.disabled) {
-            action = 'enable';
-        }
-
-        if (action === 'reboot') {
-            confirmationText = t('reboot_confirmation');
-        } else if (action === 'ngrok connect') {
-            confirmationText = t('ngrok_connect_confirmation');
-        } else if (action === 'ngrok disconnect') {
-            confirmationText = t('ngrok_disconnect_confirmation');
-        } else if (action === 'ssh connect') {
-            confirmationText = t('ssh_connect_confirmation');
-        } else if (action === 'ssh disconnect') {
-            confirmationText = t('ssh_disconnect_confirmation');
-        } else if (action === 'enable') {
-            confirmationText = t('enable_confirmation');
-        } else if (action === 'disable') {
-            confirmationText = t('disable_confirmation');
-        } else if (action === 'eject module') {
-            confirmationText = `${t('eject_module_confirmation')}?`;
-            commandDetailsPayload.slotid = moduleid; // Repurpose slotid for moduleid in this case
-        } else if (action === 'lock module') {
-            confirmationText = `${t('lock_module_confirmation')}?`;
-            commandDetailsPayload.slotid = moduleid; // Repurpose slotid for moduleid
-        } else if (action === 'refund') {
-            // Refund confirmation is handled in its own modal, so we bypass the generic one.
-            onCommand(stationid, 'refund', null, null, null, details);
-            return;
-        } else if (action === 'rent') {
-            confirmationText = t('rent_confirmation');
-        } else if (action === 'eject count') {
-            confirmationText = `${t('eject_count_confirmation')} ${details.slotid} ${t('chargers')}?`;
-        }
-        commandDetailsPayload.action = action;
-        commandDetailsPayload.confirmationText = confirmationText;
-        setCommandDetails(commandDetailsPayload);
-        setCommandModalOpen(true);
-    };
-
     const clientStations = useMemo(() => {
-        let stations = allStationsData || [];
-
-        if (!isAdminUser) {
-            if (clientInfo.partner) {
-                stations = stations.filter(s => s.info.rep?.toLowerCase() === clientInfo.clientId?.toLowerCase());
-            } else {
-                stations = stations.filter(s => s.info.client === clientInfo.clientId);
-            }
-        }
-        return stations;
-    }, [allStationsData, clientInfo, isAdminUser]);
-    
-    const stationsByLocation = useMemo(() => {
-        return (clientStations || []).reduce((acc, station) => {
-            const location = station.info.location;
-            if (!acc[location]) acc[location] = [];
-            acc[location].push(station);
-            return acc;
-        }, {});
-    }, [clientStations]);
+        return filterStationsForClient(allStationsData, clientInfo);
+    }, [allStationsData, clientInfo]);
 
     const latestTimestamp = useMemo(() => {
         if (!allStationsData || allStationsData.length === 0) {
@@ -617,15 +425,20 @@ return (
                             )}
                         </>
                     )}
-                    {((clientInfo.features.binding || clientInfo.commands.binding) || isAdminUser) && (
-                        <button onClick={onNavigateToBinding} className="p-2 rounded-md bg-blue-100 text-blue-700 hover:bg-blue-200" title={t('module_binding')}>
-                            <CpuChipIcon className="h-6 w-6" />
-                        </button>
-                    )}
-                    {((clientInfo.commands['client edit']) || isAdminUser) && (
-                        <button onClick={onNavigateToAdmin} className="p-2 rounded-md bg-orange-100 text-orange-700 hover:bg-orange-200" title={t('admin_tools')}>
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
-                        </button>
+	                    {((clientInfo.features.binding || clientInfo.commands.binding) || isAdminUser) && (
+	                        <button onClick={onNavigateToBinding} className="p-2 rounded-md bg-blue-100 text-blue-700 hover:bg-blue-200" title={t('module_binding')}>
+	                            <CpuChipIcon className="h-6 w-6" />
+	                        </button>
+	                    )}
+	                    {hasTestingAccess && (
+	                        <button onClick={onNavigateToTesting} className="p-2 rounded-md bg-slate-100 text-slate-700 hover:bg-slate-200" title={t('testing_page_title')}>
+	                            <QrCodeIcon className="h-6 w-6" />
+	                        </button>
+	                    )}
+	                    {((clientInfo.commands['client edit']) || isAdminUser) && (
+	                        <button onClick={onNavigateToAdmin} className="p-2 rounded-md bg-orange-100 text-orange-700 hover:bg-orange-200" title={t('admin_tools')}>
+	                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+	                        </button>
                     )}
                     <button onClick={onLogout} className="p-2 rounded-md bg-red-500 text-white hover:bg-red-600" title={t('logout')}>
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>

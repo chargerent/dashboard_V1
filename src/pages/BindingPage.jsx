@@ -3,20 +3,13 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../firebase-config';
 import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
 import { callFunctionWithAuth } from '../utils/callableRequest.js';
+import { buildStationQrUrl, normalizeStationId, parseStationQrInput } from '../utils/stationQr.js';
 
 const COUNTRY_OPTIONS = [
   { code: 'CA', label: 'Canada' },
   { code: 'FR', label: 'France' },
   { code: 'US', label: 'United States' },
 ];
-
-function buildQrUrl(stationid) {
-  return stationid ? `https://chargerent.online/stations/qr?id=${stationid}` : '';
-}
-
-function normalizeStationId(stationid) {
-  return String(stationid || '').trim().toUpperCase();
-}
 
 function normalizeModuleId(moduleId) {
   return String(moduleId || '').trim();
@@ -69,40 +62,6 @@ function getCountryFromStationId(stationid) {
   if (normalized.startsWith('FR')) return 'FR';
   if (normalized.startsWith('US')) return 'US';
   return '';
-}
-
-function parseStationQrInput(value) {
-  const rawValue = String(value || '').trim();
-
-  if (!rawValue) {
-    return { mode: 'empty', stationid: '' };
-  }
-
-  const compactValue = rawValue.replace(/\s+/g, '');
-  const idMatch = compactValue.match(/(?:^|[?&])id=([^&#\s]+)/i);
-
-  if (idMatch) {
-    try {
-      return {
-        mode: 'qr',
-        stationid: normalizeStationId(decodeURIComponent(idMatch[1])),
-      };
-    } catch {
-      return {
-        mode: 'qr',
-        stationid: normalizeStationId(idMatch[1]),
-      };
-    }
-  }
-
-  if (/^https?:\/\//i.test(compactValue)) {
-    return { mode: 'invalid-url', stationid: '' };
-  }
-
-  return {
-    mode: 'manual',
-    stationid: normalizeStationId(rawValue),
-  };
 }
 
 function parseModuleScanInput(value) {
@@ -291,14 +250,14 @@ export default function BindingPage({
     const normalizedStationid = normalizeStationId(nextStationid);
     setStationInfo({
       stationid: normalizedStationid,
-      qrUrl: buildQrUrl(normalizedStationid),
+      qrUrl: buildStationQrUrl(normalizedStationid),
     });
     setStationQrInput(normalizedStationid);
   }, []);
 
   const syncMoveDestinationInfo = useCallback((payload) => {
     const nextStationid = String(payload?.nextStationid || payload?.stationid || '').trim().toUpperCase();
-    const nextQrUrl = String(payload?.nextQrUrl || payload?.qrUrl || buildQrUrl(nextStationid));
+    const nextQrUrl = String(payload?.nextQrUrl || payload?.qrUrl || buildStationQrUrl(nextStationid));
 
     setMoveDestinationInfo({
       stationid: nextStationid,
@@ -461,7 +420,7 @@ export default function BindingPage({
     if (parsedValue.mode === 'manual') {
       setStationInfo({
         stationid: parsedValue.stationid,
-        qrUrl: isBindingStationId(parsedValue.stationid) ? buildQrUrl(parsedValue.stationid) : '',
+        qrUrl: isBindingStationId(parsedValue.stationid) ? buildStationQrUrl(parsedValue.stationid) : '',
       });
       setPageError('');
       return;

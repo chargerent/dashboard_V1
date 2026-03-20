@@ -18,6 +18,8 @@ import AnalyticsPage from './pages/AnalyticsPage.jsx';
 import ReportingPage from './pages/ReportingPage.jsx';
 import BindingPage from './pages/BindingPage.jsx';
 import TemplatesPage from './pages/TemplatesPage.jsx';
+import TestingPage from './pages/TestingPage.jsx';
+import { callFunctionWithAuth } from './utils/callableRequest.js';
 import { markStartupStep, measureStartupDuration } from './utils/startupTrace.js';
 
 // 🔥 firebase-config must export BOTH db and auth
@@ -100,7 +102,8 @@ function buildClientInfoFromProfile(profile, uid) {
     country: 'all',
     status: false,
     pricing: false,
-    reporting: false
+    reporting: false,
+    testing: false
   };
 
   const defaultCommands = {
@@ -153,6 +156,7 @@ function buildClientInfoFromProfile(profile, uid) {
   // Normalize language
   features.country = features.country || features.Country || 'all';
   features.defaultlanguage = (features.defaultlanguage || features.defaultLanguage || 'en').toString().toLowerCase();
+  features.testing = username === 'chargerent' || features.testing === true;
 
   return {
     uid,
@@ -189,7 +193,7 @@ function App() {
   const [token, setToken] = useState(localStorage.getItem('dashboardToken'));
   const [clientInfo, setClientInfo] = useState(null);
   const [language, setLanguage] = useState('en');
-  const [page, setPage] = useState('dashboard'); // 'dashboard', 'admin', 'binding', 'templates', 'kiosk-editor', 'rentals', 'chargers', 'provision', 'reporting', 'analytics'
+  const [page, setPage] = useState('dashboard'); // 'dashboard', 'admin', 'binding', 'templates', 'kiosk-editor', 'rentals', 'chargers', 'provision', 'reporting', 'analytics', 'testing'
   const [rentalData, setRentalData] = useState([]);
   const [commandStatus, setCommandStatus] = useState(null);
   const [firestoreError, setFirestoreError] = useState(null);
@@ -332,12 +336,11 @@ function App() {
 
       try {
         const tokenStartedAt = performance.now();
-        const idToken = await user.getIdToken();
+        const idToken = await user.getIdToken(true);
         markStartupStep('auth.getIdToken.resolved', {
           durationMs: measureStartupDuration(tokenStartedAt),
         });
-        localStorage.setItem('dashboardToken', idToken);
-        setToken(idToken);
+        let tokenToUse = idToken;
 
         const profileStartedAt = performance.now();
         const snap = await getDoc(doc(db, 'users', user.uid));
@@ -357,6 +360,16 @@ function App() {
           setAuthReady(true);
           return;
         }
+
+        try {
+          await callFunctionWithAuth('auth_syncOwnClaims');
+          tokenToUse = await user.getIdToken(true);
+        } catch (syncError) {
+          console.warn('Unable to sync auth claims during bootstrap:', syncError);
+        }
+
+        localStorage.setItem('dashboardToken', tokenToUse);
+        setToken(tokenToUse);
 
         const info = buildClientInfoFromProfile(profile, user.uid);
         setClientInfo(info);
@@ -391,7 +404,7 @@ function App() {
       // Refresh token
       try {
         if (auth.currentUser) {
-          const refreshed = await auth.currentUser.getIdToken();
+          const refreshed = await auth.currentUser.getIdToken(true);
           localStorage.setItem('dashboardToken', refreshed);
           setToken(refreshed);
         }
@@ -887,6 +900,7 @@ function App() {
       onNavigateToRentals={() => setPage('rentals')}
       onNavigateToChargers={() => setPage('chargers')}
       onNavigateToReporting={() => setPage('reporting')}
+      onNavigateToTesting={() => setPage('testing')}
       onNavigateToAnalytics={onNavigateToAnalytics}
       onNavigateToKioskEditor={() => setPage('kiosk-editor')}
       rentalData={rentalData}
@@ -938,6 +952,8 @@ function App() {
     if (!auth.currentUser || !token || !clientInfo) {
       return <LoginPage onLogin={handleLogin} />;
     }
+
+    const hasTestingAccess = clientInfo.username === 'chargerent' || clientInfo.features?.testing === true;
 
     switch (page) {
       case 'admin':
@@ -1036,6 +1052,39 @@ function App() {
             onNavigateToDashboard={() => setPage('dashboard')}
             onLogout={handleLogout}
             t={t}
+          />
+        );
+      case 'testing':
+        if (!hasTestingAccess) {
+          return dashboard;
+        }
+
+        return (
+          <TestingPage
+            onLogout={handleLogout}
+            onNavigateToDashboard={() => setPage('dashboard')}
+            clientInfo={clientInfo}
+            t={t}
+            language={language}
+            setLanguage={setLanguage}
+            rentalData={rentalData}
+            allStationsData={allStationsData}
+            onCommand={onCommand}
+            commandStatus={commandStatus}
+            setCommandStatus={setCommandStatus}
+            firestoreError={firestoreError}
+            serverFlowVersion={clientInfo?.serverFlowVersion}
+            serverUiVersion={clientInfo?.serverUiVersion}
+            pendingSlots={pendingSlots}
+            ejectingSlots={ejectingSlots}
+            setEjectingSlots={setEjectingSlots}
+            failedEjectSlots={failedEjectSlots}
+            lockingSlots={lockingSlots}
+            manageIgnoredKiosk={manageIgnoredKiosk}
+            ngrokModalOpen={ngrokModalOpen}
+            setNgrokModalOpen={setNgrokModalOpen}
+            ngrokInfo={ngrokInfo}
+            kiosksReady={kiosksReady}
           />
         );
       case 'kiosk-editor':

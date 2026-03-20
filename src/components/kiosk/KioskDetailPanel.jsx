@@ -160,8 +160,8 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         );
     });
 
-    const Module = ({ module, reverseOrder = false }) => (
-        <div className={`${module.output === false ? 'bg-red-100' : 'bg-white'} p-2 rounded-lg shadow-inner`}>
+    const Module = ({ module, reverseOrder = false, className = '' }) => (
+        <div className={`${module.output === false ? 'bg-red-100' : 'bg-white'} p-2 rounded-lg shadow-inner ${className}`}>
             <div className="flex flex-col gap-1">
                 {module.slots.slice().sort((a, b) => reverseOrder ? b.position - a.position : a.position - b.position).map(slot => {
                     const style = getSlotStyle(slot, module);
@@ -187,12 +187,12 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
 
     const renderCT3 = () => {
         return (
-            <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
-                <div className="bg-white p-4 rounded-lg shadow-inner flex flex-col items-center gap-3 w-full max-w-md">
-                    <div className="w-16 h-16 bg-gray-200 flex items-center justify-center rounded-md">
+            <div className="p-2 flex flex-col max-h-[60vh] md:max-h-none overflow-y-auto">
+                <div className="bg-white p-4 rounded-lg shadow-inner flex flex-col gap-3 w-full">
+                    <div className="w-16 h-16 bg-gray-200 flex items-center justify-center rounded-md self-center">
                         <svg xmlns="http://www.w3.org/2000/svg" className="w-10 h-10 text-gray-400" viewBox="0 0 24 24" fill="currentColor"><path d="M8 21H4a1 1 0 0 1-1-1V16a1 1 0 0 0-2 0v4a3 3 0 0 0 3 3H8a1 1 0 0 0 0-2Zm14-6a1 1 0 0 0-1 1v4a1 1 0 0 1-1 1H16a1 1 0 0 0 0 2h4a3 3 0 0 0 3-3V16a1 1 0 0 0-2 0ZM20 1H16a1 1 0 0 0 0 2h4a1 1 0 0 1 1 1V8a1 1 0 0 0 2 0V4a3 3 0 0 0-3-3ZM2 9a1 1 0 0 0 1-1V4a1 1 0 0 1 1-1H8a1 1 0 0 0 0-2H4a3 3 0 0 0-3 3V8a1 1 0 0 0 1 1Zm8-4H6a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1ZM9 9H7V7H9Zm5 2h4a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1H14a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1Zm1-4h2V9H15Zm-5 6H6a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V14a1 1 0 0 0-1-1Zm-1 4H7V15H9Zm5-1a1 1 0 0 0 1-1 1 1 0 0 0 0-2H14a1 1 0 0 0-1 1v1a1 1 0 0 0 1 1Zm4-3a1 1 0 0 0-1 1v3a1 1 0 0 0 0 2h1a1 1 0 0 0 1-1V14a1 1 0 0 0-1-1Zm-4 4a1 1 0 1 0 1 1A1 1 0 0 0 14 17Z" /></svg>
                     </div>
-                    {kiosk.modules[0] && <Module module={kiosk.modules[0]} />}
+                    {kiosk.modules[0] && <Module module={kiosk.modules[0]} className="w-full" />}
                 </div>
             </div>
         );
