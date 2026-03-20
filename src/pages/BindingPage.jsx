@@ -228,6 +228,16 @@ function findBoundModuleById(kiosks, moduleId) {
   return null;
 }
 
+function findKioskByStationId(kiosks, stationid) {
+  const normalizedStationid = normalizeStationId(stationid);
+  if (!normalizedStationid) {
+    return null;
+  }
+
+  const kioskList = Array.isArray(kiosks) ? kiosks : [];
+  return kioskList.find((kiosk) => normalizeStationId(kiosk?.stationid) === normalizedStationid) || null;
+}
+
 export default function BindingPage({
   t,
   onLogout,
@@ -561,12 +571,82 @@ export default function BindingPage({
     };
   }, [allStationsData, moduleId, t]);
 
+  const resolveUnbindRequest = useCallback(() => {
+    const requestedStationid = normalizeStationId(stationInfo.stationid);
+    const rawModuleValue = normalizeModuleId(moduleId);
+
+    if (!requestedStationid && !rawModuleValue) {
+      return { error: t('unbind_identifier_required'), target: 'station' };
+    }
+
+    const matchedStation = requestedStationid ?
+      findKioskByStationId(allStationsData, requestedStationid) :
+      null;
+
+    let moduleResolution = null;
+    if (rawModuleValue) {
+      moduleResolution = resolveModuleRequest();
+      if (moduleResolution.error) {
+        return { error: moduleResolution.error, target: 'module' };
+      }
+    }
+
+    const matchedModuleStationid = normalizeStationId(
+      moduleResolution?.matchedBinding?.kiosk?.stationid,
+    );
+
+    if (
+      requestedStationid &&
+      matchedModuleStationid &&
+      matchedModuleStationid !== requestedStationid
+    ) {
+      return { error: t('unbind_identifier_mismatch'), target: 'module' };
+    }
+
+    if (moduleResolution) {
+      return {
+        requestModuleId: moduleResolution.matchedBinding?.module?.id || moduleResolution.resolvedModuleId,
+        requestStationid: requestedStationid || matchedModuleStationid,
+        requestCountry: getCountryFromStationId(requestedStationid || matchedModuleStationid),
+      };
+    }
+
+    if (!matchedStation) {
+      return {
+        error: `${t('binding_station_not_found')}: ${requestedStationid}`,
+        target: 'station',
+      };
+    }
+
+    const stationModules = Array.isArray(matchedStation.modules) ?
+      matchedStation.modules.filter((module) => normalizeModuleId(module?.id)) :
+      [];
+
+    if (stationModules.length === 0) {
+      return {
+        error: `${t('binding_station_not_found')}: ${requestedStationid}`,
+        target: 'station',
+      };
+    }
+
+    if (stationModules.length > 1) {
+      return { error: t('unbind_station_multiple_modules'), target: 'module' };
+    }
+
+    return {
+      requestModuleId: normalizeModuleId(stationModules[0]?.id),
+      requestStationid: requestedStationid,
+      requestCountry: getCountryFromStationId(requestedStationid),
+    };
+  }, [allStationsData, moduleId, resolveModuleRequest, stationInfo.stationid, t]);
+
   const normalizedStationId = normalizeStationId(stationInfo.stationid);
   const normalizedModuleId = normalizeModuleId(moduleId);
   const bindingCountry = isBindingStationId(normalizedStationId) ?
     getCountryFromStationId(normalizedStationId) :
     '';
   const isFormActive = Boolean(bindingCountry);
+  const canUnbind = Boolean(normalizedStationId || normalizedModuleId);
   const moveFormReady = Boolean(moveSourceStationId && moveModuleId);
 
   const handleBind = useCallback(async () => {
@@ -649,28 +729,23 @@ export default function BindingPage({
   ]);
 
   const handleUnbind = useCallback(async () => {
-    if (!normalizedStationId) {
-      setPageError(t('station_qr_required'));
-      setStatus({ state: 'error', message: t('station_qr_required') });
-      focusStationQrInput();
-      return;
-    }
-
-    if (!bindingCountry) {
+    if (stationQrInput.trim() && !normalizedStationId) {
       setPageError(t('station_qr_invalid'));
       setStatus({ state: 'error', message: t('station_qr_invalid') });
       focusStationQrInput();
       return;
     }
 
-    const moduleResolution = resolveModuleRequest();
-    if (moduleResolution.error) {
+    const unbindRequest = resolveUnbindRequest();
+    if (unbindRequest.error) {
       setPageError('');
-      showBindingError(moduleResolution.error, 'module');
+      showBindingError(unbindRequest.error, unbindRequest.target || 'module');
       return;
     }
 
-    const requestModuleId = moduleResolution.matchedBinding?.module?.id || moduleResolution.resolvedModuleId;
+    const requestModuleId = normalizeModuleId(unbindRequest.requestModuleId);
+    const requestStationid = normalizeStationId(unbindRequest.requestStationid);
+    const requestCountry = String(unbindRequest.requestCountry || '').trim().toUpperCase();
 
     if (!requestModuleId) {
       setPageError('');
@@ -688,8 +763,8 @@ export default function BindingPage({
     try {
       await ensureSignedIn();
       const payload = await callFunctionWithAuth('stationBinding_unbindModule', {
-        country: bindingCountry,
-        stationid: normalizedStationId,
+        country: requestCountry,
+        stationid: requestStationid,
         moduleId: requestModuleId,
       });
 
@@ -700,13 +775,13 @@ export default function BindingPage({
       setStatus({ state: 'error', message: error?.message || t('command_failed') });
     }
   }, [
-    bindingCountry,
     ensureSignedIn,
     focusStationQrInput,
     moduleId,
     normalizedStationId,
     resetBindingForm,
-    resolveModuleRequest,
+    resolveUnbindRequest,
+    stationQrInput,
     showBindingError,
     t,
   ]);
@@ -865,8 +940,7 @@ export default function BindingPage({
                       onChange={handleModuleInputChange}
                       onKeyDown={handleModuleInputKeyDown}
                       placeholder="867652077228617"
-                      disabled={!isFormActive}
-                      className="w-full rounded-md border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
+                      className="w-full rounded-md border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
                     />
                   </label>
                 </div>
@@ -883,7 +957,7 @@ export default function BindingPage({
                   <button
                     type="button"
                     onClick={handleUnbind}
-                    disabled={!isFormActive || !normalizedModuleId || !normalizedStationId}
+                    disabled={!canUnbind}
                     className="inline-flex flex-1 items-center justify-center rounded-md bg-red-500 px-5 py-3 text-sm font-bold text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:bg-red-300"
                   >
                     {t('unbind_module')}

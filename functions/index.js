@@ -42,7 +42,7 @@ async function getAuthorizedProfileFromRequest(req, data) {
     try {
       const decodedToken = await admin.auth().verifyIdToken(idToken);
       uid = String(decodedToken?.uid || "").trim();
-    } catch (error) {
+    } catch {
       uid = "";
     }
   }
@@ -54,7 +54,7 @@ async function getAuthorizedProfileFromRequest(req, data) {
       try {
         const decodedToken = await admin.auth().verifyIdToken(idToken);
         uid = String(decodedToken?.uid || "").trim();
-      } catch (error) {
+      } catch {
         uid = "";
       }
     }
@@ -259,6 +259,14 @@ function findNextProvisionId(docSnaps) {
 
 function normalizeStationId(stationid) {
   return String(stationid || "").trim().toUpperCase();
+}
+
+function getCountryFromStationId(stationid) {
+  const normalized = normalizeStationId(stationid);
+  if (normalized.startsWith("CA")) return "CA";
+  if (normalized.startsWith("FR")) return "FR";
+  if (normalized.startsWith("US")) return "US";
+  return "";
 }
 
 function normalizeModuleId(moduleId) {
@@ -806,38 +814,79 @@ async function stationBindingBindModuleImpl(data, authState) {
 }
 
 async function stationBindingUnbindModuleImpl(data, authState) {
-  const requestedCountry = normalizeCountry(data?.country);
+  const requestedCountryValue = String(data?.country || "").trim();
+  const requestedCountry = requestedCountryValue ?
+    normalizeCountry(requestedCountryValue) :
+    "";
   const requestedStationId = normalizeStationId(data?.stationid);
-  const moduleId = normalizeModuleId(data?.moduleId);
+  const requestedModuleId = normalizeModuleId(data?.moduleId);
 
-  if (!moduleId) {
+  if (!requestedStationId && !requestedModuleId) {
     throw new functions.https.HttpsError(
         "invalid-argument",
-        "moduleId required",
+        "stationid or moduleId required",
     );
   }
 
   const snapshot = await db.collection("kiosks").get();
-  const matchingDoc = snapshot.docs.find((docSnap) => {
+  const stationDoc = requestedStationId ? snapshot.docs.find(
+      (docSnap) => extractStationId(docSnap) === requestedStationId,
+  ) : null;
+  const moduleDoc = requestedModuleId ? snapshot.docs.find((docSnap) => {
     const kiosk = docSnap.data() || {};
-    const stationid = extractStationId(docSnap);
     const modules = Array.isArray(kiosk.modules) ? kiosk.modules : [];
+    return modules.some((module) => moduleIdsMatch(module?.id, requestedModuleId));
+  }) : null;
 
-    if (modules.some((module) => moduleIdsMatch(module?.id, moduleId))) {
-      return true;
-    }
+  if (requestedStationId && !stationDoc) {
+    throw new functions.https.HttpsError(
+        "not-found",
+        `No kiosk binding found for station ${requestedStationId}.`,
+    );
+  }
 
-    return requestedStationId && stationid === requestedStationId;
-  });
+  if (requestedModuleId && !moduleDoc) {
+    throw new functions.https.HttpsError(
+        "not-found",
+        `No kiosk binding found for module ${requestedModuleId}.`,
+    );
+  }
 
+  if (stationDoc && moduleDoc && stationDoc.ref.path !== moduleDoc.ref.path) {
+    throw new functions.https.HttpsError(
+        "failed-precondition",
+        `Station ${requestedStationId} is not bound to module ${requestedModuleId}.`,
+    );
+  }
+
+  const matchingDoc = moduleDoc || stationDoc;
   if (!matchingDoc) {
     throw new functions.https.HttpsError(
         "not-found",
-        `No kiosk binding found for module ${moduleId}.`,
+        "No kiosk binding found.",
     );
   }
 
   const stationid = extractStationId(matchingDoc);
+  const matchingKiosk = matchingDoc.data() || {};
+  const boundModules = (Array.isArray(matchingKiosk.modules) ? matchingKiosk.modules : [])
+      .filter((module) => normalizeModuleId(module?.id));
+  const moduleId = requestedModuleId || normalizeModuleId(boundModules[0]?.id);
+
+  if (!moduleId) {
+    throw new functions.https.HttpsError(
+        "not-found",
+        `Station ${stationid} has no bound modules.`,
+    );
+  }
+
+  if (!requestedModuleId && boundModules.length > 1) {
+    throw new functions.https.HttpsError(
+        "failed-precondition",
+        `Station ${stationid} has multiple bound modules. Provide moduleId.`,
+    );
+  }
+
   const docRef = matchingDoc.ref;
   const pendingRef = db.collection("pending").doc(moduleId);
 
@@ -855,7 +904,15 @@ async function stationBindingUnbindModuleImpl(data, authState) {
     }
 
     const kiosk = stationSnap.data() || {};
-    const nextModules = (Array.isArray(kiosk.modules) ? kiosk.modules : [])
+    const currentModules = Array.isArray(kiosk.modules) ? kiosk.modules : [];
+    if (!currentModules.some((module) => moduleIdsMatch(module?.id, moduleId))) {
+      throw new functions.https.HttpsError(
+          "not-found",
+          `Module ${moduleId} is no longer bound to ${stationid}.`,
+      );
+    }
+
+    const nextModules = currentModules
         .filter((module) => !moduleIdsMatch(module?.id, moduleId));
 
     if (nextModules.length === 0) {
@@ -887,7 +944,10 @@ async function stationBindingUnbindModuleImpl(data, authState) {
     }, {merge: true});
   });
 
-  const nextStationid = findNextStationId(snapshot.docs, requestedCountry);
+  const nextStationid = findNextStationId(
+      snapshot.docs,
+      requestedCountry || getCountryFromStationId(stationid) || "US",
+  );
 
   return {
     ok: true,
