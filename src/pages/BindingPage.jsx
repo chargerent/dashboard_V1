@@ -22,6 +22,38 @@ function normalizeModuleId(moduleId) {
   return String(moduleId || '').trim();
 }
 
+function extractDigits(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function safeDecodeValue(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function normalizeMacHex(value) {
+  const normalized = String(value || '').trim().replace(/[:-]/g, '').toUpperCase();
+  return /^[0-9A-F]{12}$/.test(normalized) ? normalized : '';
+}
+
+function convertMacToModuleId(value) {
+  const normalizedMac = normalizeMacHex(value);
+  return normalizedMac ? `1000${BigInt(`0x${normalizedMac}`).toString(10)}` : '';
+}
+
+function findUuidParam(value) {
+  const match = String(value || '').match(/(?:^|[?&])uuid=([^&#\s]+)/i);
+  return match ? safeDecodeValue(match[1]) : '';
+}
+
+function findStandalone15Digit(value) {
+  const match = String(value || '').match(/(?:^|[^0-9])([0-9]{15})(?![0-9])/);
+  return match ? match[1] : '';
+}
+
 function isNewKioskStation(stationid) {
   return /^(CA|FR|US)8\d{3}$/.test(normalizeStationId(stationid));
 }
@@ -71,6 +103,129 @@ function parseStationQrInput(value) {
     mode: 'manual',
     stationid: normalizeStationId(rawValue),
   };
+}
+
+function parseModuleScanInput(value) {
+  const rawValue = String(value || '').trim();
+
+  if (!rawValue) {
+    return { mode: 'empty', moduleId: '' };
+  }
+
+  const decodedValue = safeDecodeValue(rawValue);
+  const compactValue = decodedValue.replace(/\s+/g, '');
+  const uuidParam = findUuidParam(compactValue);
+
+  if (uuidParam) {
+    const parsedUuid = parseModuleScanInput(uuidParam);
+    if (parsedUuid.moduleId) {
+      return parsedUuid;
+    }
+  }
+
+  const colonMacMatch = compactValue.match(/\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b/);
+  if (colonMacMatch) {
+    const macModuleId = convertMacToModuleId(colonMacMatch[0]);
+    if (macModuleId) {
+      return { mode: 'mac', moduleId: macModuleId };
+    }
+  }
+
+  const semicolonFields = compactValue.split(';').map((part) => part.trim()).filter(Boolean);
+  if (semicolonFields.length > 1) {
+    const firstField = semicolonFields[0];
+    const firstFieldImei = findStandalone15Digit(firstField);
+    if (firstFieldImei) {
+      return { mode: 'imei', moduleId: firstFieldImei };
+    }
+
+    const firstFieldDigits = extractDigits(firstField);
+    if (firstFieldDigits.length >= 15) {
+      return { mode: 'imei', moduleId: firstFieldDigits.slice(0, 15) };
+    }
+
+    const hexField = semicolonFields.find((part) => /^[0-9A-Fa-f]{12}$/.test(part));
+    if (hexField) {
+      const macModuleId = convertMacToModuleId(hexField);
+      if (macModuleId) {
+        return { mode: 'mac', moduleId: macModuleId };
+      }
+    }
+  }
+
+  const imeiValue = findStandalone15Digit(compactValue);
+  if (imeiValue) {
+    return { mode: 'imei', moduleId: imeiValue };
+  }
+
+  const compactDigits = extractDigits(compactValue);
+  if (/[^0-9]/.test(compactValue) && compactDigits.length >= 15) {
+    return { mode: 'imei', moduleId: compactDigits.slice(-15) };
+  }
+
+  const bareHexMatch = compactValue.match(/\b[0-9A-Fa-f]{12}\b/);
+  if (bareHexMatch) {
+    const macModuleId = convertMacToModuleId(bareHexMatch[0]);
+    if (macModuleId) {
+      return { mode: 'mac', moduleId: macModuleId };
+    }
+  }
+
+  if (/^[0-9A-Za-z_-]+$/.test(compactValue)) {
+    return { mode: 'literal', moduleId: normalizeModuleId(rawValue) };
+  }
+
+  return { mode: 'invalid', moduleId: '' };
+}
+
+function moduleIdsEquivalent(left, right) {
+  const leftValue = normalizeModuleId(left);
+  const rightValue = normalizeModuleId(right);
+
+  if (!leftValue || !rightValue) {
+    return false;
+  }
+
+  if (leftValue === rightValue) {
+    return true;
+  }
+
+  const leftParsed = parseModuleScanInput(leftValue);
+  const rightParsed = parseModuleScanInput(rightValue);
+  const leftCanonical = normalizeModuleId(leftParsed.moduleId || leftValue);
+  const rightCanonical = normalizeModuleId(rightParsed.moduleId || rightValue);
+
+  if (!leftCanonical || !rightCanonical) {
+    return false;
+  }
+
+  if (leftCanonical === rightCanonical) {
+    return true;
+  }
+
+  if (/^1000\d+$/.test(leftCanonical) && leftCanonical.slice(4) === rightCanonical) {
+    return true;
+  }
+
+  if (/^1000\d+$/.test(rightCanonical) && rightCanonical.slice(4) === leftCanonical) {
+    return true;
+  }
+
+  return false;
+}
+
+function findBoundModuleById(kiosks, moduleId) {
+  const kioskList = Array.isArray(kiosks) ? kiosks : [];
+
+  for (const kiosk of kioskList) {
+    const modules = Array.isArray(kiosk?.modules) ? kiosk.modules : [];
+    const matchedModule = modules.find((module) => moduleIdsEquivalent(module?.id, moduleId));
+    if (matchedModule) {
+      return { kiosk, module: matchedModule };
+    }
+  }
+
+  return null;
 }
 
 export default function BindingPage({
@@ -329,6 +484,83 @@ export default function BindingPage({
     }
   }, [commitStationQrInput]);
 
+  const commitModuleInput = useCallback((rawValue) => {
+    const parsedValue = parseModuleScanInput(rawValue);
+
+    if (!parsedValue.moduleId || parsedValue.mode === 'literal' || parsedValue.mode === 'invalid') {
+      return false;
+    }
+
+    if (normalizeModuleId(rawValue) !== parsedValue.moduleId) {
+      setModuleId(parsedValue.moduleId);
+    }
+
+    return true;
+  }, []);
+
+  useEffect(() => {
+    const trimmedModuleId = moduleId.trim();
+
+    if (!trimmedModuleId) {
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      commitModuleInput(trimmedModuleId);
+    }, 120);
+
+    return () => clearTimeout(timeoutId);
+  }, [commitModuleInput, moduleId]);
+
+  const handleModuleInputChange = useCallback((event) => {
+    setModuleId(event.target.value);
+  }, []);
+
+  const handleModuleInputKeyDown = useCallback((event) => {
+    if (event.key !== 'Enter' && event.key !== 'Tab') {
+      return;
+    }
+
+    if (commitModuleInput(event.currentTarget.value)) {
+      event.preventDefault();
+    }
+  }, [commitModuleInput]);
+
+  const showBindingError = useCallback((message, target = 'module') => {
+    setStatus({ state: 'error', message });
+
+    if (target === 'station') {
+      focusStationQrInput();
+      return;
+    }
+
+    moduleIdInputRef.current?.focus();
+  }, [focusStationQrInput]);
+
+  const resolveModuleRequest = useCallback(() => {
+    const rawModuleValue = normalizeModuleId(moduleId);
+
+    if (!rawModuleValue) {
+      return { error: t('module_id_required') };
+    }
+
+    const parsedValue = parseModuleScanInput(rawModuleValue);
+
+    if (parsedValue.mode === 'invalid') {
+      return { error: t('module_scan_invalid') };
+    }
+
+    const resolvedModuleId = normalizeModuleId(parsedValue.moduleId || rawModuleValue);
+    const matchedBinding = findBoundModuleById(allStationsData, resolvedModuleId) ||
+      (resolvedModuleId !== rawModuleValue ? findBoundModuleById(allStationsData, rawModuleValue) : null);
+
+    return {
+      matchedBinding,
+      parsedValue,
+      resolvedModuleId,
+    };
+  }, [allStationsData, moduleId, t]);
+
   const normalizedStationId = normalizeStationId(stationInfo.stationid);
   const normalizedModuleId = normalizeModuleId(moduleId);
   const bindingCountry = isBindingStationId(normalizedStationId) ?
@@ -352,10 +584,38 @@ export default function BindingPage({
       return;
     }
 
-    if (!normalizedModuleId) {
-      setStatus({ state: 'error', message: t('module_id_required') });
-      moduleIdInputRef.current?.focus();
+    const existingStation = (allStationsData || []).find(
+      (kiosk) => normalizeStationId(kiosk?.stationid) === normalizedStationId,
+    );
+
+    if (existingStation) {
+      setPageError('');
+      showBindingError(`${t('binding_station_exists')}: ${normalizedStationId}`, 'station');
       return;
+    }
+
+    const moduleResolution = resolveModuleRequest();
+    if (moduleResolution.error) {
+      setPageError('');
+      showBindingError(moduleResolution.error, 'module');
+      return;
+    }
+
+    if (moduleResolution.matchedBinding) {
+      const existingStationId = normalizeStationId(moduleResolution.matchedBinding.kiosk?.stationid);
+      setPageError('');
+      showBindingError(`${t('binding_module_exists')}: ${existingStationId}`, 'module');
+      return;
+    }
+
+    if (!moduleResolution.resolvedModuleId) {
+      setPageError('');
+      showBindingError(t('module_scan_invalid'), 'module');
+      return;
+    }
+
+    if (moduleResolution.resolvedModuleId !== moduleId) {
+      setModuleId(moduleResolution.resolvedModuleId);
     }
 
     setPageError('');
@@ -366,7 +626,7 @@ export default function BindingPage({
       const payload = await callFunctionWithAuth('stationBinding_bindModule', {
         country: bindingCountry,
         stationid: normalizedStationId,
-        moduleId: normalizedModuleId,
+        moduleId: moduleResolution.resolvedModuleId,
       });
 
       resetBindingForm();
@@ -375,7 +635,18 @@ export default function BindingPage({
       console.error(error);
       setStatus({ state: 'error', message: error?.message || t('command_failed') });
     }
-  }, [bindingCountry, ensureSignedIn, focusStationQrInput, normalizedModuleId, normalizedStationId, resetBindingForm, t]);
+  }, [
+    allStationsData,
+    bindingCountry,
+    ensureSignedIn,
+    focusStationQrInput,
+    moduleId,
+    normalizedStationId,
+    resetBindingForm,
+    resolveModuleRequest,
+    showBindingError,
+    t,
+  ]);
 
   const handleUnbind = useCallback(async () => {
     if (!normalizedStationId) {
@@ -392,10 +663,23 @@ export default function BindingPage({
       return;
     }
 
-    if (!normalizedModuleId) {
-      setStatus({ state: 'error', message: t('module_id_required') });
-      moduleIdInputRef.current?.focus();
+    const moduleResolution = resolveModuleRequest();
+    if (moduleResolution.error) {
+      setPageError('');
+      showBindingError(moduleResolution.error, 'module');
       return;
+    }
+
+    const requestModuleId = moduleResolution.matchedBinding?.module?.id || moduleResolution.resolvedModuleId;
+
+    if (!requestModuleId) {
+      setPageError('');
+      showBindingError(t('module_scan_invalid'), 'module');
+      return;
+    }
+
+    if (requestModuleId !== moduleId) {
+      setModuleId(requestModuleId);
     }
 
     setPageError('');
@@ -406,7 +690,7 @@ export default function BindingPage({
       const payload = await callFunctionWithAuth('stationBinding_unbindModule', {
         country: bindingCountry,
         stationid: normalizedStationId,
-        moduleId: normalizedModuleId,
+        moduleId: requestModuleId,
       });
 
       resetBindingForm();
@@ -415,7 +699,17 @@ export default function BindingPage({
       console.error(error);
       setStatus({ state: 'error', message: error?.message || t('command_failed') });
     }
-  }, [bindingCountry, ensureSignedIn, focusStationQrInput, normalizedModuleId, normalizedStationId, resetBindingForm, t]);
+  }, [
+    bindingCountry,
+    ensureSignedIn,
+    focusStationQrInput,
+    moduleId,
+    normalizedStationId,
+    resetBindingForm,
+    resolveModuleRequest,
+    showBindingError,
+    t,
+  ]);
 
   const handleMoveModule = useCallback(async () => {
     if (!moveSourceStationId) {
@@ -568,7 +862,8 @@ export default function BindingPage({
                       ref={moduleIdInputRef}
                       type="text"
                       value={moduleId}
-                      onChange={(event) => setModuleId(event.target.value)}
+                      onChange={handleModuleInputChange}
+                      onKeyDown={handleModuleInputKeyDown}
                       placeholder="867652077228617"
                       disabled={!isFormActive}
                       className="w-full rounded-md border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
