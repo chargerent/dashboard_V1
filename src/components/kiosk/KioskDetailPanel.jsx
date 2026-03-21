@@ -35,6 +35,14 @@ const moduleIdsMatch = (left, right) => {
 function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSlots, ejectingSlots, failedEjectSlots, lockingSlots, t, onCommand, serverUiVersion, serverFlowVersion, clientInfo, mockNow }) {
     const isOnline = isKioskOnline(kiosk, mockNow);
     const hasAnyCommands = Object.values(clientInfo.commands).some(v => v === true) || clientInfo.features.rentals;
+    const moduleIds = useMemo(() => (
+        Array.isArray(kiosk.modules)
+            ? kiosk.modules
+                .map((module) => String(module?.id || '').trim())
+                .filter(Boolean)
+            : []
+    ), [kiosk.modules]);
+    const showLegacySideIndicators = !kiosk.isNewSchema;
     
     const createSlotSet = (slots) => useMemo(() => new Set(slots.map(s => `${s.stationid}-${s.moduleid}-${s.slotid}`)), [slots]);
     const ejectingSet = createSlotSet(ejectingSlots);
@@ -150,10 +158,10 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                     </div>
                 )}
 
-                {slot.isFullNotCharging && (
+                {showLegacySideIndicators && slot.isFullNotCharging && (
                     <div className="absolute right-0 top-0 bottom-0 w-1 bg-red-500 rounded-r-md"></div>
                 )}
-                {slot.isSstatError && (
+                {showLegacySideIndicators && slot.isSstatError && (
                     <div className="absolute right-0 top-0 bottom-0 w-1 bg-purple-500 rounded-r-md"></div>
                 )}
             </div>
@@ -187,10 +195,12 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
 
     const renderCT3 = () => {
         return (
-            <div className="p-2 flex flex-col max-h-[60vh] md:max-h-none overflow-y-auto">
-                <div className="bg-white p-4 rounded-lg shadow-inner flex flex-col gap-3 w-full">
-                    <div className="w-16 h-16 bg-gray-200 flex items-center justify-center rounded-md self-center">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="w-10 h-10 text-gray-400" viewBox="0 0 24 24" fill="currentColor"><path d="M8 21H4a1 1 0 0 1-1-1V16a1 1 0 0 0-2 0v4a3 3 0 0 0 3 3H8a1 1 0 0 0 0-2Zm14-6a1 1 0 0 0-1 1v4a1 1 0 0 1-1 1H16a1 1 0 0 0 0 2h4a3 3 0 0 0 3-3V16a1 1 0 0 0-2 0ZM20 1H16a1 1 0 0 0 0 2h4a1 1 0 0 1 1 1V8a1 1 0 0 0 2 0V4a3 3 0 0 0-3-3ZM2 9a1 1 0 0 0 1-1V4a1 1 0 0 1 1-1H8a1 1 0 0 0 0-2H4a3 3 0 0 0-3 3V8a1 1 0 0 0 1 1Zm8-4H6a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1ZM9 9H7V7H9Zm5 2h4a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1H14a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1Zm1-4h2V9H15Zm-5 6H6a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V14a1 1 0 0 0-1-1Zm-1 4H7V15H9Zm5-1a1 1 0 0 0 1-1 1 1 0 0 0 0-2H14a1 1 0 0 0-1 1v1a1 1 0 0 0 1 1Zm4-3a1 1 0 0 0-1 1v3a1 1 0 0 0 0 2h1a1 1 0 0 0 1-1V14a1 1 0 0 0-1-1Zm-4 4a1 1 0 1 0 1 1A1 1 0 0 0 14 17Z" /></svg>
+            <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
+                <div className="w-full flex flex-col gap-3">
+                    <div className="bg-white p-4 rounded-lg shadow-inner flex flex-col items-center gap-3">
+                        <div className="w-16 h-16 bg-gray-200 flex items-center justify-center rounded-md">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="w-10 h-10 text-gray-400" viewBox="0 0 24 24" fill="currentColor"><path d="M8 21H4a1 1 0 0 1-1-1V16a1 1 0 0 0-2 0v4a3 3 0 0 0 3 3H8a1 1 0 0 0 0-2Zm14-6a1 1 0 0 0-1 1v4a1 1 0 0 1-1 1H16a1 1 0 0 0 0 2h4a3 3 0 0 0 3-3V16a1 1 0 0 0-2 0ZM20 1H16a1 1 0 0 0 0 2h4a1 1 0 0 1 1 1V8a1 1 0 0 0 2 0V4a3 3 0 0 0-3-3ZM2 9a1 1 0 0 0 1-1V4a1 1 0 0 1 1-1H8a1 1 0 0 0 0-2H4a3 3 0 0 0-3 3V8a1 1 0 0 0 1 1Zm8-4H6a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1ZM9 9H7V7H9Zm5 2h4a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1H14a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1Zm1-4h2V9H15Zm-5 6H6a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V14a1 1 0 0 0-1-1Zm-1 4H7V15H9Zm5-1a1 1 0 0 0 1-1 1 1 0 0 0 0-2H14a1 1 0 0 0-1 1v1a1 1 0 0 0 1 1Zm4-3a1 1 0 0 0-1 1v3a1 1 0 0 0 0 2h1a1 1 0 0 0 1-1V14a1 1 0 0 0-1-1Zm-4 4a1 1 0 1 0 1 1A1 1 0 0 0 14 17Z" /></svg>
+                        </div>
                     </div>
                     {kiosk.modules[0] && <Module module={kiosk.modules[0]} className="w-full" />}
                 </div>
@@ -502,6 +512,18 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                 {hasAnyCommands && (
                     <div className="w-full">
                         <KioskControlPanel kiosk={kiosk} t={t} onCommand={onCommand} serverUiVersion={serverUiVersion} serverFlowVersion={serverFlowVersion} clientInfo={clientInfo} isOnline={isOnline} disabled={!isOnline} />
+                    </div>
+                )}
+                {moduleIds.length > 0 && (
+                    <div className="w-full rounded-lg bg-white shadow-sm">
+                        <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 px-4 py-3 text-sm font-semibold text-gray-700">
+                            <span>{t('module_view')}:</span>
+                            {moduleIds.map((moduleId) => (
+                                <span key={moduleId} className="rounded bg-gray-200 px-2 py-1 font-mono text-xs text-gray-700">
+                                    {moduleId}
+                                </span>
+                            ))}
+                        </div>
                     </div>
                 )}
                 <div className="w-full">

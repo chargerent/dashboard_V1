@@ -96,6 +96,7 @@ function createRepeatingModule(id, count, options = {}) {
 }
 
 function createTemplateKiosk(type) {
+  const isNewSchema = ['CT3', 'CT4', 'CT8', 'CT12', 'CK48'].includes(type);
   const base = {
     stationid: `TPL-${type}`,
     provisionid: `template-${type.toLowerCase()}`,
@@ -111,6 +112,7 @@ function createTemplateKiosk(type) {
     timestamp: new Date().toISOString(),
     active: true,
     enabled: true,
+    isNewSchema,
   };
 
   switch (type) {

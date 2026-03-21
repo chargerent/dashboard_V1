@@ -140,6 +140,19 @@ export default function TestingPage({
         setStartingScanner(false);
     }, []);
 
+    const attachStreamToVideo = useCallback(async (stream) => {
+        const video = videoRef.current;
+        if (!video) {
+            return;
+        }
+
+        if (video.srcObject !== stream) {
+            video.srcObject = stream;
+        }
+
+        await video.play();
+    }, []);
+
     const loadStationFromValue = useCallback((rawValue) => {
         const parsedValue = parseStationQrInput(rawValue);
 
@@ -202,12 +215,6 @@ export default function TestingPage({
             });
 
             streamRef.current = stream;
-
-            if (videoRef.current) {
-                videoRef.current.srcObject = stream;
-                await videoRef.current.play();
-            }
-
             setScannerActive(true);
         } catch (error) {
             console.error('Failed to start testing scanner:', error);
@@ -217,6 +224,28 @@ export default function TestingPage({
             setStartingScanner(false);
         }
     }, [stopScanner, t]);
+
+    useEffect(() => {
+        if (!scannerActive || !streamRef.current) {
+            return undefined;
+        }
+
+        let cancelled = false;
+
+        attachStreamToVideo(streamRef.current).catch((error) => {
+            if (cancelled) {
+                return;
+            }
+
+            console.error('Failed to attach testing camera preview:', error);
+            stopScanner();
+            setCameraError(getScannerErrorMessage(error, t));
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [attachStreamToVideo, scannerActive, stopScanner, t]);
 
     useEffect(() => {
         if (!scannerActive || !videoRef.current || !detectorRef.current) {

@@ -78,21 +78,38 @@ export const normalizeKioskData = (kiosks) => {
             if (isNewSchema) {
                 // New schema: slots array with status/sn/lock/holeDetection fields
                 slots = (module.slots || []).map(slotData => {
-                    const hasCharger = slotData.status === 1 && slotData.sn !== 0;
-                    const chargingCurrent = slotData.chargingCurrent || 0;
-                    const isSstatError = slotData.holeDetection === 192;
+                    const status = Number(slotData.status ?? 0);
+                    const sn = Number(slotData.sn ?? 0);
+                    const chargingCurrent = Number(slotData.chargingCurrent ?? slotData.chargeCurrent ?? 0);
+                    const chargingVoltage = Number(slotData.chargingVoltage ?? slotData.chargeVoltage ?? 0);
+                    const chargeVoltage = Number(slotData.chargeVoltage ?? slotData.chargingVoltage ?? 0);
+                    const areaCode = Number(slotData.areaCode ?? 0);
+                    const holeDetection = Number(slotData.holeDetection ?? 0);
+                    const softwareVersion = Number(slotData.softwareVersion ?? 0);
+                    const hasCharger = status === 1 && sn !== 0;
+                    const isSstatError = holeDetection === 192;
                     return {
                         position: slotData.position,
-                        sn: hasCharger ? slotData.sn : 0,
+                        sn: hasCharger ? sn : 0,
                         batteryLevel: hasCharger ? slotData.batteryLevel : null,
-                        chargingCurrent: chargingCurrent,
+                        chargingCurrent,
                         isLocked: !!slotData.lock,
                         lockReason: slotData.lockReason || '',
                         cmos: null,
                         sstat: hasCharger ? '0F' : '0C', // map to old convention for UI compatibility
-                        isFullNotCharging: hasCharger && slotData.batteryLevel >= 80 && chargingCurrent === 0,
-                        isSstatError: isSstatError,
+                        // Legacy kiosks used cmos === 'BF' to mark broken chargers.
+                        // New-schema kiosks do not expose an equivalent cmos flag in the slot payload,
+                        // so do not infer a failure from "full and not charging" alone.
+                        isFullNotCharging: false,
+                        isSstatError,
                         // Extra new-schema fields preserved for display
+                        status,
+                        areaCode,
+                        holeDetection,
+                        chargingVoltage,
+                        chargeVoltage,
+                        chargeCurrent: chargingCurrent,
+                        softwareVersion,
                         temperature: slotData.temperature,
                         cellVoltage: slotData.cellVoltage,
                         cycle: slotData.cycle,
