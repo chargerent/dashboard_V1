@@ -57,6 +57,8 @@ export const translations = {
         // Detail Panel
         module_view: "Module View",
         empty: "Empty",
+        avg_charge_rate: "C.rate",
+        eta_to_80: "ETA to 80%",
         screen_payment: "Screen & Payment",
         payment_terminal: "Payment Terminal",
             // Control Panel
@@ -74,6 +76,8 @@ export const translations = {
         eject_10: "Eject 10",
         update_flow: "Update Flow",
         update_ui: "Update UI",
+        update_module: "Update Module",
+        update_ver_prefix: "Update Ver.",
         rent: "Rent",
         // Commands
         confirm_action: "Confirm Action",
@@ -98,7 +102,11 @@ export const translations = {
         eject_all_from_module: "Eject all from module",
         lock_all_in_module: "Lock all in module",
         rent_confirmation: "Are you sure you want to initiate a rental?",
+        update_module_confirmation: "Are you sure you want to trigger an update on module",
+        temp_short: "Temp",
         save_info_confirmation: "Are you sure you want to save these changes?",
+        change_status_to_provisioned: "Change station status to provisioned",
+        station_already_provisioned: "This station is already provisioned.",
         cancel: "Cancel",
         confirm: "Confirm",
         close: "Close",
@@ -482,6 +490,8 @@ export const translations = {
         // Detail Panel
         module_view: "Vue des modules",
         empty: "Vide",
+        avg_charge_rate: "C.rate",
+        eta_to_80: "ETA jusqu'à 80 %",
         screen_payment: "Écran et Paiement",
         payment_terminal: "Terminal de paiement",
         // Control Panel
@@ -499,6 +509,8 @@ export const translations = {
         eject_10: "Éjecter 10",
         update_flow: "MAJ Flux",
         update_ui: "MAJ UI",
+        update_module: "MAJ Module",
+        update_ver_prefix: "MAJ Ver.",
         rent: "Louer",
         // Commands
         confirm_action: "Confirmer l'action",
@@ -523,7 +535,11 @@ export const translations = {
         eject_all_from_module: "Tout éjecter du module",
         lock_all_in_module: "Tout verrouiller dans le module",
         rent_confirmation: "Êtes-vous sûr de vouloir initier une location ?",
+        update_module_confirmation: "Êtes-vous sûr de vouloir déclencher une mise à jour sur le module",
+        temp_short: "Temp",
         save_info_confirmation: "Êtes-vous sûr de vouloir enregistrer ces modifications ?",
+        change_status_to_provisioned: "Changer le statut de la station à provisionné",
+        station_already_provisioned: "Cette station est déjà provisionnée.",
         cancel: "Annuler",
         confirm: "Confirmer",
         close: "Fermer",

@@ -70,6 +70,7 @@ function LoginPage({ onLogin }) {
         durationMs: measureStartupDuration(signInStartedAt),
       });
       onLogin();
+      return;
     } catch (err) {
       markStartupStep("login.error", {
         code: err?.code || "unknown",
@@ -79,7 +80,6 @@ function LoginPage({ onLogin }) {
       setError(t("login_error"));
       setPassword("");
       setShowPassword(false);
-    } finally {
       setLoading(false);
     }
   };
@@ -115,6 +115,7 @@ function LoginPage({ onLogin }) {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 autoComplete="username"
+                disabled={loading}
               />
             </div>
             <div>
@@ -129,12 +130,14 @@ function LoginPage({ onLogin }) {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   autoComplete="current-password"
+                  disabled={loading}
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword((prev) => !prev)}
-                  className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 transition hover:text-gray-600 focus:outline-none focus:text-blue-600"
+                  className="absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 transition hover:text-gray-600 focus:outline-none focus:text-blue-600 disabled:cursor-not-allowed disabled:text-gray-300"
                   aria-label={showPassword ? "Hide password" : "Show password"}
+                  disabled={loading}
                 >
                   {showPassword ? (
                     <EyeSlashIcon className="h-5 w-5" aria-hidden="true" />

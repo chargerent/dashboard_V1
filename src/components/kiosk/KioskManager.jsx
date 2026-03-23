@@ -173,6 +173,9 @@ function KioskManager({ token, t, setSuccessMessage, setErrorMessage }) {
                 confirmationText = `Are you sure you want to update the UI to version ${serverUiVersion}?`;
                 command.version = serverUiVersion;
                 break;
+            case 'update module':
+                confirmationText = `${t('update_module_confirmation')} ${moduleid}?`;
+                break;
             case 'eject count':
                 confirmationText = `${t('eject_count_confirmation')} ${count} ${t('chargers')}?`;
                 break;

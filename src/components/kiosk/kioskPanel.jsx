@@ -10,6 +10,7 @@ import { useTap } from './useTap';
 function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rentalData, clientInfo, t, onCommand, onShowRentalDetails }) {
     const isOnline = isKioskOnline(kiosk, mockNow);
     const canExpand = clientInfo.features.details;
+    const isPending = String(kiosk.status || '').toLowerCase() === 'pending';
     
     const stats = useMemo(() => {
         let total = 0;
@@ -74,6 +75,11 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                             <h3 className="font-bold text-lg text-gray-800">{kiosk.stationid}</h3>
                         ) : (
                             <h3 className="font-bold text-lg text-gray-800">{kiosk.info.place}</h3>
+                        )}
+                        {isPending && (
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
+                                {t('pending')}
+                            </span>
                         )}
                         {clientInfo.commands.edit && (
                             <button onClick={(e) => { e.stopPropagation(); onToggleEdit(kiosk.stationid); }} disabled={!isOnline} className="p-1 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-200 transition-colors disabled:text-gray-300 disabled:hover:bg-transparent disabled:cursor-not-allowed">

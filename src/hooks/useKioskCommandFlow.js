@@ -48,7 +48,7 @@ export default function useKioskCommandFlow({
     setCommandModalOpen(true);
   }, [allStationsData, t]);
 
-  const handleSendCommand = useCallback((reason = null) => {
+  const handleSendCommand = useCallback((confirmationResult = null) => {
     setCommandModalOpen(false);
 
     if (!commandDetails) {
@@ -132,18 +132,34 @@ export default function useKioskCommandFlow({
       }
     }
 
+    const confirmationPayload = confirmationResult && typeof confirmationResult === 'object'
+      ? confirmationResult
+      : null;
+    const lockReason = typeof confirmationResult === 'string' ? confirmationResult : null;
+    const shouldChangeStatusToProvisioned = confirmationPayload?.changeStatusToProvisioned === true;
+    const extraConfirmationDetails = confirmationPayload ? { ...confirmationPayload } : {};
+    delete extraConfirmationDetails.changeStatusToProvisioned;
+    const kioskPayload = commandDetails.action.includes('change') && shouldChangeStatusToProvisioned
+      ? { ...commandDetails.kiosk, status: 'provisioned' }
+      : commandDetails.kiosk;
+
     const details = {
-      ...(commandDetails.action.includes('change') && { kiosk: commandDetails.kiosk, autoGeocode: commandDetails.autoGeocode }),
-      ...((commandDetails.action === 'lock slot' || commandDetails.action === 'unlock slot' || commandDetails.action === 'eject specific' || commandDetails.action === 'rent' || commandDetails.action === 'vend') && { slotid: commandDetails.slotid, info: reason }),
+      ...(commandDetails.action.includes('change') && { kiosk: kioskPayload, autoGeocode: commandDetails.autoGeocode }),
+      ...((commandDetails.action === 'lock slot' || commandDetails.action === 'unlock slot' || commandDetails.action === 'eject specific' || commandDetails.action === 'rent' || commandDetails.action === 'vend') && { slotid: commandDetails.slotid, info: lockReason }),
       ...(commandDetails.action === 'vend' && { chargerid: commandDetails.chargerid }),
       ...(commandDetails.action === 'eject count' && { slotid: commandDetails.slotid }),
-      ...(reason && typeof reason === 'object' && { ...reason }),
+      ...extraConfirmationDetails,
     };
 
     onCommand(commandDetails.stationid, commandDetails.action, commandDetails.moduleid, commandDetails.provisionid, commandDetails.uiVersion, details);
   }, [allStationsData, commandDetails, manageIgnoredKiosk, onCommand, setEjectingSlots]);
 
   const handleKioskSave = useCallback((stationid, section, data, autoGeocode) => {
+    const targetKiosk = allStationsData.find((kiosk) => kiosk.stationid === stationid);
+    const normalizedStatus = String(targetKiosk?.status || '').trim().toLowerCase();
+    const showProvisionStatusCheckbox = isNewSchemaKiosk(targetKiosk) && (
+      normalizedStatus === 'pending' || normalizedStatus === 'provisioned'
+    );
     let action;
     if (section === 'pricing') {
       action = 'pricechange';
@@ -161,9 +177,16 @@ export default function useKioskCommandFlow({
       kiosk: data,
       autoGeocode,
       confirmationText: t('save_info_confirmation'),
+      checkbox: showProvisionStatusCheckbox ? {
+        name: 'changeStatusToProvisioned',
+        label: t('change_status_to_provisioned'),
+        checked: normalizedStatus === 'provisioned',
+        disabled: normalizedStatus === 'provisioned',
+        helperText: normalizedStatus === 'provisioned' ? t('station_already_provisioned') : '',
+      } : null,
     });
     setCommandModalOpen(true);
-  }, [t]);
+  }, [allStationsData, t]);
 
   const handleGeneralCommand = useCallback((stationid, action, moduleid = null, provisionid = null, uiVersion = null, details = null) => {
     let confirmationText = `Are you sure you want to ${action}?`;
@@ -191,6 +214,8 @@ export default function useKioskCommandFlow({
     } else if (action === 'eject module') {
       confirmationText = `${t('eject_module_confirmation')}?`;
       commandDetailsPayload.slotid = moduleid;
+    } else if (action === 'update module') {
+      confirmationText = `${t('update_module_confirmation')} ${moduleid}?`;
     } else if (action === 'lock module') {
       confirmationText = `${t('lock_module_confirmation')}?`;
       commandDetailsPayload.slotid = moduleid;

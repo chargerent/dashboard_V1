@@ -4,15 +4,27 @@ import React, { useState, useEffect } from 'react';
 
 function ConfirmationModal({ isOpen, onClose, onConfirm, details, t }) {
     const [reason, setReason] = useState('');
+    const [checkboxValue, setCheckboxValue] = useState(false);
     
     useEffect(() => {
         if (isOpen) {
             setReason('');
+            setCheckboxValue(Boolean(details?.checkbox?.checked));
         }
-    }, [isOpen]);
+    }, [details, isOpen]);
 
     const handleConfirm = () => {
-        onConfirm(details?.action === 'lock slot' ? reason : null);
+        if (details?.action === 'lock slot') {
+            onConfirm(reason);
+            return;
+        }
+
+        if (details?.checkbox?.name) {
+            onConfirm({ [details.checkbox.name]: checkboxValue });
+            return;
+        }
+
+        onConfirm(null);
     };
 
     if (!isOpen) return null;
@@ -44,6 +56,28 @@ function ConfirmationModal({ isOpen, onClose, onConfirm, details, t }) {
                             placeholder="Reason for action (optional)"
                             className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                         />
+                    </div>
+                )}
+
+                {details?.checkbox?.name && (
+                    <div className="mb-4 rounded-md border border-gray-200 bg-gray-50 p-3">
+                        <label className={`flex items-start gap-3 ${details.checkbox.disabled ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}>
+                            <input
+                                type="checkbox"
+                                checked={checkboxValue}
+                                disabled={details.checkbox.disabled}
+                                onChange={(e) => setCheckboxValue(e.target.checked)}
+                                className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed"
+                            />
+                            <span className="text-sm text-gray-700">
+                                {details.checkbox.label}
+                            </span>
+                        </label>
+                        {details?.checkbox?.helperText && (
+                            <p className="mt-2 text-xs text-gray-500">
+                                {details.checkbox.helperText}
+                            </p>
+                        )}
                     </div>
                 )}
 

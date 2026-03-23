@@ -439,7 +439,6 @@ function getDefaultBoundKioskInfo(country) {
     country: normalizedCountry,
     lat: null,
     lon: null,
-    address: "",
     autoGeocode: true,
     client: "BESITER",
     account: "",
@@ -452,10 +451,32 @@ function getDefaultBoundKioskInfo(country) {
   };
 
   info.country = normalizedCountry;
-  info.address = countryDefaults.stationaddress || "";
   info.stationaddress = countryDefaults.stationaddress || "";
 
   return info;
+}
+
+function getDefaultBoundKioskHardware(templateKiosk = null) {
+  const templateHardware = clonePlain(templateKiosk?.hardware) || {};
+  const hardware = {
+    gateway: "",
+    gatewayoptions: "",
+    quarantine: {
+      time: 0,
+      unit: "min",
+    },
+    audio: "on",
+    ...templateHardware,
+  };
+
+  hardware.quarantine = {
+    time: Number(templateHardware?.quarantine?.time || 0),
+    unit: String(templateHardware?.quarantine?.unit || "min").trim() || "min",
+  };
+
+  delete hardware.type;
+
+  return hardware;
 }
 
 function createBoundKioskDocument({
@@ -485,6 +506,8 @@ function createBoundKioskDocument({
     charging: 0,
   };
 
+  const templateWifi = clonePlain(templateKiosk?.wifi) || {};
+
   const kiosk = {
     stationid,
     provisionid,
@@ -494,7 +517,11 @@ function createBoundKioskDocument({
     timestamp: null,
     lastUpdate: null,
     info: getDefaultBoundKioskInfo(normalizedCountry),
-    hardware: clonePlain(templateKiosk?.hardware) || {},
+    wifi: {
+      name: String(templateWifi?.name || "chargerent").trim() || "chargerent",
+      password: String(templateWifi?.password || "Charger33").trim() || "Charger33",
+    },
+    hardware: getDefaultBoundKioskHardware(templateKiosk),
     pricing: clonePlain(templateKiosk?.pricing) || {
       authamount: 0,
       dailyprice: 0,

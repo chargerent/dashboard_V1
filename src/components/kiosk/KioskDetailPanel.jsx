@@ -2,7 +2,7 @@
 
 import React, { useMemo, useCallback } from 'react';
 import KioskControlPanel from './KioskControlPanel';
-import { isKioskOnline } from '../../utils/helpers';
+import { isKioskOnline, isModuleOnline, isNewSchemaKiosk } from '../../utils/helpers';
 
 // --- Sub-component for the charger status code ---
 const StatusIndicator = ({ status }) => {
@@ -34,14 +34,111 @@ const moduleIdsMatch = (left, right) => {
 // --- Main Detail Panel Component ---
 function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSlots, ejectingSlots, failedEjectSlots, lockingSlots, t, onCommand, serverUiVersion, serverFlowVersion, clientInfo, mockNow }) {
     const isOnline = isKioskOnline(kiosk, mockNow);
+    const isV2Kiosk = isNewSchemaKiosk(kiosk);
     const hasAnyCommands = Object.values(clientInfo.commands).some(v => v === true) || clientInfo.features.rentals;
-    const moduleIds = useMemo(() => (
+    const canUpdateModules = clientInfo.commands.updates && isV2Kiosk;
+    const showInlineModuleIds = ['CT3', 'CT4', 'CT8', 'CT12'].includes(kiosk.hardware?.type);
+    const chargeReadyThreshold = 80;
+    const formatVersionDigits = useCallback((value) => {
+        const numericValue = Number(value);
+        if (!Number.isFinite(numericValue) || numericValue <= 0) {
+            return '---';
+        }
+
+        return String(Math.trunc(numericValue)).padStart(3, '0');
+    }, []);
+    const moduleEntries = useMemo(() => (
         Array.isArray(kiosk.modules)
             ? kiosk.modules
-                .map((module) => String(module?.id || '').trim())
-                .filter(Boolean)
+                .map((module) => {
+                    const moduleId = String(module?.id || '').trim();
+                    const softwareVersionDigits = formatVersionDigits(module?.softwareVersion);
+                    const hardwareVersionDigits = formatVersionDigits(module?.hardwareVersion);
+                    return {
+                        moduleId,
+                        moduleOnline: isModuleOnline(module, mockNow),
+                        softwareVersionDigits,
+                        hardwareVersionDigits,
+                        firmwareLabel: `FW ${softwareVersionDigits}`,
+                        hardwareLabel: `HW ${hardwareVersionDigits}`,
+                        updateLabel: t('update_module'),
+                    };
+                })
+                .filter((entry) => entry.moduleId)
             : []
-    ), [kiosk.modules]);
+    ), [formatVersionDigits, kiosk.modules, mockNow, t]);
+    const moduleIds = useMemo(() => (
+        moduleEntries.map((entry) => entry.moduleId)
+    ), [moduleEntries]);
+    const formatChargeRate = useCallback((rate) => {
+        const numericRate = Number(rate);
+        if (!Number.isFinite(numericRate) || numericRate <= 0) {
+            return '--';
+        }
+
+        return `${numericRate.toFixed(3)} %/min`;
+    }, []);
+    const formatEtaToReady = useCallback((etaMinutes) => {
+        if (etaMinutes === 0) {
+            return '0m';
+        }
+
+        if (!Number.isFinite(etaMinutes) || etaMinutes < 0) {
+            return '--';
+        }
+
+        if (etaMinutes < 60) {
+            return `${Math.ceil(etaMinutes)}m`;
+        }
+
+        const hours = Math.floor(etaMinutes / 60);
+        const minutes = Math.ceil(etaMinutes % 60);
+        return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+    }, []);
+    const handleModuleUpdate = useCallback((moduleId) => {
+        onCommand(kiosk.stationid, 'update module', moduleId);
+    }, [kiosk.stationid, onCommand]);
+    const compactHeaderModules = useMemo(() => (
+        Array.isArray(kiosk.modules)
+            ? kiosk.modules.map((module, index) => {
+                const estimatedPctPerMinute = Number(module?.chargeMetrics?.estimatedPctPerMinute);
+                const activeChargingSlots = Array.isArray(module?.slots)
+                    ? module.slots.filter((slot) => (
+                        slot &&
+                        slot.sn &&
+                        slot.sn !== 0 &&
+                        Number(slot.chargingCurrent ?? 0) > 0
+                    ))
+                    : [];
+                const hasReadyCharger = Array.isArray(module?.slots) && module.slots.some((slot) => (
+                    slot &&
+                    slot.sn &&
+                    slot.sn !== 0 &&
+                    typeof slot.batteryLevel === 'number' &&
+                    slot.batteryLevel >= chargeReadyThreshold
+                ));
+                const etaCandidates = !hasReadyCharger && Number.isFinite(estimatedPctPerMinute) && estimatedPctPerMinute > 0
+                    ? activeChargingSlots
+                        .filter((slot) => typeof slot.batteryLevel === 'number' && slot.batteryLevel < chargeReadyThreshold)
+                        .map((slot) => (chargeReadyThreshold - slot.batteryLevel) / estimatedPctPerMinute)
+                        .filter((eta) => Number.isFinite(eta) && eta >= 0)
+                    : [];
+
+                return {
+                    key: `${module?.id || 'module'}-${index}`,
+                    moduleId: String(module?.id || '').trim() || '---',
+                    moduleOnline: isModuleOnline(module, mockNow),
+                    updateLabel: t('update_module'),
+                    firmwareLabel: `FW ${formatVersionDigits(module?.softwareVersion)}`,
+                    hardwareLabel: `HW ${formatVersionDigits(module?.hardwareVersion)}`,
+                    avgChargeRate: formatChargeRate(estimatedPctPerMinute),
+                    etaToReady: hasReadyCharger
+                        ? formatEtaToReady(0)
+                        : formatEtaToReady(etaCandidates.length > 0 ? Math.min(...etaCandidates) : Number.NaN),
+                };
+            })
+            : []
+    ), [chargeReadyThreshold, formatChargeRate, formatEtaToReady, formatVersionDigits, kiosk.modules, mockNow, t]);
     const showLegacySideIndicators = !kiosk.isNewSchema;
     
     const createSlotSet = (slots) => useMemo(() => new Set(slots.map(s => `${s.stationid}-${s.moduleid}-${s.slotid}`)), [slots]);
@@ -193,15 +290,79 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         </div>
     );
 
+    const CompactTowerHeader = () => {
+        const qrFallback = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(
+            `<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220" viewBox="0 0 220 220">
+                <rect width="220" height="220" rx="18" fill="#f3f4f6"/>
+                <rect x="26" y="26" width="168" height="168" rx="14" fill="#ffffff" stroke="#d1d5db" stroke-width="4"/>
+                <text x="110" y="106" text-anchor="middle" font-family="monospace" font-size="16" fill="#6b7280">QR</text>
+                <text x="110" y="132" text-anchor="middle" font-family="monospace" font-size="14" fill="#4b5563">${kiosk.stationid || '---'}</text>
+            </svg>`
+        )}`;
+
+        return (
+            <div className="bg-white p-4 rounded-lg shadow-inner">
+                <div className="flex items-stretch gap-3">
+                    <img
+                        src={qrFallback}
+                        alt={`${kiosk.stationid} QR`}
+                        className="h-[118px] w-[118px] shrink-0 rounded-md object-cover sm:h-[128px] sm:w-[128px]"
+                    />
+                    <div className="min-w-0 flex-[1.1]">
+                        <div className="flex flex-col gap-2">
+                            {(compactHeaderModules.length > 0 ? compactHeaderModules : [{
+                                key: kiosk.stationid || 'placeholder',
+                                moduleId: kiosk.stationid || '---',
+                                moduleOnline: false,
+                                updateLabel: t('update_module'),
+                                firmwareLabel: 'FW ---',
+                                hardwareLabel: 'HW ---',
+                                avgChargeRate: '--',
+                                etaToReady: '--',
+                            }]).map((module) => (
+                                <div key={module.key} className="flex min-h-[118px] flex-col justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 shadow-sm sm:min-h-[128px]">
+                                    <div className="px-0.5 py-0.5 text-xs">
+                                        <div className="font-mono text-xs text-gray-700">{module.moduleId}</div>
+                                        <div className="mt-1 flex items-center gap-2 font-mono text-[10px] text-gray-500">
+                                            <span>{module.firmwareLabel}</span>
+                                            <span>{module.hardwareLabel}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between gap-3">
+                                            <span className="whitespace-nowrap text-gray-500">{t('avg_charge_rate')}</span>
+                                            <span className="whitespace-nowrap font-semibold text-gray-700">{module.avgChargeRate}</span>
+                                        </div>
+                                        <div className="mt-1 flex items-center justify-between gap-3">
+                                            <span className="text-gray-500">{t('eta_to_80')}</span>
+                                            <span className="font-semibold text-gray-700">{module.etaToReady}</span>
+                                        </div>
+                                        {canUpdateModules && (
+                                            <button
+                                                type="button"
+                                                onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    handleModuleUpdate(module.moduleId);
+                                                }}
+                                                disabled={!module.moduleOnline}
+                                                className="mt-2 inline-flex w-full items-center justify-center rounded-md border border-sky-200 bg-sky-50 px-2 py-1 text-[11px] font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-400"
+                                            >
+                                                {module.updateLabel}
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     const renderCT3 = () => {
         return (
             <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
                 <div className="w-full flex flex-col gap-3">
-                    <div className="bg-white p-4 rounded-lg shadow-inner flex flex-col items-center gap-3">
-                        <div className="w-16 h-16 bg-gray-200 flex items-center justify-center rounded-md">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="w-10 h-10 text-gray-400" viewBox="0 0 24 24" fill="currentColor"><path d="M8 21H4a1 1 0 0 1-1-1V16a1 1 0 0 0-2 0v4a3 3 0 0 0 3 3H8a1 1 0 0 0 0-2Zm14-6a1 1 0 0 0-1 1v4a1 1 0 0 1-1 1H16a1 1 0 0 0 0 2h4a3 3 0 0 0 3-3V16a1 1 0 0 0-2 0ZM20 1H16a1 1 0 0 0 0 2h4a1 1 0 0 1 1 1V8a1 1 0 0 0 2 0V4a3 3 0 0 0-3-3ZM2 9a1 1 0 0 0 1-1V4a1 1 0 0 1 1-1H8a1 1 0 0 0 0-2H4a3 3 0 0 0-3 3V8a1 1 0 0 0 1 1Zm8-4H6a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1ZM9 9H7V7H9Zm5 2h4a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1H14a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1Zm1-4h2V9H15Zm-5 6H6a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V14a1 1 0 0 0-1-1Zm-1 4H7V15H9Zm5-1a1 1 0 0 0 1-1 1 1 0 0 0 0-2H14a1 1 0 0 0-1 1v1a1 1 0 0 0 1 1Zm4-3a1 1 0 0 0-1 1v3a1 1 0 0 0 0 2h1a1 1 0 0 0 1-1V14a1 1 0 0 0-1-1Zm-4 4a1 1 0 1 0 1 1A1 1 0 0 0 14 17Z" /></svg>
-                        </div>
-                    </div>
+                    <CompactTowerHeader />
                     {kiosk.modules[0] && <Module module={kiosk.modules[0]} className="w-full" />}
                 </div>
             </div>
@@ -322,34 +483,14 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         </div>
     );
 
-    const renderCompactTower = (hardwareType, minimumGroups) => {
+    const renderCompactTower = (minimumGroups) => {
         const { slotsByPosition, maxPosition } = buildCompactSlotMap(kiosk.modules);
         const groupCount = Math.max(minimumGroups, Math.ceil(maxPosition / 4) || 0);
-        const qrFallback = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(
-            `<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220" viewBox="0 0 220 220">
-                <rect width="220" height="220" rx="18" fill="#f3f4f6"/>
-                <rect x="26" y="26" width="168" height="168" rx="14" fill="#ffffff" stroke="#d1d5db" stroke-width="4"/>
-                <text x="110" y="106" text-anchor="middle" font-family="monospace" font-size="16" fill="#6b7280">QR</text>
-                <text x="110" y="132" text-anchor="middle" font-family="monospace" font-size="14" fill="#4b5563">${kiosk.stationid || '---'}</text>
-            </svg>`
-        )}`;
 
         return (
             <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
                 <div className="w-full max-w-md flex flex-col gap-3">
-                    <div className="bg-white p-4 rounded-lg shadow-inner flex flex-col items-center gap-3">
-                        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
-                            <img
-                                src={qrFallback}
-                                alt={`${kiosk.stationid} QR`}
-                                className="h-32 w-32 rounded-md object-cover"
-                            />
-                        </div>
-                        <div className="text-center leading-tight">
-                            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-gray-400">{hardwareType}</p>
-                            <p className="mt-1 font-mono text-sm text-gray-600">{kiosk.stationid || '---'}</p>
-                        </div>
-                    </div>
+                    <CompactTowerHeader />
 
                     <div className="flex flex-col gap-2">
                         {Array.from({ length: groupCount }, (_, groupIndex) => (
@@ -482,11 +623,11 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
             case 'CT3':
                 return renderCT3();
             case 'CT4':
-                return renderCompactTower('CT4', 1);
+                return renderCompactTower(1);
             case 'CT8':
-                return renderCompactTower('CT8', 2);
+                return renderCompactTower(2);
             case 'CT12':
-                return renderCompactTower('CT12', 3);
+                return renderCompactTower(3);
             case 'CT10':
                 return renderCT10();
             case 'CK20':
@@ -514,14 +655,30 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                         <KioskControlPanel kiosk={kiosk} t={t} onCommand={onCommand} serverUiVersion={serverUiVersion} serverFlowVersion={serverFlowVersion} clientInfo={clientInfo} isOnline={isOnline} disabled={!isOnline} />
                     </div>
                 )}
-                {moduleIds.length > 0 && (
+                {moduleIds.length > 0 && !showInlineModuleIds && (
                     <div className="w-full rounded-lg bg-white shadow-sm">
                         <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 px-4 py-3 text-sm font-semibold text-gray-700">
                             <span>{t('module_view')}:</span>
-                            {moduleIds.map((moduleId) => (
-                                <span key={moduleId} className="rounded bg-gray-200 px-2 py-1 font-mono text-xs text-gray-700">
-                                    {moduleId}
-                                </span>
+                        </div>
+                        <div className="flex flex-wrap gap-2 px-4 py-3">
+                            {moduleEntries.map((entry) => (
+                                canUpdateModules ? (
+                                    <div key={entry.moduleId} className="flex min-w-[122px] flex-col gap-2 rounded-md bg-gray-100 px-3 py-2">
+                                        <span className="font-mono text-xs text-gray-700">{entry.moduleId}</span>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleModuleUpdate(entry.moduleId)}
+                                            disabled={!entry.moduleOnline}
+                                            className="inline-flex items-center justify-center rounded-md border border-sky-200 bg-sky-50 px-2 py-1 text-[11px] font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-200 disabled:text-gray-400"
+                                        >
+                                            {entry.updateLabel}
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <span key={entry.moduleId} className="rounded bg-gray-200 px-2 py-1 font-mono text-xs text-gray-700">
+                                        {entry.moduleId}
+                                    </span>
+                                )
                             ))}
                         </div>
                     </div>

@@ -13,6 +13,7 @@ import { geocodeAddress } from '../../utils/helpers';
 import KioskControlPanel from './KioskControlPanel';
 
 const isNewBoundKioskStation = (stationid) => /^(CA|FR|US)8\d{3}$/.test(String(stationid || '').trim().toUpperCase());
+const DEFAULT_WIFI = { name: 'chargerent', password: 'Charger33' };
 
 export const Section = ({ title, sectionKey, children, isOpen, onToggle, onSave, data }) => (
         <div className="bg-white rounded-lg shadow-sm mb-2">
@@ -90,14 +91,17 @@ const calculateRateArray = (pricing) => {
 
 function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersion, serverFlowVersion }) {
     const isNewBoundKiosk = isNewBoundKioskStation(kiosk?.stationid);
+    const initialWifi = { ...DEFAULT_WIFI, ...(kiosk.wifi || {}) };
     const [formData, setFormData] = useState({
         info: kiosk.info || {},
+        wifi: initialWifi,
         hardware: kiosk.hardware || {},
         pricing: kiosk.pricing || {},
         ui: kiosk.ui || {}
     });
     const [originalData, setOriginalData] = useState({
         info: kiosk.info || {},
+        wifi: initialWifi,
         hardware: kiosk.hardware || {},
         pricing: kiosk.pricing || {},
         ui: kiosk.ui || {}
@@ -124,12 +128,14 @@ function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersi
 
         setFormData({
             info: initialInfo,
+            wifi: { ...DEFAULT_WIFI, ...(kiosk.wifi || {}) },
             hardware: kiosk.hardware || {},
             pricing: initialPricing,
             ui: kiosk.ui || {}
         });
         setOriginalData({
             info: initialInfo,
+            wifi: { ...DEFAULT_WIFI, ...(kiosk.wifi || {}) },
             hardware: kiosk.hardware || {},
             pricing: initialPricing,
             ui: kiosk.ui || {}
@@ -155,7 +161,7 @@ function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersi
 
         // By default, convert string values to uppercase before setting state.
         // The `process` flag can be set to false to skip this.
-        if (process && typeof processedValue === 'string') {
+        if (process && typeof processedValue === 'string' && section !== 'wifi') {
             processedValue = processedValue.toUpperCase();
         }
 
@@ -282,6 +288,11 @@ function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersi
                         <FormInput label="Rep" name="rep" value={formData.info?.rep} section="info" onDataChange={onDataChange} />
                         <FormInput label="Rep %" name="reppercent" value={formData.info?.reppercent} section="info" type="number" onDataChange={onDataChange} />
                     </div>
+                </Section>
+
+                <Section title="WiFi" sectionKey="wifi" isOpen={openSection === 'wifi'} onToggle={handleToggleSection} onSave={handleSave} data={formData.wifi} isChanged={JSON.stringify(formData.wifi) !== JSON.stringify(originalData.wifi)}>
+                    <FormInput label="WiFi Name" name="name" value={formData.wifi?.name} section="wifi" onDataChange={onDataChange} />
+                    <FormInput label="WiFi Password" name="password" value={formData.wifi?.password} section="wifi" onDataChange={onDataChange} />
                 </Section>
 
                 <Section title="Hardware" sectionKey="hardware" isOpen={openSection === 'hardware'} onToggle={handleToggleSection} onSave={handleSave} data={formData.hardware} isChanged={JSON.stringify(formData.hardware) !== JSON.stringify(originalData.hardware)}>

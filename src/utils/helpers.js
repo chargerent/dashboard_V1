@@ -4,6 +4,7 @@ const NEW_KIOSK_TYPES = new Set(['CT3', 'CT4', 'CT8', 'CT12', 'CK48']);
 const ONLINE_WINDOW_MS = 10 * 60 * 1000;
 const LEGACY_TIMESTAMP_PATTERN = /(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2}):(\d{2})/;
 const HAS_TIMEZONE_PATTERN = /(Z|[+-]\d{2}:?\d{2})$/i;
+const DEFAULT_WIFI = { name: 'chargerent', password: 'Charger33' };
 
 const parseDashboardTimestamp = (value) => {
     if (!value) return null;
@@ -46,6 +47,27 @@ const hasRecentTimestamp = (timestamp, referenceTime, windowMs) => {
     return parsedTimestamp.getTime() >= (parsedReference.getTime() - windowMs);
 };
 
+const inferNewSchemaHardwareType = (modules = []) => {
+    const normalizedModules = Array.isArray(modules) ? modules : [];
+    const moduleCount = normalizedModules.length;
+    const totalSlots = normalizedModules.reduce((sum, module) => (
+        sum + (Array.isArray(module?.slots) ? module.slots.length : 0)
+    ), 0);
+
+    if (totalSlots === 48) return 'CK48';
+    if (totalSlots === 12) return 'CT12';
+    if (totalSlots === 8) return 'CT8';
+    if (totalSlots === 4) return 'CT4';
+    if (totalSlots === 3) return 'CT3';
+
+    // Tolerate stale mixed layouts left behind by the old CT parser, e.g. 12+4+4.
+    if (moduleCount === 3 && totalSlots >= 12 && totalSlots <= 20) return 'CT12';
+    if (moduleCount === 2 && totalSlots >= 8 && totalSlots <= 12) return 'CT8';
+    if (moduleCount === 1 && totalSlots >= 20) return 'CK48';
+
+    return totalSlots >= 20 ? 'CK48' : 'CT3';
+};
+
 export const isNewSchemaKiosk = (kiosk) => {
     if (!kiosk) return false;
     if (kiosk.isNewSchema === true) return true;
@@ -74,6 +96,10 @@ export const normalizeKioskData = (kiosks) => {
 
         const normalizedModules = modulesSource.map(module => {
             let slots = [];
+            const moduleSoftwareVersion = Number(module?.softwareVersion ?? 0);
+            const moduleHardwareVersion = Number(module?.hardwareVersion ?? 0);
+            const rawModuleTemperature = Number(module?.temperature ?? module?.temp);
+            const moduleTemperature = Number.isFinite(rawModuleTemperature) ? rawModuleTemperature : null;
 
             if (isNewSchema) {
                 // New schema: slots array with status/sn/lock/holeDetection fields
@@ -149,6 +175,10 @@ export const normalizeKioskData = (kiosks) => {
                 slots,
                 output: module.output,
                 heartbeat: module.heartbeat,
+                chargeMetrics: module.chargeMetrics || null,
+                softwareVersion: Number.isFinite(moduleSoftwareVersion) ? moduleSoftwareVersion : 0,
+                hardwareVersion: Number.isFinite(moduleHardwareVersion) ? moduleHardwareVersion : 0,
+                temperature: moduleTemperature,
                 isNewSchema,
             };
         });
@@ -161,8 +191,7 @@ export const normalizeKioskData = (kiosks) => {
         // Infer hardware.type for new-schema kiosks that don't have it set (e.g. migrated V2 kiosks)
         let hardware = kiosk.hardware || {};
         if (isNewSchema && !hardware.type) {
-            const totalSlots = normalizedModules.reduce((sum, m) => sum + m.slots.length, 0);
-            hardware = { ...hardware, type: totalSlots >= 20 ? 'CK48' : 'CT3' };
+            hardware = { ...hardware, type: inferNewSchemaHardwareType(normalizedModules) };
         }
 
         const configuredPower = Number(hardware?.power);
@@ -199,6 +228,10 @@ export const normalizeKioskData = (kiosks) => {
                 accountpercent: kiosk.info?.accountpercent || 0,
                 rep: kiosk.info?.rep || '',
                 reppercent: kiosk.info?.reppercent || 0
+            },
+            wifi: {
+                name: kiosk.wifi?.name || DEFAULT_WIFI.name,
+                password: kiosk.wifi?.password || DEFAULT_WIFI.password,
             },
             pricing: kiosk.pricing || {},
             ui: kiosk.ui || {},

@@ -21,15 +21,11 @@ const keepNames = new Set([
   'chk status [16]',
   'Prepare Kiosk Lookup',
   'Resolve Kiosk Doc',
-  'CT3 parse status',
   'parse status',
-  'Prepare Firebase Update',
   'Query kiosk doc',
   'Update kiosk in Firebase',
   'Firebase write result',
   'debug 273',
-  'debug 284',
-  'debug 285',
   'debug 288',
 ]);
 
@@ -37,16 +33,11 @@ const idMap = new Map([
   ['45e263e33e997169', 'ps-link-in'],
   ['952160aa36341f64', 'ps-debug-in'],
   ['7e6738b73d43dc52', 'ps-switch-status'],
-  ['c60c602fd06f43d0', 'ps-switch-length'],
-  ['3dd458aadec4d64e', 'ps-debug-ct3-branch'],
-  ['4cc0a30364315ceb', 'ps-debug-main-branch'],
-  ['53ae4cbde851aeb9', 'ps-ct3-parser'],
   ['194981b38f8cc71a', 'ps-parser'],
   ['b8167a27f5e8dad6', 'ps-debug-parser'],
   ['ps-fn-query-prep', 'ps-lookup-prep'],
   ['ps-fs-query', 'ps-fs-query'],
   ['ps-fn-update-prep', 'ps-resolve-doc'],
-  ['87d30f04384a1018', 'ps-update-prep'],
   ['ps-fs-update', 'ps-fs-update'],
   ['ps-debug-write', 'ps-debug-write'],
 ]);
@@ -89,6 +80,7 @@ const nodes = source
   .filter((node) => node.g === sourceGroupId)
   .filter((node) => node.type !== 'link out')
   .filter((node) => node.name !== 'hq update')
+  .filter((node) => keepNames.has(node.name) || node.name === 'link in 19')
   .map((node) => {
     const cloned = JSON.parse(JSON.stringify(node));
     cloned.id = mapId(cloned.id);
@@ -122,29 +114,24 @@ const nodes = source
       cloned.y = 240;
     }
 
-    if (cloned.type === 'switch' && cloned.property === 'payload.length') {
-      cloned.x = 1080;
-      cloned.y = 240;
-    }
-
-    if (cloned.name === 'CT3 parse status') {
-      cloned.x = 1270;
-      cloned.y = 200;
-    }
-
     if (cloned.name === 'parse status') {
-      cloned.x = 1270;
-      cloned.y = 280;
-    }
-
-    if (cloned.name === 'Prepare Firebase Update') {
-      cloned.x = 1460;
+      cloned.x = 1100;
       cloned.y = 240;
     }
 
     if (cloned.name === 'Update kiosk in Firebase') {
-      cloned.x = 1650;
+      cloned.x = 1350;
       cloned.y = 240;
+    }
+
+    if (cloned.name === 'Firebase write result') {
+      cloned.x = 1550;
+      cloned.y = 200;
+    }
+
+    if (cloned.name === 'debug 288') {
+      cloned.x = 1150;
+      cloned.y = 180;
     }
 
     if (Array.isArray(cloned.wires)) {
@@ -168,6 +155,9 @@ const tab = {
   info: 'Importable Firebase-only status parser for Besiter user/update payloads.',
   env: [],
 };
+
+group.w = 1540;
+group.h = 220;
 
 fs.writeFileSync(outputPath, JSON.stringify([tab, group, comment, ...nodes], null, 4) + '\n');
 console.log(`Wrote ${outputPath}`);

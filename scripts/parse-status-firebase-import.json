@@ -22,23 +22,18 @@
             "ps-link-in",
             "ps-debug-in",
             "ps-switch-status",
-            "ps-switch-length",
-            "ps-debug-ct3-branch",
-            "ps-debug-main-branch",
-            "ps-ct3-parser",
             "ps-parser",
             "ps-debug-parser",
             "ps-lookup-prep",
             "ps-fs-query",
             "ps-resolve-doc",
             "ps-fs-update",
-            "ps-debug-write",
-            "ps-update-prep"
+            "ps-debug-write"
         ],
         "x": 54,
         "y": 99,
-        "w": 1602,
-        "h": 262
+        "w": 1540,
+        "h": 220
     },
     {
         "id": "ps-comment",
@@ -109,104 +104,23 @@
         ]
     },
     {
-        "id": "ps-switch-length",
-        "type": "switch",
-        "z": "ps-import-tab",
-        "g": "ps-import-group",
-        "name": "",
-        "property": "payload.length",
-        "propertyType": "msg",
-        "rules": [
-            {
-                "t": "eq",
-                "v": "56",
-                "vt": "num"
-            },
-            {
-                "t": "else"
-            }
-        ],
-        "checkall": "true",
-        "repair": false,
-        "outputs": 2,
-        "x": 1080,
-        "y": 240,
-        "wires": [
-            [
-                "ps-ct3-parser",
-                "ps-debug-ct3-branch"
-            ],
-            [
-                "ps-debug-main-branch",
-                "ps-parser"
-            ]
-        ]
-    },
-    {
-        "id": "ps-debug-ct3-branch",
-        "type": "debug",
-        "z": "ps-import-tab",
-        "g": "ps-import-group",
-        "name": "debug 285",
-        "active": false,
-        "tosidebar": true,
-        "complete": "false",
-        "x": 2100,
-        "y": 900,
-        "wires": []
-    },
-    {
-        "id": "ps-debug-main-branch",
-        "type": "debug",
-        "z": "ps-import-tab",
-        "g": "ps-import-group",
-        "name": "debug 284",
-        "active": false,
-        "tosidebar": true,
-        "complete": "true",
-        "x": 2100,
-        "y": 1040,
-        "wires": []
-    },
-    {
-        "id": "ps-ct3-parser",
-        "type": "function",
-        "z": "ps-import-tab",
-        "g": "ps-import-group",
-        "name": "CT3 parse status",
-        "func": "function toByteArray(value) {\n    if (Buffer.isBuffer(value)) {\n        return Array.from(value);\n    }\n    if (Array.isArray(value)) {\n        return value.slice();\n    }\n    return null;\n}\n\nfunction moduleMatches(left, right) {\n    const a = String(left || '').trim();\n    const b = String(right || '').trim();\n    if (!a || !b) return false;\n    if (a === b) return true;\n    return ('1000' + a) === b || a === b.replace(/^1000/, '');\n}\n\nfunction getChargerSN(bytes) {\n    return (\n        ((bytes[0] & 0xFF) << 24) |\n        ((bytes[1] & 0xFF) << 16) |\n        ((bytes[2] & 0xFF) << 8)  |\n        (bytes[3] & 0xFF)\n    ) >>> 0;\n}\n\nfunction getChargingCurrent(slot) {\n    return Number(slot?.chargingCurrent ?? slot?.chargeCurrent ?? 0);\n}\n\nconst bytes = toByteArray(msg.payload);\nif (!bytes) {\n    node.error('Payload must be a Buffer or byte array', msg);\n    return null;\n}\n\nconst kioskDoc = msg.kioskDoc;\nif (!kioskDoc) {\n    node.error('Missing msg.kioskDoc for CT3 status parse', msg);\n    return null;\n}\n\nconst targetStation = JSON.parse(JSON.stringify(kioskDoc));\nconst targetModuleId = String(msg._statusModuleId || msg.module || '').trim();\nif (!targetModuleId) {\n    node.error('No module ID (msg.module) provided', msg);\n    return null;\n}\n\nconst modules = Array.isArray(targetStation.modules) ? targetStation.modules : [];\nconst moduleObj = modules.find((mod) => moduleMatches(mod?.id, targetModuleId));\nif (!moduleObj) {\n    node.error('Module ' + targetModuleId + ' not found in kiosk ' + (targetStation.stationid || '(unknown)'), msg);\n    return null;\n}\n\nconst timestamp = new Date().toISOString();\nconst data = bytes.slice(4);\nconst slotData = data.slice(6);\nconst segmentLength = 15;\nconst slotCount = Math.floor(slotData.length / segmentLength);\nconst existingSlots = Array.isArray(moduleObj.slots) ? moduleObj.slots : [];\nconst allSlots = [];\n\nfor (let i = 0; i < slotCount; i++) {\n    const offset = i * segmentLength;\n    const segment = slotData.slice(offset, offset + segmentLength);\n    if (segment.length < segmentLength) {\n        node.warn('CT3 slot ' + (i + 1) + ' is incomplete');\n        continue;\n    }\n\n    const existing = existingSlots.find((slot) => Number(slot?.position) === Number(segment[0]));\n    const chargingVoltage = segment[11];\n    const chargingCurrent = segment[12];\n\n    allSlots.push({\n        position: segment[0],\n        status: segment[1],\n        dischargeCurrent: segment[2],\n        cellVoltage: segment[3],\n        areaCode: segment[4],\n        sn: getChargerSN(segment.slice(5, 9)),\n        batteryLevel: segment[9],\n        temperature: segment[10],\n        chargingVoltage,\n        chargingCurrent,\n        chargeVoltage: chargingVoltage,\n        chargeCurrent: chargingCurrent,\n        softwareVersion: segment[13],\n        holeDetection: segment[14],\n        lock: Boolean(existing?.lock),\n        lockReason: existing?.lockReason || '',\n        rented: false,\n        cycle: Number(existing?.cycle || 0)\n    });\n}\n\nmoduleObj.slots = allSlots;\nmoduleObj.lastUpdated = timestamp;\nmoduleObj.total = 0;\nmoduleObj.full = 0;\nmoduleObj.empty = 0;\nmoduleObj.slot = 0;\nmoduleObj.charging = 0;\nmoduleObj.lock = 0;\n\nallSlots.forEach((slot) => {\n    if (slot.status === 1) {\n        moduleObj.total++;\n        if (slot.batteryLevel >= 80) moduleObj.full++;\n        else moduleObj.empty++;\n    } else if (slot.status === 0) {\n        moduleObj.slot++;\n    }\n    if (getChargingCurrent(slot) > 0) {\n        moduleObj.charging++;\n    }\n    if (slot.lock) {\n        moduleObj.lock++;\n    }\n});\n\n['total', 'full', 'empty', 'slot', 'charging'].forEach((prop) => {\n    targetStation[prop] = modules.reduce((sum, mod) => sum + Number(mod?.[prop] || 0), 0);\n});\n\nmsg._updatedStation = targetStation;\nnode.warn('CT3 Firebase-only status update for module ' + targetModuleId + ' | slots: ' + allSlots.length + ' | full: ' + moduleObj.full + ' | empty: ' + moduleObj.empty);\nreturn msg;",
-        "outputs": 1,
-        "timeout": 0,
-        "noerr": 0,
-        "initialize": "",
-        "finalize": "",
-        "libs": [],
-        "x": 1270,
-        "y": 200,
-        "wires": [
-            [
-                "ps-update-prep"
-            ]
-        ]
-    },
-    {
         "id": "ps-parser",
         "type": "function",
         "z": "ps-import-tab",
         "g": "ps-import-group",
         "name": "parse status",
-        "func": "function toByteArray(value) {\n    if (Buffer.isBuffer(value)) {\n        return Array.from(value);\n    }\n    if (Array.isArray(value)) {\n        return value.slice();\n    }\n    return null;\n}\n\nfunction moduleMatches(left, right) {\n    const a = String(left || '').trim();\n    const b = String(right || '').trim();\n    if (!a || !b) return false;\n    if (a === b) return true;\n    return ('1000' + a) === b || a === b.replace(/^1000/, '');\n}\n\nfunction getChargerSN(bytes) {\n    return (\n        ((bytes[0] & 0xFF) << 24) |\n        ((bytes[1] & 0xFF) << 16) |\n        ((bytes[2] & 0xFF) << 8)  |\n        (bytes[3] & 0xFF)\n    ) >>> 0;\n}\n\nfunction getChargingCurrent(slot) {\n    return Number(slot?.chargingCurrent ?? slot?.chargeCurrent ?? 0);\n}\n\nconst bytes = toByteArray(msg.payload);\nif (!bytes) {\n    node.error('Payload must be a Buffer or byte array', msg);\n    return null;\n}\n\nconst kioskDoc = msg.kioskDoc;\nif (!kioskDoc) {\n    node.error('Missing msg.kioskDoc for status parse', msg);\n    return null;\n}\n\nconst targetStation = JSON.parse(JSON.stringify(kioskDoc));\nconst targetModuleId = String(msg._statusModuleId || msg.module || '').trim();\nif (!targetModuleId) {\n    node.error('No module ID (msg.module) provided', msg);\n    return null;\n}\n\nconst modules = Array.isArray(targetStation.modules) ? targetStation.modules : [];\nconst moduleObj = modules.find((mod) => moduleMatches(mod?.id, targetModuleId));\nif (!moduleObj) {\n    node.error('Module ' + targetModuleId + ' not found in kiosk ' + (targetStation.stationid || '(unknown)'), msg);\n    return null;\n}\n\nconst timestamp = new Date().toISOString();\nconst data = bytes.slice(4);\nconst existingSlots = Array.isArray(moduleObj.slots) ? moduleObj.slots : [];\nconst allSlots = [];\n\nfor (let i = 0; i < 12; i++) {\n    const moduleOffset = i * 66;\n    const moduleBlock = data.slice(moduleOffset, moduleOffset + 66);\n    if (moduleBlock.length < 66) {\n        node.warn('Module block ' + (i + 1) + ' is incomplete');\n        continue;\n    }\n\n    const chargersBytes = moduleBlock.slice(6);\n    for (let j = 0; j < 4; j++) {\n        const offset = j * 15;\n        const segment = chargersBytes.slice(offset, offset + 15);\n        if (segment.length < 15) {\n            node.warn('Module block ' + (i + 1) + ' slot ' + (j + 1) + ' is incomplete');\n            continue;\n        }\n\n        const existing = existingSlots.find((slot) => Number(slot?.position) === Number(segment[0]));\n        const chargingVoltage = segment[11];\n        const chargingCurrent = segment[12];\n\n        allSlots.push({\n            position: segment[0],\n            status: segment[1],\n            dischargeCurrent: segment[2],\n            cellVoltage: segment[3],\n            areaCode: segment[4],\n            sn: getChargerSN(segment.slice(5, 9)),\n            batteryLevel: segment[9],\n            temperature: segment[10],\n            chargingVoltage,\n            chargingCurrent,\n            chargeVoltage: chargingVoltage,\n            chargeCurrent: chargingCurrent,\n            softwareVersion: segment[13],\n            holeDetection: segment[14],\n            lock: Boolean(existing?.lock),\n            lockReason: existing?.lockReason || '',\n            rented: false,\n            cycle: Number(existing?.cycle || 0)\n        });\n    }\n}\n\nmoduleObj.slots = allSlots;\nmoduleObj.lastUpdated = timestamp;\nmoduleObj.total = 0;\nmoduleObj.full = 0;\nmoduleObj.empty = 0;\nmoduleObj.slot = 0;\nmoduleObj.charging = 0;\nmoduleObj.lock = 0;\n\nallSlots.forEach((slot) => {\n    if (slot.status === 1) {\n        moduleObj.total++;\n        if (slot.batteryLevel >= 80) moduleObj.full++;\n        else moduleObj.empty++;\n    } else if (slot.status === 0) {\n        moduleObj.slot++;\n    }\n    if (getChargingCurrent(slot) > 0) {\n        moduleObj.charging++;\n    }\n    if (slot.lock) {\n        moduleObj.lock++;\n    }\n});\n\n['total', 'full', 'empty', 'slot', 'charging'].forEach((prop) => {\n    targetStation[prop] = modules.reduce((sum, mod) => sum + Number(mod?.[prop] || 0), 0);\n});\n\nmsg._updatedStation = targetStation;\nnode.warn('Firebase-only status update for module ' + targetModuleId + ' | slots: ' + allSlots.length + ' | full: ' + moduleObj.full + ' | empty: ' + moduleObj.empty);\nreturn msg;",
+        "func": "function toByteArray(value) {\n    if (Buffer.isBuffer(value)) {\n        return Array.from(value);\n    }\n    if (Array.isArray(value)) {\n        return value.slice();\n    }\n    return null;\n}\n\nfunction moduleMatches(left, right) {\n    const a = String(left || '').trim();\n    const b = String(right || '').trim();\n    if (!a || !b) return false;\n    if (a === b) return true;\n    return ('1000' + a) === b || a === b.replace(/^1000/, '');\n}\n\nfunction getChargerSN(bytes) {\n    return (\n        ((bytes[0] & 0xFF) << 24) |\n        ((bytes[1] & 0xFF) << 16) |\n        ((bytes[2] & 0xFF) << 8)  |\n        (bytes[3] & 0xFF)\n    ) >>> 0;\n}\n\nfunction getChargingCurrent(slot) {\n    return Number(slot?.chargingCurrent ?? slot?.chargeCurrent ?? 0);\n}\n\nfunction inferTowerType(slotCount) {\n    const normalizedCount = Number(slotCount || 0);\n    if (normalizedCount === 3) return 'CT3';\n    if (normalizedCount === 4) return 'CT4';\n    if (normalizedCount === 8) return 'CT8';\n    if (normalizedCount === 12) return 'CT12';\n    if (normalizedCount === 48) return 'CK48';\n    return '';\n}\n\nfunction inferHoleCount(bytes, data) {\n    const payloadSize = bytes.length - 5;\n    if (payloadSize === 192 && data[1] === 255 && data[2] === 255) {\n        return data[66] === 5 ? 8 : 4;\n    }\n\n    const candidates = [2, 5, 6, 8, 4, 3, 1];\n    for (const holeCount of candidates) {\n        const blockSize = 6 + (15 * holeCount);\n        if (payloadSize > 0 && payloadSize % blockSize === 0) {\n            return holeCount;\n        }\n    }\n\n    return 0;\n}\n\nfunction parsePinboards(bytes) {\n    const data = bytes.slice(4, -1);\n    const pinboards = [];\n\n    if (data.length < 6) {\n        return pinboards;\n    }\n\n    const useHeaderHoleCount = data[1] !== 0 && data[1] !== 255 && data[2] !== 11;\n\n    if (useHeaderHoleCount) {\n        for (let offset = 0; offset + 6 <= data.length;) {\n            const header = data.slice(offset, offset + 6);\n            const holeCount = Number(header[1] || 0);\n            const blockSize = 6 + (holeCount * 15);\n\n            if (holeCount <= 0) {\n                node.warn('Pinboard at offset ' + offset + ' reported invalid hole count');\n                break;\n            }\n\n            if (offset + blockSize > data.length) {\n                node.warn('Pinboard at offset ' + offset + ' is incomplete');\n                break;\n            }\n\n            const slots = [];\n            for (let index = 0; index < holeCount; index++) {\n                const segmentOffset = offset + 6 + (index * 15);\n                const segment = data.slice(segmentOffset, segmentOffset + 15);\n                if (segment.length < 15) {\n                    node.warn('Pinboard ' + header[0] + ' slot ' + (index + 1) + ' is incomplete');\n                    continue;\n                }\n                slots.push({\n                    segment,\n                    relativePosition: index + 1\n                });\n            }\n\n            pinboards.push({\n                index: Number(header[0] || (pinboards.length + 1)),\n                holeCount,\n                temperature: Number(header[3] || 0),\n                softwareVersion: Number(header[4] || 0),\n                hardwareVersion: Number(header[5] || 0),\n                header,\n                slots\n            });\n\n            offset += blockSize;\n        }\n\n        return pinboards;\n    }\n\n    const holeCount = inferHoleCount(bytes, data);\n    if (holeCount <= 0) {\n        return pinboards;\n    }\n\n    const blockSize = 6 + (holeCount * 15);\n    for (let offset = 0; offset + blockSize <= data.length; offset += blockSize) {\n        const header = data.slice(offset, offset + 6);\n        const slots = [];\n\n        for (let index = 0; index < holeCount; index++) {\n            const segmentOffset = offset + 6 + (index * 15);\n            const segment = data.slice(segmentOffset, segmentOffset + 15);\n            if (segment.length < 15) {\n                node.warn('Pinboard ' + header[0] + ' slot ' + (index + 1) + ' is incomplete');\n                continue;\n            }\n            slots.push({\n                segment,\n                relativePosition: index + 1\n            });\n        }\n\n        pinboards.push({\n            index: Number(header[0] || (pinboards.length + 1)),\n            holeCount,\n            temperature: Number(header[3] || 0),\n            softwareVersion: Number(header[4] || 0),\n            hardwareVersion: Number(header[5] || 0),\n            header,\n            slots\n        });\n    }\n\n    return pinboards;\n}\n\nfunction orderModulesForPinboards(modules) {\n    return modules\n        .slice()\n        .map((module, fallbackIndex) => {\n            const id = String(module?.id || '');\n            const match = id.match(/m(\\d+)$/i);\n            return {\n                module,\n                fallbackIndex,\n                order: match ? Number(match[1]) : (fallbackIndex + 1)\n            };\n        })\n        .sort((left, right) => left.order - right.order || left.fallbackIndex - right.fallbackIndex)\n        .map((entry) => entry.module);\n}\n\nfunction shouldUseRelativePositions(module, holeCount, splitModules) {\n    if (!splitModules) {\n        return false;\n    }\n\n    const slots = Array.isArray(module?.slots) ? module.slots : [];\n    if (slots.length === 0) {\n        return true;\n    }\n\n    const positions = slots\n        .map((slot) => Number(slot?.position || 0))\n        .filter((value) => value > 0);\n\n    if (positions.length === 0) {\n        return true;\n    }\n\n    return Math.max(...positions) <= holeCount;\n}\n\nfunction buildSlot(segment, existing, relativePosition, useRelativePositions) {\n    const absolutePosition = Number(segment[0] || 0);\n    const chargingVoltage = segment[11];\n    const chargingCurrent = segment[12];\n\n    return {\n        position: useRelativePositions ? relativePosition : absolutePosition,\n        absolutePosition,\n        status: segment[1],\n        dischargeCurrent: segment[2],\n        cellVoltage: segment[3],\n        areaCode: segment[4],\n        sn: getChargerSN(segment.slice(5, 9)),\n        batteryLevel: segment[9],\n        temperature: segment[10],\n        chargingVoltage,\n        chargingCurrent,\n        softwareVersion: segment[13],\n        holeDetection: segment[14],\n        lock: Boolean(existing?.lock),\n        lockReason: existing?.lockReason || '',\n        rented: false,\n        cycle: Number(existing?.cycle || 0)\n    };\n}\n\nfunction applyModuleStatus(module, slots, timestamp) {\n    module.slots = slots;\n    module.lastUpdated = timestamp;\n    module.total = 0;\n    module.full = 0;\n    module.empty = 0;\n    module.slot = 0;\n    module.charging = 0;\n    module.lock = 0;\n\n    slots.forEach((slot) => {\n        if (slot.status === 1) {\n            module.total++;\n            if (slot.batteryLevel >= 80) module.full++;\n            else module.empty++;\n        } else if (slot.status === 0) {\n            module.slot++;\n        }\n\n        if (getChargingCurrent(slot) > 0) {\n            module.charging++;\n        }\n\n        if (slot.lock) {\n            module.lock++;\n        }\n    });\n}\n\nfunction applyModuleHeader(module, pinboard) {\n    const nextTemperature = Number(pinboard?.temperature);\n    if (Number.isFinite(nextTemperature)) {\n        module.temperature = nextTemperature;\n    }\n\n    const nextSoftwareVersion = Number(pinboard?.softwareVersion);\n    if (\n        Number.isFinite(nextSoftwareVersion) &&\n        nextSoftwareVersion > 0 &&\n        nextSoftwareVersion !== Number(module?.softwareVersion || 0)\n    ) {\n        module.softwareVersion = nextSoftwareVersion;\n    }\n\n    const nextHardwareVersion = Number(pinboard?.hardwareVersion);\n    if (\n        Number.isFinite(nextHardwareVersion) &&\n        nextHardwareVersion > 0 &&\n        nextHardwareVersion !== Number(module?.hardwareVersion || 0)\n    ) {\n        module.hardwareVersion = nextHardwareVersion;\n    }\n}\n\nfunction recalculateStationTotals(targetStation, modules) {\n    ['total', 'full', 'empty', 'slot', 'charging'].forEach((prop) => {\n        targetStation[prop] = modules.reduce((sum, mod) => sum + Number(mod?.[prop] || 0), 0);\n    });\n}\n\nconst bytes = toByteArray(msg.payload);\nif (!bytes) {\n    node.error('Payload must be a Buffer or byte array', msg);\n    return null;\n}\n\nconst kioskDoc = msg.kioskDoc;\nif (!kioskDoc) {\n    node.error('Missing msg.kioskDoc for status parse', msg);\n    return null;\n}\n\nconst targetStation = JSON.parse(JSON.stringify(kioskDoc));\nconst targetModuleId = String(msg._statusModuleId || msg.module || '').trim();\nif (!targetModuleId) {\n    node.error('No module ID (msg.module) provided', msg);\n    return null;\n}\n\nconst modules = Array.isArray(targetStation.modules) ? targetStation.modules : [];\nconst moduleObj = modules.find((mod) => moduleMatches(mod?.id, targetModuleId));\nif (!moduleObj) {\n    node.error('Module ' + targetModuleId + ' not found in kiosk ' + (targetStation.stationid || '(unknown)'), msg);\n    return null;\n}\n\nconst timestamp = new Date().toISOString();\nconst pinboards = parsePinboards(bytes);\nif (pinboards.length === 0) {\n    node.error('Unable to parse pinboard data from status payload', msg);\n    return null;\n}\n\nconst totalSlots = pinboards.reduce((sum, pinboard) => sum + pinboard.slots.length, 0);\nconst inferredType = inferTowerType(totalSlots);\ntargetStation.hardware = targetStation.hardware && typeof targetStation.hardware === 'object'\n    ? targetStation.hardware\n    : {};\nif (inferredType && !targetStation.hardware.type) {\n    targetStation.hardware.type = inferredType;\n}\n\nconst activeModules = modules.filter((module) => !String(module?.id || '').startsWith('disabled'));\nconst orderedModules = orderModulesForPinboards(activeModules);\nconst splitModules = pinboards.length > 1 &&\n    orderedModules.length === pinboards.length &&\n    (inferredType === 'CT4' || inferredType === 'CT8' || inferredType === 'CT12');\n\nif (splitModules) {\n    pinboards.forEach((pinboard, moduleIndex) => {\n        const currentModule = orderedModules[moduleIndex];\n        const existingSlots = Array.isArray(currentModule?.slots) ? currentModule.slots : [];\n        const useRelativePositions = shouldUseRelativePositions(currentModule, pinboard.holeCount, splitModules);\n        const parsedSlots = pinboard.slots.map(({ segment, relativePosition }) => {\n            const position = useRelativePositions ? relativePosition : Number(segment[0] || 0);\n            const existing = existingSlots.find((slot) => Number(slot?.position) === position);\n            return buildSlot(segment, existing, relativePosition, useRelativePositions);\n        });\n        applyModuleHeader(currentModule, pinboard);\n        applyModuleStatus(currentModule, parsedSlots, timestamp);\n    });\n} else {\n    const existingSlots = Array.isArray(moduleObj.slots) ? moduleObj.slots : [];\n    const parsedSlots = [];\n\n    pinboards.forEach((pinboard) => {\n        pinboard.slots.forEach(({ segment, relativePosition }) => {\n            const existing = existingSlots.find((slot) => Number(slot?.position) === Number(segment[0] || 0));\n            parsedSlots.push(buildSlot(segment, existing, relativePosition, false));\n        });\n    });\n\n    if (pinboards[0]) {\n        applyModuleHeader(moduleObj, pinboards[0]);\n    }\n    applyModuleStatus(moduleObj, parsedSlots, timestamp);\n}\n\nrecalculateStationTotals(targetStation, activeModules.length > 0 ? activeModules : modules);\n\nlet updatedSlotCount = 0;\nif (splitModules) {\n    orderedModules.forEach((currentModule) => {\n        updatedSlotCount += Array.isArray(currentModule?.slots) ? currentModule.slots.length : 0;\n    });\n} else {\n    updatedSlotCount = Array.isArray(moduleObj?.slots) ? moduleObj.slots.length : 0;\n}\n\nmsg._updatedStation = targetStation;\n\nif (!kioskDoc?.provisionid) {\n    node.error('No provisionid on msg.kioskDoc', msg);\n    return null;\n}\n\nconst configuredPower = Number(targetStation.hardware?.power);\nconst fullThreshold = Number.isFinite(configuredPower) ? configuredPower : 80;\nconst chargerCapacityMah = 8000;\nconst currentUnitToMilliamps = 100;\n\nlet count = 0;\nlet slotscount = 0;\nlet lockcount = 0;\n\nmodules.forEach((mod) => {\n    const slots = Array.isArray(mod?.slots) ? mod.slots : [];\n    mod.lock = slots.reduce((sum, slot) => sum + (slot?.lock ? 1 : 0), 0);\n    slotscount += slots.length;\n\n    const chargingSlots = slots.filter((slot) => (\n        slot &&\n        slot.status === 1 &&\n        slot.sn &&\n        slot.sn !== 0 &&\n        Number(slot.chargingCurrent ?? slot.chargeCurrent ?? 0) > 0\n    ));\n    const rawChargingCurrentTotal = chargingSlots.reduce(\n        (sum, slot) => sum + Number(slot.chargingCurrent ?? slot.chargeCurrent ?? 0),\n        0\n    );\n    const avgChargingCurrent = chargingSlots.length > 0 ?\n        rawChargingCurrentTotal / chargingSlots.length :\n        0;\n    const avgChargingCurrentmA = avgChargingCurrent * currentUnitToMilliamps;\n    const estimatedPctPerMinute = avgChargingCurrentmA > 0 ?\n        avgChargingCurrentmA / (chargerCapacityMah * 0.6) :\n        null;\n\n    mod.chargeMetrics = {\n        method: 'current_estimate',\n        batteryCapacityMah: chargerCapacityMah,\n        currentUnitToMilliamps,\n        chargingSlots: chargingSlots.length,\n        avgChargingCurrent: Number(avgChargingCurrent.toFixed(2)),\n        avgChargingCurrentmA: Number(avgChargingCurrentmA.toFixed(0)),\n        estimatedPctPerMinute: estimatedPctPerMinute === null ?\n            null :\n            Number(estimatedPctPerMinute.toFixed(3)),\n        updatedAt: timestamp\n    };\n\n    slots.forEach((slot) => {\n        if (slot?.lock) {\n            lockcount++;\n        }\n\n        if (\n            slot &&\n            slot.status === 1 &&\n            slot.sn &&\n            slot.sn !== 0 &&\n            typeof slot.batteryLevel === 'number' &&\n            slot.batteryLevel >= fullThreshold &&\n            !slot.lock\n        ) {\n            count++;\n        }\n    });\n});\n\nmsg.payload = {\n    path: 'kiosks/' + kioskDoc.provisionid,\n    content: {\n        modules,\n        hardware: targetStation.hardware || kioskDoc.hardware || {},\n        total: Number(targetStation.total || 0),\n        full: Number(targetStation.full || 0),\n        empty: Number(targetStation.empty || 0),\n        slot: Number(targetStation.slot || 0),\n        charging: Number(targetStation.charging || 0),\n        count,\n        slotscount,\n        lockcount,\n        zerocount: Number(kioskDoc.zerocount || 0),\n        chargers: count === 0 ? 'soldout' : count,\n        lastUpdate: timestamp,\n        timestamp\n    }\n};\n\nnode.warn(\n    'Firebase-only status update for station ' +\n    (targetStation.stationid || '(unknown)') +\n    ' | source module ' +\n    targetModuleId +\n    ' | pinboards: ' +\n    pinboards.length +\n    ' | slots: ' +\n    updatedSlotCount +\n    ' | type: ' +\n    (inferredType || 'unknown') +\n    ' | available: ' +\n    count\n);\nreturn msg;",
         "outputs": 1,
         "timeout": 0,
         "noerr": 0,
         "initialize": "",
         "finalize": "",
         "libs": [],
-        "x": 1270,
-        "y": 280,
+        "x": 1100,
+        "y": 240,
         "wires": [
             [
-                "ps-update-prep",
+                "ps-fs-update",
                 "ps-debug-parser"
             ]
         ]
@@ -220,8 +134,8 @@
         "active": false,
         "tosidebar": true,
         "complete": "true",
-        "x": 2380,
-        "y": 1035,
+        "x": 1150,
+        "y": 180,
         "wires": []
     },
     {
@@ -280,7 +194,7 @@
         "y": 240,
         "wires": [
             [
-                "ps-switch-length"
+                "ps-parser"
             ]
         ]
     },
@@ -294,7 +208,7 @@
         "keyFilename": "/home/george/firestore/firestore-key.json",
         "projectId": "node-red-alerts",
         "mode": "update",
-        "x": 1650,
+        "x": 1350,
         "y": 240,
         "wires": [
             [
@@ -311,28 +225,8 @@
         "active": false,
         "tosidebar": true,
         "complete": "true",
-        "x": 2590,
-        "y": 920,
+        "x": 1550,
+        "y": 200,
         "wires": []
-    },
-    {
-        "id": "ps-update-prep",
-        "type": "function",
-        "z": "ps-import-tab",
-        "g": "ps-import-group",
-        "name": "Prepare Firebase Update",
-        "x": 1460,
-        "y": 240,
-        "wires": [
-            [
-                "ps-fs-update"
-            ]
-        ],
-        "func": "const station = msg._updatedStation;\nconst kioskDoc = msg.kioskDoc;\n\nif (!station) {\n    node.error('No _updatedStation on msg', msg);\n    return null;\n}\n\nif (!kioskDoc?.provisionid) {\n    node.error('No provisionid on msg.kioskDoc', msg);\n    return null;\n}\n\nconst modules = Array.isArray(station.modules) ? station.modules : [];\nconst configuredPower = Number(station.hardware?.power);\nconst fullThreshold = Number.isFinite(configuredPower) ? configuredPower : 80;\n\nlet count = 0;\nlet slotscount = 0;\nlet lockcount = 0;\n\nmodules.forEach((mod) => {\n    const slots = Array.isArray(mod.slots) ? mod.slots : [];\n    mod.lock = slots.reduce((sum, slot) => sum + (slot?.lock ? 1 : 0), 0);\n    slotscount += slots.length;\n\n    slots.forEach((slot) => {\n        if (slot?.lock) {\n            lockcount++;\n        }\n\n        if (\n            slot &&\n            slot.status === 1 &&\n            slot.sn &&\n            slot.sn !== 0 &&\n            typeof slot.batteryLevel === 'number' &&\n            slot.batteryLevel >= fullThreshold &&\n            !slot.lock\n        ) {\n            count++;\n        }\n    });\n});\n\nconst timestamp = new Date().toISOString();\n\nmsg.payload = {\n    path: 'kiosks/' + kioskDoc.provisionid,\n    content: {\n        modules,\n        total: Number(station.total || 0),\n        full: Number(station.full || 0),\n        empty: Number(station.empty || 0),\n        slot: Number(station.slot || 0),\n        charging: Number(station.charging || 0),\n        count,\n        slotscount,\n        lockcount,\n        zerocount: Number(kioskDoc.zerocount || 0),\n        chargers: count === 0 ? 'soldout' : count,\n        lastUpdate: timestamp,\n        timestamp\n    }\n};\n\nreturn msg;",
-        "outputs": 1,
-        "noerr": 0,
-        "initialize": "",
-        "finalize": "",
-        "libs": []
     }
 ]
