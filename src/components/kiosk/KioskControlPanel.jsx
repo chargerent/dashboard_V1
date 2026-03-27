@@ -1,6 +1,7 @@
 // src/components/kiosk/KioskControlPanel.jsx
 
 import React, { useMemo } from 'react';
+import { getKioskPowerThreshold } from '../../utils/helpers';
 
 const ControlButton = ({ icon, label, subLabel, onClick, className = '', status, statusColor = 'green', disabled = false }) => (
     <button 
@@ -40,7 +41,7 @@ function KioskControlPanel({ kiosk, t, onCommand, serverUiVersion, serverFlowVer
     };
 
     const ejectCounts = useMemo(() => {
-        const fullThreshold = kiosk.hardware?.power || 80;
+        const fullThreshold = getKioskPowerThreshold(kiosk);
         
         let totalChargers = 0;
         let fullChargers = 0;

@@ -1,7 +1,7 @@
 // src/components/Dashboard/LocationSummary.jsx
 
 import React, { useMemo } from 'react';
-import { isKioskOnline } from '../../utils/helpers';
+import { getKioskInfoAddress, getKioskPowerThreshold, isKioskOnline } from '../../utils/helpers';
 import RentalStats from './RentalStats';
 
 // Helper component for progress bars
@@ -68,7 +68,7 @@ function LocationSummary({ location, kiosks, chargerThreshold, clientInfo, renta
         let fullChargers = 0;
 
         kiosks.forEach(kiosk => {
-            const fullThreshold = kiosk.hardware?.power || 80;
+            const fullThreshold = getKioskPowerThreshold(kiosk);
             (kiosk.modules || []).forEach(module => {
                 totalChargers += module.slots?.filter(s => s.sn && s.sn !== 0).length || 0;
                 fullChargers += module.slots?.filter(s => s.sn && s.sn !== 0 && s.batteryLevel >= fullThreshold && !s.isLocked).length || 0;
@@ -134,7 +134,7 @@ function LocationSummary({ location, kiosks, chargerThreshold, clientInfo, renta
             }
         });
 
-        const addressInfo = kiosks.length > 0 ? `${kiosks[0].info.stationaddress}, ${kiosks[0].info.city}, ${kiosks[0].info.zip}` : '';
+        const addressInfo = kiosks.length > 0 ? `${getKioskInfoAddress(kiosks[0].info)}, ${kiosks[0].info.city}, ${kiosks[0].info.zip}` : '';
 
         // Calculate rep commission specifically from lease revenue
         const repLeaseCommission = leaseKiosks.reduce((sum, k) => {

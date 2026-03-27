@@ -4,7 +4,6 @@ import { useMemo, useState, useEffect, useRef } from 'react';
 import ConfirmationModal from '../components/UI/ConfirmationModal';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
 import { formatDateTime, formatDuration } from '../utils/dateFormatter';
-import { normalizeKioskData } from '../utils/helpers';
 
 const ChargerCard = ({ charger, t, onCommand, onNavigateToRentals, onNavigateToDashboard }) => {
     const [showRentals, setShowRentals] = useState(false);
@@ -21,9 +20,12 @@ const ChargerCard = ({ charger, t, onCommand, onNavigateToRentals, onNavigateToD
 
     const handleLockClick = () => {
         if (!charger.location) return;
-        const { stationId, moduleId, slotId } = charger.location;
+        const { stationId, moduleId, slotId, lockReason } = charger.location;
         const action = isLocked ? 'unlock slot' : 'lock slot';
-        onCommand(stationId, action, moduleId, null, null, { slotid: slotId });
+        onCommand(stationId, action, moduleId, null, null, {
+            slotid: slotId,
+            lockReason: lockReason || '',
+        });
     };
 
     const canLock = charger.status === 'in_kiosk' && onCommand;
@@ -339,12 +341,21 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
         const confirmationText = isLocking 
             ? `${t('lock_confirmation')} ${details.slotid}?`
             : `${t('unlock_confirmation')} ${details.slotid}?`;
-        setCommandDetails({ stationid, action, moduleid, slotid: details.slotid, confirmationText, ...details });
+        setCommandDetails({
+            stationid,
+            action,
+            moduleid,
+            slotid: details.slotid,
+            confirmationText,
+            lockReason: details?.lockReason || '',
+            ...details,
+        });
         setCommandModalOpen(true);
     };
 
     const handleConfirmCommand = (reason = null) => {
         setCommandModalOpen(false);
+        if (!commandDetails) return;
         onCommand(commandDetails.stationid, commandDetails.action, commandDetails.moduleid, null, null, { slotid: commandDetails.slotid, info: reason });
     };
 

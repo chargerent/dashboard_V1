@@ -9,6 +9,8 @@ const HTTP_FUNCTION_NAME_MAP = {
   admin_unlockUser: 'admin_httpUnlockUser',
   auth_trackAttempt: 'auth_httpTrackAttempt',
   auth_syncOwnClaims: 'auth_httpSyncOwnClaims',
+  kiosk_updateSection: 'kiosk_httpUpdateSection',
+  kiosk_updateSlotLock: 'kiosk_httpUpdateSlotLock',
   stationBinding_getNextStation: 'stationBinding_httpGetNextStation',
   stationBinding_bindModule: 'stationBinding_httpBindModule',
   stationBinding_unbindModule: 'stationBinding_httpUnbindModule',

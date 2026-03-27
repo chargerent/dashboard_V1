@@ -1,0 +1,235 @@
+[
+    {
+        "id": "allwdg_group",
+        "type": "group",
+        "z": "ebbebe04a01eca8f",
+        "name": "All-station 20s watchdog",
+        "style": {
+            "stroke": "#1d4ed8",
+            "fill": "#dbeafe",
+            "label": true,
+            "color": "#000000"
+        },
+        "nodes": [
+            "allwdg_refresh_inject",
+            "allwdg_prepare_roster_query",
+            "allwdg_roster_query",
+            "allwdg_cache_roster",
+            "allwdg_debug_roster",
+            "allwdg_tick_inject",
+            "allwdg_poll_all",
+            "allwdg_debug_summary",
+            "allwdg_debug_send",
+            "allwdg_link_out"
+        ],
+        "x": 2054,
+        "y": 3199,
+        "w": 1672,
+        "h": 202
+    },
+    {
+        "id": "allwdg_refresh_inject",
+        "type": "inject",
+        "z": "ebbebe04a01eca8f",
+        "g": "allwdg_group",
+        "name": "Refresh roster every 5 min",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "300",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 2250,
+        "y": 3260,
+        "wires": [
+            [
+                "allwdg_prepare_roster_query"
+            ]
+        ]
+    },
+    {
+        "id": "allwdg_prepare_roster_query",
+        "type": "function",
+        "z": "ebbebe04a01eca8f",
+        "g": "allwdg_group",
+        "name": "Prepare roster query",
+        "func": "msg.payload = {\n    path: 'kiosks',\n    query: []\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2480,
+        "y": 3260,
+        "wires": [
+            [
+                "allwdg_roster_query"
+            ]
+        ]
+    },
+    {
+        "id": "allwdg_roster_query",
+        "type": "google-cloud-firestore",
+        "z": "ebbebe04a01eca8f",
+        "g": "allwdg_group",
+        "account": "",
+        "keyFilename": "/home/george/firestore/firestore-key.json",
+        "name": "Query kiosks for roster",
+        "projectId": "node-red-alerts",
+        "mode": "query",
+        "x": 2710,
+        "y": 3260,
+        "wires": [
+            [
+                "allwdg_cache_roster"
+            ]
+        ]
+    },
+    {
+        "id": "allwdg_cache_roster",
+        "type": "function",
+        "z": "ebbebe04a01eca8f",
+        "g": "allwdg_group",
+        "name": "Cache station roster",
+        "func": "function normalizeStationId(value) {\n    return String(value || '').trim();\n}\n\nfunction normalizeModuleId(value) {\n    return String(value || '').trim();\n}\n\nconst docs = Array.isArray(msg.payload) ? msg.payload : [];\nconst roster = {};\nlet moduleCount = 0;\n\nfor (const doc of docs) {\n    const stationid = normalizeStationId(doc?.stationid);\n    if (!stationid) continue;\n\n    const modules = (Array.isArray(doc?.modules) ? doc.modules : [])\n        .map((mod) => ({\n            id: normalizeModuleId(mod?.id),\n            output: mod?.output !== false\n        }))\n        .filter((mod) => mod.id);\n\n    const activeModules = modules.filter((mod) => mod.output !== false);\n    const selectedModules = activeModules.length > 0 ? activeModules : modules;\n    if (selectedModules.length === 0) continue;\n\n    roster[stationid] = {\n        stationid,\n        provisionid: normalizeStationId(doc?.provisionid),\n        lastUpdate: doc?.lastUpdate || doc?.timestamp || doc?.lastUpdated || null,\n        modules: selectedModules.map((mod) => ({ id: mod.id }))\n    };\n\n    moduleCount += selectedModules.length;\n}\n\nflow.set('watchdogRoster', roster);\n\nmsg.payload = {\n    stations: Object.keys(roster).length,\n    modules: moduleCount,\n    refreshedAt: new Date().toISOString()\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2940,
+        "y": 3260,
+        "wires": [
+            [
+                "allwdg_debug_roster"
+            ]
+        ]
+    },
+    {
+        "id": "allwdg_debug_roster",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "allwdg_group",
+        "name": "Watchdog roster refreshed",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3170,
+        "y": 3300,
+        "wires": []
+    },
+    {
+        "id": "allwdg_tick_inject",
+        "type": "inject",
+        "z": "ebbebe04a01eca8f",
+        "g": "allwdg_group",
+        "name": "Poll all stations every 20 sec",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "20",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 5,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 2250,
+        "y": 3340,
+        "wires": [
+            [
+                "allwdg_poll_all"
+            ]
+        ]
+    },
+    {
+        "id": "allwdg_poll_all",
+        "type": "function",
+        "z": "ebbebe04a01eca8f",
+        "g": "allwdg_group",
+        "name": "Send scheduled checks for all modules",
+        "func": "const CYCLE_MS = 20 * 1000;\nconst now = Date.now();\nconst cycleUntil = Number(flow.get('watchdogCycleUntil') || 0);\n\nif (cycleUntil > now) {\n    node.status({ fill: 'yellow', shape: 'ring', text: 'Previous cycle still running' });\n    return [null, {\n        payload: {\n            skipped: true,\n            reason: 'previous cycle still running',\n            cycleUntil\n        }\n    }];\n}\n\nconst roster = flow.get('watchdogRoster') || {};\nconst stations = Object.values(roster);\n\nif (stations.length === 0) {\n    node.status({ fill: 'grey', shape: 'ring', text: 'No stations in roster' });\n    return [null, {\n        payload: {\n            stations: 0,\n            checks: 0,\n            cycleMs: CYCLE_MS\n        }\n    }];\n}\n\nconst checks = [];\n\nstations.forEach((station) => {\n    const modules = Array.isArray(station?.modules) ? station.modules : [];\n    modules.forEach((mod) => {\n        if (!mod || !mod.id) return;\n\n        checks.push({\n            stationid: station.stationid,\n            moduleid: mod.id\n        });\n    });\n});\n\nif (checks.length === 0) {\n    node.status({ fill: 'grey', shape: 'ring', text: 'No modules in roster' });\n    return [null, {\n        payload: {\n            stations: stations.length,\n            checks: 0,\n            cycleMs: CYCLE_MS\n        }\n    }];\n}\n\nflow.set('watchdogCycleUntil', now + CYCLE_MS + 1000);\n\nchecks.forEach((item, index) => {\n    const delayMs = Math.floor((index * CYCLE_MS) / checks.length);\n\n    setTimeout(() => {\n        node.send([{\n            topic: '/' + item.stationid + '/' + item.moduleid + '/user/get',\n            payload: { cmd: 'check_all' },\n            watchdog: {\n                stationid: item.stationid,\n                moduleid: item.moduleid,\n                cycleStartedAt: now,\n                cycleMs: CYCLE_MS,\n                delayMs,\n                checkIndex: index + 1,\n                totalChecks: checks.length\n            }\n        }, null]);\n    }, delayMs);\n});\n\nnode.status({\n    fill: 'green',\n    shape: 'dot',\n    text: checks.length + ' checks across ' + stations.length + ' stations'\n});\n\nreturn [null, {\n    payload: {\n        stations: stations.length,\n        checks: checks.length,\n        cycleMs: CYCLE_MS\n    }\n}];",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2550,
+        "y": 3340,
+        "wires": [
+            [
+                "allwdg_debug_send",
+                "allwdg_link_out"
+            ],
+            [
+                "allwdg_debug_summary"
+            ]
+        ]
+    },
+    {
+        "id": "allwdg_debug_summary",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "allwdg_group",
+        "name": "All watchdog summary",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 2850,
+        "y": 3380,
+        "wires": []
+    },
+    {
+        "id": "allwdg_debug_send",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "allwdg_group",
+        "name": "All watchdog sends check_all",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "watchdog",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 2850,
+        "y": 3300,
+        "wires": []
+    },
+    {
+        "id": "allwdg_link_out",
+        "type": "link out",
+        "z": "ebbebe04a01eca8f",
+        "g": "allwdg_group",
+        "name": "link out 76",
+        "mode": "link",
+        "links": [
+            "187805de07036155"
+        ],
+        "x": 3075,
+        "y": 3340,
+        "wires": []
+    }
+]

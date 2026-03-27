@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { isNewSchemaKiosk } from '../utils/helpers';
+import { getKioskPowerThreshold, isNewSchemaKiosk } from '../utils/helpers';
 
 export default function useKioskCommandFlow({
   allStationsData,
@@ -17,14 +17,13 @@ export default function useKioskCommandFlow({
     const targetModule = targetKiosk?.modules?.find((module) => module.id === moduleid);
     const targetSlot = targetModule?.slots?.find((slot) => slot.position === slotid);
     const chargerid = Number(targetSlot?.sn || 0);
-    const action = isNewSchemaKiosk(targetKiosk) && chargerid ? 'vend' : 'eject specific';
 
     setCommandDetails({
       stationid,
       moduleid,
       slotid,
-      action,
-      chargerid: action === 'vend' ? chargerid : undefined,
+      action: 'eject specific',
+      chargerid: chargerid > 0 ? chargerid : undefined,
       confirmationText,
     });
     setCommandModalOpen(true);
@@ -54,7 +53,6 @@ export default function useKioskCommandFlow({
     if (!commandDetails) {
       return;
     }
-
     const { stationid, moduleid, slotid, action } = commandDetails;
 
     if (action.includes('change')) {
@@ -68,20 +66,36 @@ export default function useKioskCommandFlow({
       }
 
       const slotsToEject = [];
-      const powerThreshold = targetKiosk.hardware?.power || 80;
+      const powerThreshold = getKioskPowerThreshold(targetKiosk);
+      const trackSlotForEject = (trackedModuleId, trackedSlotId, trackedChargerId = null) => {
+        const normalizedSlotId = Number(trackedSlotId);
+        if (!Number.isFinite(normalizedSlotId)) {
+          return;
+        }
+
+        const normalizedChargerId = Number(trackedChargerId);
+        slotsToEject.push({
+          stationid,
+          moduleid: trackedModuleId,
+          slotid: normalizedSlotId,
+          ...(Number.isFinite(normalizedChargerId) && normalizedChargerId > 0
+            ? { chargerid: normalizedChargerId }
+            : {}),
+        });
+      };
 
       switch (action) {
         case 'eject specific':
         case 'rent':
         case 'vend':
-          slotsToEject.push({ stationid, moduleid, slotid });
+          trackSlotForEject(moduleid, slotid, commandDetails.chargerid);
           break;
         case 'eject module': {
           const targetModule = targetKiosk.modules.find((module) => module.id === moduleid);
           if (targetModule) {
             targetModule.slots.forEach((slot) => {
               if (slot.sn && slot.sn !== 0) {
-                slotsToEject.push({ stationid, moduleid: targetModule.id, slotid: slot.position });
+                trackSlotForEject(targetModule.id, slot.position, slot.sn);
               }
             });
           }
@@ -91,7 +105,7 @@ export default function useKioskCommandFlow({
           targetKiosk.modules.forEach((module) => {
             module.slots.forEach((slot) => {
               if (slot.sn && slot.sn !== 0 && !slot.isLocked) {
-                slotsToEject.push({ stationid, moduleid: module.id, slotid: slot.position });
+                trackSlotForEject(module.id, slot.position, slot.sn);
               }
             });
           });
@@ -100,7 +114,7 @@ export default function useKioskCommandFlow({
           targetKiosk.modules.forEach((module) => {
             module.slots.forEach((slot) => {
               if (slot.sn && slot.sn !== 0 && slot.batteryLevel >= powerThreshold) {
-                slotsToEject.push({ stationid, moduleid: module.id, slotid: slot.position });
+                trackSlotForEject(module.id, slot.position, slot.sn);
               }
             });
           });
@@ -109,7 +123,7 @@ export default function useKioskCommandFlow({
           targetKiosk.modules.forEach((module) => {
             module.slots.forEach((slot) => {
               if (slot.sn && slot.sn !== 0 && typeof slot.batteryLevel === 'number' && slot.batteryLevel < powerThreshold && !slot.isLocked) {
-                slotsToEject.push({ stationid, moduleid: module.id, slotid: slot.position });
+                trackSlotForEject(module.id, slot.position, slot.sn);
               }
             });
           });
@@ -118,7 +132,7 @@ export default function useKioskCommandFlow({
           targetKiosk.modules.forEach((module) => {
             module.slots.forEach((slot) => {
               if (slot.isLocked) {
-                slotsToEject.push({ stationid, moduleid: module.id, slotid: slot.position });
+                trackSlotForEject(module.id, slot.position, slot.sn);
               }
             });
           });
@@ -128,7 +142,13 @@ export default function useKioskCommandFlow({
       }
 
       if (slotsToEject.length > 0) {
-        setEjectingSlots((prev) => [...prev, ...slotsToEject]);
+        setEjectingSlots((prev) => {
+          const nextBySlot = new Map(prev.map((slot) => [`${slot.stationid}-${slot.moduleid}-${slot.slotid}`, slot]));
+          slotsToEject.forEach((slot) => {
+            nextBySlot.set(`${slot.stationid}-${slot.moduleid}-${slot.slotid}`, slot);
+          });
+          return Array.from(nextBySlot.values());
+        });
       }
     }
 
@@ -146,7 +166,7 @@ export default function useKioskCommandFlow({
     const details = {
       ...(commandDetails.action.includes('change') && { kiosk: kioskPayload, autoGeocode: commandDetails.autoGeocode }),
       ...((commandDetails.action === 'lock slot' || commandDetails.action === 'unlock slot' || commandDetails.action === 'eject specific' || commandDetails.action === 'rent' || commandDetails.action === 'vend') && { slotid: commandDetails.slotid, info: lockReason }),
-      ...(commandDetails.action === 'vend' && { chargerid: commandDetails.chargerid }),
+      ...((commandDetails.action === 'eject specific' || commandDetails.action === 'vend') && commandDetails.chargerid ? { chargerid: commandDetails.chargerid } : {}),
       ...(commandDetails.action === 'eject count' && { slotid: commandDetails.slotid }),
       ...extraConfirmationDetails,
     };
@@ -161,7 +181,9 @@ export default function useKioskCommandFlow({
       normalizedStatus === 'pending' || normalizedStatus === 'provisioned'
     );
     let action;
-    if (section === 'pricing') {
+    if (section === 'formoptions') {
+      action = 'formoptionschange';
+    } else if (section === 'pricing') {
       action = 'pricechange';
     } else if (section === 'hardware') {
       action = 'hardwarechange';

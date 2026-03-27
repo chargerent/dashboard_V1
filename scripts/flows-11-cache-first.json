@@ -1,0 +1,358 @@
+[
+    {
+        "id": "ss-import-group",
+        "type": "group",
+        "z": "ebbebe04a01eca8f",
+        "g": "312070b4f9b07564",
+        "name": "send status to server firebase only (cache-first)",
+        "style": {
+            "stroke": "#1d4ed8",
+            "fill": "#dbeafe",
+            "label": true,
+            "color": "#000000"
+        },
+        "nodes": [
+            "ss-switch",
+            "ss-poll-prep",
+            "ss-poll-query",
+            "ss-poll-resolve",
+            "ss-freshness-gate",
+            "ss-check-modules",
+            "ss-trigger",
+            "ss-refresh-prep",
+            "ss-refresh-query",
+            "ss-refresh-resolve",
+            "ss-build-status",
+            "ss-debug-request",
+            "ss-debug-response",
+            "ce73e96d279fd273",
+            "d92c93b9a93cec56",
+            "f22a39a79e0753e2"
+        ],
+        "x": 1099,
+        "y": 1899,
+        "w": 1892,
+        "h": 222
+    },
+    {
+        "id": "ss-switch",
+        "type": "switch",
+        "z": "ebbebe04a01eca8f",
+        "g": "ss-import-group",
+        "name": "chk status",
+        "property": "payload.action",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "eq",
+                "v": "status",
+                "vt": "str"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 1,
+        "x": 1270,
+        "y": 2000,
+        "wires": [
+            [
+                "ss-poll-prep",
+                "ss-debug-request"
+            ]
+        ]
+    },
+    {
+        "id": "ss-poll-prep",
+        "type": "function",
+        "z": "ebbebe04a01eca8f",
+        "g": "ss-import-group",
+        "name": "Prepare Initial Query",
+        "func": "function normalizeStationId(value) {\n    return String(value || '').trim();\n}\n\nconst originalPayload = (msg.payload && typeof msg.payload === 'object')\n    ? JSON.parse(JSON.stringify(msg.payload))\n    : {};\n\nconst stationid = normalizeStationId(originalPayload.stationid || msg.stationid || msg.id || '');\nif (!stationid) {\n    node.error('No stationid provided in payload', msg);\n    return null;\n}\n\nconst requestedStaleAfterMs = Number(originalPayload.staleafterms || msg.staleafterms || 25000);\nmsg._statusRequest = originalPayload;\nmsg._statusStationId = stationid;\nmsg._statusStaleAfterMs = Number.isFinite(requestedStaleAfterMs) && requestedStaleAfterMs > 0\n    ? requestedStaleAfterMs\n    : 25000;\n\nmsg.payload = {\n    path: 'kiosks',\n    query: [{ fieldPath: 'stationid', opStr: '==', value: stationid }]\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1480,
+        "y": 1940,
+        "wires": [
+            [
+                "ss-poll-query"
+            ]
+        ]
+    },
+    {
+        "id": "ss-poll-query",
+        "type": "google-cloud-firestore",
+        "z": "ebbebe04a01eca8f",
+        "g": "ss-import-group",
+        "account": "",
+        "keyFilename": "/home/george/firestore/firestore-key.json",
+        "name": "Query kiosk",
+        "projectId": "node-red-alerts",
+        "mode": "query",
+        "x": 1700,
+        "y": 1940,
+        "wires": [
+            [
+                "ss-poll-resolve"
+            ]
+        ]
+    },
+    {
+        "id": "ss-poll-resolve",
+        "type": "function",
+        "z": "ebbebe04a01eca8f",
+        "g": "ss-import-group",
+        "name": "Resolve Kiosk",
+        "func": "function normalizeStationId(value) {\n    return String(value || '').trim();\n}\n\nconst docs = Array.isArray(msg.payload) ? msg.payload : [];\nconst stationid = normalizeStationId(msg._statusStationId || '');\nconst matched = docs.find((doc) => normalizeStationId(doc?.stationid || '') === stationid) || null;\n\nmsg.kioskDoc = matched ? JSON.parse(JSON.stringify(matched)) : null;\nmsg.stationid = (matched && matched.stationid) || stationid;\nmsg.payload = msg._statusRequest || {};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1930,
+        "y": 1940,
+        "wires": [
+            [
+                "ss-freshness-gate"
+            ]
+        ]
+    },
+    {
+        "id": "ss-freshness-gate",
+        "type": "function",
+        "z": "ebbebe04a01eca8f",
+        "g": "ss-import-group",
+        "name": "Route Fresh vs Stale",
+        "func": "const station = msg.kioskDoc;\nconst staleAfterMs = Number(msg._statusStaleAfterMs || 25000);\n\nmsg._statusStaleAfterMs = Number.isFinite(staleAfterMs) && staleAfterMs > 0\n    ? staleAfterMs\n    : 25000;\nmsg._statusWasStale = false;\n\nif (!station) {\n    return [msg, null];\n}\n\nconst allModules = Array.isArray(station.modules) ? station.modules : [];\nconst activeModules = allModules.filter((mod) => !String(mod?.id || '').startsWith('disabled'));\nconst modules = activeModules.length > 0 ? activeModules : allModules;\n\nif (modules.length === 0) {\n    return [msg, null];\n}\n\nconst now = Date.now();\nlet staleCount = 0;\nlet newestModuleAgeMs = null;\nconst staleModuleIds = [];\n\nmodules.forEach((mod) => {\n    const moduleTime = new Date(mod?.lastUpdated).getTime();\n    const ageMs = Number.isFinite(moduleTime) ? (now - moduleTime) : Number.POSITIVE_INFINITY;\n\n    if (newestModuleAgeMs === null || ageMs < newestModuleAgeMs) {\n        newestModuleAgeMs = ageMs;\n    }\n\n    if (!Number.isFinite(moduleTime) || ageMs > msg._statusStaleAfterMs) {\n        staleCount++;\n        if (mod?.id) {\n            staleModuleIds.push(String(mod.id));\n        }\n    }\n});\n\nmsg._statusModuleCount = modules.length;\nmsg._statusStaleModuleCount = staleCount;\nmsg._statusNewestModuleAgeMs = newestModuleAgeMs;\nmsg._statusStaleModuleIds = staleModuleIds;\n\nif (staleCount === 0) {\n    return [msg, null];\n}\n\nmsg._statusWasStale = true;\nreturn [null, msg];",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2165,
+        "y": 1940,
+        "wires": [
+            [
+                "ss-build-status"
+            ],
+            [
+                "ss-check-modules"
+            ]
+        ]
+    },
+    {
+        "id": "ss-check-modules",
+        "type": "function",
+        "z": "ebbebe04a01eca8f",
+        "g": "ss-import-group",
+        "name": "Poll stale modules",
+        "func": "const station = msg.kioskDoc || {};\nconst stationId = station.stationid || msg._statusStationId || '';\nconst allModules = Array.isArray(station.modules) ? station.modules : [];\nconst activeModules = allModules.filter((mod) => !String(mod?.id || '').startsWith('disabled'));\nconst baseModules = activeModules.length > 0 ? activeModules : allModules;\nconst staleModuleIds = new Set(\n    Array.isArray(msg._statusStaleModuleIds) ? msg._statusStaleModuleIds.map((id) => String(id)) : []\n);\nconst modules = staleModuleIds.size > 0\n    ? baseModules.filter((mod) => staleModuleIds.has(String(mod?.id || '')))\n    : baseModules;\nconst spacingMs = 250;\n\nif (!stationId) {\n    node.error('No stationid available for module polling', msg);\n    return null;\n}\n\nif (modules.length === 0) {\n    node.warn('No modules found for stationid: ' + stationId);\n    return [null, msg];\n}\n\nmodules.forEach((mod, index) => {\n    if (!mod || !mod.id) return;\n\n    const pollMsg = {\n        topic: '/' + stationId + '/' + mod.id + '/user/get',\n        payload: { cmd: 'check_all' }\n    };\n\n    setTimeout(() => {\n        node.send([pollMsg, null]);\n    }, index * spacingMs);\n});\n\nmsg._statusPollModuleCount = modules.length;\nmsg._statusPollSpacingMs = spacingMs;\n\nreturn [null, msg];",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2405,
+        "y": 1940,
+        "wires": [
+            [
+                "d92c93b9a93cec56"
+            ],
+            [
+                "ss-trigger"
+            ]
+        ]
+    },
+    {
+        "id": "ss-trigger",
+        "type": "trigger",
+        "z": "ebbebe04a01eca8f",
+        "g": "ss-import-group",
+        "name": "Wait 4s after stale poll",
+        "op1": "",
+        "op2": "",
+        "op1type": "nul",
+        "op2type": "pay",
+        "duration": "4",
+        "extend": false,
+        "overrideDelay": false,
+        "units": "s",
+        "reset": "",
+        "bytopic": "topic",
+        "topic": "payload.stationid",
+        "outputs": 1,
+        "x": 2405,
+        "y": 2020,
+        "wires": [
+            [
+                "ss-refresh-prep"
+            ]
+        ]
+    },
+    {
+        "id": "ss-refresh-prep",
+        "type": "function",
+        "z": "ebbebe04a01eca8f",
+        "g": "ss-import-group",
+        "name": "Prepare Refresh Query",
+        "func": "function normalizeStationId(value) {\n    return String(value || '').trim();\n}\n\nconst originalPayload = (msg.payload && typeof msg.payload === 'object')\n    ? JSON.parse(JSON.stringify(msg.payload))\n    : {};\n\nconst stationid = normalizeStationId(originalPayload.stationid || msg.stationid || msg.id || '');\nif (!stationid) {\n    node.error('No stationid provided in payload', msg);\n    return null;\n}\n\nconst requestedStaleAfterMs = Number(originalPayload.staleafterms || msg.staleafterms || 25000);\nmsg._statusRequest = originalPayload;\nmsg._statusStationId = stationid;\nmsg._statusStaleAfterMs = Number.isFinite(requestedStaleAfterMs) && requestedStaleAfterMs > 0\n    ? requestedStaleAfterMs\n    : 25000;\n\nmsg.payload = {\n    path: 'kiosks',\n    query: [{ fieldPath: 'stationid', opStr: '==', value: stationid }]\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2630,
+        "y": 2020,
+        "wires": [
+            [
+                "ss-refresh-query"
+            ]
+        ]
+    },
+    {
+        "id": "ss-refresh-query",
+        "type": "google-cloud-firestore",
+        "z": "ebbebe04a01eca8f",
+        "g": "ss-import-group",
+        "account": "",
+        "keyFilename": "/home/george/firestore/firestore-key.json",
+        "name": "Query refreshed kiosk",
+        "projectId": "node-red-alerts",
+        "mode": "query",
+        "x": 2850,
+        "y": 2020,
+        "wires": [
+            [
+                "ss-refresh-resolve"
+            ]
+        ]
+    },
+    {
+        "id": "ss-refresh-resolve",
+        "type": "function",
+        "z": "ebbebe04a01eca8f",
+        "g": "ss-import-group",
+        "name": "Resolve Refreshed Kiosk",
+        "func": "function normalizeStationId(value) {\n    return String(value || '').trim();\n}\n\nconst docs = Array.isArray(msg.payload) ? msg.payload : [];\nconst stationid = normalizeStationId(msg._statusStationId || '');\nconst matched = docs.find((doc) => normalizeStationId(doc?.stationid || '') === stationid) || null;\n\nmsg.kioskDoc = matched ? JSON.parse(JSON.stringify(matched)) : null;\nmsg.stationid = (matched && matched.stationid) || stationid;\nmsg.payload = msg._statusRequest || {};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 3090,
+        "y": 2020,
+        "wires": [
+            [
+                "ss-build-status"
+            ]
+        ]
+    },
+    {
+        "id": "ss-build-status",
+        "type": "function",
+        "z": "ebbebe04a01eca8f",
+        "g": "ss-import-group",
+        "name": "Build status from Firebase",
+        "func": "if (!msg.payload?.timerequested || !msg._statusStationId) {\n    node.error('Missing required fields (timerequested or stationid)', msg);\n    return null;\n}\n\nconst stationId = msg._statusStationId;\nconst station = msg.kioskDoc;\nconst staleAfterMs = Number(msg._statusStaleAfterMs || 25000);\nconst freshAfterMs = Number.isFinite(staleAfterMs) && staleAfterMs > 0 ? staleAfterMs : 25000;\nconst now = Date.now();\n\nif (!station) {\n    msg.payload = {\n        stationid: stationId,\n        moduleid: null,\n        action: 'status',\n        status: 'offline',\n        formoptions: {\n            active: false\n        },\n        vendbattery: null,\n        timeresponded: now,\n        timerequested: msg.payload.timerequested\n    };\n    msg.topic = 'CSTA/post/' + stationId;\n    return msg;\n}\n\nconst pricing = station.pricing && typeof station.pricing === 'object'\n    ? station.pricing\n    : {};\nconst hardware = {\n    gateway: station?.hardware?.gateway ?? null,\n    gatewayoptions: station?.hardware?.gatewayoptions ?? null\n};\nconst formoptions = station.formoptions && typeof station.formoptions === 'object'\n    ? {\n        active: station.formoptions?.active === true\n    }\n    : {\n        active: false\n    };\n\nconst modules = Array.isArray(station.modules) ? station.modules : [];\nconst freshModuleIndexes = new Set();\nlet recentModuleFound = false;\n\nmodules.forEach((mod, modIndex) => {\n    const moduleTime = new Date(mod?.lastUpdated).getTime();\n    if (Number.isFinite(moduleTime) && (now - moduleTime) < freshAfterMs) {\n        freshModuleIndexes.add(modIndex);\n        recentModuleFound = true;\n    }\n});\n\nlet finalSNs = [];\nlet firstModuleId = null;\nlet vendBatteryCandidate = null;\n\nconst vendSlotStr = String(station.vendslot || '0.1');\nconst vendParts = vendSlotStr.split('.');\nconst vendModuleIndex = parseInt(vendParts[0], 10);\nconst vendSlotNumber = parseInt(vendParts[1], 10);\n\nconst globalSlots = [];\nconst globalIndexBySlot = new Map();\n\nmodules.forEach((stationModule, modIndex) => {\n    const slots = Array.isArray(stationModule?.slots) ? stationModule.slots : [];\n    slots.forEach((slot) => {\n        const slotPosition = Number(slot?.position);\n        const key = modIndex + ':' + slotPosition;\n        globalIndexBySlot.set(key, globalSlots.length);\n        globalSlots.push({\n            modIndex,\n            slotPosition\n        });\n    });\n});\n\nglobalSlots.sort((left, right) => {\n    if (left.modIndex === right.modIndex) {\n        return left.slotPosition - right.slotPosition;\n    }\n    return left.modIndex - right.modIndex;\n});\n\nglobalSlots.forEach((slot, index) => {\n    globalIndexBySlot.set(slot.modIndex + ':' + slot.slotPosition, index);\n});\n\nlet vendIndex = globalSlots.findIndex((slot) =>\n    slot.modIndex === vendModuleIndex && slot.slotPosition === vendSlotNumber\n);\nif (vendIndex === -1) vendIndex = 0;\n\nconst totalSlots = globalSlots.length;\nlet qualifyingSlots = [];\n\nmodules.forEach((stationModule, modIndex) => {\n    if (!freshModuleIndexes.has(modIndex)) {\n        return;\n    }\n\n    const slots = Array.isArray(stationModule?.slots) ? stationModule.slots : [];\n    slots.forEach((slot) => {\n        const sn = Number(slot?.sn || 0);\n        const batteryLevel = Number(slot?.batteryLevel || 0);\n        if (Number(slot?.status) !== 1) return;\n        if (batteryLevel < 80) return;\n        if (!sn || sn === 0 || String(sn) === '00000000') return;\n\n        const globalIndex = globalIndexBySlot.get(modIndex + ':' + Number(slot?.position));\n\n        qualifyingSlots.push({\n            sn,\n            batteryLevel,\n            globalIndex: Number.isFinite(globalIndex) ? globalIndex : -1,\n            modIndex,\n            moduleid: stationModule.id || modIndex,\n            position: Number(slot?.position)\n        });\n    });\n});\n\nlet candidateSlot = null;\nlet maxBattery = -1;\nqualifyingSlots.forEach((slot) => {\n    const distance = totalSlots > 0\n        ? ((slot.globalIndex - vendIndex) + totalSlots) % totalSlots\n        : 0;\n\n    if (distance > 0 && slot.batteryLevel > maxBattery) {\n        maxBattery = slot.batteryLevel;\n        candidateSlot = slot;\n    }\n});\n\nif (candidateSlot) {\n    vendBatteryCandidate = candidateSlot;\n    firstModuleId = candidateSlot.moduleid;\n    finalSNs.push(candidateSlot.sn);\n    qualifyingSlots = qualifyingSlots.filter((slot) => slot !== candidateSlot);\n}\n\nqualifyingSlots.forEach((slot) => {\n    if (!vendBatteryCandidate) {\n        vendBatteryCandidate = slot;\n    }\n    if (!firstModuleId) {\n        firstModuleId = slot.moduleid;\n    }\n    finalSNs.push(slot.sn);\n});\n\nconst statusValue = finalSNs.length === 0\n    ? (recentModuleFound ? 'soldout' : 'offline')\n    : finalSNs;\n\nmsg.payload = {\n    stationid: station.stationid || stationId,\n    moduleid: firstModuleId,\n    action: 'status',\n    status: statusValue,\n    pricing,\n    hardware,\n    formoptions,\n    vendbattery: vendBatteryCandidate ? {\n        powerlevel: vendBatteryCandidate.batteryLevel,\n        slot: vendBatteryCandidate.position,\n        sn: vendBatteryCandidate.sn\n    } : null,\n    timeresponded: now,\n    timerequested: msg.payload.timerequested\n};\nmsg.topic = 'CSTA/post/' + (station.stationid || stationId);\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 3320,
+        "y": 2020,
+        "wires": [
+            [
+                "ss-debug-response",
+                "f22a39a79e0753e2"
+            ]
+        ]
+    },
+    {
+        "id": "ss-debug-request",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "ss-import-group",
+        "name": "status request",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "x": 1480,
+        "y": 2080,
+        "wires": []
+    },
+    {
+        "id": "ss-debug-response",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "ss-import-group",
+        "name": "status response",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "x": 3260,
+        "y": 2080,
+        "wires": []
+    },
+    {
+        "id": "ce73e96d279fd273",
+        "type": "link in",
+        "z": "ebbebe04a01eca8f",
+        "g": "ss-import-group",
+        "name": "link in 18",
+        "links": [
+            "0e86cb6041f3c6f6",
+            "121936a8363204a0"
+        ],
+        "x": 1140,
+        "y": 2000,
+        "wires": [
+            [
+                "ss-switch"
+            ]
+        ]
+    },
+    {
+        "id": "d92c93b9a93cec56",
+        "type": "link out",
+        "z": "ebbebe04a01eca8f",
+        "g": "ss-import-group",
+        "name": "link out 37",
+        "mode": "link",
+        "links": [
+            "187805de07036155"
+        ],
+        "x": 2430,
+        "y": 1940,
+        "wires": []
+    },
+    {
+        "id": "f22a39a79e0753e2",
+        "type": "link out",
+        "z": "ebbebe04a01eca8f",
+        "g": "ss-import-group",
+        "name": "link out 39",
+        "mode": "link",
+        "links": [
+            "187805de07036155"
+        ],
+        "x": 3485,
+        "y": 2020,
+        "wires": []
+    }
+]

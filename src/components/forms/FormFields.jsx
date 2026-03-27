@@ -59,14 +59,14 @@ export const FormMultiSwitch = ({ label, name, options, value, section, onDataCh
 
 export const FormSlider = ({ label, name, value, section, min, max, onDataChange }) => (
     <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">{label} - <span className="font-bold">{value}%</span></label>
+        <label className="block text-sm font-medium text-gray-700 mb-1">{label} - <span className="font-bold">{value ?? min ?? 0}%</span></label>
         <input
             type="range"
             min={min}
             max={max}
-            value={value || 0}
+            value={value ?? min ?? 0}
             name={name}
-            onChange={(e) => onDataChange(section, name, e.target.value)}
+            onChange={(e) => onDataChange(section, name, Number(e.target.value))}
             className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
         />
     </div>

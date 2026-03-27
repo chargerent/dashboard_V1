@@ -2,7 +2,7 @@
 
 import React, { useMemo, useCallback } from 'react';
 import KioskControlPanel from './KioskControlPanel';
-import { isKioskOnline, isModuleOnline, isNewSchemaKiosk } from '../../utils/helpers';
+import { getKioskPowerThreshold, isKioskOnline, isModuleOnline, isNewSchemaKiosk } from '../../utils/helpers';
 
 // --- Sub-component for the charger status code ---
 const StatusIndicator = ({ status }) => {
@@ -35,10 +35,11 @@ const moduleIdsMatch = (left, right) => {
 function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSlots, ejectingSlots, failedEjectSlots, lockingSlots, t, onCommand, serverUiVersion, serverFlowVersion, clientInfo, mockNow }) {
     const isOnline = isKioskOnline(kiosk, mockNow);
     const isV2Kiosk = isNewSchemaKiosk(kiosk);
+    const stationId = kiosk.stationid;
     const hasAnyCommands = Object.values(clientInfo.commands).some(v => v === true) || clientInfo.features.rentals;
     const canUpdateModules = clientInfo.commands.updates && isV2Kiosk;
     const showInlineModuleIds = ['CT3', 'CT4', 'CT8', 'CT12'].includes(kiosk.hardware?.type);
-    const chargeReadyThreshold = 80;
+    const chargeReadyThreshold = getKioskPowerThreshold(kiosk);
     const formatVersionDigits = useCallback((value) => {
         const numericValue = Number(value);
         if (!Number.isFinite(numericValue) || numericValue <= 0) {
@@ -140,25 +141,44 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
             : []
     ), [chargeReadyThreshold, formatChargeRate, formatEtaToReady, formatVersionDigits, kiosk.modules, mockNow, t]);
     const showLegacySideIndicators = !kiosk.isNewSchema;
-    
-    const createSlotSet = (slots) => useMemo(() => new Set(slots.map(s => `${s.stationid}-${s.moduleid}-${s.slotid}`)), [slots]);
-    const ejectingSet = createSlotSet(ejectingSlots);
-    const pendingSet = createSlotSet(pendingSlots);
-    const failedEjectList = Array.isArray(failedEjectSlots) ? failedEjectSlots : [];
+
+    const ejectingSet = useMemo(
+        () => new Set((Array.isArray(ejectingSlots) ? ejectingSlots : []).map((slot) => `${slot.stationid}-${slot.moduleid}-${slot.slotid}`)),
+        [ejectingSlots]
+    );
+    const pendingSet = useMemo(
+        () => new Set((Array.isArray(pendingSlots) ? pendingSlots : []).map((slot) => `${slot.stationid}-${slot.moduleid}-${slot.slotid}`)),
+        [pendingSlots]
+    );
+    const failedEjectList = useMemo(
+        () => (Array.isArray(failedEjectSlots) ? failedEjectSlots : []),
+        [failedEjectSlots]
+    );
 
     // A simple Set is all we need to know which slots are "in-progress"
-    const lockingSet = createSlotSet(lockingSlots);
+    const lockingSet = useMemo(
+        () => new Set((Array.isArray(lockingSlots) ? lockingSlots : []).map((slot) => `${slot.stationid}-${slot.moduleid}-${slot.slotid}`)),
+        [lockingSlots]
+    );
 
     const hasFailedEject = useCallback((module, slot) => {
         return failedEjectList.some((failedSlot) =>
-            failedSlot.stationid === kiosk.stationid &&
+            failedSlot.stationid === stationId &&
             Number(failedSlot.slotid) === Number(slot.position) &&
             moduleIdsMatch(failedSlot.moduleid, module.id)
         );
-    }, [failedEjectList, kiosk.stationid]);
+    }, [failedEjectList, stationId]);
 
     const getSlotStyle = useCallback((slot, module) => {
-        const slotId = `${kiosk.stationid}-${module.id}-${slot.position}`;
+        const slotId = `${stationId}-${module.id}-${slot.position}`;
+        const numericStatus = Number(slot?.status);
+        const slotLooksEmpty = !slot || (
+            !slot.isSstatError && (
+                slot.sstat === '0C' ||
+                Number(slot?.sn ?? 0) === 0 ||
+                (Number.isFinite(numericStatus) && numericStatus === 0)
+            )
+        );
 
         if (lockingSet.has(slotId)) {
             if (slot.isLocked) { // If the slot is currently locked, glow red.
@@ -170,7 +190,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         if (hasFailedEject(module, slot)) {
             return { className: 'border-red-500 bg-red-100 text-red-800 animate-pulse', glow: false };
         }
-        if (ejectingSet.has(slotId) && !slot.isLocked) {
+        if (ejectingSet.has(slotId) && !slot.isLocked && !slotLooksEmpty) {
             return { className: 'border-green-500 bg-green-100 text-green-800 slot-glow', glow: false };
         }
         if (pendingSet.has(slotId)) {
@@ -179,29 +199,27 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         if (slot.isLocked) {
             return { className: 'border-red-500 bg-red-100 text-red-800', glow: false };
         }
-        // A slot is empty if its status is '0C' (Open Circuit) and it's not in an error state.
-        if (!slot || (slot.sstat === '0C' && !slot.isSstatError)) {
+        if (slotLooksEmpty) {
             return { className: 'border-gray-300 bg-gray-100 text-gray-400', glow: false };
         }
 
         const isCharging = slot.chargingCurrent > 0;
         let className = '';
-        const fullThreshold = kiosk.hardware?.power || 80;
 
-        if (slot.batteryLevel >= fullThreshold) {
+        if (slot.batteryLevel >= chargeReadyThreshold) {
             className = 'border-blue-500 bg-blue-100 text-blue-800';
         } else {
             className = 'border-orange-400 bg-orange-100 text-orange-800';
         }
 
         return { className, glow: isCharging };
-    }, [kiosk.stationid, kiosk.hardware, ejectingSet, pendingSet, lockingSet, hasFailedEject]);
+    }, [chargeReadyThreshold, ejectingSet, hasFailedEject, lockingSet, pendingSet, stationId]);
 
     const ModuleControls = ({ module }) => (
         <div className="flex items-center mt-1 pt-1 border-t border-gray-200">
             <button 
                 title={t('eject_all_from_module')} 
-                onClick={(e) => { e.stopPropagation(); onCommand(kiosk.stationid, 'eject module', module.id); }} 
+                onClick={(e) => { e.stopPropagation(); onCommand(stationId, 'eject module', module.id); }} 
                 className="p-1 w-full text-gray-500 hover:bg-gray-100 rounded flex justify-center items-center"
             >
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -211,8 +229,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         </div>
     );
     
-    const SlotButton = React.memo(({ slot, module, style }) => {
-        const canInteract = clientInfo.commands.eject || clientInfo.commands.lock;
+    const SlotButton = React.memo(function SlotButton({ slot, module, style }) {
         const canEject = clientInfo.commands.eject;
         const canLock = clientInfo.commands.lock;
         const hasCharger = (slot.sstat && slot.sstat !== '0C') || slot.isSstatError;
@@ -221,7 +238,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
             <div className={`relative flex items-stretch p-0.5 rounded-md border transition-all duration-300 text-left ${style.className} ${style.glow ? 'slot-glow' : ''}`}>
                 {/* Eject Button */}
                 <button
-                    onClick={() => onSlotClick(kiosk.stationid, module.id, slot.position)}
+                    onClick={() => onSlotClick(stationId, module.id, slot.position)}
                     disabled={!canEject || !isOnline || !hasCharger}
                     className="flex-grow flex items-center justify-start p-0.5 rounded-l-md disabled:cursor-not-allowed overflow-hidden"
                 >
@@ -239,7 +256,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                 {canLock && (
                     <div className="flex flex-shrink-0 items-center border-l border-gray-300/50">
                         <button
-                            onClick={() => onLockSlot(kiosk.stationid, module.id, slot.position, slot.isLocked)}
+                            onClick={() => onLockSlot(stationId, module.id, slot.position, slot.isLocked)}
                             disabled={!isOnline}
                             className="flex items-center justify-center w-8 h-8 rounded-r-md hover:bg-gray-200/50 disabled:cursor-not-allowed"
                             title={slot.isLocked ? t('unlock_slot') : t('lock_slot')}
@@ -305,14 +322,14 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                 <div className="flex items-stretch gap-3">
                     <img
                         src={qrFallback}
-                        alt={`${kiosk.stationid} QR`}
+                        alt={`${stationId} QR`}
                         className="h-[118px] w-[118px] shrink-0 rounded-md object-cover sm:h-[128px] sm:w-[128px]"
                     />
                     <div className="min-w-0 flex-[1.1]">
                         <div className="flex flex-col gap-2">
                             {(compactHeaderModules.length > 0 ? compactHeaderModules : [{
-                                key: kiosk.stationid || 'placeholder',
-                                moduleId: kiosk.stationid || '---',
+                                key: stationId || 'placeholder',
+                                moduleId: stationId || '---',
                                 moduleOnline: false,
                                 updateLabel: t('update_module'),
                                 firmwareLabel: 'FW ---',
@@ -517,8 +534,8 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                     <div className="mx-auto w-full max-w-sm overflow-hidden rounded-lg bg-black shadow-lg">
                         <div className="w-full" style={{ aspectRatio: '228 / 405' }}>
                             <img
-                                src={`https://chargerentstations.com/images/${kiosk.stationid}.jpg`}
-                                alt={`${kiosk.stationid} screen`}
+                                src={`https://chargerentstations.com/images/${stationId}.jpg`}
+                                alt={`${stationId} screen`}
                                 className="h-full w-full object-cover"
                                 onError={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/456x810/000000/FFFFFF?text=No+Image'; }}
                             />
@@ -554,7 +571,6 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     };
 
     const renderCK20 = () => {
-        const hardwareType = kiosk.hardware?.type;
         return (
         <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
             <div className="w-full flex flex-col gap-3">
@@ -566,8 +582,6 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     )};
     
     const renderCK30 = () => {
-        const hardwareType = kiosk.hardware?.type;
-
         return (
         <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
             <div className="w-full flex flex-col gap-3">
@@ -610,12 +624,6 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
             </div>
         );
     };
-
-    const PlaceholderView = ({ type }) => (
-        <div className="p-8 text-center text-gray-500">
-            <p>Detailed slot view for <strong>{type}</strong> kiosks is not yet implemented.</p>
-        </div>
-    );
 
     const renderContent = () => {
         const hardwareType = kiosk.hardware?.type;

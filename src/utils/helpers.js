@@ -5,6 +5,8 @@ const ONLINE_WINDOW_MS = 10 * 60 * 1000;
 const LEGACY_TIMESTAMP_PATTERN = /(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2}):(\d{2})/;
 const HAS_TIMEZONE_PATTERN = /(Z|[+-]\d{2}:?\d{2})$/i;
 const DEFAULT_WIFI = { name: 'chargerent', password: 'Charger33' };
+const DEFAULT_FORM_OPTIONS = { active: false };
+export const DEFAULT_KIOSK_POWER_THRESHOLD = 80;
 
 const parseDashboardTimestamp = (value) => {
     if (!value) return null;
@@ -72,6 +74,30 @@ export const isNewSchemaKiosk = (kiosk) => {
     if (!kiosk) return false;
     if (kiosk.isNewSchema === true) return true;
     return NEW_KIOSK_TYPES.has(String(kiosk.hardware?.type || '').toUpperCase());
+};
+
+export const getKioskPowerThreshold = (kiosk) => {
+    const configuredPower = Number(kiosk?.hardware?.power);
+    return Number.isFinite(configuredPower) ? configuredPower : DEFAULT_KIOSK_POWER_THRESHOLD;
+};
+
+export const getKioskInfoAddress = (info) => (
+    String(info?.address ?? info?.stationaddress ?? '')
+);
+
+export const normalizeKioskInfoForSchema = (info, isNewSchema = false) => {
+    const normalizedInfo = JSON.parse(JSON.stringify(info || {}));
+    const address = getKioskInfoAddress(normalizedInfo);
+
+    if (isNewSchema) {
+        delete normalizedInfo.stationaddress;
+        normalizedInfo.address = address;
+        return normalizedInfo;
+    }
+
+    delete normalizedInfo.address;
+    normalizedInfo.stationaddress = address;
+    return normalizedInfo;
 };
 
 export const isModuleOnline = (module, referenceTime) => (
@@ -194,8 +220,7 @@ export const normalizeKioskData = (kiosks) => {
             hardware = { ...hardware, type: inferNewSchemaHardwareType(normalizedModules) };
         }
 
-        const configuredPower = Number(hardware?.power);
-        const fullThreshold = Number.isFinite(configuredPower) ? configuredPower : 80;
+        const fullThreshold = getKioskPowerThreshold({ hardware });
         const derivedCount = normalizedModules.reduce((sum, module) => (
             sum + module.slots.filter(slot => (
                 slot.sn &&
@@ -207,6 +232,8 @@ export const normalizeKioskData = (kiosks) => {
         ), 0);
         const kioskCount = Number(kiosk.count);
 
+        const normalizedAddress = getKioskInfoAddress(kiosk.info);
+
         return {
             stationid: kiosk.stationid,
             provisionid: kiosk.provisionid,
@@ -214,7 +241,8 @@ export const normalizeKioskData = (kiosks) => {
             info: {
                 location: kiosk.info?.location || '',
                 place: kiosk.info?.place || '',
-                stationaddress: kiosk.info?.stationaddress || kiosk.info?.address || '',
+                address: normalizedAddress,
+                stationaddress: normalizedAddress,
                 city: kiosk.info?.city || '',
                 state: kiosk.info?.state || '',
                 zip: kiosk.info?.zip || '',
@@ -232,6 +260,9 @@ export const normalizeKioskData = (kiosks) => {
             wifi: {
                 name: kiosk.wifi?.name || DEFAULT_WIFI.name,
                 password: kiosk.wifi?.password || DEFAULT_WIFI.password,
+            },
+            formoptions: {
+                active: kiosk.formoptions?.active === true || DEFAULT_FORM_OPTIONS.active,
             },
             pricing: kiosk.pricing || {},
             ui: kiosk.ui || {},
@@ -296,39 +327,4 @@ export const isKioskOnline = (kiosk, referenceTime) => {
  */
 export const isKioskActive = (kiosk, referenceTime) => {
     return hasRecentTimestamp(kiosk?.lastUpdated, referenceTime, 10 * 24 * 60 * 60 * 1000);
-};
-/**
- * Fetches coordinates for a given address using Google Geocoding API.
- * @param {Object} addressComponents - The components of the address.
- * @returns {Promise<Object|null>} - A promise that resolves to an object with lat and lon, or null.
- */
-export const geocodeAddress = async (addressComponents) => {
-    const { stationaddress, city, state, zip } = addressComponents;
-    if (!stationaddress || !city) {
-        return null;
-    }
-
-    const addressString = `${stationaddress}, ${city}, ${state} ${zip}`.trim();
-    // TODO: This key should not be exposed on the client side.
-    // It should be moved to a backend environment variable and accessed
-    // via a dedicated API endpoint on your server.
-    const apiKey = 'AIzaSyB267y0CtDdNwn8aZr-1SWN1TDNgVlzxK8';
-    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(addressString)}&key=${apiKey}`;
-
-    try {
-        const response = await fetch(url);
-        if (!response.ok) {
-            throw new Error(`Geocoding request failed with status ${response.status}`);
-        }
-
-        const data = await response.json();
-        if (data.status === 'OK' && data.results[0]) {
-            return data.results[0].geometry.location; // { lat, lng: lon }
-        }
-        console.error('Geocoding API did not return OK:', data.status, data.error_message);
-        return null;
-    } catch (error) {
-        console.error('Geocoding API error:', error);
-        return null;
-    }
 };

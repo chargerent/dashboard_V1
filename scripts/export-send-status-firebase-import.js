@@ -8,23 +8,8 @@ const __dirname = path.dirname(__filename);
 const outputPath = path.join(__dirname, 'send-status-firebase-import.json');
 
 const normalizeHelpers = `
-const ID_MAP = {
-    'CS0001': 'USB0001',
-    'CS0002': 'CAB0001',
-    'CS0003': 'CAB0002',
-    'CS0004': 'CAB0003',
-    'CS0005': 'CAB0004',
-    'CS0006': 'CAB0005',
-    'CS0007': 'CAB0006',
-    'CS0008': 'CAB0007',
-    'CS0009': 'CAB0008',
-    'CS0010': 'CAB0009',
-    'CS0011': 'CAB0010'
-};
-
 function normalizeStationId(value) {
-    const stationid = String(value || '').trim();
-    return ID_MAP[stationid] || stationid;
+    return String(value || '').trim();
 }
 `.trim();
 
@@ -128,6 +113,9 @@ if (!station) {
         moduleid: null,
         action: 'status',
         status: 'offline',
+        formoptions: {
+            active: false
+        },
         vendbattery: null,
         timeresponded: Date.now(),
         timerequested: msg.payload.timerequested
@@ -135,6 +123,21 @@ if (!station) {
     msg.topic = 'CSTA/post/' + stationId;
     return msg;
 }
+
+const pricing = station.pricing && typeof station.pricing === 'object'
+    ? station.pricing
+    : {};
+const hardware = {
+    gateway: station?.hardware?.gateway ?? null,
+    gatewayoptions: station?.hardware?.gatewayoptions ?? null
+};
+const formoptions = station.formoptions && typeof station.formoptions === 'object'
+    ? {
+        active: station.formoptions?.active === true
+    }
+    : {
+        active: false
+    };
 
 let latestModuleTime = 0;
 const modules = Array.isArray(station.modules) ? station.modules : [];
@@ -253,6 +256,9 @@ msg.payload = {
     moduleid: firstModuleId,
     action: 'status',
     status: statusValue,
+    pricing,
+    hardware,
+    formoptions,
     vendbattery: vendBatteryCandidate ? {
         powerlevel: vendBatteryCandidate.batteryLevel,
         slot: vendBatteryCandidate.position,

@@ -143,14 +143,13 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock }) => {
     );
 };
 
-export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalData, allStationsData, t, language, setLanguage, onLogout, onCommand, referenceTime }) {
+export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalData, allStationsData, t, language, setLanguage, onLogout, onCommand, commandStatus, setCommandStatus, referenceTime }) {
     const [activeFilters, setActiveFilters] = useState({ period: 'today', status: 'all', returnType: 'all' });
     const [searchTerm, setSearchTerm] = useState('');
     const [showRefundModal, setShowRefundModal] = useState(false);
     const [rentalToRefund, setRentalToRefund] = useState(null);
     const [commandDetails, setCommandDetails] = useState(null);
     const [commandModalOpen, setCommandModalOpen] = useState(false);
-    const [commandStatus, setCommandStatus] = useState(null);
 
     // Set default filter on mount to ensure it's always 'today' initially.
     useEffect(() => {
@@ -162,7 +161,15 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
         (allStationsData || []).forEach(kiosk => {
             kiosk.modules.forEach(module => {
                 module.slots.forEach(slot => {
-                    if (slot.sn && slot.sn !== 0) map.set(String(slot.sn), { stationId: kiosk.stationid, moduleId: module.id, slotId: slot.position, isLocked: !!slot.isLocked });
+                    if (slot.sn && slot.sn !== 0) {
+                        map.set(String(slot.sn), {
+                            stationId: kiosk.stationid,
+                            moduleId: module.id,
+                            slotId: slot.position,
+                            isLocked: !!slot.isLocked,
+                            lockReason: slot.lockReason || '',
+                        });
+                    }
                 });
             });
         });
@@ -288,11 +295,18 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
 
     const handleLockClick = (rental) => {
         if (!rental.location) return;
-        const { stationId, moduleId, slotId, isLocked } = rental.location;
+        const { stationId, moduleId, slotId, isLocked, lockReason } = rental.location;
         const action = isLocked ? 'unlock slot' : 'lock slot';
         const confirmationText = isLocked ? `${t('unlock_confirmation')} ${slotId}?` : `${t('lock_confirmation')} ${slotId}?`;
         
-        setCommandDetails({ stationid: stationId, moduleid: moduleId, slotid: slotId, action, confirmationText });
+        setCommandDetails({
+            stationid: stationId,
+            moduleid: moduleId,
+            slotid: slotId,
+            action,
+            confirmationText,
+            lockReason: lockReason || '',
+        });
         setCommandModalOpen(true);
     };
 

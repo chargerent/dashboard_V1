@@ -1,7 +1,7 @@
 // src/components/kiosk/KioskPanel.jsx
 
 import { useMemo, useCallback } from 'react';
-import { isKioskOnline, isModuleOnline } from '../../utils/helpers';
+import { isKioskOnline, isModuleOnline, getKioskPowerThreshold } from '../../utils/helpers';
 import { formatDateTime } from '../../utils/dateFormatter';
 import RentalStats from '../Dashboard/RentalStats';
 import GatewayIcon from './GatewayIcon';
@@ -19,7 +19,7 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
         let locked = 0;
         let emptySlots = 0;
         let totalPhysicalSlots = 0;
-        const fullThreshold = kiosk.hardware?.power || 80;
+        const fullThreshold = getKioskPowerThreshold(kiosk);
 
         kiosk.modules.forEach(module => {
             totalPhysicalSlots += module.slots.length;

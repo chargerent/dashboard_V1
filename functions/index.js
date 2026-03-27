@@ -1,5 +1,5 @@
 /* eslint-env node */
-const functions = require("firebase-functions");
+const {onCall, onRequest, HttpsError} = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
 
 admin.initializeApp();
@@ -7,6 +7,9 @@ const db = admin.firestore();
 
 const AUTH_MAPPING_DOMAIN = "auth.charge.rent";
 const STATION_SEQUENCE_START = 8000;
+const DEFAULT_KIOSK_POWER_THRESHOLD = 80;
+const NEW_KIOSK_TYPES = new Set(["CT3", "CT4", "CT8", "CT12", "CK48"]);
+const GOOGLE_MAPS_SECRET = "GOOGLE_MAPS_API_KEY";
 const COUNTRY_PREFIXES = {
   CA: "CA",
   CAN: "CA",
@@ -14,6 +17,35 @@ const COUNTRY_PREFIXES = {
   EUR: "FR",
   US: "US",
   USA: "US",
+};
+
+function buildHttpsCompat(runtimeOptions = null) {
+  return {
+    HttpsError,
+    onCall(handler) {
+      if (runtimeOptions) {
+        return onCall(runtimeOptions, async (request) => handler(request.data, request));
+      }
+
+      return onCall(async (request) => handler(request.data, request));
+    },
+    onRequest(handler) {
+      if (runtimeOptions) {
+        return onRequest(runtimeOptions, handler);
+      }
+
+      return onRequest(handler);
+    },
+  };
+}
+
+const functions = {
+  https: buildHttpsCompat(),
+  runWith(runtimeOptions) {
+    return {
+      https: buildHttpsCompat(runtimeOptions),
+    };
+  },
 };
 
 function setCorsHeaders(req, res) {
@@ -155,8 +187,9 @@ function sendFunctionError(res, error) {
   });
 }
 
-function handleHttpFunction(handler) {
-  return functions.https.onRequest(async (req, res) => {
+function handleHttpFunction(handler, runtimeOptions = null) {
+  const builder = runtimeOptions ? functions.runWith(runtimeOptions) : functions;
+  return builder.https.onRequest(async (req, res) => {
     setCorsHeaders(req, res);
 
     if (req.method === "OPTIONS") {
@@ -221,6 +254,58 @@ function buildCustomClaimsFromProfile(profile) {
     role,
     commands,
   };
+}
+
+function canEditKiosk(authState, kiosk) {
+  if (authState.isAdmin) {
+    return true;
+  }
+
+  const userClientId = String(authState.profile?.clientId || "").trim();
+  if (!userClientId) {
+    return false;
+  }
+
+  const kioskClient = String(kiosk?.info?.client || kiosk?.info?.clientId || "").trim();
+  const kioskRep = String(kiosk?.info?.rep || "").trim();
+  const canAccessKiosk = kioskClient === userClientId || kioskRep === userClientId;
+
+  if (!canAccessKiosk) {
+    return false;
+  }
+
+  const commands = authState.profile?.commands || authState.profile?.Commands || {};
+  if (commands["client edit"] !== true) {
+    return false;
+  }
+
+  return true;
+}
+
+function canLockKiosk(authState, kiosk) {
+  if (authState.isAdmin) {
+    return true;
+  }
+
+  const userClientId = String(authState.profile?.clientId || "").trim();
+  if (!userClientId) {
+    return false;
+  }
+
+  const kioskClient = String(kiosk?.info?.client || kiosk?.info?.clientId || "").trim();
+  const kioskRep = String(kiosk?.info?.rep || "").trim();
+  const canAccessKiosk = kioskClient === userClientId || kioskRep === userClientId;
+
+  if (!canAccessKiosk) {
+    return false;
+  }
+
+  const commands = authState.profile?.commands || authState.profile?.Commands || {};
+  if (commands.lock !== true) {
+    return false;
+  }
+
+  return true;
 }
 
 async function syncCustomClaimsForProfile(uid, profile) {
@@ -299,12 +384,37 @@ function normalizeModuleId(moduleId) {
   return String(moduleId || "").trim();
 }
 
+function isNewSchemaKioskDocument(kiosk) {
+  if (!kiosk) return false;
+  if (kiosk.isNewSchema === true) return true;
+
+  const hardwareType = String(kiosk?.hardware?.type || "").trim().toUpperCase();
+  if (NEW_KIOSK_TYPES.has(hardwareType)) {
+    return true;
+  }
+
+  const modules = Array.isArray(kiosk?.modules) ? kiosk.modules : [];
+  return modules.some((module) => Array.isArray(module?.slots));
+}
+
 function moduleIdsMatch(left, right) {
-  return normalizeModuleId(left) === normalizeModuleId(right);
+  const leftId = normalizeModuleId(left);
+  const rightId = normalizeModuleId(right);
+
+  if (!leftId || !rightId) {
+    return false;
+  }
+
+  return leftId === rightId ||
+    `1000${leftId}` === rightId ||
+    leftId === rightId.replace(/^1000/, "");
 }
 
 function recalculateKioskTotals(kiosk) {
-  const fullThreshold = Number(kiosk?.hardware?.power) || 80;
+  const configuredPower = Number(kiosk?.hardware?.power);
+  const fullThreshold = Number.isFinite(configuredPower) ?
+    configuredPower :
+    DEFAULT_KIOSK_POWER_THRESHOLD;
   const modules = Array.isArray(kiosk?.modules) ? kiosk.modules : [];
 
   let count = 0;
@@ -374,12 +484,390 @@ function clonePlain(value) {
   return JSON.parse(JSON.stringify(value ?? null));
 }
 
+function getKioskInfoAddress(info) {
+  return String(info?.address || info?.stationaddress || "").trim();
+}
+
+function normalizeKioskInfoForSchema(info, useAddressField = false) {
+  const normalizedInfo = clonePlain(info) || {};
+  const address = getKioskInfoAddress(normalizedInfo);
+
+  if (useAddressField) {
+    delete normalizedInfo.stationaddress;
+    normalizedInfo.address = address;
+    return normalizedInfo;
+  }
+
+  delete normalizedInfo.address;
+  normalizedInfo.stationaddress = address;
+  return normalizedInfo;
+}
+
+function getGoogleMapsApiKey() {
+  return String(process.env.GOOGLE_MAPS_API_KEY || "").trim();
+}
+
+async function geocodeKioskAddress(info) {
+  const address = getKioskInfoAddress(info);
+  const city = String(info?.city || "").trim();
+  const state = String(info?.state || "").trim();
+  const zip = String(info?.zip || "").trim();
+  const country = String(info?.country || "").trim();
+
+  if (!address || !city) {
+    return null;
+  }
+
+  const apiKey = getGoogleMapsApiKey();
+  if (!apiKey) {
+    console.warn("Google Maps API key is not configured; skipping geocode");
+    return null;
+  }
+
+  const addressString = [address, city, state, zip, country]
+      .filter(Boolean)
+      .join(", ");
+  const url =
+    "https://maps.googleapis.com/maps/api/geocode/json?" +
+    `address=${encodeURIComponent(addressString)}&key=${encodeURIComponent(apiKey)}`;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Geocoding request failed (${response.status})`);
+    }
+
+    const payload = await response.json();
+    if (payload.status === "OK" && payload.results?.[0]?.geometry?.location) {
+      return {
+        lat: payload.results[0].geometry.location.lat,
+        lon: payload.results[0].geometry.location.lng,
+      };
+    }
+
+    console.warn("Geocoding request did not return coordinates", {
+      status: payload.status,
+      error: payload.error_message || null,
+    });
+    return null;
+  } catch (error) {
+    console.error("Geocoding request failed", error);
+    return null;
+  }
+}
+
+function hasAddressChanged(existingInfo, nextInfo) {
+  return (
+    getKioskInfoAddress(nextInfo) !== getKioskInfoAddress(existingInfo) ||
+    String(nextInfo?.city || "").trim() !== String(existingInfo?.city || "").trim() ||
+    String(nextInfo?.state || "").trim() !== String(existingInfo?.state || "").trim() ||
+    String(nextInfo?.zip || "").trim() !== String(existingInfo?.zip || "").trim()
+  );
+}
+
+async function kioskUpdateSectionImpl(data, authState) {
+  const section = String(data?.section || "").trim().toLowerCase();
+  const stationid = normalizeStationId(data?.stationid);
+  const kioskPatch = clonePlain(data?.kiosk) || {};
+  const autoGeocode = data?.autoGeocode === true;
+  const requestId = String(data?.requestId || "").trim();
+  const allowedSections = new Set(["info", "formoptions", "hardware", "pricing", "ui"]);
+
+  if (!stationid) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "stationid required",
+    );
+  }
+
+  if (!allowedSections.has(section)) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "section must be one of info, formoptions, hardware, pricing, ui",
+      );
+  }
+
+  if (!kioskPatch || typeof kioskPatch !== "object") {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "kiosk payload required",
+    );
+  }
+
+  if (!Object.prototype.hasOwnProperty.call(kioskPatch, section)) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        `kiosk.${section} payload required`,
+    );
+  }
+
+  const snapshot = await db.collection("kiosks")
+      .where("stationid", "==", stationid)
+      .limit(1)
+      .get();
+
+  if (snapshot.empty) {
+    throw new functions.https.HttpsError(
+        "not-found",
+        `Kiosk ${stationid} not found.`,
+    );
+  }
+
+  const docRef = snapshot.docs[0].ref;
+
+  return db.runTransaction(async (transaction) => {
+    const liveSnap = await transaction.get(docRef);
+    if (!liveSnap.exists) {
+      throw new functions.https.HttpsError(
+          "not-found",
+          `Kiosk ${stationid} no longer exists.`,
+      );
+    }
+
+    const liveKiosk = liveSnap.data() || {};
+    if (!canEditKiosk(authState, liveKiosk)) {
+      throw new functions.https.HttpsError(
+          "permission-denied",
+          "Not allowed to edit this kiosk.",
+      );
+    }
+
+    if (!isNewSchemaKioskDocument(liveKiosk)) {
+      throw new functions.https.HttpsError(
+          "failed-precondition",
+          `${stationid} is not a V2 kiosk.`,
+      );
+    }
+
+    let nextSectionValue = clonePlain(kioskPatch[section]);
+    if (!nextSectionValue || typeof nextSectionValue !== "object") {
+      throw new functions.https.HttpsError(
+          "invalid-argument",
+          `${section} payload must be an object`,
+      );
+    }
+
+    if (section === "info") {
+      nextSectionValue = normalizeKioskInfoForSchema(nextSectionValue, true);
+    }
+
+    const mergedKiosk = {
+      ...clonePlain(liveKiosk),
+      [section]: nextSectionValue,
+    };
+
+    if (typeof kioskPatch?.status === "string" && kioskPatch.status.trim()) {
+      mergedKiosk.status = kioskPatch.status.trim();
+    }
+
+    let geocoded = false;
+    if (section === "info" && autoGeocode && hasAddressChanged(liveKiosk.info, mergedKiosk.info)) {
+      const coordinates = await geocodeKioskAddress(mergedKiosk.info);
+      if (coordinates) {
+        mergedKiosk.info = {
+          ...mergedKiosk.info,
+          lat: coordinates.lat,
+          lon: coordinates.lon,
+        };
+        geocoded = true;
+      }
+    }
+
+    const recalculatedKiosk = recalculateKioskTotals(mergedKiosk);
+    const updateData = {
+      [section]: clonePlain(recalculatedKiosk[section]) || {},
+      count: Number(recalculatedKiosk.count || 0),
+      slotscount: Number(recalculatedKiosk.slotscount || 0),
+      lockcount: Number(recalculatedKiosk.lockcount || 0),
+      zerocount: Number(recalculatedKiosk.zerocount || 0),
+      chargers: recalculatedKiosk.chargers,
+      total: Number(recalculatedKiosk.total || 0),
+      full: Number(recalculatedKiosk.full || 0),
+      empty: Number(recalculatedKiosk.empty || 0),
+      slot: Number(recalculatedKiosk.slot || 0),
+      charging: Number(recalculatedKiosk.charging || 0),
+    };
+
+    if (typeof recalculatedKiosk.status === "string" && recalculatedKiosk.status.trim()) {
+      updateData.status = recalculatedKiosk.status.trim();
+    }
+
+    transaction.set(docRef, updateData, {merge: true});
+
+    const message = geocoded ?
+      `${section} updated for ${stationid}. Address geocoded.` :
+      `${section} updated for ${stationid}.`;
+
+    return {
+      ok: true,
+      stationid,
+      section,
+      requestId: requestId || null,
+      geocoded,
+      message,
+      kiosk: {
+        ...recalculatedKiosk,
+        ...updateData,
+      },
+    };
+  });
+}
+
+async function kioskUpdateSlotLockImpl(data, authState) {
+  const stationid = normalizeStationId(data?.stationid);
+  const moduleId = normalizeModuleId(data?.moduleid || data?.moduleId);
+  const slotid = Number(data?.slotid ?? data?.slot);
+  const requestId = String(data?.requestId || "").trim();
+  const action = String(data?.action || "").trim().toLowerCase();
+  const lockReasonInput = String(data?.lockReason ?? data?.info ?? "").trim();
+  let explicitLock = null;
+
+  if (typeof data?.locked === "boolean") {
+    explicitLock = data.locked;
+  } else if (action === "lock slot") {
+    explicitLock = true;
+  } else if (action === "unlock slot") {
+    explicitLock = false;
+  }
+
+  if (!stationid) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "stationid required",
+    );
+  }
+
+  if (!moduleId) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "moduleid required",
+    );
+  }
+
+  if (!Number.isFinite(slotid)) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "slotid must be numeric",
+    );
+  }
+
+  const snapshot = await db.collection("kiosks")
+      .where("stationid", "==", stationid)
+      .limit(1)
+      .get();
+
+  if (snapshot.empty) {
+    throw new functions.https.HttpsError(
+        "not-found",
+        `Kiosk ${stationid} not found.`,
+    );
+  }
+
+  const docRef = snapshot.docs[0].ref;
+
+  return db.runTransaction(async (transaction) => {
+    const liveSnap = await transaction.get(docRef);
+    if (!liveSnap.exists) {
+      throw new functions.https.HttpsError(
+          "not-found",
+          `Kiosk ${stationid} no longer exists.`,
+      );
+    }
+
+    const liveKiosk = liveSnap.data() || {};
+    if (!canLockKiosk(authState, liveKiosk)) {
+      throw new functions.https.HttpsError(
+          "permission-denied",
+          "Not allowed to lock this kiosk.",
+      );
+    }
+
+    if (!isNewSchemaKioskDocument(liveKiosk)) {
+      throw new functions.https.HttpsError(
+          "failed-precondition",
+          `${stationid} is not a V2 kiosk.`,
+      );
+    }
+
+    const nextKiosk = clonePlain(liveKiosk) || {};
+    const modules = Array.isArray(nextKiosk.modules) ? nextKiosk.modules : [];
+    const targetModule = modules.find((module) => moduleIdsMatch(module?.id, moduleId));
+
+    if (!targetModule) {
+      throw new functions.https.HttpsError(
+          "not-found",
+          `Module ${moduleId} not found on ${stationid}.`,
+      );
+    }
+
+    const slots = Array.isArray(targetModule.slots) ? targetModule.slots : [];
+    const targetSlot = slots.find((slot) => Number(slot?.position) === slotid);
+
+    if (!targetSlot) {
+      throw new functions.https.HttpsError(
+          "not-found",
+          `Slot ${slotid} not found on module ${moduleId}.`,
+      );
+    }
+
+    const nextLocked = explicitLock === null ? !targetSlot.lock : explicitLock;
+    const nextLockReason = nextLocked ?
+      (lockReasonInput || String(targetSlot.lockReason || "").trim()) :
+      "";
+
+    targetSlot.lock = nextLocked;
+    if (nextLocked) {
+      targetSlot.lockReason = nextLockReason;
+    } else {
+      delete targetSlot.lockReason;
+    }
+
+    const recalculatedKiosk = recalculateKioskTotals(nextKiosk);
+    const updateData = {
+      modules: clonePlain(recalculatedKiosk.modules) || [],
+      count: Number(recalculatedKiosk.count || 0),
+      slotscount: Number(recalculatedKiosk.slotscount || 0),
+      lockcount: Number(recalculatedKiosk.lockcount || 0),
+      zerocount: Number(recalculatedKiosk.zerocount || 0),
+      chargers: recalculatedKiosk.chargers,
+      total: Number(recalculatedKiosk.total || 0),
+      full: Number(recalculatedKiosk.full || 0),
+      empty: Number(recalculatedKiosk.empty || 0),
+      slot: Number(recalculatedKiosk.slot || 0),
+      charging: Number(recalculatedKiosk.charging || 0),
+    };
+    const writeData = {
+      ...updateData,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    transaction.set(docRef, writeData, {merge: true});
+
+    return {
+      ok: true,
+      stationid,
+      moduleid: targetModule.id,
+      slotid,
+      locked: nextLocked,
+      lockReason: nextLocked ? nextLockReason : "",
+      requestId: requestId || null,
+      message: nextLocked ?
+        `Slot ${slotid} locked on ${stationid}.` :
+        `Slot ${slotid} unlocked on ${stationid}.`,
+      kiosk: {
+        ...recalculatedKiosk,
+        ...updateData,
+      },
+    };
+  });
+}
+
 const DEFAULT_BOUND_KIOSK_INFO_BY_COUNTRY = {
   US: {
     location: "HQ",
     place: "OFFICE",
     locationtype: "HQ",
-    stationaddress: "4514 Conchita Way",
+    address: "4514 Conchita Way",
     city: "Tarzana",
     state: "CA",
     zip: "91356-4904",
@@ -391,7 +879,7 @@ const DEFAULT_BOUND_KIOSK_INFO_BY_COUNTRY = {
     location: "PARIS HQ",
     place: "OFFICE",
     locationtype: "HQ",
-    stationaddress: "212 RUE DE RIVOLI",
+    address: "212 RUE DE RIVOLI",
     city: "PARIS",
     state: "FR",
     zip: "75001",
@@ -403,7 +891,7 @@ const DEFAULT_BOUND_KIOSK_INFO_BY_COUNTRY = {
     location: "CANADA HQ",
     place: "OFFICE 2",
     locationtype: "OFFICE",
-    stationaddress: "700 THIRD LINE",
+    address: "700 THIRD LINE",
     city: "OAKVILLE",
     state: "ON",
     zip: "L6L 4B1.",
@@ -446,12 +934,12 @@ function getDefaultBoundKioskInfo(country) {
     rep: "",
     accountpercent: 0,
     reppercent: 0,
-    stationaddress: "",
+    address: "",
     ...countryDefaults,
   };
 
   info.country = normalizedCountry;
-  info.stationaddress = countryDefaults.stationaddress || "";
+  info.address = countryDefaults.address || "";
 
   return info;
 }
@@ -468,11 +956,15 @@ function getDefaultBoundKioskHardware(templateKiosk = null) {
     audio: "on",
     ...templateHardware,
   };
+  const configuredPower = Number(templateHardware?.power);
 
   hardware.quarantine = {
     time: Number(templateHardware?.quarantine?.time || 0),
     unit: String(templateHardware?.quarantine?.unit || "min").trim() || "min",
   };
+  hardware.power = Number.isFinite(configuredPower) ?
+    configuredPower :
+    DEFAULT_KIOSK_POWER_THRESHOLD;
 
   delete hardware.type;
 
@@ -520,6 +1012,9 @@ function createBoundKioskDocument({
     wifi: {
       name: String(templateWifi?.name || "chargerent").trim() || "chargerent",
       password: String(templateWifi?.password || "Charger33").trim() || "Charger33",
+    },
+    formoptions: {
+      active: templateKiosk?.formoptions?.active === true,
     },
     hardware: getDefaultBoundKioskHardware(templateKiosk),
     pricing: clonePlain(templateKiosk?.pricing) || {
@@ -1351,6 +1846,31 @@ exports.admin_httpUnlockUser = handleHttpFunction(async (data, req) => {
 });
 
 exports.admin_upsertUser = exports.admin_upsertUserProfile;
+
+exports.kiosk_updateSection = functions.runWith({
+  secrets: [GOOGLE_MAPS_SECRET],
+}).https.onCall(async (data, context) => {
+  const authState = await getAuthorizedProfileFromContext(context);
+  return kioskUpdateSectionImpl(data, authState);
+});
+
+exports.kiosk_httpUpdateSection = handleHttpFunction(
+    async (data, req) => {
+      const authState = await getAuthorizedProfileFromRequest(req, data);
+      return kioskUpdateSectionImpl(data, authState);
+    },
+    {secrets: [GOOGLE_MAPS_SECRET]},
+);
+
+exports.kiosk_updateSlotLock = functions.https.onCall(async (data, context) => {
+  const authState = await getAuthorizedProfileFromContext(context);
+  return kioskUpdateSlotLockImpl(data, authState);
+});
+
+exports.kiosk_httpUpdateSlotLock = handleHttpFunction(async (data, req) => {
+  const authState = await getAuthorizedProfileFromRequest(req, data);
+  return kioskUpdateSlotLockImpl(data, authState);
+});
 
 exports.stationBinding_getNextStation = functions.https.onCall(async (data, context) => {
   await assertCanManageBindingsFromContext(context);

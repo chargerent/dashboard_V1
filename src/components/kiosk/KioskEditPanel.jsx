@@ -9,11 +9,21 @@ import {
     FormSelect,
     FormColorPicker
 } from '../forms/FormFields.jsx';
-import { geocodeAddress } from '../../utils/helpers';
+import { getKioskPowerThreshold, isNewSchemaKiosk, normalizeKioskInfoForSchema } from '../../utils/helpers';
 import KioskControlPanel from './KioskControlPanel';
 
 const isNewBoundKioskStation = (stationid) => /^(CA|FR|US)8\d{3}$/.test(String(stationid || '').trim().toUpperCase());
 const DEFAULT_WIFI = { name: 'chargerent', password: 'Charger33' };
+const DEFAULT_FORM_OPTIONS = { active: false };
+const getInitialHardware = (kiosk) => ({
+    ...(kiosk?.hardware || {}),
+    power: getKioskPowerThreshold(kiosk),
+});
+const isV2Kiosk = (kiosk) => isNewSchemaKiosk(kiosk) || isNewBoundKioskStation(kiosk?.stationid);
+const getInitialInfo = (kiosk) => normalizeKioskInfoForSchema({
+    autoGeocode: true,
+    ...(kiosk?.info || {}),
+}, isV2Kiosk(kiosk));
 
 export const Section = ({ title, sectionKey, children, isOpen, onToggle, onSave, data }) => (
         <div className="bg-white rounded-lg shadow-sm mb-2">
@@ -91,24 +101,29 @@ const calculateRateArray = (pricing) => {
 
 function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersion, serverFlowVersion }) {
     const isNewBoundKiosk = isNewBoundKioskStation(kiosk?.stationid);
+    const usesNewSchemaInfo = isV2Kiosk(kiosk);
+    const addressFieldName = usesNewSchemaInfo ? 'address' : 'stationaddress';
     const initialWifi = { ...DEFAULT_WIFI, ...(kiosk.wifi || {}) };
+    const initialFormOptions = { ...DEFAULT_FORM_OPTIONS, ...(kiosk.formoptions || {}) };
     const [formData, setFormData] = useState({
-        info: kiosk.info || {},
+        info: getInitialInfo(kiosk),
         wifi: initialWifi,
-        hardware: kiosk.hardware || {},
+        formoptions: initialFormOptions,
+        hardware: getInitialHardware(kiosk),
         pricing: kiosk.pricing || {},
         ui: kiosk.ui || {}
     });
     const [originalData, setOriginalData] = useState({
-        info: kiosk.info || {},
+        info: getInitialInfo(kiosk),
         wifi: initialWifi,
-        hardware: kiosk.hardware || {},
+        formoptions: initialFormOptions,
+        hardware: getInitialHardware(kiosk),
         pricing: kiosk.pricing || {},
         ui: kiosk.ui || {}
     });
 
     useEffect(() => { // This effect resets the form state whenever the kiosk prop changes.
-        const initialInfo = { autoGeocode: true, ...kiosk.info };
+        const initialInfo = getInitialInfo(kiosk);
         const initialPricing = { ...kiosk.pricing };
         const numericPricingFields = ['taxrate', 'buyprice', 'dailyprice', 'authamount', 'initialperiod', 'overdue'];
         const numericInfoFields = ['accountpercent', 'reppercent'];
@@ -129,14 +144,16 @@ function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersi
         setFormData({
             info: initialInfo,
             wifi: { ...DEFAULT_WIFI, ...(kiosk.wifi || {}) },
-            hardware: kiosk.hardware || {},
+            formoptions: { ...DEFAULT_FORM_OPTIONS, ...(kiosk.formoptions || {}) },
+            hardware: getInitialHardware(kiosk),
             pricing: initialPricing,
             ui: kiosk.ui || {}
         });
         setOriginalData({
             info: initialInfo,
             wifi: { ...DEFAULT_WIFI, ...(kiosk.wifi || {}) },
-            hardware: kiosk.hardware || {},
+            formoptions: { ...DEFAULT_FORM_OPTIONS, ...(kiosk.formoptions || {}) },
+            hardware: getInitialHardware(kiosk),
             pricing: initialPricing,
             ui: kiosk.ui || {}
         });
@@ -232,32 +249,12 @@ function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersi
         setOpenSection(openSection === section ? null : section);
     };
 
-    const handleSave = async (section, data) => {
-        if (section === 'info') {
-            const originalInfo = kiosk.info || {}; // This is the original kiosk data before edits
-            const newInfo = formData.info;
-            const addressChanged =
-                newInfo.stationaddress !== originalInfo.stationaddress ||
-                newInfo.city !== originalInfo.city ||
-                newInfo.state !== originalInfo.state ||
-                newInfo.zip !== originalInfo.zip;
-
-            if (newInfo.autoGeocode && addressChanged) {
-                const location = await geocodeAddress({
-                    stationaddress: newInfo.stationaddress,
-                    city: newInfo.city,
-                    state: newInfo.state,
-                    zip: newInfo.zip,
-                });
-
-                if (location) {
-                    const updatedData = { ...newInfo, lat: location.lat, lon: location.lng };
-                    onSave(kiosk.stationid, section, { ...formData, info: updatedData }, newInfo.autoGeocode);
-                    return; // Early return after successful geocoding
-                }
-            }
-        }
-        onSave(kiosk.stationid, section, formData, formData.info.autoGeocode);
+    const handleSave = (section, data) => {
+        const nextFormData = {
+            ...formData,
+            info: normalizeKioskInfoForSchema(formData.info, usesNewSchemaInfo),
+        };
+        onSave(kiosk.stationid, section, nextFormData, nextFormData.info.autoGeocode);
     };
 
     return (
@@ -268,7 +265,7 @@ function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersi
                 <Section title="Info" sectionKey="info" isOpen={openSection === 'info'} onToggle={handleToggleSection} onSave={handleSave} data={formData.info} isChanged={JSON.stringify(formData.info) !== JSON.stringify(originalData.info)}>
                     <FormInput label="Location" name="location" value={formData.info?.location} section="info" onDataChange={onDataChange} />
                     <FormInput label="Place" name="place" value={formData.info?.place} section="info" onDataChange={onDataChange} />
-                    <FormInput label="Address" name="stationaddress" value={formData.info?.stationaddress} section="info" onDataChange={onDataChange} />
+                    <FormInput label="Address" name={addressFieldName} value={formData.info?.[addressFieldName]} section="info" onDataChange={onDataChange} />
                     <FormInput label="City" name="city" value={formData.info?.city} section="info" onDataChange={onDataChange} />
                     <FormInput label="State" name="state" value={formData.info?.state} section="info" onDataChange={onDataChange} />
                     <FormInput label="Zip Code" name="zip" value={formData.info?.zip} section="info" onDataChange={onDataChange} />
@@ -294,7 +291,11 @@ function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersi
                     <FormInput label="WiFi Name" name="name" value={formData.wifi?.name} section="wifi" onDataChange={onDataChange} />
                     <FormInput label="WiFi Password" name="password" value={formData.wifi?.password} section="wifi" onDataChange={onDataChange} />
                 </Section>
-
+                {usesNewSchemaInfo && (
+                    <Section title="Form Options" sectionKey="formoptions" isOpen={openSection === 'formoptions'} onToggle={handleToggleSection} onSave={handleSave} data={formData.formoptions} isChanged={JSON.stringify(formData.formoptions) !== JSON.stringify(originalData.formoptions)}>
+                        <FormToggle label="Active" name="active" checked={formData.formoptions?.active} section="formoptions" onDataChange={onDataChange} />
+                    </Section>
+                )}
                 <Section title="Hardware" sectionKey="hardware" isOpen={openSection === 'hardware'} onToggle={handleToggleSection} onSave={handleSave} data={formData.hardware} isChanged={JSON.stringify(formData.hardware) !== JSON.stringify(originalData.hardware)}>
                     <FormMultiSwitch 
                         label="Gateway" 
@@ -314,6 +315,7 @@ function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersi
                     <FormInput label="Quarantine Time" name="quarantine.time" value={formData.hardware?.quarantine?.time} section="hardware" onDataChange={onDataChange} />
                     <FormMultiSwitch label="Quarantine Unit" name="quarantine.unit" options={['min', 'hours', 'days']} value={formData.hardware?.quarantine?.unit} section="hardware" onDataChange={onDataChange} />
                     <FormMultiSwitch label="Audio" name="audio" options={['on', 'off']} value={formData.hardware?.audio} section="hardware" onDataChange={onDataChange} />
+                    <FormSlider label="Dispense Power Level" name="power" value={formData.hardware?.power} section="hardware" min="0" max="100" onDataChange={onDataChange} />
                     {!isNewBoundKiosk && (
                         <>
                             <FormInput label="Type" name="type" value={formData.hardware?.type} section="hardware" onDataChange={onDataChange} disabled />
@@ -332,7 +334,6 @@ function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersi
                                 section="hardware"
                                 onDataChange={handleScreenChange} />
                             <FormSlider label="Volume" name="volume" value={formData.hardware?.volume} section="hardware" min="0" max="100" onDataChange={onDataChange} />
-                            <FormSlider label="Power Threshold" name="power" value={formData.hardware?.power} section="hardware" min="0" max="100" onDataChange={onDataChange} />
                             <FormInput label="Port" name="port" value={formData.hardware?.port} section="hardware" onDataChange={onDataChange} />
                             <FormInput label="Server" name="server" value={formData.hardware?.server} section="hardware" onDataChange={onDataChange} />
                             <FormInput label="SN" name="sn" value={formData.hardware?.sn} section="hardware" onDataChange={onDataChange} />

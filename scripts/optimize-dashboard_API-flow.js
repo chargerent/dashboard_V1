@@ -62,23 +62,14 @@ function ensureGroupNodes(group, ids) {
 function buildVendContextFunction() {
   return `const STORE_KEY = 'dashboardPendingVendCommands';
 const TTL_MS = 5 * 60 * 1000;
-const ID_MAP = {
-  'CS0001': 'USB0001',
-  'CS0002': 'CAB0001',
-  'CS0003': 'CAB0002',
-  'CS0004': 'CAB0003',
-  'CS0005': 'CAB0004',
-  'CS0006': 'CAB0005',
-  'CS0007': 'CAB0006',
-  'CS0008': 'CAB0007',
-  'CS0009': 'CAB0008',
-  'CS0010': 'CAB0009',
-  'CS0011': 'CAB0010'
-};
 
 function normalizeStationId(value) {
-  const stationid = String(value || '').trim();
-  return ID_MAP[stationid] || stationid;
+  return String(value || '').trim();
+}
+
+function resolveTimestamp(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function prune(store, now) {
@@ -95,14 +86,14 @@ if (String(command.action || '').toLowerCase() !== 'vend') {
   return msg;
 }
 
-const stationidRaw = String(command.stationid || '').trim();
-const stationid = normalizeStationId(stationidRaw);
+const stationidRaw = normalizeStationId(command.stationid);
+const stationid = stationidRaw;
 const moduleid = String(command.moduleid || command.moduleId || '').trim();
 const chargerid = Number(command.chargerid || command.sn || 0);
 const slotValue = command.slotid ?? command.slot;
 const slotid = Number(slotValue);
 const now = Date.now();
-const timerequested = Number(command.timerequested || now);
+const timerequested = resolveTimestamp(command.timerequested, now);
 const sessionId = msg._session?.id || msg._session || command.admin || null;
 
 if (!stationid || !moduleid || !Number.isFinite(chargerid) || chargerid <= 0) {
@@ -115,7 +106,7 @@ if (sessionId === null || sessionId === undefined || sessionId === '') {
   return null;
 }
 
-const requestId = String(command.requestId || \`vend-\${stationid}-\${moduleid}-\${chargerid}-\${now}\`).trim();
+const requestId = String(command.requestId || '').trim() || \`vend-\${stationid}-\${moduleid}-\${chargerid}-\${now}\`;
 const pendingKey = \`vend:\${stationid}:\${moduleid}:\${chargerid}\`;
 const entry = {
   requestId,
@@ -139,6 +130,10 @@ msg.requestId = requestId;
 msg.timerequested = timerequested;
 msg.command = {
   ...command,
+  stationid,
+  moduleid,
+  chargerid,
+  slotid: entry.slotid,
   requestId,
   timerequested
 };

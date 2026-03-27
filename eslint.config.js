@@ -25,6 +25,11 @@ export default [
         version: "detect",
       },
     },
+    rules: {
+      ...pluginReactConfig.rules,
+      // This codebase does not maintain runtime PropTypes for React components.
+      "react/prop-types": "off",
+    },
   },
   {
     plugins: {

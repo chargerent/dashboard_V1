@@ -8,7 +8,7 @@ import { translations } from './utils/translations';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage.jsx';
 import AdminPage from './pages/AdminPage.jsx';
-import { normalizeKioskData } from './utils/helpers.js';
+import { isNewSchemaKiosk, normalizeKioskData, normalizeKioskInfoForSchema } from './utils/helpers.js';
 import KioskEditorPage from './pages/KioskEditorPage.jsx';
 import RentalsPage from './pages/RentalsPage.jsx';
 import ChargersPage from './pages/ChargersPage.jsx';
@@ -67,14 +67,48 @@ function findMatchingSlot(module, slotRef, chargerId) {
   return slots.find((slot) => Number(slot?.sn) === numericChargerId) || null;
 }
 
-function slotStateMatchesResponse(slotState, stationId, moduleRef, slotRef) {
+function slotStateMatchesResponse(slotState, stationId, moduleRef, slotRef, chargerId = null) {
   if (!slotState || slotState.stationid !== stationId) return false;
-  if (!moduleMatchesResponse({ id: slotState.moduleid }, moduleRef)) return false;
 
+  const normalizedModuleRef = String(moduleRef || '').trim();
   const numericSlotId = Number(slotRef);
-  if (!Number.isFinite(numericSlotId)) return true;
+  const numericChargerId = Number(chargerId);
+  const hasModuleRef = normalizedModuleRef !== '';
+  const hasSlotRef = Number.isFinite(numericSlotId);
+  const hasChargerRef = Number.isFinite(numericChargerId) && numericChargerId > 0;
 
-  return Number(slotState.slotid) === numericSlotId;
+  if (hasModuleRef) {
+    if (!moduleMatchesResponse({ id: slotState.moduleid }, normalizedModuleRef)) return false;
+    if (hasSlotRef && Number(slotState.slotid) !== numericSlotId) return false;
+    if (hasChargerRef) {
+      const trackedChargerId = Number(slotState.chargerid);
+      if (Number.isFinite(trackedChargerId) && trackedChargerId > 0) {
+        return trackedChargerId === numericChargerId;
+      }
+    }
+    return true;
+  }
+
+  if (!hasChargerRef) return false;
+
+  const trackedChargerId = Number(slotState.chargerid);
+  return Number.isFinite(trackedChargerId) && trackedChargerId > 0 && trackedChargerId === numericChargerId;
+}
+
+function getTrackedSlotKey(slotState) {
+  return `${slotState.stationid}-${slotState.moduleid}-${Number(slotState.slotid)}`;
+}
+
+function slotLooksEmpty(slot) {
+  if (!slot) return true;
+
+  const numericSn = Number(slot?.sn ?? 0);
+  const numericStatus = Number(slot?.status);
+  return !slot.isSstatError && (
+    slot.sstat === '0C' ||
+    numericSn === 0 ||
+    (Number.isFinite(numericStatus) && numericStatus === 0)
+  );
 }
 
 function createCommandRequestId(action, stationid, moduleid) {
@@ -84,6 +118,26 @@ function createCommandRequestId(action, stationid, moduleid) {
   const randomSegment = Math.random().toString(36).slice(2, 10);
   return `${prefix}-${targetStation}-${targetModule}-${Date.now()}-${randomSegment}`;
 }
+
+function normalizeKioskPayloadForSave(action, kioskPayload, usesNewSchemaInfo) {
+  if (!kioskPayload || typeof kioskPayload !== 'object') return kioskPayload;
+  if (action !== 'infochange' || !kioskPayload.info || typeof kioskPayload.info !== 'object') {
+    return kioskPayload;
+  }
+
+  return {
+    ...kioskPayload,
+    info: normalizeKioskInfoForSchema(kioskPayload.info, usesNewSchemaInfo),
+  };
+}
+
+const FIREBASE_SAVE_ACTIONS = {
+  infochange: 'info',
+  formoptionschange: 'formoptions',
+  hardwarechange: 'hardware',
+  pricechange: 'pricing',
+  uichange: 'ui',
+};
 
 function buildClientInfoFromProfile(profile, uid) {
   if (!profile) return null;
@@ -216,6 +270,19 @@ function App() {
   const [allStationsData, setAllStationsData] = useState([]);
   const [ngrokInfo, setNgrokInfo] = useState(null);
   const [kiosksReady, setKiosksReady] = useState(false);
+  const debugEjectUi = useCallback((message, payload) => {
+    if (typeof window === 'undefined') return;
+
+    try {
+      if (window.localStorage.getItem('debugEjectSlots') !== '1') {
+        return;
+      }
+    } catch {
+      return;
+    }
+
+    console.info(`[EjectUI] ${message}`, payload);
+  }, []);
 
   const clearFailedEjectSlot = useCallback((slotKey) => {
     const timer = failedEjectTimersRef.current.get(slotKey);
@@ -248,21 +315,21 @@ function App() {
     failedEjectTimersRef.current.set(slotKey, timer);
   }, [clearFailedEjectSlot]);
 
-  const clearEjectCommandState = useCallback((stationId, moduleRef, slotRef) => {
-    if (!stationId || !moduleRef) return;
+  const clearEjectCommandState = useCallback((stationId, moduleRef, slotRef, chargerId = null) => {
+    if (!stationId) return;
 
     setEjectingSlots(prev =>
-      prev.filter(slot => !slotStateMatchesResponse(slot, stationId, moduleRef, slotRef))
+      prev.filter(slot => !slotStateMatchesResponse(slot, stationId, moduleRef, slotRef, chargerId))
     );
     setPendingSlots(prev =>
-      prev.filter(slot => !slotStateMatchesResponse(slot, stationId, moduleRef, slotRef))
+      prev.filter(slot => !slotStateMatchesResponse(slot, stationId, moduleRef, slotRef, chargerId))
     );
   }, []);
 
   const handleLogout = useCallback(async () => {
     try {
       await signOut(auth);
-    } catch (e) {
+    } catch {
       // ignore
     }
     localStorage.removeItem('dashboardToken');
@@ -274,9 +341,11 @@ function App() {
   }, []);
 
   useEffect(() => {
+    const failedEjectTimers = failedEjectTimersRef.current;
+
     return () => {
-      failedEjectTimersRef.current.forEach(timer => clearTimeout(timer));
-      failedEjectTimersRef.current.clear();
+      failedEjectTimers.forEach(timer => clearTimeout(timer));
+      failedEjectTimers.clear();
     };
   }, []);
 
@@ -408,7 +477,7 @@ function App() {
           localStorage.setItem('dashboardToken', refreshed);
           setToken(refreshed);
         }
-      } catch (e) {
+      } catch {
         await handleLogout();
       }
     };
@@ -535,6 +604,40 @@ function App() {
     }
   }, [allStationsData, pendingSlots]);
 
+  useEffect(() => {
+    if (ejectingSlots.length === 0 || allStationsData.length === 0) return;
+
+    const settledSlotKeys = new Set();
+
+    ejectingSlots.forEach((trackedSlot) => {
+      const kiosk = allStationsData.find((station) => station.stationid === trackedSlot.stationid);
+      if (!kiosk) return;
+
+      const targetModule = findMatchingModule(kiosk.modules, trackedSlot.moduleid, trackedSlot.chargerid);
+      const targetSlot = findMatchingSlot(targetModule, trackedSlot.slotid, trackedSlot.chargerid);
+      if (!targetModule || !targetSlot) return;
+
+      const currentChargerId = Number(targetSlot?.sn ?? 0);
+      const expectedChargerId = Number(trackedSlot?.chargerid);
+      const chargerChanged = Number.isFinite(expectedChargerId) &&
+        expectedChargerId > 0 &&
+        currentChargerId > 0 &&
+        currentChargerId !== expectedChargerId;
+
+      if (slotLooksEmpty(targetSlot) || chargerChanged) {
+        settledSlotKeys.add(getTrackedSlotKey(trackedSlot));
+      }
+    });
+
+    if (settledSlotKeys.size === 0) return;
+
+    debugEjectUi(
+      'Clearing stale ejecting slots from kiosk snapshot',
+      ejectingSlots.filter((slot) => settledSlotKeys.has(getTrackedSlotKey(slot)))
+    );
+    setEjectingSlots((prev) => prev.filter((slot) => !settledSlotKeys.has(getTrackedSlotKey(slot))));
+  }, [allStationsData, debugEjectUi, ejectingSlots]);
+
   const latestTimestamp = useMemo(() => {
     if (!allStationsData?.length) {
       return new Date();
@@ -560,7 +663,126 @@ function App() {
     }
   }, []);
 
-  const onCommand = useCallback((stationid, action, moduleid = null, provisionid = null, uiVersion = null, details = null) => {
+  const onCommand = useCallback(async (stationid, action, moduleid = null, provisionid = null, uiVersion = null, details = null) => {
+    const targetKiosk = stationid
+      ? allStationsData.find((kiosk) => kiosk.stationid === stationid)
+      : null;
+    const kioskType = String(targetKiosk?.hardware?.type || '').trim();
+    const shouldUseFirebaseForLock = Boolean(
+      targetKiosk &&
+      isNewSchemaKiosk(targetKiosk) &&
+      (action === 'lock slot' || action === 'unlock slot')
+    );
+    const firebaseSection = FIREBASE_SAVE_ACTIONS[action];
+    const shouldUseFirebaseForSave = Boolean(
+      firebaseSection &&
+      targetKiosk &&
+      isNewSchemaKiosk(targetKiosk)
+    );
+    const normalizedKioskPayload = normalizeKioskPayloadForSave(
+      action,
+      details?.kiosk || null,
+      shouldUseFirebaseForSave,
+    );
+
+    if (shouldUseFirebaseForLock) {
+      const requestId = createCommandRequestId(action, stationid, moduleid);
+      const slotid = Number(details?.slotid);
+      const lockReason = typeof details?.info === 'string' ? details.info : '';
+
+      if (moduleid != null && Number.isFinite(slotid)) {
+        setLockingSlots((prev) => {
+          const alreadyTracking = prev.some((slot) => (
+            slot.stationid === stationid &&
+            String(slot.moduleid) === String(moduleid) &&
+            Number(slot.slotid) === slotid
+          ));
+
+          return alreadyTracking ? prev : [...prev, { stationid, moduleid, slotid }];
+        });
+      }
+
+      setCommandStatus({ state: 'sending', message: t('sending_command') });
+
+      try {
+        const payload = await callFunctionWithAuth('kiosk_updateSlotLock', {
+          stationid,
+          moduleid,
+          slotid,
+          locked: action === 'lock slot',
+          lockReason,
+          requestId,
+        });
+        const normalizedKiosk = payload?.kiosk
+          ? normalizeKioskData([payload.kiosk])[0]
+          : null;
+
+        if (normalizedKiosk) {
+          setAllStationsData((prevKiosks) =>
+            prevKiosks.map((station) =>
+              station.stationid === normalizedKiosk.stationid ? normalizedKiosk : station
+            )
+          );
+        }
+
+        setCommandStatus({
+          state: 'success',
+          message: payload?.message || t('command_success'),
+        });
+      } catch (error) {
+        setCommandStatus({
+          state: 'error',
+          message: error?.message ? `${t('command_failed')} ${error.message}` : t('command_failed'),
+        });
+      } finally {
+        if (moduleid != null && Number.isFinite(slotid)) {
+          setLockingSlots((prev) => prev.filter((slot) => !(
+            slot.stationid === stationid &&
+            String(slot.moduleid) === String(moduleid) &&
+            Number(slot.slotid) === slotid
+          )));
+        }
+      }
+      return;
+    }
+
+    if (shouldUseFirebaseForSave) {
+      const requestId = createCommandRequestId(action, stationid, moduleid);
+      setCommandStatus({ state: 'sending', message: t('sending_command') });
+
+      try {
+        const payload = await callFunctionWithAuth('kiosk_updateSection', {
+          stationid,
+          section: firebaseSection,
+          kiosk: normalizedKioskPayload,
+          autoGeocode: details?.autoGeocode === true,
+          requestId,
+        });
+        const normalizedKiosk = payload?.kiosk
+          ? normalizeKioskData([payload.kiosk])[0]
+          : null;
+
+        if (normalizedKiosk) {
+          setAllStationsData((prevKiosks) =>
+            prevKiosks.map((station) =>
+              station.stationid === normalizedKiosk.stationid ? normalizedKiosk : station
+            )
+          );
+        }
+
+        setCommandStatus({
+          state: 'success',
+          message: payload?.message || t('command_success'),
+        });
+      } catch (error) {
+        setCommandStatus({
+          state: 'error',
+          message: error?.message ? `${t('command_failed')} ${error.message}` : t('command_failed'),
+        });
+      }
+      return;
+    }
+
     if (ws.current && ws.current.readyState === WebSocket.OPEN) {
       const timerequested = Date.now();
       const requestId = createCommandRequestId(action, stationid, moduleid);
@@ -569,6 +791,7 @@ function App() {
         action,
         requestId,
         timerequested,
+        ...(action.startsWith('eject') && kioskType ? { kioskType } : {}),
         ...(provisionid && { provisionid }),
         ...(uiVersion && { version: uiVersion }),
         ...(moduleid && { moduleid }),
@@ -591,6 +814,13 @@ function App() {
           commandData = { ...baseData };
           break;
         case 'eject specific':
+          commandData = {
+            ...baseData,
+            slotid: details.slotid,
+            info: details.info,
+            ...(Number.isFinite(Number(details?.chargerid)) && Number(details?.chargerid) > 0 ? { chargerid: Number(details.chargerid) } : {})
+          };
+          break;
         case 'rent':
           commandData = { ...baseData, slotid: details.slotid, info: details.info };
           break;
@@ -613,7 +843,14 @@ function App() {
           commandData = { ...baseData, kiosk: details.kiosk };
           break;
         default:
-          commandData = { ...baseData, ...(moduleid && { moduleid }), ...(details && { kiosk: details.kiosk, autoGeocode: details.autoGeocode }) };
+          commandData = {
+            ...baseData,
+            ...(moduleid && { moduleid }),
+            ...(details && {
+              kiosk: normalizedKioskPayload,
+              autoGeocode: details.autoGeocode,
+            }),
+          };
       }
 
       const message = {
@@ -624,6 +861,9 @@ function App() {
 
       ws.current.send(JSON.stringify(message));
       console.log('[WS Send]', message);
+      if (action.startsWith('eject') || action === 'rent' || action === 'vend') {
+        debugEjectUi('Sent eject-style command', commandData);
+      }
 
       console.log(`[2. IGNORE] Ignoring Firestore updates for ${stationid} for 30s.`);
       ignoredKiosksRef.current = { ...ignoredKiosksRef.current, [stationid]: Date.now() + 30000 };
@@ -632,7 +872,7 @@ function App() {
     } else {
       setCommandStatus({ state: 'error', message: t('connection_lost') });
     }
-  }, [token, t]);
+  }, [allStationsData, debugEjectUi, token, t]);
 
   // ---------------------------------------------
   // WebSocket connect (FULL HANDLER INCLUDED)
@@ -703,7 +943,16 @@ function App() {
             const slotRef = data.slot ?? data.slotid;
             const chargerId = data.chargerid ?? data.sn;
 
-            clearEjectCommandState(stationId, moduleRef, slotRef);
+            debugEjectUi('Received eject response', {
+              action: data.action,
+              status: data.status,
+              stationId,
+              moduleRef,
+              slotRef,
+              chargerId,
+              message: data.status_en,
+            });
+            clearEjectCommandState(stationId, moduleRef, slotRef, chargerId);
 
             if (isSuccess && stationId) {
               setAllStationsData(prevStations => {
@@ -714,7 +963,7 @@ function App() {
                   const targetSlot = findMatchingSlot(targetModule, slotRef, chargerId);
 
                   if (targetModule && targetSlot) {
-                    clearEjectCommandState(stationId, targetModule.id, targetSlot.position);
+                    clearEjectCommandState(stationId, targetModule.id, targetSlot.position, chargerId);
                   }
 
                   return {
@@ -725,7 +974,17 @@ function App() {
                             ...module,
                             slots: module.slots.map(slot =>
                               slot.position === targetSlot?.position
-                                ? { ...slot, sn: 0, batteryLevel: 0, chargingCurrent: 0, sstat: '0C', cmos: null }
+                                ? {
+                                    ...slot,
+                                    sn: 0,
+                                    batteryLevel: 0,
+                                    chargingCurrent: 0,
+                                    sstat: '0C',
+                                    cmos: null,
+                                    isLocked: false,
+                                    lock: false,
+                                    lockReason: null,
+                                  }
                                 : slot
                             )
                           }
@@ -741,6 +1000,14 @@ function App() {
                 return prev;
               });
             } else if (stationId) {
+              debugEjectUi('Eject response failed', {
+                action: data.action,
+                stationId,
+                moduleRef,
+                slotRef,
+                chargerId,
+                message: data.status_en,
+              });
               flashFailedEjectSlot(stationId, moduleRef, slotRef);
             }
 
@@ -882,7 +1149,7 @@ function App() {
         }
       }
     };
-  }, [token, clientInfo, t, clearEjectCommandState, flashFailedEjectSlot]);
+  }, [token, clientInfo, t, clearEjectCommandState, debugEjectUi, flashFailedEjectSlot]);
 
   // Login handler (kept for LoginPage)
   const handleLogin = () => {
@@ -1015,6 +1282,8 @@ function App() {
             setLanguage={setLanguage}
             onLogout={handleLogout}
             onCommand={onCommand}
+            commandStatus={commandStatus}
+            setCommandStatus={setCommandStatus}
             referenceTime={latestTimestamp}
           />
         );

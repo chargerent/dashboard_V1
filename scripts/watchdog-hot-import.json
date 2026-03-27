@@ -1,0 +1,292 @@
+[
+    {
+        "id": "hotwdg_group",
+        "type": "group",
+        "z": "ebbebe04a01eca8f",
+        "name": "Hot kiosk refresher",
+        "style": {
+            "stroke": "#0f766e",
+            "fill": "#ccfbf1",
+            "label": true,
+            "color": "#000000"
+        },
+        "nodes": [
+            "hotwdg_refresh_inject",
+            "hotwdg_prepare_roster_query",
+            "hotwdg_roster_query",
+            "hotwdg_cache_roster",
+            "hotwdg_debug_roster",
+            "hotwdg_mark_in",
+            "hotwdg_mark_hot",
+            "hotwdg_debug_mark",
+            "hotwdg_tick_inject",
+            "hotwdg_poll_hot",
+            "hotwdg_debug_summary",
+            "hotwdg_debug_send",
+            "hotwdg_link_out"
+        ],
+        "x": 2054,
+        "y": 2879,
+        "w": 1752,
+        "h": 242
+    },
+    {
+        "id": "hotwdg_refresh_inject",
+        "type": "inject",
+        "z": "ebbebe04a01eca8f",
+        "g": "hotwdg_group",
+        "name": "Refresh roster every 5 min",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "300",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 2250,
+        "y": 2940,
+        "wires": [
+            [
+                "hotwdg_prepare_roster_query"
+            ]
+        ]
+    },
+    {
+        "id": "hotwdg_prepare_roster_query",
+        "type": "function",
+        "z": "ebbebe04a01eca8f",
+        "g": "hotwdg_group",
+        "name": "Prepare roster query",
+        "func": "msg.payload = {\n    path: 'kiosks',\n    query: []\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2490,
+        "y": 2940,
+        "wires": [
+            [
+                "hotwdg_roster_query"
+            ]
+        ]
+    },
+    {
+        "id": "hotwdg_roster_query",
+        "type": "google-cloud-firestore",
+        "z": "ebbebe04a01eca8f",
+        "g": "hotwdg_group",
+        "account": "",
+        "keyFilename": "/home/george/firestore/firestore-key.json",
+        "name": "Query kiosks for roster",
+        "projectId": "node-red-alerts",
+        "mode": "query",
+        "x": 2720,
+        "y": 2940,
+        "wires": [
+            [
+                "hotwdg_cache_roster"
+            ]
+        ]
+    },
+    {
+        "id": "hotwdg_cache_roster",
+        "type": "function",
+        "z": "ebbebe04a01eca8f",
+        "g": "hotwdg_group",
+        "name": "Cache kiosk roster",
+        "func": "function normalizeStationId(value) {\n    return String(value || '').trim();\n}\n\nfunction normalizeModuleId(value) {\n    return String(value || '').trim();\n}\n\nconst docs = Array.isArray(msg.payload) ? msg.payload : [];\nconst prefixes = ['CA8', 'FR8', 'US8'];\nconst roster = {};\n\nfor (const doc of docs) {\n    const stationid = normalizeStationId(doc?.stationid);\n    if (!stationid) continue;\n    if (!prefixes.some((prefix) => stationid.startsWith(prefix))) continue;\n\n    const modules = (Array.isArray(doc?.modules) ? doc.modules : [])\n        .map((mod) => ({\n            id: normalizeModuleId(mod?.id),\n            output: mod?.output !== false\n        }))\n        .filter((mod) => mod.id);\n\n    const activeModules = modules.filter((mod) => mod.output !== false);\n    const selectedModules = activeModules.length > 0 ? activeModules : modules;\n    if (selectedModules.length === 0) continue;\n\n    roster[stationid] = {\n        stationid,\n        provisionid: normalizeStationId(doc?.provisionid),\n        lastUpdate: doc?.lastUpdate || doc?.timestamp || doc?.lastUpdated || null,\n        hardwareType: normalizeStationId(doc?.hardware?.type),\n        formActive: doc?.formoptions?.active === true,\n        modules: selectedModules.map((mod) => ({ id: mod.id }))\n    };\n}\n\nflow.set('watchdogRoster', roster);\n\nmsg.payload = {\n    rosterStations: Object.keys(roster).length,\n    refreshedAt: new Date().toISOString()\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2950,
+        "y": 2940,
+        "wires": [
+            [
+                "hotwdg_debug_roster"
+            ]
+        ]
+    },
+    {
+        "id": "hotwdg_debug_roster",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "hotwdg_group",
+        "name": "Roster refreshed",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3160,
+        "y": 2980,
+        "wires": []
+    },
+    {
+        "id": "hotwdg_mark_in",
+        "type": "link in",
+        "z": "ebbebe04a01eca8f",
+        "g": "hotwdg_group",
+        "name": "Register hot kiosk",
+        "links": [],
+        "x": 2235,
+        "y": 3020,
+        "wires": [
+            [
+                "hotwdg_mark_hot"
+            ]
+        ]
+    },
+    {
+        "id": "hotwdg_mark_hot",
+        "type": "function",
+        "z": "ebbebe04a01eca8f",
+        "g": "hotwdg_group",
+        "name": "Mark station hot for 10 min",
+        "func": "function normalizeStationId(value) {\n    return String(value || '').trim();\n}\n\nfunction normalizeModuleId(value) {\n    return String(value || '').trim();\n}\n\nconst HOT_WINDOW_MS = 10 * 60 * 1000;\nconst payload = msg.payload;\n\nconst stationid = normalizeStationId(\n    (payload && typeof payload === 'object' ? payload.stationid : payload) ||\n    msg.stationid ||\n    msg._statusStationId ||\n    msg.id\n);\n\nif (!stationid) {\n    node.warn('Hot kiosk registration missing stationid');\n    return null;\n}\n\nconst hotStations = flow.get('watchdogHotStations') || {};\nconst reason = String(\n    (payload && typeof payload === 'object' ? payload.action : '') ||\n    msg.action ||\n    hotStations[stationid]?.reason ||\n    'status'\n).trim() || 'status';\n\nhotStations[stationid] = {\n    stationid,\n    reason,\n    hotUntil: Date.now() + HOT_WINDOW_MS,\n    markedAt: Date.now()\n};\n\nflow.set('watchdogHotStations', hotStations);\n\nmsg.payload = hotStations[stationid];\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2490,
+        "y": 3020,
+        "wires": [
+            [
+                "hotwdg_debug_mark"
+            ]
+        ]
+    },
+    {
+        "id": "hotwdg_debug_mark",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "hotwdg_group",
+        "name": "Hot kiosk marked",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 2720,
+        "y": 3060,
+        "wires": []
+    },
+    {
+        "id": "hotwdg_tick_inject",
+        "type": "inject",
+        "z": "ebbebe04a01eca8f",
+        "g": "hotwdg_group",
+        "name": "Poll hot kiosks every 20 sec",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "20",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 5,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 2260,
+        "y": 3100,
+        "wires": [
+            [
+                "hotwdg_poll_hot"
+            ]
+        ]
+    },
+    {
+        "id": "hotwdg_poll_hot",
+        "type": "function",
+        "z": "ebbebe04a01eca8f",
+        "g": "hotwdg_group",
+        "name": "Send scheduled module checks",
+        "func": "const CYCLE_MS = 20 * 1000;\nconst now = Date.now();\nconst cycleUntil = Number(flow.get('watchdogCycleUntil') || 0);\n\nif (cycleUntil > now) {\n    node.status({ fill: 'yellow', shape: 'ring', text: 'Previous cycle still running' });\n    return [null, {\n        payload: {\n            skipped: true,\n            reason: 'previous cycle still running',\n            cycleUntil\n        }\n    }];\n}\n\nconst roster = flow.get('watchdogRoster') || {};\nconst hotStations = flow.get('watchdogHotStations') || {};\nconst retainedHotStations = {};\nconst checks = [];\n\nfor (const [stationid, state] of Object.entries(hotStations)) {\n    const hotUntil = Number(state?.hotUntil || 0);\n    if (hotUntil <= now) continue;\n\n    const station = roster[stationid];\n    if (!station || !Array.isArray(station.modules) || station.modules.length === 0) continue;\n\n    retainedHotStations[stationid] = state;\n\n    station.modules.forEach((mod) => {\n        if (!mod || !mod.id) return;\n\n        checks.push({\n            stationid,\n            moduleid: mod.id,\n            reason: state.reason || 'status'\n        });\n    });\n}\n\nflow.set('watchdogHotStations', retainedHotStations);\n\nif (checks.length === 0) {\n    node.status({ fill: 'grey', shape: 'ring', text: 'No hot kiosks' });\n    return [null, {\n        payload: {\n            activeStations: 0,\n            checks: 0,\n            cycleMs: CYCLE_MS\n        }\n    }];\n}\n\nflow.set('watchdogCycleUntil', now + CYCLE_MS + 1000);\n\nchecks.forEach((item, index) => {\n    const delayMs = Math.floor((index * CYCLE_MS) / checks.length);\n\n    setTimeout(() => {\n        node.send([{\n            topic: '/' + item.stationid + '/' + item.moduleid + '/user/get',\n            payload: { cmd: 'check_all' },\n            watchdog: {\n                stationid: item.stationid,\n                moduleid: item.moduleid,\n                reason: item.reason,\n                cycleStartedAt: now,\n                cycleMs: CYCLE_MS,\n                delayMs,\n                totalChecks: checks.length\n            }\n        }, null]);\n    }, delayMs);\n});\n\nnode.status({\n    fill: 'green',\n    shape: 'dot',\n    text: checks.length + ' checks for ' + Object.keys(retainedHotStations).length + ' hot kiosks'\n});\n\nreturn [null, {\n    payload: {\n        activeStations: Object.keys(retainedHotStations).length,\n        checks: checks.length,\n        cycleMs: CYCLE_MS\n    }\n}];",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2530,
+        "y": 3100,
+        "wires": [
+            [
+                "hotwdg_debug_send",
+                "hotwdg_link_out"
+            ],
+            [
+                "hotwdg_debug_summary"
+            ]
+        ]
+    },
+    {
+        "id": "hotwdg_debug_summary",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "hotwdg_group",
+        "name": "Hot watchdog summary",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 2800,
+        "y": 3140,
+        "wires": []
+    },
+    {
+        "id": "hotwdg_debug_send",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "hotwdg_group",
+        "name": "Hot watchdog sends check_all",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "watchdog",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 2820,
+        "y": 3060,
+        "wires": []
+    },
+    {
+        "id": "hotwdg_link_out",
+        "type": "link out",
+        "z": "ebbebe04a01eca8f",
+        "g": "hotwdg_group",
+        "name": "link out 76",
+        "mode": "link",
+        "links": [
+            "187805de07036155"
+        ],
+        "x": 3045,
+        "y": 3100,
+        "wires": []
+    }
+]

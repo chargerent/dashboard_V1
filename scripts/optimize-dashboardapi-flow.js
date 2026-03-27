@@ -50,23 +50,14 @@ function buildVendPrepareNode() {
     name: 'Prepare vend command',
     func: `const STORE_KEY = 'dashboardPendingVendCommands';
 const TTL_MS = 5 * 60 * 1000;
-const ID_MAP = {
-  'CS0001': 'USB0001',
-  'CS0002': 'CAB0001',
-  'CS0003': 'CAB0002',
-  'CS0004': 'CAB0003',
-  'CS0005': 'CAB0004',
-  'CS0006': 'CAB0005',
-  'CS0007': 'CAB0006',
-  'CS0008': 'CAB0007',
-  'CS0009': 'CAB0008',
-  'CS0010': 'CAB0009',
-  'CS0011': 'CAB0010'
-};
 
 function normalizeStationId(value) {
-  const stationid = String(value || '').trim();
-  return ID_MAP[stationid] || stationid;
+  return String(value || '').trim();
+}
+
+function resolveTimestamp(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function prune(store, now) {
@@ -79,14 +70,18 @@ function prune(store, now) {
 }
 
 const command = msg.command || {};
-const stationidRaw = String(command.stationid || '').trim();
-const stationid = normalizeStationId(stationidRaw);
+if (String(command.action || '').toLowerCase() !== 'vend') {
+  return msg;
+}
+
+const stationidRaw = normalizeStationId(command.stationid);
+const stationid = stationidRaw;
 const moduleid = String(command.moduleid || command.moduleId || '').trim();
 const chargerid = Number(command.chargerid || command.sn || 0);
 const slotValue = command.slotid ?? command.slot;
 const slotid = Number(slotValue);
 const now = Date.now();
-const timerequested = Number(command.timerequested || now);
+const timerequested = resolveTimestamp(command.timerequested, now);
 const sessionId = msg._session?.id || msg._session || command.admin || null;
 
 if (!stationid || !moduleid || !Number.isFinite(chargerid) || chargerid <= 0) {
@@ -99,7 +94,7 @@ if (sessionId === null || sessionId === undefined || sessionId === '') {
   return null;
 }
 
-const requestId = String(command.requestId || \`vend-\${stationid}-\${moduleid}-\${chargerid}-\${now}\`).trim();
+const requestId = String(command.requestId || '').trim() || \`vend-\${stationid}-\${moduleid}-\${chargerid}-\${now}\`;
 const pendingKey = \`vend:\${stationid}:\${moduleid}:\${chargerid}\`;
 const entry = {
   requestId,
@@ -121,6 +116,15 @@ flow.set(STORE_KEY, store);
 
 msg.requestId = requestId;
 msg.timerequested = timerequested;
+msg.command = {
+  ...command,
+  stationid,
+  moduleid,
+  chargerid,
+  slotid: entry.slotid,
+  requestId,
+  timerequested
+};
 msg.payload = {
   action: 'vend',
   stationid,
@@ -174,27 +178,18 @@ function buildVendHydrateNode() {
 const RECENT_KEY = 'dashboardRecentVendConfirmations';
 const TTL_MS = 5 * 60 * 1000;
 const RECENT_TTL_MS = 60 * 1000;
-const ID_MAP = {
-  'CS0001': 'USB0001',
-  'CS0002': 'CAB0001',
-  'CS0003': 'CAB0002',
-  'CS0004': 'CAB0003',
-  'CS0005': 'CAB0004',
-  'CS0006': 'CAB0005',
-  'CS0007': 'CAB0006',
-  'CS0008': 'CAB0007',
-  'CS0009': 'CAB0008',
-  'CS0010': 'CAB0009',
-  'CS0011': 'CAB0010'
-};
 
 function normalizeStationId(value) {
-  const stationid = String(value || '').trim();
-  return ID_MAP[stationid] || stationid;
+  return String(value || '').trim();
 }
 
 function normalizeModuleId(value) {
   return String(value || '').trim();
+}
+
+function resolveTimestamp(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function pruneQueues(store, now) {
@@ -283,13 +278,13 @@ const stationid = normalizeStationId(incoming.stationid || incoming.kiosk || par
 const moduleid = normalizeModuleId(incoming.moduleid || incoming.module);
 const chargerid = Number(incoming.chargerid || incoming.sn || 0);
 const now = Date.now();
+const incomingKey = \`vend:\${stationid}:\${moduleid}:\${chargerid}\`;
 
 if (!stationid || !moduleid || !Number.isFinite(chargerid) || chargerid <= 0) {
   node.warn('Vend confirmation missing stationid, moduleid, or chargerid');
   return null;
 }
 
-const recentKey = \`vend:\${stationid}:\${moduleid}:\${chargerid}\`;
 const store = pruneQueues(flow.get(STORE_KEY) || {}, now);
 const recent = pruneRecent(flow.get(RECENT_KEY) || {}, now);
 const match = findPending(store, stationid, moduleid, chargerid);
@@ -298,7 +293,7 @@ const pending = match.pending;
 flow.set(STORE_KEY, store);
 
 if (!pending || pending.sessionId === null || pending.sessionId === undefined || pending.sessionId === '') {
-  if (recent[recentKey]) {
+  if (recent[incomingKey]) {
     flow.set(RECENT_KEY, recent);
     return null;
   }
@@ -308,7 +303,15 @@ if (!pending || pending.sessionId === null || pending.sessionId === undefined ||
 
 const status = Number(incoming.status);
 const isSuccess = status === 1;
-recent[recentKey] = {
+const responseStationid = pending.stationid || stationid;
+const responseModuleid = pending.moduleid || moduleid;
+const responseKey = \`vend:\${responseStationid}:\${responseModuleid}:\${chargerid}\`;
+const timeresponded = resolveTimestamp(incoming.timeresponded, now);
+recent[incomingKey] = {
+  seenAt: now,
+  requestId: pending.requestId
+};
+recent[responseKey] = {
   seenAt: now,
   requestId: pending.requestId
 };
@@ -317,14 +320,14 @@ flow.set(RECENT_KEY, recent);
 msg._session = pending.sessionId;
 msg.payload = {
   action: 'vend',
-  stationid,
-  moduleid,
+  stationid: responseStationid,
+  moduleid: responseModuleid,
   slotid: pending.slotid,
   chargerid,
   status: incoming.status,
   status_en: incoming.status_en || (isSuccess ? 'charger ejected' : 'charger eject failed'),
   timerequested: pending.timerequested,
-  timeresponded: Number(incoming.timeresponded || now),
+  timeresponded,
   requestId: pending.requestId
 };
 return msg;`,

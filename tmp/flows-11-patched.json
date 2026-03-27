@@ -1,0 +1,366 @@
+[
+    {
+        "id": "78694e29453b878e",
+        "type": "group",
+        "z": "ebbebe04a01eca8f",
+        "name": "set stationid / mqtt / pending",
+        "style": {
+            "stroke": "#000000",
+            "fill": "#dbcbe7",
+            "label": true,
+            "color": "#000000"
+        },
+        "nodes": [
+            "1f5d1ac6505c05b1",
+            "763ddd23ee9d77dc",
+            "e93a83e6c6917286",
+            "2f2b8145a2ae9b3b",
+            "bf3f457564dc8738",
+            "d05397a908cd9804",
+            "d57302041b767328",
+            "adc52cbd2e7c6bf7",
+            "e9bd6b72b73b3235",
+            "23c72ac380edcad5",
+            "f3f25e02819a9534",
+            "10874361782dcdc3",
+            "e20b26ef15752d0f",
+            "019f0416132b98c0",
+            "3f8cda6f56acbce9",
+            "8a3adb89b0836c3a",
+            "38aff7df11eb85c5"
+        ],
+        "x": 1034,
+        "y": 2259,
+        "w": 2292,
+        "h": 262
+    },
+    {
+        "id": "1f5d1ac6505c05b1",
+        "type": "http in",
+        "z": "ebbebe04a01eca8f",
+        "g": "78694e29453b878e",
+        "name": "",
+        "url": "/api/iot/client/con",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 1160,
+        "y": 2400,
+        "wires": [
+            [
+                "adc52cbd2e7c6bf7",
+                "8a3adb89b0836c3a"
+            ]
+        ]
+    },
+    {
+        "id": "763ddd23ee9d77dc",
+        "type": "http response",
+        "z": "ebbebe04a01eca8f",
+        "g": "78694e29453b878e",
+        "name": "",
+        "statusCode": "",
+        "headers": {},
+        "x": 3250,
+        "y": 2340,
+        "wires": []
+    },
+    {
+        "id": "e93a83e6c6917286",
+        "type": "function",
+        "z": "ebbebe04a01eca8f",
+        "g": "78694e29453b878e",
+        "name": "resolve stationid from Firebase or queue pending",
+        "func": "const docs = Array.isArray(msg.payload) ? msg.payload : [];\nconst moduleId = String(msg.module || '').trim();\nconst requestData = msg.payloadRaw || (msg.req && msg.req.query) || {};\nconst rawUuid = requestData.uuid || null;\nconst simUUID = requestData.simUUID || '';\nconst simMobile = requestData.simMobile || '';\nconst deviceId = requestData.deviceId || '';\nconst ssl = requestData.ssl || '';\nconst screen = requestData.screen || '';\nconst defaultWifiName = 'chargerent';\nconst defaultWifiPassword = 'Charger33';\n\nif (!moduleId) {\n    node.error('Missing msg.module');\n    return null;\n}\n\nlet matched = null;\nfor (const doc of docs) {\n    const modules = Array.isArray(doc.modules) ? doc.modules : [];\n    for (const mod of modules) {\n        const modId = mod && mod.id != null ? String(mod.id).trim() : '';\n        if (!modId) continue;\n\n        if (modId === moduleId || ('1000' + modId) === moduleId || modId === moduleId.replace(/^1000/, '')) {\n            matched = doc;\n            break;\n        }\n    }\n    if (matched) break;\n}\n\nif (matched && matched.stationid) {\n    msg.stationid = matched.stationid;\n    msg.kioskDoc = matched;\n    msg.simUUID = String(simUUID).trim();\n    msg.simMobile = String(simMobile).trim();\n    msg.deviceId = String(deviceId).trim();\n    msg.ssl = String(ssl).trim();\n    msg.screen = String(screen).trim();\n    msg.wifiName = String(matched.wifi && matched.wifi.name || defaultWifiName).trim() || defaultWifiName;\n    msg.wifiPassword = String(matched.wifi && matched.wifi.password || defaultWifiPassword).trim() || defaultWifiPassword;\n    return [msg, null];\n}\n\nmsg.stationid = 'pending';\nmsg.simUUID = String(simUUID).trim();\nmsg.simMobile = String(simMobile).trim();\nmsg.deviceId = String(deviceId).trim();\nmsg.ssl = String(ssl).trim();\nmsg.screen = String(screen).trim();\nmsg.wifiName = defaultWifiName;\nmsg.wifiPassword = defaultWifiPassword;\nmsg.payload = {\n    path: 'pending/' + moduleId,\n    content: {\n        moduleId,\n        rawUuid,\n        simUUID: msg.simUUID,\n        simMobile: msg.simMobile,\n        deviceId: msg.deviceId,\n        ssl: msg.ssl,\n        screen: msg.screen,\n        stationid: 'pending',\n        active: false,\n        firstSeen: new Date().toISOString(),\n        lastSeen: new Date().toISOString()\n    }\n};\n\nreturn [null, msg];",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2510,
+        "y": 2400,
+        "wires": [
+            [
+                "2f2b8145a2ae9b3b",
+                "019f0416132b98c0"
+            ],
+            [
+                "f3f25e02819a9534",
+                "3f8cda6f56acbce9"
+            ]
+        ]
+    },
+    {
+        "id": "2f2b8145a2ae9b3b",
+        "type": "function",
+        "z": "ebbebe04a01eca8f",
+        "g": "78694e29453b878e",
+        "name": "set response",
+        "func": "const timestamp = Date.now();\nconst moduleId = String(msg.module || '').trim();\nconst stationid = String(msg.stationid || '').trim();\nconst defaultWifiName = 'chargerent';\nconst defaultWifiPassword = 'Charger33';\nconst wifiName = String(msg.wifiName || defaultWifiName).trim() || defaultWifiName;\nconst wifiPassword = String(msg.wifiPassword || defaultWifiPassword).trim() || defaultWifiPassword;\n\nmsg.payload = {\n    code: 200,\n    type: 0,\n    data: moduleId + '|securemode=2,signmethod=hmacmd5,timestamp=' + timestamp +\n        '|,' + stationid + ',34.56.244.66,1883,' + wifiName + ',' + wifiPassword + ',1740359355246',\n    msg: 'OK',\n    time: timestamp\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 3070,
+        "y": 2380,
+        "wires": [
+            [
+                "bf3f457564dc8738",
+                "763ddd23ee9d77dc"
+            ]
+        ]
+    },
+    {
+        "id": "bf3f457564dc8738",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "78694e29453b878e",
+        "name": "config",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 3230,
+        "y": 2460,
+        "wires": []
+    },
+    {
+        "id": "d05397a908cd9804",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "78694e29453b878e",
+        "name": "initial com",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1630,
+        "y": 2340,
+        "wires": []
+    },
+    {
+        "id": "d57302041b767328",
+        "type": "function",
+        "z": "ebbebe04a01eca8f",
+        "g": "78694e29453b878e",
+        "name": "parse kiosk module id",
+        "func": "const rawUuid = String(\n    (msg.payload && msg.payload.uuid) ||\n    (msg.req && msg.req.query && msg.req.query.uuid) ||\n    ''\n).trim();\n\nif (!rawUuid) {\n    node.error('Missing uuid', msg);\n    return null;\n}\n\n// Kiosk IMEI-style module ids should pass through unchanged.\nif (/^\\d{15}$/.test(rawUuid)) {\n    msg.module = rawUuid;\n    return msg;\n}\n\n// MAC-like UUIDs are converted into the stored 1000-prefixed module id.\nif (/^(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/.test(rawUuid)) {\n    const hex = rawUuid.replace(/[:-]/g, '');\n    msg.module = '1000' + Number.parseInt(hex, 16).toString(10);\n    return msg;\n}\n\nmsg.module = rawUuid;\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1550,
+        "y": 2400,
+        "wires": [
+            [
+                "38aff7df11eb85c5",
+                "e9bd6b72b73b3235"
+            ]
+        ]
+    },
+    {
+        "id": "adc52cbd2e7c6bf7",
+        "type": "change",
+        "z": "ebbebe04a01eca8f",
+        "g": "78694e29453b878e",
+        "name": "preserve raw payload",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payloadRaw",
+                "pt": "msg",
+                "to": "payload",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1380,
+        "y": 2400,
+        "wires": [
+            [
+                "d57302041b767328",
+                "d05397a908cd9804"
+            ]
+        ]
+    },
+    {
+        "id": "e9bd6b72b73b3235",
+        "type": "function",
+        "z": "ebbebe04a01eca8f",
+        "g": "78694e29453b878e",
+        "name": "Prepare kiosk lookup query",
+        "func": " msg.payload = {                                                                                                             \n      path: 'kiosks',                                                                                                         \n      query: []                                                                                                               \n  };                                                                                                                          \n  return msg; ",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1940,
+        "y": 2400,
+        "wires": [
+            [
+                "23c72ac380edcad5",
+                "10874361782dcdc3"
+            ]
+        ]
+    },
+    {
+        "id": "23c72ac380edcad5",
+        "type": "google-cloud-firestore",
+        "z": "ebbebe04a01eca8f",
+        "g": "78694e29453b878e",
+        "account": "",
+        "keyFilename": "/home/george/firestore/firestore-key.json",
+        "name": "Query kiosks",
+        "projectId": "node-red-alerts",
+        "mode": "query",
+        "x": 2210,
+        "y": 2400,
+        "wires": [
+            [
+                "e93a83e6c6917286",
+                "e20b26ef15752d0f"
+            ]
+        ]
+    },
+    {
+        "id": "f3f25e02819a9534",
+        "type": "google-cloud-firestore",
+        "z": "ebbebe04a01eca8f",
+        "g": "78694e29453b878e",
+        "account": "",
+        "keyFilename": "/home/george/firestore/firestore-key.json",
+        "name": "Upsert pending module",
+        "projectId": "node-red-alerts",
+        "mode": "update",
+        "x": 2870,
+        "y": 2440,
+        "wires": [
+            [
+                "2f2b8145a2ae9b3b"
+            ]
+        ]
+    },
+    {
+        "id": "10874361782dcdc3",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "78694e29453b878e",
+        "name": "debug 541",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 2120,
+        "y": 2440,
+        "wires": []
+    },
+    {
+        "id": "e20b26ef15752d0f",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "78694e29453b878e",
+        "name": "debug 542",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 2360,
+        "y": 2320,
+        "wires": []
+    },
+    {
+        "id": "019f0416132b98c0",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "78694e29453b878e",
+        "name": "debug 548",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 2680,
+        "y": 2300,
+        "wires": []
+    },
+    {
+        "id": "3f8cda6f56acbce9",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "78694e29453b878e",
+        "name": "debug 549",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 2620,
+        "y": 2460,
+        "wires": []
+    },
+    {
+        "id": "8a3adb89b0836c3a",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "78694e29453b878e",
+        "name": "debug 552",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1320,
+        "y": 2480,
+        "wires": []
+    },
+    {
+        "id": "38aff7df11eb85c5",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "78694e29453b878e",
+        "name": "parsed module",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "module",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1820,
+        "y": 2340,
+        "wires": [],
+        "targetType": "msg"
+    }
+]
