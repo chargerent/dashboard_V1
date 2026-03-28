@@ -8,6 +8,16 @@ const db = admin.firestore();
 const AUTH_MAPPING_DOMAIN = "auth.charge.rent";
 const STATION_SEQUENCE_START = 8000;
 const DEFAULT_KIOSK_POWER_THRESHOLD = 80;
+const DEFAULT_MARKETING_OPTIONS = {
+  active: false,
+  title: "Get the Rogers app",
+  offerText: "Manage your account, pay your bill and get exclusive offers all in one place.",
+  buttonText: "Download now",
+  buttonUrl: "https://www.rogers.com/support/apps",
+};
+const DEFAULT_ANALYTICS_OPTIONS = {
+  active: false,
+};
 const NEW_KIOSK_TYPES = new Set(["CT3", "CT4", "CT8", "CT12", "CK48"]);
 const GOOGLE_MAPS_SECRET = "GOOGLE_MAPS_API_KEY";
 const COUNTRY_PREFIXES = {
@@ -571,7 +581,7 @@ async function kioskUpdateSectionImpl(data, authState) {
   const kioskPatch = clonePlain(data?.kiosk) || {};
   const autoGeocode = data?.autoGeocode === true;
   const requestId = String(data?.requestId || "").trim();
-  const allowedSections = new Set(["info", "formoptions", "hardware", "pricing", "ui"]);
+  const allowedSections = new Set(["info", "formoptions", "marketingoptions", "analyticsoptions", "hardware", "pricing", "ui"]);
 
   if (!stationid) {
     throw new functions.https.HttpsError(
@@ -583,7 +593,7 @@ async function kioskUpdateSectionImpl(data, authState) {
   if (!allowedSections.has(section)) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "section must be one of info, formoptions, hardware, pricing, ui",
+        "section must be one of info, formoptions, marketingoptions, analyticsoptions, hardware, pricing, ui",
       );
   }
 
@@ -1015,6 +1025,16 @@ function createBoundKioskDocument({
     },
     formoptions: {
       active: templateKiosk?.formoptions?.active === true,
+    },
+    marketingoptions: {
+      active: templateKiosk?.marketingoptions?.active === true,
+      title: String(templateKiosk?.marketingoptions?.title ?? DEFAULT_MARKETING_OPTIONS.title).trim(),
+      offerText: String(templateKiosk?.marketingoptions?.offerText ?? DEFAULT_MARKETING_OPTIONS.offerText).trim(),
+      buttonText: String(templateKiosk?.marketingoptions?.buttonText ?? DEFAULT_MARKETING_OPTIONS.buttonText).trim(),
+      buttonUrl: String(templateKiosk?.marketingoptions?.buttonUrl ?? DEFAULT_MARKETING_OPTIONS.buttonUrl).trim(),
+    },
+    analyticsoptions: {
+      active: templateKiosk?.analyticsoptions?.active === true || DEFAULT_ANALYTICS_OPTIONS.active,
     },
     hardware: getDefaultBoundKioskHardware(templateKiosk),
     pricing: clonePlain(templateKiosk?.pricing) || {

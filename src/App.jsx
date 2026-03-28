@@ -134,6 +134,8 @@ function normalizeKioskPayloadForSave(action, kioskPayload, usesNewSchemaInfo) {
 const FIREBASE_SAVE_ACTIONS = {
   infochange: 'info',
   formoptionschange: 'formoptions',
+  marketingoptionschange: 'marketingoptions',
+  analyticsoptionschange: 'analyticsoptions',
   hardwarechange: 'hardware',
   pricechange: 'pricing',
   uichange: 'ui',

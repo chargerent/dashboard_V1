@@ -1,7 +1,8 @@
 // src/pages/RentalsPage.jsx
 
-import { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { formatDateTime, formatDuration, formatDate } from '../utils/dateFormatter';
+import { normalizeText, textEquals, textIncludes } from '../utils/text';
 import RefundModal from '../components/UI/RefundModal.jsx';
 import ConfirmationModal from '../components/UI/ConfirmationModal.jsx';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
@@ -151,11 +152,6 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
     const [commandDetails, setCommandDetails] = useState(null);
     const [commandModalOpen, setCommandModalOpen] = useState(false);
 
-    // Set default filter on mount to ensure it's always 'today' initially.
-    useEffect(() => {
-        setActiveFilters(prev => ({ ...prev, period: 'today' }));
-    }, []);
-
     const chargerLocations = useMemo(() => {
         const map = new Map();
         (allStationsData || []).forEach(kiosk => {
@@ -205,13 +201,13 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
 
         if (clientInfo && !clientInfo.isAdmin) {
             if (clientInfo.role === 'partner') {
-                rentals = rentals.filter(r => r.repId?.toLowerCase() === clientInfo.clientId?.toLowerCase());
+                rentals = rentals.filter(r => textEquals(r.repId, clientInfo.clientId));
             } else {
-                rentals = rentals.filter(r => r.clientId?.toLowerCase() === clientInfo.clientId?.toLowerCase());
+                rentals = rentals.filter(r => textEquals(r.clientId, clientInfo.clientId));
             }
         }
 
-        const lowercasedSearch = searchTerm.toLowerCase();
+        const lowercasedSearch = normalizeText(searchTerm);
 
         // Filter by period
         if (!referenceTime) return []; // Guard against undefined referenceTime
@@ -259,15 +255,19 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
         // Filter by search term
         if (lowercasedSearch) {
             rentals = rentals.filter(r =>
-                r.rentalLocation?.toLowerCase().includes(lowercasedSearch) ||
-                r.rentalStationid?.toLowerCase().includes(lowercasedSearch) ||
-                r.card_last4?.includes(lowercasedSearch) ||
-                r.sn?.toLowerCase().includes(lowercasedSearch)
+                textIncludes(r.rentalLocation, lowercasedSearch) ||
+                textIncludes(r.rentalStationid, lowercasedSearch) ||
+                textIncludes(r.card_last4, lowercasedSearch) ||
+                textIncludes(r.sn, lowercasedSearch)
             );
         }
 
         // Sort by most recent
-        return rentals.sort((a, b) => new Date(b.rentalTime) - new Date(a.rentalTime));
+        return rentals.sort((a, b) => {
+            const bTime = safeToDate(b.rentalTime)?.getTime() ?? 0;
+            const aTime = safeToDate(a.rentalTime)?.getTime() ?? 0;
+            return bTime - aTime;
+        });
 
     }, [rentalData, allStationsData, clientInfo, activeFilters, searchTerm, referenceTime, chargerLocations]);
 

@@ -183,6 +183,10 @@ export default function useKioskCommandFlow({
     let action;
     if (section === 'formoptions') {
       action = 'formoptionschange';
+    } else if (section === 'marketingoptions') {
+      action = 'marketingoptionschange';
+    } else if (section === 'analyticsoptions') {
+      action = 'analyticsoptionschange';
     } else if (section === 'pricing') {
       action = 'pricechange';
     } else if (section === 'hardware') {

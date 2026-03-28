@@ -6,6 +6,14 @@ const LEGACY_TIMESTAMP_PATTERN = /(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2}):(\d{
 const HAS_TIMEZONE_PATTERN = /(Z|[+-]\d{2}:?\d{2})$/i;
 const DEFAULT_WIFI = { name: 'chargerent', password: 'Charger33' };
 const DEFAULT_FORM_OPTIONS = { active: false };
+const DEFAULT_MARKETING_OPTIONS = {
+    active: false,
+    title: 'Get the Rogers app',
+    offerText: 'Manage your account, pay your bill and get exclusive offers all in one place.',
+    buttonText: 'Download now',
+    buttonUrl: 'https://www.rogers.com/support/apps',
+};
+const DEFAULT_ANALYTICS_OPTIONS = { active: false };
 export const DEFAULT_KIOSK_POWER_THRESHOLD = 80;
 
 const parseDashboardTimestamp = (value) => {
@@ -263,6 +271,16 @@ export const normalizeKioskData = (kiosks) => {
             },
             formoptions: {
                 active: kiosk.formoptions?.active === true || DEFAULT_FORM_OPTIONS.active,
+            },
+            marketingoptions: {
+                active: kiosk.marketingoptions?.active === true || DEFAULT_MARKETING_OPTIONS.active,
+                title: kiosk.marketingoptions?.title ?? DEFAULT_MARKETING_OPTIONS.title,
+                offerText: kiosk.marketingoptions?.offerText ?? DEFAULT_MARKETING_OPTIONS.offerText,
+                buttonText: kiosk.marketingoptions?.buttonText ?? DEFAULT_MARKETING_OPTIONS.buttonText,
+                buttonUrl: kiosk.marketingoptions?.buttonUrl ?? DEFAULT_MARKETING_OPTIONS.buttonUrl,
+            },
+            analyticsoptions: {
+                active: kiosk.analyticsoptions?.active === true || DEFAULT_ANALYTICS_OPTIONS.active,
             },
             pricing: kiosk.pricing || {},
             ui: kiosk.ui || {},

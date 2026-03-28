@@ -104,6 +104,23 @@ if (!msg.payload?.timerequested || !msg._statusStationId) {
     return null;
 }
 
+function normalizeOptionGroup(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        return { active: false };
+    }
+
+    const normalized = {
+        ...value,
+        active: value.active === true
+    };
+
+    if (!normalized.active) {
+        return { active: false };
+    }
+
+    return normalized;
+}
+
 const stationId = msg._statusStationId;
 const station = msg.kioskDoc;
 
@@ -114,6 +131,12 @@ if (!station) {
         action: 'status',
         status: 'offline',
         formoptions: {
+            active: false
+        },
+        marketingoptions: {
+            active: false
+        },
+        analyticsoptions: {
             active: false
         },
         vendbattery: null,
@@ -131,13 +154,9 @@ const hardware = {
     gateway: station?.hardware?.gateway ?? null,
     gatewayoptions: station?.hardware?.gatewayoptions ?? null
 };
-const formoptions = station.formoptions && typeof station.formoptions === 'object'
-    ? {
-        active: station.formoptions?.active === true
-    }
-    : {
-        active: false
-    };
+const formoptions = normalizeOptionGroup(station.formoptions);
+const marketingoptions = normalizeOptionGroup(station.marketingoptions);
+const analyticsoptions = normalizeOptionGroup(station.analyticsoptions);
 
 let latestModuleTime = 0;
 const modules = Array.isArray(station.modules) ? station.modules : [];
@@ -259,6 +278,8 @@ msg.payload = {
     pricing,
     hardware,
     formoptions,
+    marketingoptions,
+    analyticsoptions,
     vendbattery: vendBatteryCandidate ? {
         powerlevel: vendBatteryCandidate.batteryLevel,
         slot: vendBatteryCandidate.position,

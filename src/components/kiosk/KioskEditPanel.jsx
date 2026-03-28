@@ -15,6 +15,14 @@ import KioskControlPanel from './KioskControlPanel';
 const isNewBoundKioskStation = (stationid) => /^(CA|FR|US)8\d{3}$/.test(String(stationid || '').trim().toUpperCase());
 const DEFAULT_WIFI = { name: 'chargerent', password: 'Charger33' };
 const DEFAULT_FORM_OPTIONS = { active: false };
+const DEFAULT_MARKETING_OPTIONS = {
+    active: false,
+    title: 'Get the Rogers app',
+    offerText: 'Manage your account, pay your bill and get exclusive offers all in one place.',
+    buttonText: 'Download now',
+    buttonUrl: 'https://www.rogers.com/support/apps',
+};
+const DEFAULT_ANALYTICS_OPTIONS = { active: false };
 const getInitialHardware = (kiosk) => ({
     ...(kiosk?.hardware || {}),
     power: getKioskPowerThreshold(kiosk),
@@ -105,10 +113,14 @@ function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersi
     const addressFieldName = usesNewSchemaInfo ? 'address' : 'stationaddress';
     const initialWifi = { ...DEFAULT_WIFI, ...(kiosk.wifi || {}) };
     const initialFormOptions = { ...DEFAULT_FORM_OPTIONS, ...(kiosk.formoptions || {}) };
+    const initialMarketingOptions = { ...DEFAULT_MARKETING_OPTIONS, ...(kiosk.marketingoptions || {}) };
+    const initialAnalyticsOptions = { ...DEFAULT_ANALYTICS_OPTIONS, ...(kiosk.analyticsoptions || {}) };
     const [formData, setFormData] = useState({
         info: getInitialInfo(kiosk),
         wifi: initialWifi,
         formoptions: initialFormOptions,
+        marketingoptions: initialMarketingOptions,
+        analyticsoptions: initialAnalyticsOptions,
         hardware: getInitialHardware(kiosk),
         pricing: kiosk.pricing || {},
         ui: kiosk.ui || {}
@@ -117,6 +129,8 @@ function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersi
         info: getInitialInfo(kiosk),
         wifi: initialWifi,
         formoptions: initialFormOptions,
+        marketingoptions: initialMarketingOptions,
+        analyticsoptions: initialAnalyticsOptions,
         hardware: getInitialHardware(kiosk),
         pricing: kiosk.pricing || {},
         ui: kiosk.ui || {}
@@ -145,6 +159,8 @@ function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersi
             info: initialInfo,
             wifi: { ...DEFAULT_WIFI, ...(kiosk.wifi || {}) },
             formoptions: { ...DEFAULT_FORM_OPTIONS, ...(kiosk.formoptions || {}) },
+            marketingoptions: { ...DEFAULT_MARKETING_OPTIONS, ...(kiosk.marketingoptions || {}) },
+            analyticsoptions: { ...DEFAULT_ANALYTICS_OPTIONS, ...(kiosk.analyticsoptions || {}) },
             hardware: getInitialHardware(kiosk),
             pricing: initialPricing,
             ui: kiosk.ui || {}
@@ -153,6 +169,8 @@ function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersi
             info: initialInfo,
             wifi: { ...DEFAULT_WIFI, ...(kiosk.wifi || {}) },
             formoptions: { ...DEFAULT_FORM_OPTIONS, ...(kiosk.formoptions || {}) },
+            marketingoptions: { ...DEFAULT_MARKETING_OPTIONS, ...(kiosk.marketingoptions || {}) },
+            analyticsoptions: { ...DEFAULT_ANALYTICS_OPTIONS, ...(kiosk.analyticsoptions || {}) },
             hardware: getInitialHardware(kiosk),
             pricing: initialPricing,
             ui: kiosk.ui || {}
@@ -178,7 +196,7 @@ function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersi
 
         // By default, convert string values to uppercase before setting state.
         // The `process` flag can be set to false to skip this.
-        if (process && typeof processedValue === 'string' && section !== 'wifi') {
+        if (process && typeof processedValue === 'string' && section !== 'wifi' && section !== 'marketingoptions') {
             processedValue = processedValue.toUpperCase();
         }
 
@@ -294,6 +312,20 @@ function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersi
                 {usesNewSchemaInfo && (
                     <Section title="Form Options" sectionKey="formoptions" isOpen={openSection === 'formoptions'} onToggle={handleToggleSection} onSave={handleSave} data={formData.formoptions} isChanged={JSON.stringify(formData.formoptions) !== JSON.stringify(originalData.formoptions)}>
                         <FormToggle label="Active" name="active" checked={formData.formoptions?.active} section="formoptions" onDataChange={onDataChange} />
+                    </Section>
+                )}
+                {usesNewSchemaInfo && (
+                    <Section title="Marketing Options" sectionKey="marketingoptions" isOpen={openSection === 'marketingoptions'} onToggle={handleToggleSection} onSave={handleSave} data={formData.marketingoptions} isChanged={JSON.stringify(formData.marketingoptions) !== JSON.stringify(originalData.marketingoptions)}>
+                        <FormToggle label="Active" name="active" checked={formData.marketingoptions?.active} section="marketingoptions" onDataChange={onDataChange} />
+                        <FormInput label="Title" name="title" value={formData.marketingoptions?.title} section="marketingoptions" onDataChange={onDataChange} />
+                        <FormInput label="Offer Text" name="offerText" value={formData.marketingoptions?.offerText} section="marketingoptions" onDataChange={onDataChange} />
+                        <FormInput label="Button Text" name="buttonText" value={formData.marketingoptions?.buttonText} section="marketingoptions" onDataChange={onDataChange} />
+                        <FormInput label="Button URL" name="buttonUrl" value={formData.marketingoptions?.buttonUrl} section="marketingoptions" onDataChange={onDataChange} />
+                    </Section>
+                )}
+                {usesNewSchemaInfo && (
+                    <Section title="Analytics Options" sectionKey="analyticsoptions" isOpen={openSection === 'analyticsoptions'} onToggle={handleToggleSection} onSave={handleSave} data={formData.analyticsoptions} isChanged={JSON.stringify(formData.analyticsoptions) !== JSON.stringify(originalData.analyticsoptions)}>
+                        <FormToggle label="Active" name="active" checked={formData.analyticsoptions?.active} section="analyticsoptions" onDataChange={onDataChange} />
                     </Section>
                 )}
                 <Section title="Hardware" sectionKey="hardware" isOpen={openSection === 'hardware'} onToggle={handleToggleSection} onSave={handleSave} data={formData.hardware} isChanged={JSON.stringify(formData.hardware) !== JSON.stringify(originalData.hardware)}>

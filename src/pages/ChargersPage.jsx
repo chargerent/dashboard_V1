@@ -1,9 +1,10 @@
 // src/pages/ChargersPage.jsx
 
-import { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import ConfirmationModal from '../components/UI/ConfirmationModal';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
 import { formatDateTime, formatDuration } from '../utils/dateFormatter';
+import { textEquals, textIncludes, toText } from '../utils/text';
 
 const ChargerCard = ({ charger, t, onCommand, onNavigateToRentals, onNavigateToDashboard }) => {
     const [showRentals, setShowRentals] = useState(false);
@@ -198,8 +199,8 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
         // 1. Create a map of all chargers currently in any kiosk for quick lookup.
         const kioskChargerLocations = new Map();
         const clientKiosks = clientInfo.role === 'partner'
-            ? (kioskData || []).filter(k => k.info.rep?.toLowerCase() === clientInfo.clientId?.toLowerCase())
-            : (kioskData || []).filter(k => k.info.client === clientInfo.clientId);
+            ? (kioskData || []).filter(k => textEquals(k.info.rep, clientInfo.clientId))
+            : (kioskData || []).filter(k => textEquals(k.info.client, clientInfo.clientId));
 
         const kiosksToProcess = clientInfo.isAdmin ? kioskData : clientKiosks;
 
@@ -228,9 +229,9 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
             // Filter rentals based on client permissions, similar to RentalsPage
             if (!clientInfo.isAdmin) {
                 if (clientInfo.role === 'partner') {
-                    clientRentals = rentalData.filter(r => r.repId?.toLowerCase() === clientInfo.clientId?.toLowerCase());
+                    clientRentals = rentalData.filter(r => textEquals(r.repId, clientInfo.clientId));
                 } else {
-                    clientRentals = rentalData.filter(r => r.clientId === clientInfo.clientId);
+                    clientRentals = rentalData.filter(r => textEquals(r.clientId, clientInfo.clientId));
                 }
             }
 
@@ -238,11 +239,12 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
             const sortedRentals = [...clientRentals].sort((a, b) => new Date(b.rentalTime) - new Date(a.rentalTime));
 
             for (const rental of clientRentals) {
-                if (!rental.sn) continue;
+                const chargerSn = toText(rental.sn);
+                if (!chargerSn) continue;
 
-                if (!chargerMap.has(rental.sn)) {
-                    chargerMap.set(rental.sn, {
-                        sn: rental.sn,
+                if (!chargerMap.has(chargerSn)) {
+                    chargerMap.set(chargerSn, {
+                        sn: chargerSn,
                         totalRentals: 0,
                         shortRentals: 0,
                         status: 'unknown',
@@ -255,7 +257,7 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
                     });
                 }
 
-                const charger = chargerMap.get(rental.sn);
+                const charger = chargerMap.get(chargerSn);
                 charger.totalRentals += 1;
                 if (rental.rentalPeriod && rental.rentalPeriod < 5 * 60 * 1000) {
                     charger.shortRentals += 1;
@@ -265,8 +267,9 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
             
             // 2. Determine last rental info for all chargers
             for (const rental of sortedRentals) {
-                if (!rental.sn) continue;
-                const charger = chargerMap.get(rental.sn);
+                const chargerSn = toText(rental.sn);
+                if (!chargerSn) continue;
+                const charger = chargerMap.get(chargerSn);
                 
                 // Set last rental time only if it hasn't been set yet (because of the sort)
                 if (charger && !charger.lastRentalTime) {
@@ -328,8 +331,8 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
 
         const lowercasedSearch = searchTerm.toLowerCase();
         return filtered.filter(charger =>
-            (charger.sn && charger.sn.toLowerCase().includes(lowercasedSearch)) ||
-            (charger.location?.stationId && charger.location.stationId.toLowerCase().includes(lowercasedSearch))
+            textIncludes(charger.sn, lowercasedSearch) ||
+            textIncludes(charger.location?.stationId, lowercasedSearch)
         );
     }, [chargers, searchTerm, activeFilter]);
 
