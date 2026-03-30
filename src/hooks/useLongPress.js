@@ -8,6 +8,11 @@ const useLongPress = (
 ) => {
     const timeout = useRef();
     const pressHandled = useRef(false);
+    const preventDefault = useCallback((event) => {
+        if (event.cancelable) {
+            event.preventDefault();
+        }
+    }, []);
 
     const start = useCallback(
         event => {
@@ -40,8 +45,6 @@ const useLongPress = (
             event.preventDefault();
         }
     }, []);
-
-    const preventDefault = e => e.cancelable && e.preventDefault();
 
     return {
         onMouseDown: start,

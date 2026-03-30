@@ -1,5 +1,5 @@
 // src/pages/AdminPage.jsx
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import ConfirmationModal from '../components/UI/ConfirmationModal.jsx';
 import LoadingSpinner from '../components/UI/LoadingSpinner.jsx';
 import ClientAdminCard from './ClientAdminCard.jsx';

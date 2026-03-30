@@ -1,14 +1,11 @@
 // scripts/compile-schemas.js
 import fs from 'fs';
 import path from 'path';
-import url from 'url';
 import Ajv from 'ajv';
 import standaloneCode from 'ajv/dist/standalone/index.js';
 
 console.log('🚀 Running pre-build schema compilation...');
 
-// Since we are running this from the root, we can use process.cwd()
-const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
 const schemaPath = path.join(process.cwd(), 'src', 'schemas.json');
 
 if (!fs.existsSync(schemaPath)) {

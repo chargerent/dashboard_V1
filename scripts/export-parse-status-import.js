@@ -11,7 +11,7 @@ const outputPath = path.join(__dirname, 'parse-status-firebase-import.json');
 const source = JSON.parse(fs.readFileSync(sourcePath, 'utf8'));
 
 const sourceGroupId = 'b45eac58d0898b94';
-const sourceTabId = '940482972d2ca412';
+const _sourceTabId = '940482972d2ca412';
 
 const targetTabId = 'ps-import-tab';
 const targetGroupId = 'ps-import-group';

@@ -1,6 +1,6 @@
 // src/pages/ChargersPage.jsx
 
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import ConfirmationModal from '../components/UI/ConfirmationModal';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
 import { formatDateTime, formatDuration } from '../utils/dateFormatter';
@@ -181,13 +181,7 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
             .join('|');
     }, [kioskData]);
 
-    // Always-fresh ref so the chargers memo can read kioskData without it
-    // being a reactive dependency (avoids recalculating on every heartbeat).
-    const kioskDataRef = useRef(kioskData);
-    kioskDataRef.current = kioskData;
-
     const chargers = useMemo(() => {
-        const kioskData = kioskDataRef.current;
         if (!rentalData || !kioskData) {
             return [];
         }
@@ -310,7 +304,6 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
 
 
         return Array.from(chargerMap.values()).sort((a, b) => a.sn.localeCompare(b.sn));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [rentalData, kioskChargerFingerprint, clientInfo]);
 
     const filteredChargers = useMemo(() => {

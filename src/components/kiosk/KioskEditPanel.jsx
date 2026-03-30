@@ -10,19 +10,70 @@ import {
     FormColorPicker
 } from '../forms/FormFields.jsx';
 import { getKioskPowerThreshold, isNewSchemaKiosk, normalizeKioskInfoForSchema } from '../../utils/helpers';
-import KioskControlPanel from './KioskControlPanel';
 
 const isNewBoundKioskStation = (stationid) => /^(CA|FR|US)8\d{3}$/.test(String(stationid || '').trim().toUpperCase());
 const DEFAULT_WIFI = { name: 'chargerent', password: 'Charger33' };
 const DEFAULT_FORM_OPTIONS = { active: false };
+const MARKETING_OPTION_LANGUAGES = [
+    ['english', 'English'],
+    ['french', 'French'],
+    ['spanish', 'Spanish'],
+    ['german', 'German'],
+    ['italian', 'Italian'],
+    ['portuguese', 'Portuguese'],
+];
 const DEFAULT_MARKETING_OPTIONS = {
-    active: false,
-    title: 'Get the Rogers app',
-    offerText: 'Manage your account, pay your bill and get exclusive offers all in one place.',
-    buttonText: 'Download now',
+    active: true,
+    title: {
+        english: 'Get the Rogers app',
+        french: "Obtenez l'application Rogers",
+        spanish: 'Obtén la aplicación Rogers',
+        german: 'Holen Sie sich die Rogers App',
+        italian: "Scarica l'app Rogers",
+        portuguese: 'Baixe o aplicativo Rogers',
+    },
+    offerText: {
+        english: 'Manage your account, pay your bill and get exclusive offers all in one place.',
+        french: "Gérez votre compte, payez votre facture et profitez d'offres exclusives en un seul endroit.",
+        spanish: 'Administra tu cuenta, paga tu factura y obtén ofertas exclusivas en un solo lugar.',
+        german: 'Verwalten Sie Ihr Konto, bezahlen Sie Ihre Rechnung und erhalten Sie exklusive Angebote an einem Ort.',
+        italian: 'Gestisci il tuo account, paga la bolletta e accedi a offerte esclusive in un unico posto.',
+        portuguese: 'Gerencie sua conta, pague sua fatura e acesse ofertas exclusivas em um só lugar.',
+    },
+    buttonText: {
+        english: 'Download now',
+        french: 'Télécharger maintenant',
+        spanish: 'Descargar ahora',
+        german: 'Jetzt herunterladen',
+        italian: 'Scarica ora',
+        portuguese: 'Baixar agora',
+    },
     buttonUrl: 'https://www.rogers.com/support/apps',
 };
 const DEFAULT_ANALYTICS_OPTIONS = { active: false };
+const isPlainObject = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
+const mergeMarketingLocaleValues = (value, defaults) => {
+    if (typeof value === 'string') {
+        return { ...defaults, english: value };
+    }
+
+    if (isPlainObject(value)) {
+        return { ...defaults, ...value };
+    }
+
+    return { ...defaults };
+};
+const getInitialMarketingOptions = (kiosk) => {
+    const marketingoptions = isPlainObject(kiosk?.marketingoptions) ? kiosk.marketingoptions : {};
+
+    return {
+        active: marketingoptions.active == null ? DEFAULT_MARKETING_OPTIONS.active : marketingoptions.active === true,
+        buttonUrl: marketingoptions.buttonUrl ?? DEFAULT_MARKETING_OPTIONS.buttonUrl,
+        title: mergeMarketingLocaleValues(marketingoptions.title, DEFAULT_MARKETING_OPTIONS.title),
+        offerText: mergeMarketingLocaleValues(marketingoptions.offerText, DEFAULT_MARKETING_OPTIONS.offerText),
+        buttonText: mergeMarketingLocaleValues(marketingoptions.buttonText, DEFAULT_MARKETING_OPTIONS.buttonText),
+    };
+};
 const getInitialHardware = (kiosk) => ({
     ...(kiosk?.hardware || {}),
     power: getKioskPowerThreshold(kiosk),
@@ -107,13 +158,13 @@ const calculateRateArray = (pricing) => {
     return rentprice;
 };
 
-function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersion, serverFlowVersion }) {
+function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVersion, _serverFlowVersion }) {
     const isNewBoundKiosk = isNewBoundKioskStation(kiosk?.stationid);
     const usesNewSchemaInfo = isV2Kiosk(kiosk);
     const addressFieldName = usesNewSchemaInfo ? 'address' : 'stationaddress';
     const initialWifi = { ...DEFAULT_WIFI, ...(kiosk.wifi || {}) };
     const initialFormOptions = { ...DEFAULT_FORM_OPTIONS, ...(kiosk.formoptions || {}) };
-    const initialMarketingOptions = { ...DEFAULT_MARKETING_OPTIONS, ...(kiosk.marketingoptions || {}) };
+    const initialMarketingOptions = getInitialMarketingOptions(kiosk);
     const initialAnalyticsOptions = { ...DEFAULT_ANALYTICS_OPTIONS, ...(kiosk.analyticsoptions || {}) };
     const [formData, setFormData] = useState({
         info: getInitialInfo(kiosk),
@@ -159,7 +210,7 @@ function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersi
             info: initialInfo,
             wifi: { ...DEFAULT_WIFI, ...(kiosk.wifi || {}) },
             formoptions: { ...DEFAULT_FORM_OPTIONS, ...(kiosk.formoptions || {}) },
-            marketingoptions: { ...DEFAULT_MARKETING_OPTIONS, ...(kiosk.marketingoptions || {}) },
+            marketingoptions: getInitialMarketingOptions(kiosk),
             analyticsoptions: { ...DEFAULT_ANALYTICS_OPTIONS, ...(kiosk.analyticsoptions || {}) },
             hardware: getInitialHardware(kiosk),
             pricing: initialPricing,
@@ -169,7 +220,7 @@ function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersi
             info: initialInfo,
             wifi: { ...DEFAULT_WIFI, ...(kiosk.wifi || {}) },
             formoptions: { ...DEFAULT_FORM_OPTIONS, ...(kiosk.formoptions || {}) },
-            marketingoptions: { ...DEFAULT_MARKETING_OPTIONS, ...(kiosk.marketingoptions || {}) },
+            marketingoptions: getInitialMarketingOptions(kiosk),
             analyticsoptions: { ...DEFAULT_ANALYTICS_OPTIONS, ...(kiosk.analyticsoptions || {}) },
             hardware: getInitialHardware(kiosk),
             pricing: initialPricing,
@@ -267,7 +318,7 @@ function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersi
         setOpenSection(openSection === section ? null : section);
     };
 
-    const handleSave = (section, data) => {
+    const handleSave = (section, _data) => {
         const nextFormData = {
             ...formData,
             info: normalizeKioskInfoForSchema(formData.info, usesNewSchemaInfo),
@@ -317,10 +368,52 @@ function KioskEditPanel({ kiosk, onSave, onCommand, clientInfo, t, serverUiVersi
                 {usesNewSchemaInfo && (
                     <Section title="Marketing Options" sectionKey="marketingoptions" isOpen={openSection === 'marketingoptions'} onToggle={handleToggleSection} onSave={handleSave} data={formData.marketingoptions} isChanged={JSON.stringify(formData.marketingoptions) !== JSON.stringify(originalData.marketingoptions)}>
                         <FormToggle label="Active" name="active" checked={formData.marketingoptions?.active} section="marketingoptions" onDataChange={onDataChange} />
-                        <FormInput label="Title" name="title" value={formData.marketingoptions?.title} section="marketingoptions" onDataChange={onDataChange} />
-                        <FormInput label="Offer Text" name="offerText" value={formData.marketingoptions?.offerText} section="marketingoptions" onDataChange={onDataChange} />
-                        <FormInput label="Button Text" name="buttonText" value={formData.marketingoptions?.buttonText} section="marketingoptions" onDataChange={onDataChange} />
                         <FormInput label="Button URL" name="buttonUrl" value={formData.marketingoptions?.buttonUrl} section="marketingoptions" onDataChange={onDataChange} />
+                        <div className="rounded-md border border-gray-200 p-4">
+                            <h4 className="mb-3 text-sm font-semibold text-gray-700">Title</h4>
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                {MARKETING_OPTION_LANGUAGES.map(([key, label]) => (
+                                    <FormInput
+                                        key={`marketing-title-${key}`}
+                                        label={label}
+                                        name={`title.${key}`}
+                                        value={formData.marketingoptions?.title?.[key]}
+                                        section="marketingoptions"
+                                        onDataChange={onDataChange}
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                        <div className="rounded-md border border-gray-200 p-4">
+                            <h4 className="mb-3 text-sm font-semibold text-gray-700">Offer Text</h4>
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                {MARKETING_OPTION_LANGUAGES.map(([key, label]) => (
+                                    <FormInput
+                                        key={`marketing-offer-${key}`}
+                                        label={label}
+                                        name={`offerText.${key}`}
+                                        value={formData.marketingoptions?.offerText?.[key]}
+                                        section="marketingoptions"
+                                        onDataChange={onDataChange}
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                        <div className="rounded-md border border-gray-200 p-4">
+                            <h4 className="mb-3 text-sm font-semibold text-gray-700">Button Text</h4>
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                                {MARKETING_OPTION_LANGUAGES.map(([key, label]) => (
+                                    <FormInput
+                                        key={`marketing-button-${key}`}
+                                        label={label}
+                                        name={`buttonText.${key}`}
+                                        value={formData.marketingoptions?.buttonText?.[key]}
+                                        section="marketingoptions"
+                                        onDataChange={onDataChange}
+                                    />
+                                ))}
+                            </div>
+                        </div>
                     </Section>
                 )}
                 {usesNewSchemaInfo && (

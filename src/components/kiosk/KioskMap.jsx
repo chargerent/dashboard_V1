@@ -1,6 +1,4 @@
-import React from 'react';
-
-const KioskMap = ({ kiosks, selectedKiosk, onKioskSelect }) => {
+const KioskMap = ({ kiosks }) => {
     // A real implementation would use a mapping library like Leaflet or Google Maps.
     // This is a placeholder to resolve the import error and provide a visual cue.
     return (

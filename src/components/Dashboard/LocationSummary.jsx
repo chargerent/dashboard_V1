@@ -1,6 +1,6 @@
 // src/components/Dashboard/LocationSummary.jsx
 
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import { getKioskInfoAddress, getKioskPowerThreshold, isKioskOnline } from '../../utils/helpers';
 import RentalStats from './RentalStats';
 
@@ -56,10 +56,9 @@ const CommissionStats = ({ clientInfo, accountMTD, accountYTD, repMTD, repYTD, s
     );
 };
 
-function LocationSummary({ location, kiosks, chargerThreshold, clientInfo, rentalData, referenceTime, t, onShowRentalDetails }) {
+function LocationSummary({ location, kiosks, _chargerThreshold, clientInfo, rentalData, referenceTime, t, onShowRentalDetails }) {
     const summary = useMemo(() => {
         const leaseKiosks = kiosks.filter(k => k.pricing?.kioskmode === 'LEASE');
-        const hasLeaseKiosks = leaseKiosks.length > 0;
         const totalLeaseRevenue = leaseKiosks.reduce((sum, k) => sum + (Number(k.pricing?.leaseamount) || 0), 0);
         const currencySymbol = kiosks[0]?.pricing?.symbol || '$';
 
@@ -190,7 +189,7 @@ function LocationSummary({ location, kiosks, chargerThreshold, clientInfo, renta
                     subLabel={`${summary.fullChargers} ${t('full')}`}
                 />
                 {canShowRentalInfo && (
-                    <React.Fragment>
+                    <>
                         <StatDisplay
                             value={summary.rentedChargers}
                             label={t('currently_rented')}
@@ -199,7 +198,7 @@ function LocationSummary({ location, kiosks, chargerThreshold, clientInfo, renta
                             value={summary.missingChargers}
                             label={t('missing_chargers')}
                         />
-                    </React.Fragment>
+                    </>
                 )}
             </div>
             {canShowRentalInfo && (

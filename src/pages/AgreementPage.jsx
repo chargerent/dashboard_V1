@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useMemo } from "react";
+/* eslint-disable react/no-unescaped-entities */
+import { useState, useEffect, useMemo } from "react";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { FormMultiSwitch } from "../components/forms/FormFields.jsx";
 
-const EventLegalText = ({ t }) => (
+const EventLegalText = ({ _t }) => (
   <>
     <p>
       This agreement is entered into by and between the company stated above
@@ -207,7 +208,7 @@ const EventLegalText = ({ t }) => (
   </>
 );
 
-const GenesisLegalText = ({ t }) => (
+const GenesisLegalText = ({ _t }) => (
   <>
     <p>
       This agreement is entered into by and between the company stated above
@@ -419,7 +420,7 @@ const RevShareLegalText = ({ t }) => (
     <h3 className="font-bold text-sm">{t("recitals")}</h3>
     <p>{t("recitals_content")}</p>
     {Array.from({ length: 18 }, (_, i) => i + 1).map((i) => (
-      <React.Fragment key={i}>
+      <div key={i}>
         <h3 className="font-bold text-sm pt-2">
           {t(`article_${i}_title`)}
         </h3>
@@ -450,7 +451,7 @@ const RevShareLegalText = ({ t }) => (
         ) : (
           <p>{t(`article_${i}_content`)}</p>
         )}
-      </React.Fragment>
+      </div>
     ))}
   </>
 );
@@ -461,7 +462,7 @@ const LeaseLegalText = ({ t }) => (
     <h3 className="font-bold text-sm">{t("recitals")}</h3>
     <p>{t("recitals_content")}</p>
     {Array.from({ length: 18 }, (_, i) => i + 1).map((i) => (
-      <React.Fragment key={i}>
+      <div key={i}>
         <h3 className="font-bold text-sm pt-2">
           {t(`article_${i}_title`)}
         </h3>
@@ -475,7 +476,7 @@ const LeaseLegalText = ({ t }) => (
             <p>{t("article_6_content_2")}</p>
           </>
         )}
-      </React.Fragment>
+      </div>
     ))}
   </>
 );

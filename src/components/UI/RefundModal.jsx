@@ -1,7 +1,7 @@
 // src/components/UI/RefundModal.jsx
 import { useState } from 'react';
 
-export default function RefundModal({ isOpen, onClose, onConfirm, t, rental }) {
+export default function RefundModal({ isOpen, onClose, onConfirm, t, _rental }) {
     const [amount, setAmount] = useState('');
     const [error, setError] = useState('');
 

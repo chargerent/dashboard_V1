@@ -27,27 +27,12 @@ export default function RentalDetailView({ kiosk, period, rentalData, onClose, t
             .sort((a, b) => new Date(b.rentalTime) - new Date(a.rentalTime));
     }, [kiosk.stationid, period, rentalData]);
 
-    const handleRefundClick = (rental) => {
-        setSelectedRental(rental);
-        setShowRefundModal(true);
-    };
-
     const handleConfirmRefund = (amount) => {
         if (selectedRental) {
             onCommand(kiosk.stationid, 'refund', null, null, null, { orderId: selectedRental.orderid, amount });
         }
         setShowRefundModal(false);
         setSelectedRental(null);
-    };
-
-    const getStatusChip = (status) => {
-        const statusStyles = {
-            rented: 'bg-blue-100 text-blue-800',
-            returned: 'bg-green-100 text-green-800',
-            lost: 'bg-red-100 text-red-800',
-            refunded: 'bg-purple-100 text-purple-800',
-        };
-        return <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${statusStyles[status] || 'bg-gray-100 text-gray-800'}`}>{t(status)}</span>;
     };
 
     return (

@@ -4,17 +4,18 @@ import { useState, useEffect } from 'react';
 import MultiSwitch from '../utils/MultiSwitch';
 
 const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsList, t, isEditing, editedData, onEdit, onCancel, onSave, onDataChange, onDelete, currentUser, lockoutData, onUnlock }) => {
-    if (!client || !currentUser) return null; // Prevent rendering if client or currentUser is undefined
-
     const [openSection, setOpenSection] = useState(null);
-    const showActiveToggle = String((isEditing ? editedData?.username : client.username) || '').toLowerCase() !== 'chargerent';
-    const canManageActiveState = !!(currentUser?.isAdmin || currentUser?.role === 'admin' || currentUser?.username === 'chargerent');
-    const lockoutDate = lockoutData?.lockedUntil ? new Date(lockoutData.lockedUntil) : null;
-    const isLocked = !!(lockoutDate && !Number.isNaN(lockoutDate.getTime()) && lockoutDate > new Date());
 
     useEffect(() => {
         setOpenSection(null); // Reset open sections when edit mode changes
     }, [isEditing]);
+
+    if (!client || !currentUser) return null; // Prevent rendering if client or currentUser is undefined
+
+    const showActiveToggle = String((isEditing ? editedData?.username : client.username) || '').toLowerCase() !== 'chargerent';
+    const canManageActiveState = !!(currentUser?.isAdmin || currentUser?.role === 'admin' || currentUser?.username === 'chargerent');
+    const lockoutDate = lockoutData?.lockedUntil ? new Date(lockoutData.lockedUntil) : null;
+    const isLocked = !!(lockoutDate && !Number.isNaN(lockoutDate.getTime()) && lockoutDate > new Date());
 
     const toggleSection = (section) => {
         setOpenSection(prev => (prev === section ? null : section));
@@ -48,7 +49,7 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
         return parsed.toLocaleString();
     };
 
-    const SectionButton = ({ section, isEditing }) => (
+    const SectionButton = ({ section, _isEditing }) => (
         <button 
             type="button"
             onClick={() => toggleSection(section)}

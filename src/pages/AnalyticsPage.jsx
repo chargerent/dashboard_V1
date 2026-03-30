@@ -458,11 +458,11 @@ const AnalyticsPage = ({ allStationsData, rentalData, onNavigateToDashboard, onL
 
                         if (name === 'rentalMarker' && sn) {
                           const cumulative = props.payload.cumulativeRentals;
-                          return [<span style={{ color: COLORS.count, fontWeight: 'bold' }}>{value}</span>, `${t('rental')} (SN: ${sn}) — Total: ${cumulative}`];
+                          return [<span key="rental-marker" style={{ color: COLORS.count, fontWeight: 'bold' }}>{value}</span>, `${t('rental')} (SN: ${sn}) — Total: ${cumulative}`];
                         }
                         if (name === 'returnMarker' && sn) {
                           const duration = rentalPeriod ? ` - ${formatMsDuration(rentalPeriod)}` : '';
-                          return [<span style={{ color: COLORS.count, fontWeight: 'bold' }}>{value}</span>, `${t('return')} (SN: ${sn}${duration})`];
+                          return [<span key="return-marker" style={{ color: COLORS.count, fontWeight: 'bold' }}>{value}</span>, `${t('return')} (SN: ${sn}${duration})`];
                         }
                         // Fallback for other lines like count, total, etc.
                         const formattedTime = new Date(originalTimestamp).toLocaleString('en-US', {

@@ -8,7 +8,7 @@ import ConfirmationModal from '../UI/ConfirmationModal';
 
 const API_BASE_URL = ''; // Use relative path, assuming proxy or same host
 
-function KioskManager({ token, t, setSuccessMessage, setErrorMessage }) {
+function KioskManager({ token, t, _setSuccessMessage, setErrorMessage }) {
     const [kiosks, setKiosks] = useState([]);
     const [loading, setLoading] = useState(true);
     const [selectedKioskId, setSelectedKioskId] = useState('');
@@ -132,7 +132,7 @@ function KioskManager({ token, t, setSuccessMessage, setErrorMessage }) {
         });
     }, []);
 
-    const handleKioskSave = useCallback((stationid, section, data) => {
+    const handleKioskSave = useCallback((stationid, _section, _data) => {
         const confirmationText = t('save_info_confirmation');
         // Prepare details for the confirmation modal
         setCommandDetails({

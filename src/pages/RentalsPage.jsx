@@ -1,6 +1,6 @@
 // src/pages/RentalsPage.jsx
 
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { formatDateTime, formatDuration, formatDate } from '../utils/dateFormatter';
 import { normalizeText, textEquals, textIncludes } from '../utils/text';
 import RefundModal from '../components/UI/RefundModal.jsx';

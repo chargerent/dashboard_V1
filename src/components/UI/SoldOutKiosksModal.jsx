@@ -1,6 +1,4 @@
 // src/components/UI/SoldOutKiosksModal.jsx
-import React from 'react';
-
 const SoldOutKiosksModal = ({ isOpen, onClose, soldOutKiosks, t }) => {
     if (!isOpen) return null;
 

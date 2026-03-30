@@ -1,6 +1,6 @@
 // src/components/kiosk/KioskControlPanel.jsx
 
-import React, { useMemo } from 'react';
+import { useMemo } from 'react';
 import { getKioskPowerThreshold } from '../../utils/helpers';
 
 const ControlButton = ({ icon, label, subLabel, onClick, className = '', status, statusColor = 'green', disabled = false }) => (
@@ -24,7 +24,7 @@ const ControlButton = ({ icon, label, subLabel, onClick, className = '', status,
 
 const V2_TYPES = ['CT3', 'CT4', 'CT8', 'CT12', 'CK48'];
 
-function KioskControlPanel({ kiosk, t, onCommand, serverUiVersion, serverFlowVersion, clientInfo, isOnline, disabled = false }) {
+function KioskControlPanel({ kiosk, t, onCommand, serverUiVersion, serverFlowVersion, clientInfo, _isOnline, disabled = false }) {
     const isV2 = V2_TYPES.includes(kiosk.hardware?.type);
     const flowSubLabel = () => {
         const kioskV = kiosk.fversion ? kiosk.fversion.split(' ')[0] : null;
@@ -71,10 +71,10 @@ function KioskControlPanel({ kiosk, t, onCommand, serverUiVersion, serverFlowVer
                 )}
                 {clientInfo.commands.disable && (                    
                     <ControlButton 
-                        onClick={() => onCommand(kiosk.stationid, !!kiosk.disabled ? 'enable' : 'disable')}
+                        onClick={() => onCommand(kiosk.stationid, kiosk.disabled ? 'enable' : 'disable')}
                         disabled={disabled} 
-                        label={!!kiosk.disabled ? t('enable') : t('disable')}
-                        status={!!kiosk.disabled} statusColor="red"
+                        label={kiosk.disabled ? t('enable') : t('disable')}
+                        status={kiosk.disabled} statusColor="red"
                         className="bg-red-100 hover:bg-red-200 text-red-800" 
                         icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>} />
                 )}

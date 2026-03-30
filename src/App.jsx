@@ -1,5 +1,5 @@
 // src/App.jsx
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useIdleTimer } from './hooks/useIdleTimer';
 import InactivityModal from './components/InactivityModal';
 import { subscribeUserToPush } from './push';
@@ -1226,6 +1226,8 @@ function App() {
     }
 
     const hasTestingAccess = clientInfo.username === 'chargerent' || clientInfo.features?.testing === true;
+    const hasReportingAccess = clientInfo.isAdmin || clientInfo.features?.reporting === true;
+    const isRegularReportingUser = !clientInfo.isAdmin && clientInfo.role !== 'partner';
 
     switch (page) {
       case 'admin':
@@ -1306,6 +1308,10 @@ function App() {
           />
         );
       case 'reporting':
+        if (!hasReportingAccess) {
+          return dashboard;
+        }
+
         return (
           <ReportingPage
             onNavigateToDashboard={() => setPage('dashboard')}
@@ -1315,6 +1321,7 @@ function App() {
             rentalData={rentalData}
             allStationsData={allStationsData}
             clientInfo={clientInfo}
+            userMode={isRegularReportingUser}
           />
         );
       case 'analytics':

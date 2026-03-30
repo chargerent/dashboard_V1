@@ -1,6 +1,4 @@
 // src/components/InactivityModal.jsx
-import React from 'react';
-
 const InactivityModal = ({ isOpen, onStay, onLogout, countdown, t }) => {
     if (!isOpen) {
         return null;

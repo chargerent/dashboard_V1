@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import KioskDetailPanel from '../components/kiosk/KioskDetailPanel.jsx';
 
 const previewClientInfo = {

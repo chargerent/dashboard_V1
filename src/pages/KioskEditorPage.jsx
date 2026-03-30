@@ -1,10 +1,9 @@
 // src/pages/KioskEditorPage.jsx
 
-import { useState } from 'react';
 import KioskEditPanel from '../components/kiosk/KioskEditPanel';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
 
-function KioskEditorPage({ token, onNavigateToDashboard, onLogout, t, kioskData, onCommand, commandStatus, onDismissCommandStatus }) {
+function KioskEditorPage({ _token, onNavigateToDashboard, onLogout, t, kioskData, onCommand, commandStatus, onDismissCommandStatus }) {
     // [DEBUG] Log the commandStatus prop every time the component renders
     console.log('[DEBUG] KioskEditorPage rendered. Current commandStatus:', commandStatus);
 

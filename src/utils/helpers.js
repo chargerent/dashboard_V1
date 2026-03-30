@@ -7,14 +7,58 @@ const HAS_TIMEZONE_PATTERN = /(Z|[+-]\d{2}:?\d{2})$/i;
 const DEFAULT_WIFI = { name: 'chargerent', password: 'Charger33' };
 const DEFAULT_FORM_OPTIONS = { active: false };
 const DEFAULT_MARKETING_OPTIONS = {
-    active: false,
-    title: 'Get the Rogers app',
-    offerText: 'Manage your account, pay your bill and get exclusive offers all in one place.',
-    buttonText: 'Download now',
+    active: true,
+    title: {
+        english: 'Get the Rogers app',
+        french: "Obtenez l'application Rogers",
+        spanish: 'Obtén la aplicación Rogers',
+        german: 'Holen Sie sich die Rogers App',
+        italian: "Scarica l'app Rogers",
+        portuguese: 'Baixe o aplicativo Rogers',
+    },
+    offerText: {
+        english: 'Manage your account, pay your bill and get exclusive offers all in one place.',
+        french: "Gérez votre compte, payez votre facture et profitez d'offres exclusives en un seul endroit.",
+        spanish: 'Administra tu cuenta, paga tu factura y obtén ofertas exclusivas en un solo lugar.',
+        german: 'Verwalten Sie Ihr Konto, bezahlen Sie Ihre Rechnung und erhalten Sie exklusive Angebote an einem Ort.',
+        italian: 'Gestisci il tuo account, paga la bolletta e accedi a offerte esclusive in un unico posto.',
+        portuguese: 'Gerencie sua conta, pague sua fatura e acesse ofertas exclusivas em um só lugar.',
+    },
+    buttonText: {
+        english: 'Download now',
+        french: 'Télécharger maintenant',
+        spanish: 'Descargar ahora',
+        german: 'Jetzt herunterladen',
+        italian: 'Scarica ora',
+        portuguese: 'Baixar agora',
+    },
     buttonUrl: 'https://www.rogers.com/support/apps',
 };
 const DEFAULT_ANALYTICS_OPTIONS = { active: false };
 export const DEFAULT_KIOSK_POWER_THRESHOLD = 80;
+const isPlainObject = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
+const mergeLocalizedMarketingValue = (value, defaults) => {
+    if (typeof value === 'string') {
+        return { ...defaults, english: value };
+    }
+
+    if (isPlainObject(value)) {
+        return { ...defaults, ...value };
+    }
+
+    return { ...defaults };
+};
+const normalizeMarketingOptions = (marketingoptions) => {
+    const source = isPlainObject(marketingoptions) ? marketingoptions : {};
+
+    return {
+        active: source.active == null ? DEFAULT_MARKETING_OPTIONS.active : source.active === true,
+        title: mergeLocalizedMarketingValue(source.title, DEFAULT_MARKETING_OPTIONS.title),
+        offerText: mergeLocalizedMarketingValue(source.offerText, DEFAULT_MARKETING_OPTIONS.offerText),
+        buttonText: mergeLocalizedMarketingValue(source.buttonText, DEFAULT_MARKETING_OPTIONS.buttonText),
+        buttonUrl: source.buttonUrl ?? DEFAULT_MARKETING_OPTIONS.buttonUrl,
+    };
+};
 
 const parseDashboardTimestamp = (value) => {
     if (!value) return null;
@@ -272,13 +316,7 @@ export const normalizeKioskData = (kiosks) => {
             formoptions: {
                 active: kiosk.formoptions?.active === true || DEFAULT_FORM_OPTIONS.active,
             },
-            marketingoptions: {
-                active: kiosk.marketingoptions?.active === true || DEFAULT_MARKETING_OPTIONS.active,
-                title: kiosk.marketingoptions?.title ?? DEFAULT_MARKETING_OPTIONS.title,
-                offerText: kiosk.marketingoptions?.offerText ?? DEFAULT_MARKETING_OPTIONS.offerText,
-                buttonText: kiosk.marketingoptions?.buttonText ?? DEFAULT_MARKETING_OPTIONS.buttonText,
-                buttonUrl: kiosk.marketingoptions?.buttonUrl ?? DEFAULT_MARKETING_OPTIONS.buttonUrl,
-            },
+            marketingoptions: normalizeMarketingOptions(kiosk.marketingoptions),
             analyticsoptions: {
                 active: kiosk.analyticsoptions?.active === true || DEFAULT_ANALYTICS_OPTIONS.active,
             },

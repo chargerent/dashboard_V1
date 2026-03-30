@@ -1,5 +1,4 @@
-/* eslint-disable react/prop-types */
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import KioskPanel from '../components/kiosk/kioskPanel';
 import KioskDetailPanel from '../components/kiosk/KioskDetailPanel';
 import KioskEditPanel from '../components/kiosk/KioskEditPanel';

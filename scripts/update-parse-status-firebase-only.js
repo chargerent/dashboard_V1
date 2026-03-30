@@ -151,7 +151,7 @@ function inferTowerType(slotCount) {
 }
 `.trim();
 
-const ct3ParseFunc = `
+const _ct3ParseFunc = `
 ${parseCommonHelpers}
 
 const bytes = toByteArray(msg.payload);
@@ -698,7 +698,7 @@ node.warn(
 return msg;
 `.trim();
 
-const prepareFirebaseUpdateFunc = `
+const _prepareFirebaseUpdateFunc = `
 const station = msg._updatedStation;
 const kioskDoc = msg.kioskDoc;
 

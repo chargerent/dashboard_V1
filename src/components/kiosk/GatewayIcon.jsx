@@ -1,6 +1,6 @@
 // src/components/kiosk/GatewayIcon.jsx
 
-function GatewayIcon({ gateway, t }) {
+function GatewayIcon({ gateway, _t }) {
     const iconSize = "h-4 w-4";
 
     switch (gateway) {

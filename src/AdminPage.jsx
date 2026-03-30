@@ -53,7 +53,7 @@ function AdminPage({ onNavigateToDashboard, onLogout, t, onNavigateToProvisionPa
   const [firebaseUser, setFirebaseUser] = useState(auth.currentUser || null);
 
   const [clients, setClients] = useState([]);
-  const [originalClients, setOriginalClients] = useState([]);
+  const [_originalClients, setOriginalClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 

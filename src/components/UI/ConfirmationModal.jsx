@@ -1,6 +1,6 @@
 // src/components/UI/ConfirmationModal.jsx
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 
 function ConfirmationModal({ isOpen, onClose, onConfirm, details, t }) {
     const [reason, setReason] = useState('');

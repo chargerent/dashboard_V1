@@ -1,4 +1,3 @@
-import React from 'react';
 import { formatDateTime } from '../../utils/dateFormatter';
 
 const InitialStatusPage = ({ offlineKiosksByCountry, onDone, t }) => {

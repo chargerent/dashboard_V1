@@ -52,8 +52,6 @@ function GlobalRentalActivity({ kiosks, rentalData, clientInfo, referenceTime, a
         return finalFilteredRentals;
     }, [rentalData, kiosks, clientInfo, activeFilters]);
 
-    const canShowRentalInfo = clientInfo.features.rentals || clientInfo.features.lease_revenue || clientInfo.features.rental_counts || clientInfo.features.rental_revenue;
-
     return (
         <div className="bg-white p-4 rounded-lg shadow-md mb-8">
             <RentalStats 
