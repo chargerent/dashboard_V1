@@ -26,12 +26,16 @@
             "9b0945aa899cfa6d",
             "4e32b616baeacfe8",
             "b59d741abd1bef05",
-            "f101e6372e70f0dd"
+            "f101e6372e70f0dd",
+            "9b7d5c4e29f1a830",
+            "5e39f0a4c7d26811",
+            "4d19af3b88c2e750",
+            "e7b2c46095da183f"
         ],
         "x": 2094,
         "y": 2151.5,
-        "w": 892,
-        "h": 149.5
+        "w": 966,
+        "h": 188.5
     },
     {
         "id": "ed38194e9a2f3014",
@@ -916,7 +920,8 @@
         "wires": [
             [
                 "9b0945aa899cfa6d",
-                "f101e6372e70f0dd"
+                "f101e6372e70f0dd",
+                "9b7d5c4e29f1a830"
             ]
         ]
     },
@@ -1044,6 +1049,82 @@
         "x": 2450,
         "y": 2240,
         "wires": []
+    },
+    {
+        "id": "9b7d5c4e29f1a830",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "g": "881d95e69c4c5e9c",
+        "name": "Prepare refund rental lookup",
+        "func": "const payload = msg.payload || {};\nconst action = String(payload.action || msg.action || '').trim().toLowerCase();\nconst status = String(payload.refund_status || payload.status || msg.refund_status || msg.status || '').trim().toLowerCase();\nconst successfulStatuses = new Set(['approved', 'refunded', 'succeeded']);\nconst transactionid = String(payload.transactionid || msg.transactionid || '').trim();\n\nif (action !== 'refund' || !successfulStatuses.has(status) || !transactionid) {\n    return null;\n}\n\nmsg._refundConfirmation = {\n    action,\n    status,\n    stationid: String(payload.stationid || msg.stationid || '').trim(),\n    transactionid,\n    amount: payload.refund_amount ?? payload.amount ?? msg.refund_amount ?? msg.amount,\n    time: String(payload.refund_date || payload.time || msg.refund_date || msg.time || '').trim(),\n    admin: String(payload.admin || msg.admin || '').trim()\n};\nmsg.payload = {\n    path: 'rentals',\n    query: [\n        {\n            fieldPath: 'rawid',\n            opStr: '==',\n            value: transactionid\n        }\n    ]\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2450,
+        "y": 2280,
+        "wires": [
+            [
+                "5e39f0a4c7d26811"
+            ]
+        ]
+    },
+    {
+        "id": "5e39f0a4c7d26811",
+        "type": "google-cloud-firestore",
+        "z": "09af597d0b44144e",
+        "g": "881d95e69c4c5e9c",
+        "account": "",
+        "keyFilename": "/home/george/firestore/firestore-key.json",
+        "name": "Query refund rental",
+        "projectId": "node-red-alerts",
+        "mode": "query",
+        "x": 2670,
+        "y": 2280,
+        "wires": [
+            [
+                "4d19af3b88c2e750"
+            ]
+        ]
+    },
+    {
+        "id": "4d19af3b88c2e750",
+        "type": "function",
+        "z": "09af597d0b44144e",
+        "g": "881d95e69c4c5e9c",
+        "name": "Build refunded rental write",
+        "func": "const docs = Array.isArray(msg.payload) ? msg.payload : [];\nconst confirmation = msg._refundConfirmation || {};\nconst transactionid = String(confirmation.transactionid || '').trim();\n\nif (!transactionid) {\n    return null;\n}\n\nconst doc = docs.find((entry) => String(entry?.rawid || entry?.rentalId || entry?.orderid || '').trim() === transactionid) || docs[0] || null;\nif (!doc) {\n    node.warn('No rental found for refund confirmation ' + transactionid);\n    return null;\n}\n\nconst parsedRefundTime = new Date(confirmation.time || Date.now());\nconst refundTime = Number.isNaN(parsedRefundTime.getTime()) ? new Date().toISOString() : parsedRefundTime.toISOString();\nconst existingStatus = String(doc.status || '').trim().toLowerCase();\nconst isOpenRental = existingStatus === 'rented' || !doc.returnTime || existingStatus === 'refunded';\nconst nextStatus = isOpenRental ? 'returned' : (doc.status || 'returned');\nconst nextReturnTime = isOpenRental ? (String(doc.returnTime || '').trim() || refundTime) : doc.returnTime;\nconst rentalTimeMs = Date.parse(String(doc.rentalTime || ''));\nconst returnTimeMs = Date.parse(String(nextReturnTime || ''));\nconst content = {\n    ...doc,\n    rawid: doc.rawid || transactionid,\n    status: nextStatus,\n    refundStatus: confirmation.status || 'refunded',\n    refundAmount: confirmation.amount ?? doc.refundAmount,\n    refundDate: refundTime\n};\n\nif (confirmation.admin) {\n    content.refundAdmin = confirmation.admin;\n}\n\nif (isOpenRental) {\n    content.returnTime = nextReturnTime;\n    content.returnStationid = String(doc.returnStationid || confirmation.stationid || doc.rentalStationid || '').trim();\n    content.returnType = doc.returnType || 'auto-return';\n\n    if (Number.isFinite(rentalTimeMs) && Number.isFinite(returnTimeMs)) {\n        content.rentalPeriod = Math.max(0, returnTimeMs - rentalTimeMs);\n    }\n}\n\nmsg.payload = {\n    path: 'rentals/' + content.rawid,\n    content\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2880,
+        "y": 2280,
+        "wires": [
+            [
+                "e7b2c46095da183f"
+            ]
+        ]
+    },
+    {
+        "id": "e7b2c46095da183f",
+        "type": "google-cloud-firestore",
+        "z": "09af597d0b44144e",
+        "g": "881d95e69c4c5e9c",
+        "account": "",
+        "keyFilename": "/home/george/firestore/firestore-key.json",
+        "name": "Persist refunded rental return",
+        "projectId": "node-red-alerts",
+        "mode": "set",
+        "x": 3000,
+        "y": 2280,
+        "wires": [
+            []
+        ]
     },
     {
         "id": "55a17df606d2a350",

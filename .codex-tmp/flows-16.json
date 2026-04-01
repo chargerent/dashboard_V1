@@ -1,0 +1,314 @@
+[
+    {
+        "id": "93a17619d9a74af8",
+        "type": "group",
+        "z": "21e27655ab0bb194",
+        "name": "process refund from dashboard button",
+        "style": {
+            "stroke": "#ff0000",
+            "fill": "#ffbfbf",
+            "label": true,
+            "color": "#000000"
+        },
+        "nodes": [
+            "75fa86343ccbcf71",
+            "c2d1725aaa5f01dd",
+            "d62193c811a3a330",
+            "560bd7df4e5d8c12",
+            "acfe30805a7c9c1f",
+            "56bf9e395382b77d",
+            "6663a6a1d036640a",
+            "7e7c4a2fe97421d5",
+            "61c497cf83d66324",
+            "d2af9ccab188549f",
+            "87828ee391ca9484",
+            "dcec4101ad5539be",
+            "d2e9a5e4da5c4d53"
+        ],
+        "x": 214,
+        "y": 1279,
+        "w": 1662,
+        "h": 162
+    },
+    {
+        "id": "75fa86343ccbcf71",
+        "type": "function",
+        "z": "21e27655ab0bb194",
+        "g": "93a17619d9a74af8",
+        "name": "Build rental query for refund",
+        "func": "// Build a query for rentals collection based on the first 13 characters of transactionid\nconst p = msg.payload || {};\nconst fullId = String(p.transactionid || msg.transactionid || '');\nconst shortId = fullId.substring(0, 13);\n\nif (!shortId) {\n    node.error('❌ Missing transactionid');\n    return null;\n}\n\nmsg._orderid = shortId;\nmsg._refundStatus = p.status || msg.status || 'unknown';\nmsg._refundAmount = p.amount ?? msg.amount ?? 'unknown';\nmsg._refundDate = p.time || msg.time || new Date().toISOString();\nmsg._refundStationid = p.stationid || msg.stationid || '';\nmsg._refundAdmin = p.admin || msg.admin || '';\n\nmsg.payload = {\n    path: 'rentals',\n    query: [\n        { fieldPath: 'orderid', opStr: '==', value: shortId }\n    ]\n};\n\nnode.status({ fill: 'blue', shape: 'dot', text: `Query ${shortId}` });\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 420,
+        "y": 1320,
+        "wires": [
+            [
+                "560bd7df4e5d8c12"
+            ]
+        ]
+    },
+    {
+        "id": "c2d1725aaa5f01dd",
+        "type": "function",
+        "z": "21e27655ab0bb194",
+        "g": "93a17619d9a74af8",
+        "name": "Prepare refund merge update",
+        "func": "// --- Merge refund fields, mark returned, and adjust totalCharged ---\n\nconst results = msg.payload;\nconst orderid = msg._orderid;\nconst refundStatus = String(msg._refundStatus || 'unknown').trim() || 'unknown';\nconst refundAmountRaw = msg._refundAmount;\nconst refundDate = String(msg._refundDate || new Date().toISOString()).trim() || new Date().toISOString();\nconst refundStationid = String(msg._refundStationid || '').trim();\nconst refundAdmin = String(msg._refundAdmin || '').trim();\n\nif (!Array.isArray(results) || results.length === 0) {\n    node.warn(`⚠️ No rental found for orderid ${orderid}`);\n    return null;\n}\n\nconst rental = results[0];\nconst currentTotal = parseFloat(rental.totalCharged) || 0;\nconst normalizedRefundAmount = String(refundAmountRaw ?? '').trim().toLowerCase();\nconst isFullRefund = normalizedRefundAmount === 'full';\nconst numericRefundAmount = isFullRefund\n    ? currentTotal\n    : Math.max(parseFloat(refundAmountRaw) || 0, 0);\nconst updatedTotal = Math.max(currentTotal - numericRefundAmount, 0);\nconst returnTime = String(rental.returnTime || '').trim() || refundDate;\nconst rentalStart = Date.parse(String(rental.rentedAt || rental.rentalTime || ''));\nconst rentalEnd = Date.parse(returnTime);\n\nconst updatedData = {\n    status: 'returned',\n    refundStatus,\n    refundAmount: isFullRefund ? 'full' : numericRefundAmount.toFixed(2),\n    refundDate,\n    totalCharged: updatedTotal,\n    returnTime,\n    returnStationid: rental.returnStationid || refundStationid || rental.rentalStationid || '',\n    returnModuleid: rental.returnModuleid || rental.rentalModuleid || '',\n    returnSlotid: rental.returnSlotid ?? rental.rentalSlotid ?? 0,\n    returnLocation: rental.returnLocation || rental.rentalLocation || '',\n    returnPlace: rental.returnPlace || rental.rentalPlace || '',\n    returnPower: rental.returnPower || rental.rentPower || '',\n    returnType: rental.returnType || 'auto-return'\n};\n\nif (refundAdmin) {\n    updatedData.refundAdmin = refundAdmin;\n}\n\nif (Number.isFinite(rentalStart) && Number.isFinite(rentalEnd)) {\n    updatedData.rentalPeriod = Math.max(rentalEnd - rentalStart, 0);\n}\n\nmsg.payload = {\n    path: `rentals/${orderid}`,\n    content: updatedData,\n    merge: true\n};\n\nconst refundLabel = isFullRefund ? 'full' : `$${numericRefundAmount.toFixed(2)}`;\nnode.status({\n    fill: 'green',\n    shape: 'dot',\n    text: `Refund ${refundLabel} → returned / total $${updatedTotal.toFixed(2)}`\n});\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1210,
+        "y": 1320,
+        "wires": [
+            [
+                "d62193c811a3a330"
+            ]
+        ]
+    },
+    {
+        "id": "d62193c811a3a330",
+        "type": "google-cloud-firestore",
+        "z": "21e27655ab0bb194",
+        "g": "93a17619d9a74af8",
+        "account": "",
+        "keyFilename": "/home/george/firestore/firestore-key.json",
+        "name": "Merge refund fields into rental",
+        "projectId": "node-red-alerts",
+        "mode": "update",
+        "x": 1480,
+        "y": 1320,
+        "wires": [
+            [
+                "87828ee391ca9484"
+            ]
+        ]
+    },
+    {
+        "id": "560bd7df4e5d8c12",
+        "type": "google-cloud-firestore",
+        "z": "21e27655ab0bb194",
+        "g": "93a17619d9a74af8",
+        "account": "",
+        "keyFilename": "/home/george/firestore/firestore-key.json",
+        "name": "Query rental by orderid (refund)",
+        "projectId": "node-red-alerts",
+        "mode": "query",
+        "x": 690,
+        "y": 1320,
+        "wires": [
+            [
+                "dcec4101ad5539be"
+            ]
+        ]
+    },
+    {
+        "id": "acfe30805a7c9c1f",
+        "type": "link in",
+        "z": "21e27655ab0bb194",
+        "g": "93a17619d9a74af8",
+        "name": "link in 33",
+        "links": [
+            "52ca4a3330098f16",
+            "76ac71a116cf9f7d"
+        ],
+        "x": 255,
+        "y": 1320,
+        "wires": [
+            [
+                "75fa86343ccbcf71"
+            ]
+        ]
+    },
+    {
+        "id": "56bf9e395382b77d",
+        "type": "link in",
+        "z": "21e27655ab0bb194",
+        "g": "93a17619d9a74af8",
+        "name": "link in 34",
+        "links": [
+            "52ca4a3330098f16"
+        ],
+        "x": 285,
+        "y": 1400,
+        "wires": [
+            [
+                "6663a6a1d036640a"
+            ]
+        ]
+    },
+    {
+        "id": "6663a6a1d036640a",
+        "type": "switch",
+        "z": "21e27655ab0bb194",
+        "g": "93a17619d9a74af8",
+        "name": "",
+        "property": "payload.amount",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "eq",
+                "v": "0",
+                "vt": "num"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 1,
+        "x": 370,
+        "y": 1400,
+        "wires": [
+            [
+                "d2af9ccab188549f"
+            ]
+        ]
+    },
+    {
+        "id": "7e7c4a2fe97421d5",
+        "type": "google-cloud-firestore",
+        "z": "21e27655ab0bb194",
+        "g": "93a17619d9a74af8",
+        "account": "",
+        "keyFilename": "/home/george/firestore/firestore-key.json",
+        "name": "get transaction from rentals DB",
+        "projectId": "node-red-alerts",
+        "mode": "query",
+        "x": 910,
+        "y": 1400,
+        "wires": [
+            [
+                "d2e9a5e4da5c4d53"
+            ]
+        ]
+    },
+    {
+        "id": "61c497cf83d66324",
+        "type": "link out",
+        "z": "21e27655ab0bb194",
+        "g": "93a17619d9a74af8",
+        "name": "link out 68",
+        "mode": "link",
+        "links": [],
+        "x": 1835,
+        "y": 1320,
+        "wires": []
+    },
+    {
+        "id": "d2af9ccab188549f",
+        "type": "function",
+        "z": "21e27655ab0bb194",
+        "g": "93a17619d9a74af8",
+        "name": "Build rental query for force-close",
+        "func": "// === Build Firestore Query for Force-Close ===\n// Finds the rental using the first 13 characters of transactionid\n\nconst p = msg.payload || {};\nconst fullId = String(p.transactionid || msg.transactionid || \"\");\nconst shortId = fullId.substring(0, 13);\n\nif (!shortId) {\n    node.error(\"❌ Missing transactionid in message\");\n    return null;\n}\n\n// Preserve meta info for the next node\nmsg._orderid = shortId;\nmsg._action = p.action || \"refund\";\nmsg._refundStatus = p.status || \"pending\";\nmsg._refundAmount = p.amount || \"0\";\nmsg._refundDate = p.time || new Date().toISOString();\nmsg._admin = p.admin || \"system\";\n\n// Build Firestore query\nmsg.payload = {\n    path: \"rentals\",\n    query: [\n        { fieldPath: \"orderid\", opStr: \"==\", value: shortId }\n    ]\n};\n\nnode.status({\n    fill: \"blue\",\n    shape: \"dot\",\n    text: `Querying orderid ${shortId}`\n});\n\nreturn msg;\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 580,
+        "y": 1400,
+        "wires": [
+            [
+                "7e7c4a2fe97421d5"
+            ]
+        ]
+    },
+    {
+        "id": "87828ee391ca9484",
+        "type": "change",
+        "z": "21e27655ab0bb194",
+        "g": "93a17619d9a74af8",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload.content.gateway",
+                "pt": "msg",
+                "to": "command.gateway",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "payload.content.totalCharged",
+                "pt": "msg",
+                "to": "rentalData.totalCharged",
+                "tot": "msg"
+            },
+            {
+                "t": "set",
+                "p": "payload.content.terminalserver",
+                "pt": "msg",
+                "to": "rentalData.terminalserver",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 1700,
+        "y": 1320,
+        "wires": [
+            [
+                "61c497cf83d66324"
+            ]
+        ]
+    },
+    {
+        "id": "dcec4101ad5539be",
+        "type": "change",
+        "z": "21e27655ab0bb194",
+        "g": "93a17619d9a74af8",
+        "name": "",
+        "rules": [
+            {
+                "t": "set",
+                "p": "rentalData",
+                "pt": "msg",
+                "to": "payload[0]",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 950,
+        "y": 1320,
+        "wires": [
+            [
+                "c2d1725aaa5f01dd"
+            ]
+        ]
+    },
+    {
+        "id": "d2e9a5e4da5c4d53",
+        "type": "function",
+        "z": "21e27655ab0bb194",
+        "g": "93a17619d9a74af8",
+        "name": "Force close rental (DB pricing)",
+        "func": "const asStr = v => (v == null ? \"\" : String(v)).trim();\nconst asNum = v => Number(v || 0);\nconst nowISO = () => new Date().toISOString();\nconst toTs = v => (typeof v === \"number\" ? v : Date.parse(v) || 0);\n\nfunction normalizeRate(arr) {\n  if (!Array.isArray(arr)) return [];\n  return arr.map(t => ({\n    time: Number(t?.time ?? 0),\n    price: Number(t?.price ?? 0)\n  }));\n}\n\nfunction extractPricingFromRental(r) {\n  if (r?.pricingAtStart && Array.isArray(r.pricingAtStart.rate)) {\n    return {\n      kioskmode: r.pricingAtStart.kioskmode || null,\n      rate: normalizeRate(r.pricingAtStart.rate),\n      currency: r.pricingAtStart.currency || r.currency || null,\n      symbol: r.pricingAtStart.symbol || r.symbol || null,\n      taxrate: Number(r.pricingAtStart.taxrate ?? r.taxrate ?? 0)\n    };\n  }\n\n  if (r?.pricing && Array.isArray(r.pricing.rate)) {\n    return {\n      kioskmode: r.pricing.kioskmode || null,\n      rate: normalizeRate(r.pricing.rate),\n      currency: r.pricing.currency || r.currency || null,\n      symbol: r.pricing.symbol || r.symbol || null,\n      taxrate: Number(r.pricing.taxrate ?? r.taxrate ?? 0)\n    };\n  }\n\n  const tiersFromChargePlan = Array.isArray(r?.chargePlan?.tiers)\n    ? r.chargePlan.tiers\n    : [];\n\n  return {\n    kioskmode: r?.chargePlan?.kioskmode || null,\n    rate: normalizeRate(tiersFromChargePlan),\n    currency: r?.currency || null,\n    symbol: r?.symbol || null,\n    taxrate: Number(r?.taxrate ?? 0)\n  };\n}\n\nfunction computeCharge(pricing, rentalPeriodMs) {\n  const out = {\n    plan: {\n      kioskmode: String(pricing?.kioskmode || '').toUpperCase(),\n      type: 'force-close',\n      tierIndex: 0,\n      tiers: []\n    },\n    subtotal: 0,\n    tax: 0,\n    total: 0,\n    currency: pricing?.currency || null,\n    symbol: pricing?.symbol || null,\n    initialCharge: 0,\n    overageCharge: 0\n  };\n\n  if (!pricing || !Array.isArray(pricing.rate) || pricing.rate.length === 0) {\n    return out;\n  }\n\n  const tiers = pricing.rate;\n  const taxrate = Number(pricing.taxrate || 0);\n  const minutes = Math.floor((Number(rentalPeriodMs) || 0) / 60000);\n\n  let tierIndex = 0;\n  tiers.forEach((tier, i) => {\n    if (minutes > Number(tier.time || 0)) tierIndex = i + 1;\n  });\n\n  const selected = tiers[Math.min(tierIndex, tiers.length - 1)] || { price: 0 };\n  let totalcharge = Number(selected.price || 0);\n  totalcharge = +(totalcharge * (1 + taxrate / 100)).toFixed(2);\n\n  const subtotal = +(totalcharge / (1 + taxrate / 100)).toFixed(2);\n  const tax = +(totalcharge - subtotal).toFixed(2);\n\n  const firstTierPrice = Number(tiers[0]?.price || 0);\n  const initialCharge = +((firstTierPrice * (1 + taxrate / 100)).toFixed(2));\n  const overageCharge = +(totalcharge - initialCharge).toFixed(2);\n\n  return {\n    plan: {\n      kioskmode: String(pricing.kioskmode || '').toUpperCase(),\n      type: 'force-close',\n      tierIndex,\n      tiers: tiers.map(t => ({ time: +t.time, price: +t.price }))\n    },\n    subtotal,\n    tax,\n    total: totalcharge,\n    currency: pricing.currency || null,\n    symbol: pricing.symbol || null,\n    initialCharge,\n    overageCharge\n  };\n}\n\nconst transactionid = asStr(msg.transactionid || msg.payload?.transactionid || \"\");\nif (!transactionid) {\n  node.warn(\"❌ Missing transactionid in force-close message\");\n  return null;\n}\n\nconst rentals = msg.payload || [];\nif (!Array.isArray(rentals) || rentals.length === 0) {\n  node.warn(`⚠️ No rentals found for transaction ${transactionid}`);\n  return null;\n}\n\nconst rental = rentals[0];\nconst pricing = extractPricingFromRental(rental);\n\nif (!pricing || !Array.isArray(pricing.rate) || pricing.rate.length === 0) {\n  node.warn(`⚠️ No DB pricing found on rental ${rental.orderid}; force-close will use zero pricing fallback.`);\n}\n\nconst returnedAt = nowISO();\n\nrental.status = \"returned\";\nrental.returnTime = returnedAt;\nrental.returnStationid = rental.rentalStationid;\nrental.returnModuleid = rental.rentalModuleid;\nrental.returnSlotid = rental.rentalSlotid || 0;\nrental.returnLocation = rental.rentalLocation || rental.returnLocation || \"\";\nrental.returnPlace = rental.rentalPlace || rental.returnPlace || \"\";\nrental.returnPower = rental.rentPower || \"\";\nrental.forceClosed = true;\n\nconst start = toTs(rental.rentedAt || rental.rentalTime);\nconst end = toTs(returnedAt);\nrental.rentalPeriod = Math.max(end - start, 0);\n\nconst bill = computeCharge(pricing, rental.rentalPeriod);\nrental.chargePlan = bill.plan;\nrental.currency = bill.currency || rental.currency || null;\nrental.symbol = bill.symbol || rental.symbol || null;\nrental.subtotal = bill.subtotal;\nrental.tax = bill.tax;\nrental.totalCharged = bill.total;\nrental.initialCharge = bill.initialCharge;\nrental.overageCharge = bill.overageCharge;\n\nrental.refundStatus = \"force-closed\";\nrental.refundAmount = \"0.00\";\nrental.refundDate = returnedAt;\n\nmsg.payload = {\n  path: `rentals/${rental.orderid}`,\n  content: rental\n};\n\nnode.status({\n  fill: \"green\",\n  shape: \"dot\",\n  text: `Force closed ${rental.orderid} → total $${Number(bill.total || 0).toFixed(2)}`\n});\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1200,
+        "y": 1400,
+        "wires": [
+            [
+                "d62193c811a3a330"
+            ]
+        ]
+    }
+]

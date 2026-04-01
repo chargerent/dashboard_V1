@@ -226,7 +226,9 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
     const originalTotalRentals = filteredRentals.length;
     const adjustedTotalRentals = Math.round(originalTotalRentals * (adjustmentPercentage / 100));
 
-    const commission = clientInfo?.commission || 0;
+    const commission = Number.isFinite(Number(clientInfo?.revShare ?? clientInfo?.commission))
+        ? Number(clientInfo?.revShare ?? clientInfo?.commission)
+        : 0;
 
     const { totalRevenue, currencySymbol } = useMemo(() => {
         const total = filteredRentals.reduce((sum, r) => sum + (parseFloat(r.totalCharged) || 0), 0);

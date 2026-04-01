@@ -57,6 +57,11 @@ const CommissionStats = ({ clientInfo, accountMTD, accountYTD, repMTD, repYTD, s
 };
 
 function LocationSummary({ location, kiosks, _chargerThreshold, clientInfo, rentalData, referenceTime, t, onShowRentalDetails }) {
+    const clientRevShare = useMemo(() => {
+        const value = Number(clientInfo?.revShare ?? clientInfo?.commission);
+        return Number.isFinite(value) ? value : 0;
+    }, [clientInfo]);
+
     const summary = useMemo(() => {
         const leaseKiosks = kiosks.filter(k => k.pricing?.kioskmode === 'LEASE');
         const totalLeaseRevenue = leaseKiosks.reduce((sum, k) => sum + (Number(k.pricing?.leaseamount) || 0), 0);
@@ -112,9 +117,13 @@ function LocationSummary({ location, kiosks, _chargerThreshold, clientInfo, rent
             const kioskMtdRevenue = mtdRentals.filter(r => r.rentalStationid === kiosk.stationid).reduce((acc, r) => acc + (r.totalCharged || 0), 0);
             const kioskYtdRevenue = ytdRentals.filter(r => r.rentalStationid === kiosk.stationid).reduce((acc, r) => acc + (r.totalCharged || 0), 0);
 
-            if (kiosk.info.accountpercent) {
-                accountCommissionMTD += kioskMtdRevenue * (kiosk.info.accountpercent / 100);
-                accountCommissionYTD += kioskYtdRevenue * (kiosk.info.accountpercent / 100);
+            const accountPercent = (!clientInfo.isAdmin && clientInfo.role !== 'partner')
+                ? clientRevShare
+                : (Number(kiosk.info.accountpercent) || 0);
+
+            if (accountPercent > 0) {
+                accountCommissionMTD += kioskMtdRevenue * (accountPercent / 100);
+                accountCommissionYTD += kioskYtdRevenue * (accountPercent / 100);
             }
 
             if (kiosk.info.reppercent) {
@@ -144,7 +153,7 @@ function LocationSummary({ location, kiosks, _chargerThreshold, clientInfo, rent
         }, 0);
 
         return { onlineKiosks, totalChargers, fullChargers, rentedChargers, missingChargers, addressInfo, locationRentals, accountCommissionMTD, repCommissionMTD, accountCommissionYTD, repCommissionYTD, totalLeaseRevenue, currencySymbol, repLeaseCommission };
-    }, [kiosks, rentalData, referenceTime, clientInfo]);
+    }, [kiosks, rentalData, referenceTime, clientInfo, clientRevShare]);
 
     const kioskOnlinePercent = kiosks.length > 0 ? (summary.onlineKiosks / kiosks.length) * 100 : 0;
     const kioskStatusColor = summary.onlineKiosks === kiosks.length ? '#22c55e' : '#ef4444';
@@ -162,7 +171,9 @@ function LocationSummary({ location, kiosks, _chargerThreshold, clientInfo, rent
     
     const canShowRentalInfo = clientInfo.features.rentals || clientInfo.features.lease_revenue || clientInfo.features.rental_counts || clientInfo.features.rental_revenue;
 
-    const showAccountCommission = (clientInfo.features.client_commission || clientInfo.isAdmin) && kiosks.some(k => k.info.accountpercent > 0);
+    const showAccountCommission = clientInfo.isAdmin
+        ? kiosks.some(k => Number(k.info.accountpercent) > 0)
+        : clientInfo.role !== 'partner' && clientInfo.features.client_commission && clientRevShare > 0;
     const showRepCommission = (clientInfo.features.rep_commission || clientInfo.isAdmin) && kiosks.some(k => k.info.reppercent > 0);
 
     return (

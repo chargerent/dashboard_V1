@@ -3,6 +3,13 @@
 import { useState, useMemo } from 'react';
 import { formatDateTime, formatDuration, formatDate } from '../utils/dateFormatter';
 import { normalizeText, textEquals, textIncludes } from '../utils/text';
+import {
+    hasRefundRequest,
+    isRefundedRental,
+    isReturnedRentalStatus,
+    isSuccessfulRefundStatus,
+    normalizeRefundStatus,
+} from '../utils/rentals.js';
 import RefundModal from '../components/UI/RefundModal.jsx';
 import ConfirmationModal from '../components/UI/ConfirmationModal.jsx';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
@@ -16,19 +23,19 @@ const safeToDate = (timestamp) => {
 };
 
 const RentalCard = ({ rental, t, onRefund, onLockClick, canLock }) => {
+    const normalizedRefundStatus = normalizeRefundStatus(rental.refundStatus);
     const statusClass = rental.status === 'rented' ? 'bg-blue-100 text-blue-800' :
                         rental.status === 'purchased' ? 'bg-purple-100 text-purple-800' :
-                        rental.status === 'refunded' ? 'bg-green-100 text-green-800' : // Changed to green
-                        rental.status === 'pending' ? 'bg-orange-100 text-orange-800' : // Changed to orange
-                        rental.status === 'returned' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'; // Default for 'returned' or other
+                        rental.status === 'refunded' ? 'bg-green-100 text-green-800' :
+                        rental.status === 'pending' ? 'bg-orange-100 text-orange-800' :
+                        rental.status === 'returned' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800';
 
     const FIVE_MINUTES_IN_MS = 5 * 60 * 1000;
-    // Highlight if the rental was returned and the duration was less than 5 minutes.
-    const isShortRental = rental.status === 'returned' && rental.rentalPeriod && rental.rentalPeriod < FIVE_MINUTES_IN_MS;
+    const isShortRental = isReturnedRentalStatus(rental.status) && rental.rentalPeriod && rental.rentalPeriod < FIVE_MINUTES_IN_MS;
     const cardBgClass = isShortRental ? 'bg-red-50' : 'bg-white';
 
-    const refundStatusClass = rental.refundStatus === 'pending' ? 'text-orange-700' :
-                              (rental.refundStatus === 'approved' || rental.refundStatus === 'succeeded') ? 'text-green-700' :
+    const refundStatusClass = normalizedRefundStatus === 'pending' ? 'text-orange-700' :
+                              isSuccessfulRefundStatus(normalizedRefundStatus) ? 'text-green-700' :
                               'text-gray-700';
 
     const lockButtonColor = rental.isLocked ? 'text-red-600 bg-red-100' : 'text-gray-400 hover:text-red-600 hover:bg-red-100';
@@ -86,7 +93,7 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock }) => {
                 <div>
                     <p className="text-gray-500">{t('amount')}</p>
                     <p className="font-mono text-base font-bold text-gray-800">
-                        {(rental.status === 'returned' || rental.status === 'purchased')
+                        {(isReturnedRentalStatus(rental.status) || rental.status === 'purchased')
                             ? `${rental.symbol || ''}${(rental.totalCharged ?? rental.buyprice)?.toFixed(2) || '0.00'}`
                             : ''}
                     </p>
@@ -133,7 +140,7 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock }) => {
                             </svg>
                         </button>
                     )}
-                    {onRefund && rental.status !== 'refunded' && !rental.refundStatus && (
+                    {onRefund && !hasRefundRequest(rental) && (
                         <button onClick={() => onRefund(rental)} className="text-xs bg-blue-500 hover:bg-blue-600 text-white font-semibold py-1 px-3 rounded-md">
                             {t('refund')}
                         </button>
@@ -242,7 +249,9 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
         // Filter by status
         if (activeFilters.status === 'short_rental') {
             const FIVE_MINUTES_IN_MS = 5 * 60 * 1000;
-            rentals = rentals.filter(r => r.status === 'returned' && r.rentalPeriod && r.rentalPeriod < FIVE_MINUTES_IN_MS);
+            rentals = rentals.filter(r => isReturnedRentalStatus(r.status) && r.rentalPeriod && r.rentalPeriod < FIVE_MINUTES_IN_MS);
+        } else if (activeFilters.status === 'refunded') {
+            rentals = rentals.filter(isRefundedRental);
         } else if (activeFilters.status !== 'all') {
             rentals = rentals.filter(r => r.status === activeFilters.status);
         }
@@ -413,7 +422,7 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
                 <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
                     {filteredRentals.length > 0 ? (
                         filteredRentals.map(rental => {
-                            const canLock = clientInfo.commands.lock && rental.status === 'returned' && rental.location;
+                            const canLock = clientInfo.commands.lock && isReturnedRentalStatus(rental.status) && rental.location;
                             return <RentalCard 
                                 key={`${rental.orderid}-${rental.status}-${rental.rentalTime}`} 
                                 rental={rental} t={t} 

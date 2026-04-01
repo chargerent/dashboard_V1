@@ -20,6 +20,11 @@ import BindingPage from './pages/BindingPage.jsx';
 import TemplatesPage from './pages/TemplatesPage.jsx';
 import TestingPage from './pages/TestingPage.jsx';
 import { callFunctionWithAuth } from './utils/callableRequest.js';
+import {
+  applyRefundConfirmationToRental,
+  isSuccessfulRefundStatus,
+  rentalMatchesRefundConfirmation,
+} from './utils/rentals.js';
 import { markStartupStep, measureStartupDuration } from './utils/startupTrace.js';
 
 // 🔥 firebase-config must export BOTH db and auth
@@ -149,6 +154,8 @@ function buildClientInfoFromProfile(profile, uid) {
   const partner = !!profile.partner;
   const role = String(profile.role || (username === 'chargerent' ? 'admin' : 'user')).toLowerCase();
   const isAdmin = role === 'admin' || username === 'chargerent';
+  const rawCommission = profile.revShare ?? profile.commission;
+  const commission = Number.isFinite(Number(rawCommission)) ? Number(rawCommission) : 0;
 
   const defaultFeatures = {
     rentals: false,
@@ -221,6 +228,8 @@ function buildClientInfoFromProfile(profile, uid) {
     features,
     commands,
     partner,
+    commission,
+    revShare: commission,
     isAdmin,
     role,
     serverFlowVersion: profile.serverFlowVersion,
@@ -895,17 +904,13 @@ function App() {
           const data = JSON.parse(event.data);
           console.log('[WS Receive]', data);
 
-          if (data.action === 'refund' && data.status === 'approved' && (data.orderId || data.transactionid)) {
+          const refundStatus = data.refund_status || data.status;
+
+          if (data.action === 'refund' && isSuccessfulRefundStatus(refundStatus) && (data.orderId || data.transactionid)) {
             setRentalData(prevData =>
               prevData.map(rental =>
-                (rental.orderid === data.orderId || rental.rawid === data.transactionid)
-                  ? {
-                    ...rental,
-                    status: 'refunded',
-                    refundStatus: data.refund_status || 'approved',
-                    refundAmount: data.refund_amount,
-                    refundDate: data.refund_date || new Date().toISOString()
-                  }
+                rentalMatchesRefundConfirmation(rental, data)
+                  ? applyRefundConfirmationToRental(rental, data)
                   : rental
               )
             );
@@ -1120,7 +1125,7 @@ function App() {
               );
             }
           } else if (data.action === 'refund') {
-            const isSuccess = data.status === 'approved';
+            const isSuccess = isSuccessfulRefundStatus(refundStatus);
             setCommandStatus({ state: isSuccess ? 'success' : 'error', message: data.status_en || (isSuccess ? t('refund_success') : t('refund_failed')) });
           }
 

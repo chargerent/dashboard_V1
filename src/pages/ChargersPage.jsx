@@ -4,6 +4,7 @@ import { useMemo, useState, useEffect } from 'react';
 import ConfirmationModal from '../components/UI/ConfirmationModal';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
 import { formatDateTime, formatDuration } from '../utils/dateFormatter';
+import { isReturnedRentalStatus } from '../utils/rentals.js';
 import { textEquals, textIncludes, toText } from '../utils/text';
 
 const ChargerCard = ({ charger, t, onCommand, onNavigateToRentals, onNavigateToDashboard }) => {
@@ -283,7 +284,7 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
                     charger.isLocked = location.isLocked;
                 } else if (charger.lastRentalStatus === 'rented') {
                     charger.status = 'rented';
-                } else if (charger.lastRentalStatus === 'returned') {
+                } else if (isReturnedRentalStatus(charger.lastRentalStatus)) {
                     // If its last rental was a return, but it's not in a kiosk, it's missing.
                     charger.status = 'missing';
                 }

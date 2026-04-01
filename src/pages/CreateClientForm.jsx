@@ -100,7 +100,7 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
       features: { ...newClient.features, defaultlanguage: (newClient.features?.defaultlanguage || 'en').toLowerCase() },
       commands: { ...newClient.commands },
       partner: !!newClient.partner,
-      commission: newClient.partner ? String(newClient.commission ?? '0') : "0",
+      commission: String(newClient.commission ?? '').trim() || "0",
       active: newClient.active !== false,
       role: newClient.role || (newClient.partner ? 'partner' : 'user'),
       authEmail: mappedEmail || undefined
@@ -217,18 +217,18 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
               className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
           </div>
 
-          <div className="md:col-span-2 flex items-center gap-4 border-t pt-4">
-            <div className="w-1/2">
+          <div className="md:col-span-2 border-t pt-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:items-end">
+              <div>
               <PermissionToggle label="Partner" isChecked={newClient.partner}
                 onChange={(value) => setNewClient(prev => ({ ...prev, partner: value }))} />
-            </div>
-            {newClient.partner && (
-              <div className="w-1/2">
-                <label className="block text-sm font-medium text-gray-700">{t('commission_percentage')}</label>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">{t('rev_share_percentage')}</label>
                 <input type="number" name="commission" value={newClient.commission || ''} onChange={handleInputChange}
                   className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" min="0" max="100" step="0.1" />
               </div>
-            )}
+            </div>
           </div>
 
           <div className="md:col-span-2">

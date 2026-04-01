@@ -102,20 +102,20 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
                             <label className="block text-sm font-medium text-gray-700">Contact Email</label>
                             <input type="email" value={editedData.contact?.email || ''} onChange={(e) => onDataChange('contact.email', e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
                         </div>
-                        <div className="flex items-center gap-4 border-t pt-3">
-                            <div className="w-1/2">
+                        <div className="border-t pt-3">
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:items-end">
+                                <div>
                                 <PermissionToggle
                                     label="Partner"
                                     isChecked={editedData.partner}
                                     onChange={(value) => onDataChange('partner', value)}
                                 />
-                            </div>
-                            {editedData.partner && (
-                                <div className="w-1/2">
-                                    <label className="block text-sm font-medium text-gray-700">{t('commission_percentage')}</label>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">{t('rev_share_percentage')}</label>
                                     <input type="number" value={editedData.commission || ''} onChange={(e) => onDataChange('commission', e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" min="0" max="100" step="0.1" />
                                 </div>
-                            )}
+                            </div>
                         </div>                        
                         {showActiveToggle && (
                             <PermissionToggle
