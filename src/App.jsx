@@ -8,7 +8,7 @@ import { translations } from './utils/translations';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage.jsx';
 import AdminPage from './pages/AdminPage.jsx';
-import { isNewSchemaKiosk, normalizeKioskData, normalizeKioskInfoForSchema } from './utils/helpers.js';
+import { isKioskOnline, isNewSchemaKiosk, normalizeKioskData, normalizeKioskInfoForSchema } from './utils/helpers.js';
 import KioskEditorPage from './pages/KioskEditorPage.jsx';
 import RentalsPage from './pages/RentalsPage.jsx';
 import ChargersPage from './pages/ChargersPage.jsx';
@@ -124,6 +124,37 @@ function createCommandRequestId(action, stationid, moduleid) {
   return `${prefix}-${targetStation}-${targetModule}-${Date.now()}-${randomSegment}`;
 }
 
+function getKioskRecencyTimestamp(kiosk) {
+  const rawTimestamp = kiosk?.lastUpdated || kiosk?.lastUpdate || kiosk?.timestamp || '';
+  if (!rawTimestamp) return 0;
+
+  if (rawTimestamp instanceof Date) {
+    return Number.isNaN(rawTimestamp.getTime()) ? 0 : rawTimestamp.getTime();
+  }
+
+  const normalizedTimestamp = typeof rawTimestamp === 'string' && !/(Z|[+-]\d{2}:?\d{2})$/i.test(rawTimestamp)
+    ? `${rawTimestamp}Z`
+    : rawTimestamp;
+  const parsedTimestamp = Date.parse(normalizedTimestamp);
+  return Number.isFinite(parsedTimestamp) ? parsedTimestamp : 0;
+}
+
+function clearDerivedSlot(slot) {
+  return {
+    ...slot,
+    sn: 0,
+    batteryLevel: null,
+    chargingCurrent: 0,
+    chargingVoltage: 0,
+    chargeVoltage: 0,
+    chargeCurrent: 0,
+    sstat: '0C',
+    status: 0,
+    isLocked: false,
+    lockReason: '',
+  };
+}
+
 function normalizeKioskPayloadForSave(action, kioskPayload, usesNewSchemaInfo) {
   if (!kioskPayload || typeof kioskPayload !== 'object') return kioskPayload;
   if (action !== 'infochange' || !kioskPayload.info || typeof kioskPayload.info !== 'object') {
@@ -186,10 +217,13 @@ function buildClientInfoFromProfile(profile, uid) {
   let features = { ...defaultFeatures, ...(profile.features || {}) };
   const payloadCommands = profile.commands || profile.Commands;
   let commands = { ...defaultCommands, ...(payloadCommands || {}) };
+  const hasBindingAccess = username === 'chargerent' || features.binding === true || commands.binding === true;
+  const hasTestingAccess = username === 'chargerent' || features.testing === true;
 
   // Admin override
   if (isAdmin) {
     features = {
+      ...(profile.features || {}),
       rentals: true,
       details: true,
       stationid: true,
@@ -198,28 +232,35 @@ function buildClientInfoFromProfile(profile, uid) {
       status: true,
       pricing: true,
       reporting: true,
-      ...(profile.features || {})
+      lease_revenue: true,
+      rental_counts: true,
+      rental_revenue: true,
+      client_commission: true,
+      rep_commission: true,
+      search: true,
+      binding: false,
+      testing: false,
     };
     commands = {
+      ...(payloadCommands || {}),
       edit: true,
       lock: true,
       eject: true,
       eject_multiple: true,
-      binding: true,
       updates: true,
       connectivity: true,
       reboot: true,
       reload: true,
       disable: true,
       "client edit": true,
-      ...(payloadCommands || {})
     };
   }
 
   // Normalize language
   features.country = features.country || features.Country || 'all';
   features.defaultlanguage = (features.defaultlanguage || features.defaultLanguage || 'en').toString().toLowerCase();
-  features.testing = username === 'chargerent' || features.testing === true;
+  features.binding = hasBindingAccess;
+  features.testing = hasTestingAccess;
 
   return {
     uid,
@@ -259,6 +300,8 @@ function App() {
   const [clientInfo, setClientInfo] = useState(null);
   const [language, setLanguage] = useState('en');
   const [page, setPage] = useState('dashboard'); // 'dashboard', 'admin', 'binding', 'templates', 'kiosk-editor', 'rentals', 'chargers', 'provision', 'reporting', 'analytics', 'testing'
+  const [dashboardSearchTerm, setDashboardSearchTerm] = useState('');
+  const [chargerSearchTerm, setChargerSearchTerm] = useState('');
   const [rentalData, setRentalData] = useState([]);
   const [commandStatus, setCommandStatus] = useState(null);
   const [firestoreError, setFirestoreError] = useState(null);
@@ -472,6 +515,34 @@ function App() {
     return () => unsub();
   }, [handleLogout]);
 
+  useEffect(() => {
+    if (!token || !auth.currentUser) return;
+
+    const flowVersionRef = doc(db, 'server', 'flow_current');
+    const unsubscribeFlowVersion = onSnapshot(flowVersionRef, (snapshot) => {
+      const firestoreFlowVersion = snapshot.data()?.fversion;
+
+      if (typeof firestoreFlowVersion !== 'string' || !firestoreFlowVersion.trim()) {
+        return;
+      }
+
+      setClientInfo((prev) => {
+        if (!prev || prev.serverFlowVersion === firestoreFlowVersion) {
+          return prev;
+        }
+
+        return {
+          ...prev,
+          serverFlowVersion: firestoreFlowVersion,
+        };
+      });
+    }, (error) => {
+      console.warn('Unable to subscribe to server flow version:', error);
+    });
+
+    return () => unsubscribeFlowVersion();
+  }, [token]);
+
   // Effect to handle token expiration when tab/PWA becomes visible again
   useEffect(() => {
     const checkTokenOnFocus = async () => {
@@ -663,6 +734,68 @@ function App() {
 
     return latestStation?.lastUpdated ? new Date(latestStation.lastUpdated) : new Date();
   }, [allStationsData]);
+
+  const dedupedStationsData = useMemo(() => {
+    if (!Array.isArray(allStationsData) || allStationsData.length === 0) {
+      return [];
+    }
+
+    const winningLocations = new Map();
+
+    allStationsData.forEach((kiosk, kioskIndex) => {
+      const kioskOnline = isKioskOnline(kiosk, latestTimestamp);
+      const kioskTimestamp = getKioskRecencyTimestamp(kiosk);
+
+      (kiosk.modules || []).forEach((module, moduleIndex) => {
+        (module.slots || []).forEach((slot, slotIndex) => {
+          const chargerSn = String(slot?.sn || '').trim();
+          if (!chargerSn || chargerSn === '0') return;
+
+          const existing = winningLocations.get(chargerSn);
+          const candidate = {
+            kioskIndex,
+            moduleIndex,
+            slotIndex,
+            kioskOnline,
+            kioskTimestamp,
+          };
+
+          if (!existing) {
+            winningLocations.set(chargerSn, candidate);
+            return;
+          }
+
+          const shouldReplace = (
+            (candidate.kioskOnline && !existing.kioskOnline) ||
+            (candidate.kioskOnline === existing.kioskOnline && candidate.kioskTimestamp > existing.kioskTimestamp)
+          );
+
+          if (shouldReplace) {
+            winningLocations.set(chargerSn, candidate);
+          }
+        });
+      });
+    });
+
+    return allStationsData.map((kiosk, kioskIndex) => ({
+      ...kiosk,
+      modules: (kiosk.modules || []).map((module, moduleIndex) => ({
+        ...module,
+        slots: (module.slots || []).map((slot, slotIndex) => {
+          const chargerSn = String(slot?.sn || '').trim();
+          if (!chargerSn || chargerSn === '0') return slot;
+
+          const winner = winningLocations.get(chargerSn);
+          const isWinner = winner &&
+            winner.kioskIndex === kioskIndex &&
+            winner.moduleIndex === moduleIndex &&
+            winner.slotIndex === slotIndex;
+
+          return isWinner ? slot : clearDerivedSlot(slot);
+        }),
+      })),
+    }));
+  }, [allStationsData, latestTimestamp]);
 
   const manageIgnoredKiosk = useCallback((kioskId, shouldIgnore) => {
     if (shouldIgnore) {
@@ -1175,13 +1308,17 @@ function App() {
       onNavigateToAdmin={() => setPage('admin')}
       onNavigateToBinding={() => setPage('binding')}
       onNavigateToRentals={() => setPage('rentals')}
-      onNavigateToChargers={() => setPage('chargers')}
+      onNavigateToChargers={(searchTerm = '') => {
+        setChargerSearchTerm(String(searchTerm || ''));
+        setPage('chargers');
+      }}
+      initialSearch={dashboardSearchTerm}
       onNavigateToReporting={() => setPage('reporting')}
       onNavigateToTesting={() => setPage('testing')}
       onNavigateToAnalytics={onNavigateToAnalytics}
       onNavigateToKioskEditor={() => setPage('kiosk-editor')}
       rentalData={rentalData}
-      allStationsData={allStationsData}
+      allStationsData={dedupedStationsData}
       setAllStationsData={setAllStationsData}
       ngrokModalOpen={ngrokModalOpen}
       setNgrokModalOpen={setNgrokModalOpen}
@@ -1231,6 +1368,7 @@ function App() {
     }
 
     const hasTestingAccess = clientInfo.username === 'chargerent' || clientInfo.features?.testing === true;
+    const hasBindingAccess = clientInfo.username === 'chargerent' || clientInfo.features?.binding === true || clientInfo.commands?.binding === true;
     const hasReportingAccess = clientInfo.isAdmin || clientInfo.features?.reporting === true;
     const isRegularReportingUser = !clientInfo.isAdmin && clientInfo.role !== 'partner';
 
@@ -1249,6 +1387,10 @@ function App() {
           />
         );
       case 'binding':
+        if (!hasBindingAccess) {
+          return dashboard;
+        }
+
         return (
           <BindingPage
             t={t}
@@ -1256,7 +1398,7 @@ function App() {
             onNavigateToDashboard={() => setPage('dashboard')}
             onNavigateToAdmin={() => setPage('admin')}
             currentUser={clientInfo}
-            allStationsData={allStationsData}
+            allStationsData={dedupedStationsData}
           />
         );
       case 'agreement':
@@ -1285,7 +1427,7 @@ function App() {
             onNavigateToDashboard={() => setPage('dashboard')}
             clientInfo={clientInfo}
             rentalData={rentalData}
-            allStationsData={allStationsData}
+            allStationsData={dedupedStationsData}
             t={t}
             language={language}
             setLanguage={setLanguage}
@@ -1299,9 +1441,12 @@ function App() {
       case 'chargers':
         return (
           <ChargersPage
-            onNavigateToDashboard={() => setPage('dashboard')}
+            onNavigateToDashboard={(searchTerm = '') => {
+              setDashboardSearchTerm(String(searchTerm || ''));
+              setPage('dashboard');
+            }}
             rentalData={rentalData}
-            kioskData={allStationsData}
+            kioskData={dedupedStationsData}
             t={t}
             language={language}
             setLanguage={setLanguage}
@@ -1310,6 +1455,7 @@ function App() {
             commandStatus={commandStatus}
             setCommandStatus={setCommandStatus}
             clientInfo={clientInfo}
+            initialSearch={chargerSearchTerm}
           />
         );
       case 'reporting':
@@ -1324,7 +1470,7 @@ function App() {
             onLogout={handleLogout}
             t={t}
             rentalData={rentalData}
-            allStationsData={allStationsData}
+            allStationsData={dedupedStationsData}
             clientInfo={clientInfo}
             userMode={isRegularReportingUser}
           />
@@ -1332,7 +1478,7 @@ function App() {
       case 'analytics':
         return (
           <AnalyticsPage
-            allStationsData={allStationsData}
+            allStationsData={dedupedStationsData}
             rentalData={rentalData}
             initialData={analyticsInitialData}
             onNavigateToDashboard={() => setPage('dashboard')}
@@ -1354,7 +1500,7 @@ function App() {
             language={language}
             setLanguage={setLanguage}
             rentalData={rentalData}
-            allStationsData={allStationsData}
+            allStationsData={dedupedStationsData}
             onCommand={onCommand}
             commandStatus={commandStatus}
             setCommandStatus={setCommandStatus}
@@ -1380,7 +1526,7 @@ function App() {
             onLogout={handleLogout}
             onNavigateToDashboard={() => setPage('dashboard')}
             t={t}
-            kioskData={allStationsData}
+            kioskData={dedupedStationsData}
             onCommand={onCommand}
           />
         );

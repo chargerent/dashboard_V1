@@ -32,7 +32,7 @@ const moduleIdsMatch = (left, right) => {
 };
 
 // --- Main Detail Panel Component ---
-function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSlots, ejectingSlots, failedEjectSlots, lockingSlots, t, onCommand, serverUiVersion, serverFlowVersion, clientInfo, mockNow }) {
+function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSlots, ejectingSlots, failedEjectSlots, lockingSlots, t, onCommand, onNavigateToChargers, serverUiVersion, serverFlowVersion, clientInfo, mockNow }) {
     const isOnline = isKioskOnline(kiosk, mockNow);
     const isV2Kiosk = isNewSchemaKiosk(kiosk);
     const stationId = kiosk.stationid;
@@ -99,6 +99,11 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     const handleModuleUpdate = useCallback((moduleId) => {
         onCommand(kiosk.stationid, 'update module', moduleId);
     }, [kiosk.stationid, onCommand]);
+    const handleNavigateToCharger = useCallback((event, chargerSn) => {
+        event.stopPropagation();
+        if (!chargerSn || !onNavigateToChargers) return;
+        onNavigateToChargers(String(chargerSn));
+    }, [onNavigateToChargers]);
     const compactHeaderModules = useMemo(() => (
         Array.isArray(kiosk.modules)
             ? kiosk.modules.map((module, index) => {
@@ -237,20 +242,32 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         return (
             <div className={`relative flex items-stretch p-0.5 rounded-md border transition-all duration-300 text-left ${style.className} ${style.glow ? 'slot-glow' : ''}`}>
                 {/* Eject Button */}
-                <button
-                    onClick={() => onSlotClick(stationId, module.id, slot.position)}
-                    disabled={!canEject || !isOnline || !hasCharger}
-                    className="flex-grow flex items-center justify-start p-0.5 rounded-l-md disabled:cursor-not-allowed overflow-hidden"
-                >
-                    <div className="flex flex-col items-center w-8 mr-2">
-                        <span className="text-xs font-mono text-gray-500">{String(slot.position).padStart(2, '0')}</span>
-                        <StatusIndicator status={slot.sstat} />
-                    </div>
-                    <div className="flex flex-col items-start min-w-0">
-                        <span className="text-xs font-mono font-bold">{hasCharger ? `${slot.batteryLevel}%` : t('empty')}</span>
-                        <span className="text-[10px] text-gray-400 font-mono leading-tight truncate">{hasCharger ? slot.sn : '\u00A0'}</span>
-                    </div>
-                </button>
+                <div className="flex-grow flex items-center justify-start p-0.5 rounded-l-md overflow-hidden">
+                    <button
+                        onClick={() => onSlotClick(stationId, module.id, slot.position)}
+                        disabled={!canEject || !isOnline || !hasCharger}
+                        className="flex min-w-0 flex-grow items-center justify-start disabled:cursor-not-allowed"
+                    >
+                        <div className="flex flex-col items-center w-8 mr-2">
+                            <span className="text-xs font-mono text-gray-500">{String(slot.position).padStart(2, '0')}</span>
+                            <StatusIndicator status={slot.sstat} />
+                        </div>
+                        <div className="flex flex-col items-start min-w-0">
+                            <span className="text-xs font-mono font-bold">{hasCharger ? `${slot.batteryLevel}%` : t('empty')}</span>
+                            <span className="text-[10px] text-gray-400 font-mono leading-tight truncate">{'\u00A0'}</span>
+                        </div>
+                    </button>
+                    {hasCharger && (
+                        <button
+                            type="button"
+                            onClick={(event) => handleNavigateToCharger(event, slot.sn)}
+                            className="ml-2 shrink-0 text-[10px] font-mono leading-tight text-sky-700 underline decoration-sky-300 underline-offset-2 hover:text-sky-900"
+                            title={`${t('chargers_page_title')}: ${slot.sn}`}
+                        >
+                            {slot.sn}
+                        </button>
+                    )}
+                </div>
 
                 {/* Lock/Unlock Button */}
                 {canLock && (
@@ -444,27 +461,39 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
 
         return (
             <div className={`relative min-h-[40px] rounded-md border p-0.5 text-left transition-all duration-300 ${style.className} ${style.glow ? 'slot-glow' : ''}`}>
-                <button
-                    onClick={() => hasCharger && canEject && onSlotClick(kiosk.stationid, module.id, slot.position)}
-                    disabled={!canEject || !isOnline || !hasCharger}
-                    className="flex h-full w-full min-w-0 items-start gap-1.5 rounded-md px-2 py-0.5 pr-7 disabled:cursor-not-allowed"
-                    title={hasCharger ? `SN ${slot.sn}` : `Slot ${displayPosition || slot.position}`}
-                >
-                    <div className="flex w-7 flex-col items-center justify-center pt-0.5">
-                        <span className="text-[10px] font-mono leading-none text-gray-500">
-                            {String(displayPosition || slot.position).padStart(2, '0')}
-                        </span>
-                        <StatusIndicator status={slot.sstat} />
-                    </div>
-                    <div className="flex min-w-0 flex-col pt-0.5">
-                        <span className="text-[13px] font-bold leading-none">
-                            {hasCharger ? `${slot.batteryLevel}%` : '—'}
-                        </span>
-                        <span className="truncate font-mono text-[9px] leading-tight text-gray-500">
-                            {hasCharger ? slot.sn : '\u00A0'}
-                        </span>
-                    </div>
-                </button>
+                <div className="flex h-full w-full min-w-0 items-start gap-1.5 rounded-md px-2 py-0.5 pr-7">
+                    <button
+                        onClick={() => hasCharger && canEject && onSlotClick(kiosk.stationid, module.id, slot.position)}
+                        disabled={!canEject || !isOnline || !hasCharger}
+                        className="flex min-w-0 flex-grow items-start gap-1.5 disabled:cursor-not-allowed"
+                        title={hasCharger ? `SN ${slot.sn}` : `Slot ${displayPosition || slot.position}`}
+                    >
+                        <div className="flex w-7 flex-col items-center justify-center pt-0.5">
+                            <span className="text-[10px] font-mono leading-none text-gray-500">
+                                {String(displayPosition || slot.position).padStart(2, '0')}
+                            </span>
+                            <StatusIndicator status={slot.sstat} />
+                        </div>
+                        <div className="flex min-w-0 flex-col pt-0.5">
+                            <span className="text-[13px] font-bold leading-none">
+                                {hasCharger ? `${slot.batteryLevel}%` : '—'}
+                            </span>
+                            <span className="truncate font-mono text-[9px] leading-tight text-gray-500">
+                                {'\u00A0'}
+                            </span>
+                        </div>
+                    </button>
+                    {hasCharger && (
+                        <button
+                            type="button"
+                            onClick={(event) => handleNavigateToCharger(event, slot.sn)}
+                            className="absolute right-7 top-1.5 truncate font-mono text-[9px] leading-tight text-sky-700 underline decoration-sky-300 underline-offset-2 hover:text-sky-900"
+                            title={`${t('chargers_page_title')}: ${slot.sn}`}
+                        >
+                            {slot.sn}
+                        </button>
+                    )}
+                </div>
 
                 {canLock && (
                     <button

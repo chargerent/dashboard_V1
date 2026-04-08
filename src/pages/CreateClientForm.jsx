@@ -5,6 +5,19 @@ import MultiSwitch from "../utils/MultiSwitch";
 
 const AUTH_MAPPING_DOMAIN = "auth.charge.rent";
 
+const getEffectiveAdminFeatures = (features, featuresList, username = '') => {
+  const normalizedUsername = String(username || '').trim().toLowerCase();
+  const rawFeatures = features || {};
+  const base = Object.fromEntries((featuresList || []).map((key) => [key, key !== 'binding' && key !== 'testing']));
+
+  return {
+    ...base,
+    ...rawFeatures,
+    binding: normalizedUsername === 'chargerent' || rawFeatures.binding === true,
+    testing: normalizedUsername === 'chargerent' || rawFeatures.testing === true,
+  };
+};
+
 const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, commandsList }) => {
   const [newClient, setNewClient] = useState({
     username: '',
@@ -31,6 +44,8 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
   const [openSection, setOpenSection] = useState(null);
   const [formError, setFormError] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
+  const isAdminRole = newClient.role === 'admin';
+  const isPartnerRole = newClient.role === 'partner';
 
   const normalizeUsername = (u) => String(u || '').trim().toLowerCase();
   const isValidUsername = (u) => /^[a-z0-9._-]+$/.test(u);
@@ -40,6 +55,10 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
     if (!u || !isValidUsername(u)) return '';
     return `${u}@${AUTH_MAPPING_DOMAIN}`;
   }, [newClient.username]);
+  const effectiveAdminFeatures = useMemo(
+    () => getEffectiveAdminFeatures(newClient.features, featuresList, newClient.username),
+    [featuresList, newClient.features, newClient.username],
+  );
 
   const toggleSection = (section) => setOpenSection(prev => (prev === section ? null : section));
 
@@ -54,6 +73,16 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
 
     if (type === 'checkbox') {
       setNewClient(prev => ({ ...prev, [name]: checked }));
+      return;
+    }
+
+    if (name === 'role') {
+      setNewClient(prev => ({
+        ...prev,
+        role: value,
+        partner: value === 'partner',
+        clientId: value === 'admin' ? '' : prev.clientId,
+      }));
       return;
     }
 
@@ -73,8 +102,8 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
 
     const usernameNorm = normalizeUsername(newClient.username);
 
-    if (!usernameNorm || !newClient.password || !newClient.clientId) {
-      setFormError("Username, password, and Client ID are required.");
+    if (!usernameNorm || !newClient.password || (!isAdminRole && !newClient.clientId)) {
+      setFormError(isAdminRole ? "Username and password are required." : "Username, password, and Client ID are required.");
       return;
     }
     if (!isValidUsername(usernameNorm)) {
@@ -92,17 +121,17 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
 
     const profile = {
       username: usernameNorm,
-      clientId: String(newClient.clientId).trim().toUpperCase(),
+      clientId: isAdminRole ? '' : String(newClient.clientId).trim().toUpperCase(),
       contact: {
         name: String(newClient.contact?.name || '').trim(),
         email: String(newClient.contact?.email || '').trim(),
       },
       features: { ...newClient.features, defaultlanguage: (newClient.features?.defaultlanguage || 'en').toLowerCase() },
       commands: { ...newClient.commands },
-      partner: !!newClient.partner,
-      commission: String(newClient.commission ?? '').trim() || "0",
+      partner: isPartnerRole,
+      commission: isPartnerRole ? (String(newClient.commission ?? '').trim() || "0") : "0",
       active: newClient.active !== false,
-      role: newClient.role || (newClient.partner ? 'partner' : 'user'),
+      role: newClient.role || 'user',
       authEmail: mappedEmail || undefined
     };
 
@@ -128,13 +157,13 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
     </button>
   );
 
-  const PermissionToggle = ({ label, isChecked, onChange }) => (
-    <div className="flex items-center justify-between py-2 px-3 border-b border-gray-100 last:border-b-0">
+  const PermissionToggle = ({ label, isChecked, onChange, disabled }) => (
+    <div className={`flex items-center justify-between py-2 px-3 border-b border-gray-100 last:border-b-0 ${disabled ? 'opacity-50' : ''}`}>
       <span className="text-sm font-medium text-gray-700 capitalize">{label.replace(/_/g, ' ')}</span>
-      <label className="flex shrink-0 items-center cursor-pointer">
+      <label className={`flex shrink-0 items-center ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
         <div className="relative">
-          <input type="checkbox" className="sr-only" checked={!!isChecked} onChange={e => onChange(e.target.checked)} />
-          <div className={`block w-10 h-6 rounded-full transition ${isChecked ? 'bg-blue-600' : 'bg-gray-300'}`}></div>
+          <input type="checkbox" className="sr-only" checked={!!isChecked} onChange={e => !disabled && onChange(e.target.checked)} disabled={disabled} />
+          <div className={`block w-10 h-6 rounded-full transition ${isChecked ? (disabled ? 'bg-blue-300' : 'bg-blue-600') : 'bg-gray-300'}`}></div>
           <div className={`dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform ${isChecked ? 'translate-x-4' : ''}`}></div>
         </div>
       </label>
@@ -190,9 +219,17 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700">{t('client_id')} <span className="text-red-500">*</span></label>
-            <input type="text" name="clientId" value={newClient.clientId} onChange={handleInputChange}
-              className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" required />
+            <label className={`block text-sm font-medium ${isAdminRole ? 'text-gray-400' : 'text-gray-700'}`}>{t('client_id')} {!isAdminRole && <span className="text-red-500">*</span>}</label>
+            <input
+              type="text"
+              name="clientId"
+              value={newClient.clientId}
+              onChange={handleInputChange}
+              disabled={isAdminRole}
+              placeholder={isAdminRole ? 'Not required for admins' : ''}
+              className={`mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 ${isAdminRole ? 'cursor-not-allowed bg-gray-100 text-gray-400' : ''}`}
+              required={!isAdminRole}
+            />
           </div>
 
           <div>
@@ -217,19 +254,15 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
               className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
           </div>
 
-          <div className="md:col-span-2 border-t pt-4">
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:items-end">
-              <div>
-              <PermissionToggle label="Partner" isChecked={newClient.partner}
-                onChange={(value) => setNewClient(prev => ({ ...prev, partner: value }))} />
-              </div>
+          {isPartnerRole && (
+            <div className="md:col-span-2 border-t pt-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700">{t('rev_share_percentage')}</label>
                 <input type="number" name="commission" value={newClient.commission || ''} onChange={handleInputChange}
                   className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" min="0" max="100" step="0.1" />
               </div>
             </div>
-          </div>
+          )}
 
           <div className="md:col-span-2">
             <label className="block text-sm font-medium text-gray-700">Active</label>
@@ -241,23 +274,27 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
         <div className="p-2 border-t border-gray-200 mt-4">
           <SectionButton section="features" />
           {openSection === 'features' && (
-            <div className="bg-gray-50 rounded-md p-2 mt-1">
+            <div className={`rounded-md p-2 mt-1 ${isAdminRole ? 'bg-gray-100 opacity-60' : 'bg-gray-50'}`}>
+              {isAdminRole && <p className="px-2 pb-2 text-xs italic text-gray-500">Admins have all features except binding and testing unless explicitly enabled.</p>}
               <MultiSwitch label={t('default_language')} options={['EN', 'FR']}
                 value={newClient.features.defaultlanguage || 'en'}
-                onChange={(val) => handleLanguageChange(val)} />
+                onChange={(val) => !isAdminRole && handleLanguageChange(val)} />
               {featuresList.map(key => (
-                <PermissionToggle key={key} label={key} isChecked={newClient.features[key]}
-                  onChange={(value) => handlePermissionChange('features', key, value)} />
+                <PermissionToggle key={key} label={key} isChecked={isAdminRole ? effectiveAdminFeatures[key] : newClient.features[key]}
+                  onChange={(value) => ((isAdminRole && (key === 'binding' || key === 'testing')) || !isAdminRole) && handlePermissionChange('features', key, value)}
+                  disabled={isAdminRole && key !== 'binding' && key !== 'testing'} />
               ))}
             </div>
           )}
 
           <SectionButton section="commands" />
           {openSection === 'commands' && (
-            <div className="bg-gray-50 rounded-md p-2 mt-1">
+            <div className={`rounded-md p-2 mt-1 ${isAdminRole ? 'bg-gray-100 opacity-60' : 'bg-gray-50'}`}>
+              {isAdminRole && <p className="px-2 pb-2 text-xs italic text-gray-500">Admins have all commands enabled</p>}
               {Object.keys(newClient.commands).map(key => (
-                <PermissionToggle key={key} label={key} isChecked={newClient.commands[key]}
-                  onChange={(value) => handlePermissionChange('commands', key, value)} />
+                <PermissionToggle key={key} label={key} isChecked={isAdminRole ? true : newClient.commands[key]}
+                  onChange={(value) => !isAdminRole && handlePermissionChange('commands', key, value)}
+                  disabled={isAdminRole} />
               ))}
             </div>
           )}

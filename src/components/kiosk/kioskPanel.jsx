@@ -11,6 +11,8 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
     const isOnline = isKioskOnline(kiosk, mockNow);
     const canExpand = clientInfo.features.details;
     const isPending = String(kiosk.status || '').toLowerCase() === 'pending';
+    const hasPricing = kiosk.pricing && Object.keys(kiosk.pricing).length > 0;
+    const isPricingOnlineDisabled = hasPricing && kiosk.pricing?.online === false;
     
     const stats = useMemo(() => {
         let total = 0;
@@ -72,7 +74,7 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                 <div className="flex justify-between items-start mb-2">
                     <div className="flex items-center gap-1.5">
                         {clientInfo.features.stationid ? (
-                            <h3 className="font-bold text-lg text-gray-800">{kiosk.stationid}</h3>
+                            <h3 className={`font-bold text-lg ${isPricingOnlineDisabled ? 'text-orange-500' : 'text-gray-800'}`}>{kiosk.stationid}</h3>
                         ) : (
                             <h3 className="font-bold text-lg text-gray-800">{kiosk.info.place}</h3>
                         )}

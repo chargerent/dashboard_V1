@@ -6,6 +6,7 @@ import CommandStatusToast from '../components/UI/CommandStatusToast';
 import { formatDateTime, formatDuration } from '../utils/dateFormatter';
 import { isReturnedRentalStatus } from '../utils/rentals.js';
 import { textEquals, textIncludes, toText } from '../utils/text';
+import { isKioskOnline } from '../utils/helpers';
 
 const ChargerCard = ({ charger, t, onCommand, onNavigateToRentals, onNavigateToDashboard }) => {
     const [showRentals, setShowRentals] = useState(false);
@@ -161,6 +162,32 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
     const [searchTerm, setSearchTerm] = useState(initialSearch);
     const [activeFilter, setActiveFilter] = useState('all');
 
+    const latestTimestamp = useMemo(() => {
+        if (!Array.isArray(kioskData) || kioskData.length === 0) {
+            return new Date().toISOString();
+        }
+
+        const latestStation = kioskData.reduce((latest, current) => {
+            if (!current || !current.lastUpdated) return latest;
+            if (!latest) return current;
+
+            const latestDate = new Date(latest.lastUpdated.endsWith('Z') ? latest.lastUpdated : `${latest.lastUpdated}Z`);
+            const currentDate = new Date(current.lastUpdated.endsWith('Z') ? current.lastUpdated : `${current.lastUpdated}Z`);
+            return currentDate > latestDate ? current : latest;
+        }, null);
+
+        return latestStation ? latestStation.lastUpdated : new Date().toISOString();
+    }, [kioskData]);
+
+    const getKioskTimestamp = (kiosk) => {
+        const rawTimestamp = kiosk?.lastUpdated || kiosk?.lastUpdate || kiosk?.timestamp || '';
+        if (!rawTimestamp) return 0;
+
+        const normalizedTimestamp = rawTimestamp.endsWith('Z') ? rawTimestamp : `${rawTimestamp}Z`;
+        const parsedTimestamp = Date.parse(normalizedTimestamp);
+        return Number.isFinite(parsedTimestamp) ? parsedTimestamp : 0;
+    };
+
     useEffect(() => {
         setSearchTerm(initialSearch);
     }, [initialSearch]);
@@ -197,20 +224,27 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
             ? (kioskData || []).filter(k => textEquals(k.info.rep, clientInfo.clientId))
             : (kioskData || []).filter(k => textEquals(k.info.client, clientInfo.clientId));
 
-        const kiosksToProcess = clientInfo.isAdmin ? kioskData : clientKiosks;
+        const kiosksToProcess = (clientInfo.isAdmin ? kioskData : clientKiosks)
+            .filter((kiosk) => isKioskOnline(kiosk, latestTimestamp));
 
         if (kiosksToProcess) {
             for (const kiosk of kiosksToProcess) {
                 for (const module of (kiosk.modules || [])) {
                     (module.slots || []).forEach(slot => {
                         if (slot.sn && slot.sn !== 0) {
-                            kioskChargerLocations.set(String(slot.sn), {
+                            const nextLocation = {
                                 stationId: kiosk.stationid,
                                 moduleId: module.id,
                                 slotId: slot.position,
                                 isLocked: !!slot.isLocked,
                                 lockReason: slot.lockReason || '',
-                            });
+                                kioskTimestamp: getKioskTimestamp(kiosk),
+                            };
+                            const existingLocation = kioskChargerLocations.get(String(slot.sn));
+
+                            if (!existingLocation || nextLocation.kioskTimestamp >= existingLocation.kioskTimestamp) {
+                                kioskChargerLocations.set(String(slot.sn), nextLocation);
+                            }
                         }
                     });
                 }
@@ -305,7 +339,7 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
 
 
         return Array.from(chargerMap.values()).sort((a, b) => a.sn.localeCompare(b.sn));
-    }, [rentalData, kioskChargerFingerprint, clientInfo]);
+    }, [rentalData, kioskChargerFingerprint, clientInfo, kioskData, latestTimestamp]);
 
     const filteredChargers = useMemo(() => {
         let filtered = [...chargers];

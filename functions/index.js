@@ -207,8 +207,9 @@ async function assertCanManageBindings(req, data) {
   const authState = await getAuthorizedProfileFromRequest(req, data);
   const features = authState.profile.features || {};
   const commands = authState.profile.commands || {};
+  const username = normalizeUsername(authState.profile.username);
 
-  if (authState.isAdmin || features.binding === true || commands.binding === true) {
+  if (username === "chargerent" || features.binding === true || commands.binding === true) {
     return authState;
   }
 
@@ -222,8 +223,9 @@ async function assertCanManageBindingsFromContext(context) {
   const authState = await getAuthorizedProfileFromContext(context);
   const features = authState.profile.features || {};
   const commands = authState.profile.commands || {};
+  const username = normalizeUsername(authState.profile.username);
 
-  if (authState.isAdmin || features.binding === true || commands.binding === true) {
+  if (username === "chargerent" || features.binding === true || commands.binding === true) {
     return authState;
   }
 

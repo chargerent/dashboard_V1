@@ -19,7 +19,7 @@ import RentalDetailView from '../components/Dashboard/RentalDetailView';
 import { CpuChipIcon, QrCodeIcon } from '@heroicons/react/24/outline';
 import useKioskCommandFlow from '../hooks/useKioskCommandFlow';
 
-export default function DashboardPage({ _token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToReporting, onNavigateToTesting, rentalData, allStationsData, _setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, _setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, _ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, _setNgrokInfo, manageIgnoredKiosk, kiosksReady }) {
+export default function DashboardPage({ _token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToReporting, onNavigateToTesting, rentalData, allStationsData, _setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, _setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, _ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, _setNgrokInfo, manageIgnoredKiosk, kiosksReady, initialSearch = '' }) {
     const [loading, setLoading] = useState(!kiosksReady);
     const [error] = useState(null);
     const [expandedKioskId, setExpandedKioskId] = useState(null);
@@ -37,6 +37,7 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     const [showSoldOutModal, setShowSoldOutModal] = useState(false);
     const isAdminUser = !!clientInfo?.isAdmin;
     const hasReportingAccess = clientInfo?.features?.reporting === true || isAdminUser;
+    const hasBindingAccess = clientInfo?.username === 'chargerent' || clientInfo?.features?.binding === true || clientInfo?.commands?.binding === true;
     const hasTestingAccess = clientInfo?.username === 'chargerent' || clientInfo?.features?.testing === true;
 
     const { showWarning, handleStay } = useIdleTimer({ onLogout, idleTimeout: 540000, warningTimeout: 60000 });
@@ -69,6 +70,10 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
         }, 300);
         return () => clearTimeout(handler);
     }, [searchTerm]);
+
+    useEffect(() => {
+        setSearchTerm(initialSearch);
+    }, [initialSearch]);
     const handleToggleDetails = (stationid) => {
         setEditingKioskId(null); 
         setRentalDetailView(null);
@@ -426,7 +431,7 @@ return (
                             </svg>
                         </button>
                     )}
-	                    {((clientInfo.features.binding || clientInfo.commands.binding) || isAdminUser) && (
+	                    {hasBindingAccess && (
 	                        <button onClick={onNavigateToBinding} className="p-2 rounded-md bg-blue-100 text-blue-700 hover:bg-blue-200" title={t('module_binding')}>
 	                            <CpuChipIcon className="h-6 w-6" />
 	                        </button>
@@ -514,7 +519,7 @@ return (
                                                     {editingKioskId === kiosk.stationid && kioskToEdit ? (
                                                         <KioskEditPanel kiosk={kioskToEdit} onSave={handleKioskSave} clientInfo={clientInfo} isVisible={editingKioskId === kiosk.stationid} t={t} onCommand={handleGeneralCommand} />
                                                     ) : (
-                                                        clientInfo.features.details && <KioskDetailPanel kiosk={kiosk} isVisible={expandedKioskId === kiosk.stationid} onSlotClick={handleSlotClick} onLockSlot={handleLockSlotClick} pendingSlots={pendingSlots} ejectingSlots={ejectingSlots} failedEjectSlots={failedEjectSlots} lockingSlots={lockingSlots} t={t} onCommand={handleGeneralCommand} clientInfo={clientInfo} mockNow={latestTimestamp} serverFlowVersion={serverFlowVersion} serverUiVersion={serverUiVersion} />
+                                                        clientInfo.features.details && <KioskDetailPanel kiosk={kiosk} isVisible={expandedKioskId === kiosk.stationid} onSlotClick={handleSlotClick} onLockSlot={handleLockSlotClick} pendingSlots={pendingSlots} ejectingSlots={ejectingSlots} failedEjectSlots={failedEjectSlots} lockingSlots={lockingSlots} t={t} onCommand={handleGeneralCommand} onNavigateToChargers={onNavigateToChargers} clientInfo={clientInfo} mockNow={latestTimestamp} serverFlowVersion={serverFlowVersion} serverUiVersion={serverUiVersion} />
                                                     )}
                                                     {rentalDetailView?.kioskId === kiosk.stationid && (
                                                         <RentalDetailView kiosk={kiosk} period={rentalDetailView.period} rentalData={enrichedRentalData} onClose={() => setRentalDetailView(null)} onCommand={handleGeneralCommand} t={t} />

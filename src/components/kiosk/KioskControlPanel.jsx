@@ -18,26 +18,37 @@ const ControlButton = ({ icon, label, subLabel, onClick, className = '', status,
         )}
         {icon}
         <span className="text-xs font-semibold">{label}</span>
-        {subLabel && <span className="text-[9px] whitespace-nowrap text-gray-500 -mt-1">{subLabel}</span>}
+        {subLabel && <span className="text-[9px] text-center leading-tight text-gray-500 -mt-1">{subLabel}</span>}
     </button>
 );
 
 const V2_TYPES = ['CT3', 'CT4', 'CT8', 'CT12', 'CK48'];
+const getDisplayVersion = (version) => (
+    typeof version === 'string' && version.trim()
+        ? version.trim().split(' ')[0]
+        : null
+);
 
 function KioskControlPanel({ kiosk, t, onCommand, serverUiVersion, serverFlowVersion, clientInfo, _isOnline, disabled = false }) {
     const isV2 = V2_TYPES.includes(kiosk.hardware?.type);
     const flowSubLabel = () => {
-        const kioskV = kiosk.fversion ? kiosk.fversion.split(' ')[0] : null;
-        const serverV = serverFlowVersion ? serverFlowVersion.split(' ')[0] : null;
+        const kioskV = getDisplayVersion(kiosk.fversion);
+        const serverV = getDisplayVersion(serverFlowVersion);
         if (kioskV && serverV) return `${kioskV} → ${serverV}`;
         return kioskV || serverV || '';
     };
 
     const uiSubLabel = () => {
-        const kioskV = kiosk.ui?.version || kiosk.uiVersion || null;
-        const serverV = serverUiVersion || null;
-        if (kioskV && serverV) return `${kioskV} → ${serverV}`;
-        return kioskV || serverV || '';
+        const kioskV = getDisplayVersion(kiosk.ui?.version || kiosk.uiVersion);
+        const serverV = getDisplayVersion(serverUiVersion);
+        const serverFlowV = getDisplayVersion(serverFlowVersion);
+        const uiVersionText = kioskV && serverV ? `${kioskV} → ${serverV}` : kioskV || serverV || '';
+
+        if (!isV2 && serverFlowV) {
+            return uiVersionText ? `${uiVersionText} | Flow ${serverFlowV}` : `Flow ${serverFlowV}`;
+        }
+
+        return uiVersionText;
     };
 
     const ejectCounts = useMemo(() => {

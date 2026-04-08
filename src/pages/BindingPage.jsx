@@ -204,8 +204,7 @@ export default function BindingPage({
   currentUser,
   allStationsData,
 }) {
-  const isAdminUser = currentUser?.role === 'admin' || currentUser?.username === 'chargerent';
-  const canManageBindings = isAdminUser ||
+  const canManageBindings = currentUser?.username === 'chargerent' ||
     currentUser?.features?.binding === true ||
     currentUser?.commands?.binding === true;
 
@@ -266,7 +265,7 @@ export default function BindingPage({
   }, []);
 
   const loadMoveNextStation = useCallback(async (selectedCountry) => {
-    if (!isAdminUser || !selectedCountry) {
+    if (!canManageBindings || !selectedCountry) {
       setMoveDestinationInfo({ stationid: '', qrUrl: '' });
       return;
     }
@@ -293,7 +292,7 @@ export default function BindingPage({
     } finally {
       setLoadingMoveNextStation(false);
     }
-  }, [ensureSignedIn, firebaseUser, isAdminUser, syncMoveDestinationInfo, t]);
+  }, [canManageBindings, ensureSignedIn, firebaseUser, syncMoveDestinationInfo, t]);
 
   useEffect(() => {
     if (!moveSourceStationId) {
@@ -931,7 +930,7 @@ export default function BindingPage({
               </div>
             </div>
 
-            {isAdminUser && (
+            {canManageBindings && (
               <div className="rounded-lg bg-white shadow-md">
                 <div className="border-b border-gray-200 px-6 py-6">
                   <p className="text-sm font-semibold uppercase tracking-[0.2em] text-blue-600">{t('move_module_title')}</p>

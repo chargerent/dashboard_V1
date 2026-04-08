@@ -3,6 +3,29 @@
 import { useState, useEffect } from 'react';
 import MultiSwitch from '../utils/MultiSwitch';
 
+const getRole = (account) => {
+    const username = String(account?.username || '').trim().toLowerCase();
+    const role = String(account?.role || '').trim().toLowerCase();
+
+    if (role) return role;
+    if (username === 'chargerent') return 'admin';
+    if (account?.partner) return 'partner';
+    return 'user';
+};
+
+const getEffectiveAdminFeatures = (account, featuresList) => {
+    const rawFeatures = account?.features || {};
+    const username = String(account?.username || '').trim().toLowerCase();
+    const base = Object.fromEntries((featuresList || []).map((key) => [key, key !== 'binding' && key !== 'testing']));
+
+    return {
+        ...base,
+        ...rawFeatures,
+        binding: username === 'chargerent' || rawFeatures.binding === true,
+        testing: username === 'chargerent' || rawFeatures.testing === true,
+    };
+};
+
 const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsList, t, isEditing, editedData, onEdit, onCancel, onSave, onDataChange, onDelete, currentUser, lockoutData, onUnlock }) => {
     const [openSection, setOpenSection] = useState(null);
 
@@ -75,8 +98,15 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
 
     const renderEditForm = () => {
         if (!editedData) return null;
-        const allFeatures = { ...Object.fromEntries(featuresList.map(k => [k, false])), ...(editedData.features || {}) };
-        const allCommands = { ...Object.fromEntries(commandsList.map(k => [k, false])), ...(editedData.commands || {}) };
+        const role = getRole(editedData);
+        const isAdminRole = role === 'admin';
+        const isPartnerRole = role === 'partner';
+        const allFeatures = isAdminRole
+            ? getEffectiveAdminFeatures(editedData, featuresList)
+            : { ...Object.fromEntries(featuresList.map(k => [k, false])), ...(editedData.features || {}) };
+        const allCommands = isAdminRole
+            ? Object.fromEntries(commandsList.map(k => [k, true]))
+            : { ...Object.fromEntries(commandsList.map(k => [k, false])), ...(editedData.commands || {}) };
 
         return (
             <div className="p-4">
@@ -87,7 +117,30 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700">Client ID</label>
-                            <input type="text" value={editedData.clientId} onChange={(e) => onDataChange('clientId', e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
+                            <input
+                                type="text"
+                                value={editedData.clientId || ''}
+                                onChange={(e) => onDataChange('clientId', e.target.value)}
+                                disabled={isAdminRole}
+                                placeholder={isAdminRole ? 'Not required for admins' : ''}
+                                className={`mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2 ${isAdminRole ? 'cursor-not-allowed bg-gray-100 text-gray-400' : ''}`}
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700">Role</label>
+                            <select
+                                value={role}
+                                onChange={(e) => {
+                                    const nextRole = e.target.value;
+                                    onDataChange('role', nextRole);
+                                    onDataChange('partner', nextRole === 'partner');
+                                }}
+                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
+                            >
+                                <option value="user">user</option>
+                                <option value="partner">partner</option>
+                                <option value="admin">admin</option>
+                            </select>
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700">Password (leave blank to keep unchanged)</label>
@@ -102,21 +155,12 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
                             <label className="block text-sm font-medium text-gray-700">Contact Email</label>
                             <input type="email" value={editedData.contact?.email || ''} onChange={(e) => onDataChange('contact.email', e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
                         </div>
-                        <div className="border-t pt-3">
-                            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:items-end">
-                                <div>
-                                <PermissionToggle
-                                    label="Partner"
-                                    isChecked={editedData.partner}
-                                    onChange={(value) => onDataChange('partner', value)}
-                                />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700">{t('rev_share_percentage')}</label>
-                                    <input type="number" value={editedData.commission || ''} onChange={(e) => onDataChange('commission', e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" min="0" max="100" step="0.1" />
-                                </div>
+                        {isPartnerRole && (
+                            <div className="border-t pt-3">
+                                <label className="block text-sm font-medium text-gray-700">{t('rev_share_percentage')}</label>
+                                <input type="number" value={editedData.commission || ''} onChange={(e) => onDataChange('commission', e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" min="0" max="100" step="0.1" />
                             </div>
-                        </div>                        
+                        )}
                         {showActiveToggle && (
                             <PermissionToggle
                                 label="Active"
@@ -128,13 +172,14 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
                     <div className={`p-2 mt-4 ${isEditing ? 'border-t' : ''}`}>
                         <SectionButton section="features" isEditing={isEditing} />
                         {openSection === 'features' && (
-                            <div className="bg-gray-50 rounded-md p-2 mt-1">
+                            <div className={`rounded-md p-2 mt-1 ${isAdminRole ? 'bg-gray-100 opacity-60' : 'bg-gray-50'}`}>
+                                {isAdminRole && <p className="px-2 pb-2 text-xs italic text-gray-500">Admins have all features except binding and testing unless explicitly enabled.</p>}
                                 <MultiSwitch
                                     label={t('default_language')}
                                     options={['EN', 'FR']}
                                     value={editedData.features?.defaultlanguage || 'en'}
                                     onChange={(value) => {
-                                        if (isEditing) {
+                                        if (isEditing && (!isAdminRole || editedData?.username === 'chargerent')) {
                                             onDataChange('features.defaultlanguage', value);
                                         }
                                     }}
@@ -142,17 +187,20 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
                                 {featuresList.map(key => (
                                     <PermissionToggle
                                         key={key} label={key} isChecked={allFeatures[key]}
-                                        onChange={(value) => handlePermissionToggle('features', key, value)}
+                                        onChange={(value) => ((isAdminRole && (key === 'binding' || key === 'testing')) || !isAdminRole) && handlePermissionToggle('features', key, value)}
+                                        disabled={isAdminRole && key !== 'binding' && key !== 'testing'}
                                     />
                                 ))}
                             </div>
                         )}
                         <SectionButton section="commands" isEditing={isEditing} />
                         {openSection === 'commands' && (
-                            <div className="bg-gray-50 rounded-md p-2 mt-1">
+                            <div className={`rounded-md p-2 mt-1 ${isAdminRole ? 'bg-gray-100 opacity-60' : 'bg-gray-50'}`}>
+                                {isAdminRole && <p className="px-2 pb-2 text-xs italic text-gray-500">Admins have all commands enabled</p>}
                                 {commandsList.map(key => (
                                     <PermissionToggle key={key} label={key} isChecked={allCommands[key]}
-                                        onChange={(value) => handlePermissionToggle('commands', key, value)} />
+                                        onChange={(value) => !isAdminRole && handlePermissionToggle('commands', key, value)}
+                                        disabled={isAdminRole} />
                                 ))}
                             </div>
                         )}
@@ -166,8 +214,15 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
     };
 
     const renderViewMode = () => {
-        const allFeatures = { ...Object.fromEntries((featuresList || []).map(k => [k, false])), ...(client.features || {}) };
-        const allCommands = { ...Object.fromEntries((commandsList || []).map(k => [k, false])), ...(client.commands || {}) };
+        const role = getRole(client);
+        const isAdminRole = role === 'admin';
+        const isPartnerRole = role === 'partner';
+        const allFeatures = isAdminRole
+            ? getEffectiveAdminFeatures(client, featuresList)
+            : { ...Object.fromEntries((featuresList || []).map(k => [k, false])), ...(client.features || {}) };
+        const allCommands = isAdminRole
+            ? Object.fromEntries((commandsList || []).map(k => [k, true]))
+            : { ...Object.fromEntries((commandsList || []).map(k => [k, false])), ...(client.commands || {}) };
         const contact = client.contact || {};
         const loginLogs = Array.isArray(lockoutData?.logs) ? [...lockoutData.logs].reverse() : [];
 
@@ -183,10 +238,15 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
                     <div className="flex justify-between items-center">
                         <div className="flex items-center gap-2">
                             <h3 className="font-bold text-lg text-gray-800">{client.username}</h3>
-                            {client.partner && (
+                            {isPartnerRole && (
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5 text-blue-600">
                                     <path fillRule="evenodd" d="M8.603 3.799A4.49 4.49 0 0 1 12 2.25c1.357 0 2.573.6 3.397 1.549a4.49 4.49 0 0 1 3.498 1.307 4.491 4.491 0 0 1 1.307 3.497A4.49 4.49 0 0 1 21.75 12c0 1.357-.6 2.573-1.549 3.397a4.49 4.49 0 0 1-1.307 3.498 4.491 4.491 0 0 1-3.497 1.307A4.49 4.49 0 0 1 12 21.75a4.49 4.49 0 0 1-3.397-1.549 4.49 4.49 0 0 1-3.498-1.307 4.491 4.491 0 0 1-1.307-3.497A4.49 4.49 0 0 1 2.25 12c0-1.357.6-2.573 1.549-3.397a4.49 4.49 0 0 1 1.307-3.498 4.491 4.491 0 0 1 3.497-1.307Zm7.007 6.387a.75.75 0 1 0-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 0 0-1.06 1.06l2.25 2.25a.75.75 0 0 0 1.14-.094l3.75-5.25Z" clipRule="evenodd" />
                                 </svg>
+                            )}
+                            {isAdminRole && (
+                                <span className="inline-flex items-center rounded-full border border-purple-300 bg-purple-100 px-2 py-0.5 text-xs font-semibold text-purple-700">
+                                    Admin
+                                </span>
                             )}
                         </div>                        <div className="flex items-center gap-2">
                             <button onClick={() => onEdit(client.username)} className="p-1.5 rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-600" title={t('edit_client')}>
@@ -213,25 +273,28 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
                 <div className="p-2">
                     <SectionButton section="features" />
                     {openSection === 'features' && (
-                        <div className="bg-gray-50 rounded-md p-2 mt-1">
+                        <div className={`rounded-md p-2 mt-1 ${isAdminRole ? 'bg-gray-100 opacity-60' : 'bg-gray-50'}`}>
+                            {isAdminRole && <p className="px-2 pb-2 text-xs italic text-gray-500">Admins have all features except binding and testing unless explicitly enabled.</p>}
                             <MultiSwitch
                                 label={t('default_language')}
                                 options={['EN', 'FR']}
                                 value={client.features?.defaultlanguage || 'en'}
-                                onChange={(value) => onPermissionChange(client.uid, 'features', 'defaultlanguage', value)}
+                                onChange={(value) => !isAdminRole && onPermissionChange(client.uid, 'features', 'defaultlanguage', value)}
                             />
                             {featuresList.map(key => (
                                 <PermissionToggle
                                     key={key} label={key} isChecked={allFeatures[key]}
-                                    onChange={(value) => handlePermissionToggle('features', key, value)}
+                                    onChange={(value) => ((isAdminRole && (key === 'binding' || key === 'testing')) || !isAdminRole) && handlePermissionToggle('features', key, value)}
+                                    disabled={isAdminRole && key !== 'binding' && key !== 'testing'}
                                 />
                             ))}
                         </div>
                     )}
                     <SectionButton section="commands" />
                     {openSection === 'commands' && (
-                        <div className="bg-gray-50 rounded-md p-2 mt-1">
-                            {commandsList.map(key => (<PermissionToggle key={key} label={key} isChecked={allCommands[key]} onChange={(value) => handlePermissionToggle('commands', key, value)} />))}
+                        <div className={`rounded-md p-2 mt-1 ${isAdminRole ? 'bg-gray-100 opacity-60' : 'bg-gray-50'}`}>
+                            {isAdminRole && <p className="px-2 pb-2 text-xs italic text-gray-500">Admins have all commands enabled</p>}
+                            {commandsList.map(key => (<PermissionToggle key={key} label={key} isChecked={allCommands[key]} onChange={(value) => !isAdminRole && handlePermissionToggle('commands', key, value)} disabled={isAdminRole} />))}
                         </div>
                     )}
                     <SectionButton section="login_history" />
