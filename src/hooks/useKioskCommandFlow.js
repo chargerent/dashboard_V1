@@ -183,6 +183,8 @@ export default function useKioskCommandFlow({
     let action;
     if (section === 'formoptions') {
       action = 'formoptionschange';
+    } else if (section === 'wifi') {
+      action = isNewSchemaKiosk(targetKiosk) ? 'wifichange' : 'infochange';
     } else if (section === 'marketingoptions') {
       action = 'marketingoptionschange';
     } else if (section === 'analyticsoptions') {

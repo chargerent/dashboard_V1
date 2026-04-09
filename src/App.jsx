@@ -169,6 +169,7 @@ function normalizeKioskPayloadForSave(action, kioskPayload, usesNewSchemaInfo) {
 
 const FIREBASE_SAVE_ACTIONS = {
   infochange: 'info',
+  wifichange: 'wifi',
   formoptionschange: 'formoptions',
   marketingoptionschange: 'marketingoptions',
   analyticsoptionschange: 'analyticsoptions',

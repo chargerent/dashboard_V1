@@ -632,7 +632,7 @@ async function kioskUpdateSectionImpl(data, authState) {
   const kioskPatch = clonePlain(data?.kiosk) || {};
   const autoGeocode = data?.autoGeocode === true;
   const requestId = String(data?.requestId || "").trim();
-  const allowedSections = new Set(["info", "formoptions", "marketingoptions", "analyticsoptions", "hardware", "pricing", "ui"]);
+  const allowedSections = new Set(["info", "wifi", "formoptions", "marketingoptions", "analyticsoptions", "hardware", "pricing", "ui"]);
 
   if (!stationid) {
     throw new functions.https.HttpsError(
@@ -644,7 +644,7 @@ async function kioskUpdateSectionImpl(data, authState) {
   if (!allowedSections.has(section)) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "section must be one of info, formoptions, marketingoptions, analyticsoptions, hardware, pricing, ui",
+        "section must be one of info, wifi, formoptions, marketingoptions, analyticsoptions, hardware, pricing, ui",
       );
   }
 
