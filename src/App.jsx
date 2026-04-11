@@ -19,6 +19,7 @@ import ReportingPage from './pages/ReportingPage.jsx';
 import BindingPage from './pages/BindingPage.jsx';
 import TemplatesPage from './pages/TemplatesPage.jsx';
 import TestingPage from './pages/TestingPage.jsx';
+import MediaPage from './pages/MediaPage.jsx';
 import { callFunctionWithAuth } from './utils/callableRequest.js';
 import {
   applyRefundConfirmationToRental,
@@ -198,7 +199,8 @@ function buildClientInfoFromProfile(profile, uid) {
     status: false,
     pricing: false,
     reporting: false,
-    testing: false
+    testing: false,
+    media: false,
   };
 
   const defaultCommands = {
@@ -220,6 +222,7 @@ function buildClientInfoFromProfile(profile, uid) {
   let commands = { ...defaultCommands, ...(payloadCommands || {}) };
   const hasBindingAccess = username === 'chargerent' || features.binding === true || commands.binding === true;
   const hasTestingAccess = username === 'chargerent' || features.testing === true;
+  const hasMediaAccess = username === 'chargerent' || isAdmin || features.media === true;
 
   // Admin override
   if (isAdmin) {
@@ -239,6 +242,7 @@ function buildClientInfoFromProfile(profile, uid) {
       client_commission: true,
       rep_commission: true,
       search: true,
+      media: true,
       binding: false,
       testing: false,
     };
@@ -262,6 +266,7 @@ function buildClientInfoFromProfile(profile, uid) {
   features.defaultlanguage = (features.defaultlanguage || features.defaultLanguage || 'en').toString().toLowerCase();
   features.binding = hasBindingAccess;
   features.testing = hasTestingAccess;
+  features.media = hasMediaAccess;
 
   return {
     uid,
@@ -300,7 +305,7 @@ function App() {
   const [token, setToken] = useState(localStorage.getItem('dashboardToken'));
   const [clientInfo, setClientInfo] = useState(null);
   const [language, setLanguage] = useState('en');
-  const [page, setPage] = useState('dashboard'); // 'dashboard', 'admin', 'binding', 'templates', 'kiosk-editor', 'rentals', 'chargers', 'provision', 'reporting', 'analytics', 'testing'
+  const [page, setPage] = useState('dashboard'); // 'dashboard', 'admin', 'media', 'binding', 'templates', 'kiosk-editor', 'rentals', 'chargers', 'provision', 'reporting', 'analytics', 'testing'
   const [dashboardSearchTerm, setDashboardSearchTerm] = useState('');
   const [chargerSearchTerm, setChargerSearchTerm] = useState('');
   const [rentalData, setRentalData] = useState([]);
@@ -1371,10 +1376,16 @@ function App() {
     const hasTestingAccess = clientInfo.username === 'chargerent' || clientInfo.features?.testing === true;
     const hasBindingAccess = clientInfo.username === 'chargerent' || clientInfo.features?.binding === true || clientInfo.commands?.binding === true;
     const hasReportingAccess = clientInfo.isAdmin || clientInfo.features?.reporting === true;
+    const hasMediaAccess = clientInfo.isAdmin || clientInfo.features?.media === true;
+    const canOpenAdminTools = clientInfo.isAdmin || clientInfo.commands?.['client edit'] === true || hasMediaAccess;
     const isRegularReportingUser = !clientInfo.isAdmin && clientInfo.role !== 'partner';
 
     switch (page) {
       case 'admin':
+        if (!canOpenAdminTools) {
+          return dashboard;
+        }
+
         return (
           <AdminPage
             token={token}
@@ -1383,7 +1394,23 @@ function App() {
             onNavigateToProvisionPage={() => setPage('provision')}
             onNavigateToAgreement={() => setPage('agreement')}
             onNavigateToTemplates={() => setPage('templates')}
+            onNavigateToMedia={() => setPage('media')}
             currentUser={clientInfo}
+            t={t}
+          />
+        );
+      case 'media':
+        if (!hasMediaAccess) {
+          return dashboard;
+        }
+
+        return (
+          <MediaPage
+            onLogout={handleLogout}
+            onNavigateToDashboard={() => setPage('dashboard')}
+            onNavigateToAdmin={() => setPage('admin')}
+            currentUser={clientInfo}
+            allStationsData={dedupedStationsData}
             t={t}
           />
         );

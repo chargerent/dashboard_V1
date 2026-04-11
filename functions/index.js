@@ -1,13 +1,21 @@
 /* eslint-env node */
 const {onCall, onRequest, HttpsError} = require("firebase-functions/v2/https");
+const crypto = require("node:crypto");
 const admin = require("firebase-admin");
 
 admin.initializeApp();
 const db = admin.firestore();
+const STORAGE_BUCKET = "node-red-alerts.firebasestorage.app";
+const STORAGE_BUCKET_CANDIDATES = Array.from(new Set([
+  STORAGE_BUCKET,
+  "chargerent-backup",
+  "node-red-alerts.appspot.com",
+]));
 
 const AUTH_MAPPING_DOMAIN = "auth.charge.rent";
 const STATION_SEQUENCE_START = 8000;
 const DEFAULT_KIOSK_POWER_THRESHOLD = 80;
+const MAX_MEDIA_UPLOAD_BYTES = 250 * 1024 * 1024;
 const DEFAULT_MARKETING_OPTIONS = {
   active: true,
   title: {
@@ -38,6 +46,12 @@ const DEFAULT_MARKETING_OPTIONS = {
 };
 const DEFAULT_ANALYTICS_OPTIONS = {
   active: false,
+};
+const DEFAULT_MEDIA_OPTIONS = {
+  active: false,
+  assetIds: [],
+  playlist: [],
+  loop: true,
 };
 const NEW_KIOSK_TYPES = new Set(["CT3", "CT4", "CT8", "CT12", "CK48"]);
 const GOOGLE_MAPS_SECRET = "GOOGLE_MAPS_API_KEY";
@@ -76,6 +90,69 @@ function normalizeMarketingOptions(marketingoptions) {
     buttonText: mergeLocalizedMarketingValue(source.buttonText, DEFAULT_MARKETING_OPTIONS.buttonText),
     buttonUrl: source.buttonUrl ?? DEFAULT_MARKETING_OPTIONS.buttonUrl,
   };
+}
+
+function normalizeMediaOptions(media) {
+  const source = isPlainObject(media) ? media : {};
+  const playlist = Array.isArray(source.playlist) ?
+    source.playlist.filter((item) => isPlainObject(item)) :
+    [];
+  const assetIds = Array.isArray(source.assetIds) ?
+    source.assetIds
+        .map((value) => String(value || "").trim())
+        .filter(Boolean) :
+    playlist
+        .map((item) => String(item?.assetId || "").trim())
+        .filter(Boolean);
+
+  return {
+    ...DEFAULT_MEDIA_OPTIONS,
+    ...source,
+    active: source.active === true && playlist.length > 0,
+    assetIds,
+    playlist,
+    loop: source.loop !== false,
+  };
+}
+
+function detectMediaKind(contentType) {
+  const normalizedContentType = String(contentType || "").trim().toLowerCase();
+  if (normalizedContentType.startsWith("image/")) return "image";
+  if (normalizedContentType.startsWith("video/")) return "video";
+  if (normalizedContentType === "application/pdf") return "pdf";
+  return "other";
+}
+
+function isSupportedMediaContentType(contentType) {
+  const normalizedContentType = String(contentType || "").trim().toLowerCase();
+  return (
+    normalizedContentType.startsWith("image/") ||
+    normalizedContentType.startsWith("video/") ||
+    normalizedContentType === "application/pdf"
+  );
+}
+
+function sanitizeFileName(fileName) {
+  const normalized = String(fileName || "")
+      .trim()
+      .replace(/[^a-zA-Z0-9._-]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "");
+
+  return normalized || `upload-${Date.now()}`;
+}
+
+function getStorageBucketCandidates(requestedBucketName = "") {
+  const normalizedRequested = String(requestedBucketName || "").trim();
+  return Array.from(new Set([
+    normalizedRequested,
+    ...STORAGE_BUCKET_CANDIDATES,
+  ].filter(Boolean)));
+}
+
+function getStorageBucket(bucketName = "") {
+  const normalizedBucketName = String(bucketName || "").trim() || STORAGE_BUCKET;
+  return admin.storage().bucket(normalizedBucketName);
 }
 
 function buildHttpsCompat(runtimeOptions = null) {
@@ -235,6 +312,39 @@ async function assertCanManageBindingsFromContext(context) {
   );
 }
 
+function hasMediaFeature(authState) {
+  const username = normalizeUsername(authState?.profile?.username);
+  if (username === "chargerent" || authState?.isAdmin) {
+    return true;
+  }
+
+  return authState?.profile?.features?.media === true;
+}
+
+async function assertCanManageMedia(req, data) {
+  const authState = await getAuthorizedProfileFromRequest(req, data);
+  if (hasMediaFeature(authState)) {
+    return authState;
+  }
+
+  throw new functions.https.HttpsError(
+      "permission-denied",
+      "Not allowed to manage media",
+  );
+}
+
+async function assertCanManageMediaFromContext(context) {
+  const authState = await getAuthorizedProfileFromContext(context);
+  if (hasMediaFeature(authState)) {
+    return authState;
+  }
+
+  throw new functions.https.HttpsError(
+      "permission-denied",
+      "Not allowed to manage media",
+  );
+}
+
 function sendFunctionError(res, error) {
   const status = Number(error?.httpErrorCode?.status) || 500;
   const code = String(error?.code || "internal");
@@ -315,6 +425,118 @@ function buildCustomClaimsFromProfile(profile) {
     role,
     commands,
   };
+}
+
+function getAuthClientId(authState) {
+  return String(authState?.profile?.clientId || "").trim().toUpperCase();
+}
+
+function canAccessMediaAsset(authState, asset) {
+  if (!asset) {
+    return false;
+  }
+
+  if (authState?.isAdmin) {
+    return true;
+  }
+
+  if (asset.visibility === "global") {
+    return true;
+  }
+
+  const authClientId = getAuthClientId(authState);
+  const ownerClientId = String(asset.ownerClientId || "").trim().toUpperCase();
+  return !!authClientId && ownerClientId === authClientId;
+}
+
+function canArchiveMediaAsset(authState, asset) {
+  if (!asset) {
+    return false;
+  }
+
+  if (authState?.isAdmin) {
+    return true;
+  }
+
+  if (asset.visibility === "global") {
+    return false;
+  }
+
+  return canAccessMediaAsset(authState, asset);
+}
+
+function canManageMediaForKiosk(authState, kiosk) {
+  if (authState?.isAdmin) {
+    return true;
+  }
+
+  if (!hasMediaFeature(authState)) {
+    return false;
+  }
+
+  const authClientId = getAuthClientId(authState);
+  if (!authClientId) {
+    return false;
+  }
+
+  const kioskClient = String(kiosk?.info?.client || kiosk?.info?.clientId || "").trim().toUpperCase();
+  const kioskRep = String(kiosk?.info?.rep || "").trim().toUpperCase();
+  return kioskClient === authClientId || kioskRep === authClientId;
+}
+
+function resolveMediaModeValue(currentMode) {
+  const rawMode = String(currentMode || "").trim();
+
+  if (rawMode && rawMode === rawMode.toLowerCase()) {
+    return "media";
+  }
+
+  return "MEDIA";
+}
+
+function serializeFirestoreTimestamp(value) {
+  if (!value) return null;
+
+  if (typeof value?.toDate === "function") {
+    return value.toDate().toISOString();
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  return String(value);
+}
+
+function serializeMediaAssetSnapshot(docSnap) {
+  const asset = docSnap.data() || {};
+
+  return {
+    id: docSnap.id,
+    name: String(asset.name || ""),
+    contentType: String(asset.contentType || ""),
+    kind: String(asset.kind || "other"),
+    size: Number(asset.size || 0),
+    visibility: String(asset.visibility || "client"),
+    ownerClientId: String(asset.ownerClientId || ""),
+    bucketName: String(asset.bucketName || ""),
+    storagePath: String(asset.storagePath || ""),
+    downloadUrl: String(asset.downloadUrl || ""),
+    createdByUid: String(asset.createdByUid || ""),
+    createdByUsername: String(asset.createdByUsername || ""),
+    active: asset.active !== false,
+    createdAt: serializeFirestoreTimestamp(asset.createdAt),
+    updatedAt: serializeFirestoreTimestamp(asset.updatedAt),
+    targetType: String(asset.targetType || "CK48"),
+  };
+}
+
+function chunkArray(values, size) {
+  const chunks = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
 }
 
 function canEditKiosk(authState, kiosk) {
@@ -545,6 +767,13 @@ function clonePlain(value) {
   return JSON.parse(JSON.stringify(value ?? null));
 }
 
+function buildStorageDownloadUrl(storagePath, downloadToken, bucketName = STORAGE_BUCKET) {
+  return (
+    `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/` +
+    `${encodeURIComponent(storagePath)}?alt=media&token=${encodeURIComponent(downloadToken)}`
+  );
+}
+
 function getKioskInfoAddress(info) {
   return String(info?.address || info?.stationaddress || "").trim();
 }
@@ -632,7 +861,7 @@ async function kioskUpdateSectionImpl(data, authState) {
   const kioskPatch = clonePlain(data?.kiosk) || {};
   const autoGeocode = data?.autoGeocode === true;
   const requestId = String(data?.requestId || "").trim();
-  const allowedSections = new Set(["info", "wifi", "formoptions", "marketingoptions", "analyticsoptions", "hardware", "pricing", "ui"]);
+  const allowedSections = new Set(["info", "wifi", "formoptions", "marketingoptions", "analyticsoptions", "hardware", "pricing", "ui", "media"]);
 
   if (!stationid) {
     throw new functions.https.HttpsError(
@@ -644,7 +873,7 @@ async function kioskUpdateSectionImpl(data, authState) {
   if (!allowedSections.has(section)) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "section must be one of info, wifi, formoptions, marketingoptions, analyticsoptions, hardware, pricing, ui",
+        "section must be one of info, wifi, formoptions, marketingoptions, analyticsoptions, hardware, pricing, ui, media",
       );
   }
 
@@ -661,6 +890,19 @@ async function kioskUpdateSectionImpl(data, authState) {
         `kiosk.${section} payload required`,
     );
   }
+
+  console.info("kioskUpdateSection.request", {
+    stationid,
+    section,
+    requestId: requestId || null,
+    uid: authState?.uid || null,
+    autoGeocode,
+    patchKeys: Object.keys(kioskPatch[section] || {}),
+    wifiName: section === "wifi" ? String(kioskPatch?.wifi?.name || "") : null,
+    wifiPasswordLength: section === "wifi" && typeof kioskPatch?.wifi?.password === "string" ?
+      kioskPatch.wifi.password.length :
+      null,
+  });
 
   const snapshot = await db.collection("kiosks")
       .where("stationid", "==", stationid)
@@ -716,6 +958,10 @@ async function kioskUpdateSectionImpl(data, authState) {
       nextSectionValue = normalizeMarketingOptions(nextSectionValue);
     }
 
+    if (section === "media") {
+      nextSectionValue = normalizeMediaOptions(nextSectionValue);
+    }
+
     const mergedKiosk = {
       ...clonePlain(liveKiosk),
       [section]: nextSectionValue,
@@ -757,11 +1003,35 @@ async function kioskUpdateSectionImpl(data, authState) {
       updateData.status = recalculatedKiosk.status.trim();
     }
 
+    console.info("kioskUpdateSection.write", {
+      stationid,
+      section,
+      requestId: requestId || null,
+      uid: authState?.uid || null,
+      updateKeys: Object.keys(updateData),
+      wifiName: section === "wifi" ? String(updateData?.wifi?.name || "") : null,
+      wifiPasswordLength: section === "wifi" && typeof updateData?.wifi?.password === "string" ?
+        updateData.wifi.password.length :
+        null,
+    });
+
     transaction.set(docRef, updateData, {merge: true});
 
     const message = geocoded ?
       `${section} updated for ${stationid}. Address geocoded.` :
       `${section} updated for ${stationid}.`;
+
+    console.info("kioskUpdateSection.success", {
+      stationid,
+      section,
+      requestId: requestId || null,
+      uid: authState?.uid || null,
+      geocoded,
+      wifiName: section === "wifi" ? String(updateData?.wifi?.name || "") : null,
+      wifiPasswordLength: section === "wifi" && typeof updateData?.wifi?.password === "string" ?
+        updateData.wifi.password.length :
+        null,
+    });
 
     return {
       ok: true,
@@ -925,6 +1195,408 @@ async function kioskUpdateSlotLockImpl(data, authState) {
       },
     };
   });
+}
+
+async function mediaListAssetsImpl(authState, data = {}) {
+  const includeArchived = data?.includeArchived === true;
+  const snapshot = await db.collection("mediaAssets")
+      .orderBy("createdAt", "desc")
+      .get();
+
+  const assets = snapshot.docs
+      .map((docSnap) => serializeMediaAssetSnapshot(docSnap))
+      .filter((asset) => canAccessMediaAsset(authState, asset))
+      .filter((asset) => includeArchived || asset.active !== false);
+
+  return {assets};
+}
+
+async function mediaCreateUploadUrlImpl(data, authState, req = null) {
+  const fileName = String(data?.fileName || "").trim();
+  const contentType = String(data?.contentType || "").trim().toLowerCase();
+  const size = Number(data?.size || 0);
+  const requestedVisibility = String(data?.visibility || "").trim().toLowerCase();
+
+  if (!fileName) {
+    throw new functions.https.HttpsError("invalid-argument", "fileName required");
+  }
+
+  if (!isSupportedMediaContentType(contentType)) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Only image, video, and PDF uploads are supported",
+    );
+  }
+
+  if (!Number.isFinite(size) || size <= 0) {
+    throw new functions.https.HttpsError("invalid-argument", "size must be a positive number");
+  }
+
+  if (size > MAX_MEDIA_UPLOAD_BYTES) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        `Uploads must be ${MAX_MEDIA_UPLOAD_BYTES / (1024 * 1024)} MB or smaller`,
+    );
+  }
+
+  const assetId = db.collection("mediaAssets").doc().id;
+  const visibility = authState.isAdmin && requestedVisibility === "global" ? "global" : "client";
+  const storagePath = `dashboard-media/${visibility}/${assetId}/${sanitizeFileName(fileName)}`;
+  const expiresAt = Date.now() + (15 * 60 * 1000);
+  let uploadUrl = "";
+  let uploadMode = "signed";
+  let bucketName = STORAGE_BUCKET;
+  let lastError = null;
+
+  for (const candidateBucketName of getStorageBucketCandidates()) {
+    const bucket = getStorageBucket(candidateBucketName);
+    const file = bucket.file(storagePath);
+
+    try {
+      [uploadUrl] = await file.getSignedUrl({
+        version: "v4",
+        action: "write",
+        expires: expiresAt,
+        contentType,
+      });
+      bucketName = candidateBucketName;
+      uploadMode = "signed";
+      break;
+    } catch (error) {
+      lastError = error;
+      console.error("mediaCreateUploadUrl.getSignedUrlFailed", {
+        bucket: candidateBucketName,
+        storagePath,
+        contentType,
+        uid: authState?.uid || null,
+        code: error?.code || null,
+        message: error?.message || String(error),
+      });
+
+      try {
+        const resumableOptions = {
+          metadata: {
+            contentType,
+          },
+        };
+        const origin = String(req?.headers?.origin || "").trim();
+        if (origin) {
+          resumableOptions.origin = origin;
+        }
+
+        [uploadUrl] = await file.createResumableUpload(resumableOptions);
+        bucketName = candidateBucketName;
+        uploadMode = "resumable";
+        lastError = null;
+        break;
+      } catch (resumableError) {
+        lastError = resumableError;
+        console.error("mediaCreateUploadUrl.createResumableUploadFailed", {
+          bucket: candidateBucketName,
+          storagePath,
+          contentType,
+          uid: authState?.uid || null,
+          code: resumableError?.code || null,
+          message: resumableError?.message || String(resumableError),
+        });
+      }
+    }
+  }
+
+  if (!uploadUrl) {
+    throw new functions.https.HttpsError(
+        "internal",
+        lastError?.message || "Unable to create upload URL",
+    );
+  }
+
+  return {
+    assetId,
+    storagePath,
+    uploadUrl,
+    uploadMode,
+    bucketName,
+    expiresAt: new Date(expiresAt).toISOString(),
+    visibility,
+  };
+}
+
+async function mediaFinalizeUploadImpl(data, authState) {
+  const assetId = String(data?.assetId || "").trim();
+  const fileName = String(data?.fileName || "").trim();
+  const storagePath = String(data?.storagePath || "").trim();
+  const requestedBucketName = String(data?.bucketName || "").trim();
+  const contentTypeInput = String(data?.contentType || "").trim().toLowerCase();
+  const sizeInput = Number(data?.size || 0);
+  const requestedVisibility = String(data?.visibility || "").trim().toLowerCase();
+
+  if (!assetId || !fileName || !storagePath) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "assetId, fileName, and storagePath are required",
+    );
+  }
+
+  if (!storagePath.startsWith("dashboard-media/") || !storagePath.includes(`/${assetId}/`)) {
+    throw new functions.https.HttpsError("invalid-argument", "Invalid storagePath");
+  }
+
+  let file = null;
+  let metadata = null;
+  let resolvedBucketName = "";
+
+  for (const candidateBucketName of getStorageBucketCandidates(requestedBucketName)) {
+    const candidateFile = getStorageBucket(candidateBucketName).file(storagePath);
+    const [exists] = await candidateFile.exists();
+    if (!exists) {
+      continue;
+    }
+
+    file = candidateFile;
+    resolvedBucketName = candidateBucketName;
+    [metadata] = await candidateFile.getMetadata();
+    break;
+  }
+
+  if (!file || !metadata) {
+    throw new functions.https.HttpsError("not-found", "Uploaded file not found");
+  }
+  const contentType = String(metadata?.contentType || contentTypeInput || "").trim().toLowerCase();
+  if (!isSupportedMediaContentType(contentType)) {
+    throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Uploaded file must be an image, video, or PDF",
+    );
+  }
+
+  const visibility = authState.isAdmin && requestedVisibility === "global" ? "global" : "client";
+  const downloadToken = crypto.randomUUID();
+  await file.setMetadata({
+    contentType,
+    cacheControl: "public,max-age=3600",
+    metadata: {
+      ...(metadata?.metadata || {}),
+      firebaseStorageDownloadTokens: downloadToken,
+    },
+  });
+
+  const assetRef = db.collection("mediaAssets").doc(assetId);
+  const assetData = {
+    name: fileName,
+    storagePath,
+    contentType,
+    kind: detectMediaKind(contentType),
+    size: Number(metadata?.size || sizeInput || 0),
+    visibility,
+    ownerClientId: visibility === "global" ? "" : getAuthClientId(authState),
+    createdByUid: authState.uid,
+    createdByUsername: normalizeUsername(authState.profile?.username),
+    bucketName: resolvedBucketName,
+    downloadUrl: buildStorageDownloadUrl(storagePath, downloadToken, resolvedBucketName),
+    active: true,
+    targetType: "CK48",
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  await assetRef.set(assetData, {merge: true});
+  const savedSnap = await assetRef.get();
+
+  return {
+    ok: true,
+    asset: serializeMediaAssetSnapshot(savedSnap),
+  };
+}
+
+async function mediaArchiveAssetImpl(data, authState) {
+  const assetId = String(data?.assetId || "").trim();
+  if (!assetId) {
+    throw new functions.https.HttpsError("invalid-argument", "assetId required");
+  }
+
+  const assetRef = db.collection("mediaAssets").doc(assetId);
+  const assetSnap = await assetRef.get();
+  if (!assetSnap.exists) {
+    throw new functions.https.HttpsError("not-found", "Asset not found");
+  }
+
+  const asset = serializeMediaAssetSnapshot(assetSnap);
+  if (!canArchiveMediaAsset(authState, asset)) {
+    throw new functions.https.HttpsError("permission-denied", "Not allowed to archive this asset");
+  }
+
+  await assetRef.set({
+    active: false,
+    archivedAt: admin.firestore.FieldValue.serverTimestamp(),
+    archivedByUid: authState.uid,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, {merge: true});
+
+  return {ok: true, assetId};
+}
+
+async function mediaAssignPlaylistImpl(data, authState) {
+  const requestedStationIds = Array.isArray(data?.stationids) ? data.stationids : [];
+  const stationids = Array.from(new Set(
+      requestedStationIds
+          .map((value) => normalizeStationId(value))
+          .filter(Boolean),
+  ));
+  const requestedAssetIds = Array.isArray(data?.assetIds) ? data.assetIds : [];
+  const assetIds = Array.from(new Set(
+      requestedAssetIds
+          .map((value) => String(value || "").trim())
+          .filter(Boolean),
+  ));
+  const active = data?.active !== false && assetIds.length > 0;
+  const loop = data?.loop !== false;
+  const setUiMode = data?.setUiMode !== false;
+
+  if (stationids.length === 0) {
+    throw new functions.https.HttpsError("invalid-argument", "stationids required");
+  }
+
+  const assetDocsById = new Map();
+  if (assetIds.length > 0) {
+    for (const assetId of assetIds) {
+      const assetSnap = await db.collection("mediaAssets").doc(assetId).get();
+      if (!assetSnap.exists) {
+        throw new functions.https.HttpsError("not-found", `Asset ${assetId} not found`);
+      }
+
+      const asset = serializeMediaAssetSnapshot(assetSnap);
+      if (!canAccessMediaAsset(authState, asset)) {
+        throw new functions.https.HttpsError(
+            "permission-denied",
+            `Not allowed to use asset ${assetId}`,
+        );
+      }
+      if (asset.active === false) {
+        throw new functions.https.HttpsError(
+            "failed-precondition",
+            `Asset ${asset.name || assetId} is archived`,
+        );
+      }
+
+      assetDocsById.set(assetId, asset);
+    }
+  }
+
+  const playlist = assetIds.map((assetId, index) => {
+    const asset = assetDocsById.get(assetId);
+    return {
+      assetId,
+      order: index + 1,
+      name: asset?.name || "",
+      kind: asset?.kind || "other",
+      contentType: asset?.contentType || "",
+      size: Number(asset?.size || 0),
+      downloadUrl: asset?.downloadUrl || "",
+      storagePath: asset?.storagePath || "",
+    };
+  });
+
+  const kioskDocsByStationId = new Map();
+  for (const chunk of chunkArray(stationids, 10)) {
+    const kioskSnapshot = await db.collection("kiosks")
+        .where("stationid", "in", chunk)
+        .get();
+
+    kioskSnapshot.docs.forEach((docSnap) => {
+      const kiosk = docSnap.data() || {};
+      kioskDocsByStationId.set(normalizeStationId(kiosk.stationid), docSnap);
+    });
+  }
+
+  const failures = [];
+  const validUpdates = [];
+
+  stationids.forEach((stationid) => {
+    const docSnap = kioskDocsByStationId.get(stationid);
+    if (!docSnap) {
+      failures.push({stationid, reason: "Kiosk not found"});
+      return;
+    }
+
+    const kiosk = docSnap.data() || {};
+    if (!canManageMediaForKiosk(authState, kiosk)) {
+      failures.push({stationid, reason: "Not allowed to manage this kiosk"});
+      return;
+    }
+
+    if (!isNewSchemaKioskDocument(kiosk) ||
+        String(kiosk?.hardware?.type || "").trim().toUpperCase() !== "CK48") {
+      failures.push({stationid, reason: "Only V2 CK48 kiosks are supported"});
+      return;
+    }
+
+    validUpdates.push({stationid, docSnap, kiosk});
+  });
+
+  if (validUpdates.length === 0) {
+    throw new functions.https.HttpsError(
+        "failed-precondition",
+        failures[0]?.reason || "No eligible kiosks selected",
+    );
+  }
+
+  const updatedStationIds = [];
+  let batch = db.batch();
+  let writesInBatch = 0;
+  const timestamp = new Date().toISOString();
+
+  for (const entry of validUpdates) {
+    const nextMedia = active ? {
+      active: true,
+      loop,
+      assetIds,
+      playlist,
+      targetType: "CK48",
+      updatedAt: timestamp,
+      updatedByUid: authState.uid,
+      updatedByUsername: normalizeUsername(authState.profile?.username),
+      assignedAt: timestamp,
+    } : {
+      ...DEFAULT_MEDIA_OPTIONS,
+      active: false,
+      updatedAt: timestamp,
+      updatedByUid: authState.uid,
+      updatedByUsername: normalizeUsername(authState.profile?.username),
+      clearedAt: timestamp,
+    };
+
+    const updateData = {media: nextMedia};
+    if (active && setUiMode) {
+      updateData.ui = {
+        ...(clonePlain(entry.kiosk.ui) || {}),
+        mode: resolveMediaModeValue(entry.kiosk?.ui?.mode),
+      };
+    }
+
+    batch.set(entry.docSnap.ref, updateData, {merge: true});
+    writesInBatch += 1;
+    updatedStationIds.push(entry.stationid);
+
+    if (writesInBatch >= 400) {
+      await batch.commit();
+      batch = db.batch();
+      writesInBatch = 0;
+    }
+  }
+
+  if (writesInBatch > 0) {
+    await batch.commit();
+  }
+
+  return {
+    ok: true,
+    updatedCount: updatedStationIds.length,
+    updatedStationIds,
+    failures,
+    assetCount: assetIds.length,
+    active,
+    setUiMode,
+  };
 }
 
 const DEFAULT_BOUND_KIOSK_INFO_BY_COUNTRY = {
@@ -1859,6 +2531,56 @@ exports.admin_createAuthUserAndProfile = functions.https.onCall(async (data, con
 exports.admin_setUserPassword = functions.https.onCall(async (data, context) => {
   await assertAdminFromContext(context);
   return setUserPasswordImpl(data);
+});
+
+exports.media_listAssets = functions.https.onCall(async (data, context) => {
+  const authState = await assertCanManageMediaFromContext(context);
+  return mediaListAssetsImpl(authState, data);
+});
+
+exports.media_httpListAssets = handleHttpFunction(async (data, req) => {
+  const authState = await assertCanManageMedia(req, data);
+  return mediaListAssetsImpl(authState, data);
+});
+
+exports.media_createUploadUrl = functions.https.onCall(async (data, context) => {
+  const authState = await assertCanManageMediaFromContext(context);
+  return mediaCreateUploadUrlImpl(data, authState, context?.rawRequest || null);
+});
+
+exports.media_httpCreateUploadUrl = handleHttpFunction(async (data, req) => {
+  const authState = await assertCanManageMedia(req, data);
+  return mediaCreateUploadUrlImpl(data, authState, req);
+});
+
+exports.media_finalizeUpload = functions.https.onCall(async (data, context) => {
+  const authState = await assertCanManageMediaFromContext(context);
+  return mediaFinalizeUploadImpl(data, authState);
+});
+
+exports.media_httpFinalizeUpload = handleHttpFunction(async (data, req) => {
+  const authState = await assertCanManageMedia(req, data);
+  return mediaFinalizeUploadImpl(data, authState);
+});
+
+exports.media_archiveAsset = functions.https.onCall(async (data, context) => {
+  const authState = await assertCanManageMediaFromContext(context);
+  return mediaArchiveAssetImpl(data, authState);
+});
+
+exports.media_httpArchiveAsset = handleHttpFunction(async (data, req) => {
+  const authState = await assertCanManageMedia(req, data);
+  return mediaArchiveAssetImpl(data, authState);
+});
+
+exports.media_assignPlaylist = functions.https.onCall(async (data, context) => {
+  const authState = await assertCanManageMediaFromContext(context);
+  return mediaAssignPlaylistImpl(data, authState);
+});
+
+exports.media_httpAssignPlaylist = handleHttpFunction(async (data, req) => {
+  const authState = await assertCanManageMedia(req, data);
+  return mediaAssignPlaylistImpl(data, authState);
 });
 
 exports.auth_trackAttempt = functions.https.onCall(async (data, context) => (

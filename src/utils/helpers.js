@@ -35,6 +35,11 @@ const DEFAULT_MARKETING_OPTIONS = {
     buttonUrl: 'https://www.rogers.com/support/apps',
 };
 const DEFAULT_ANALYTICS_OPTIONS = { active: false };
+const DEFAULT_MEDIA_OPTIONS = {
+    active: false,
+    assetIds: [],
+    playlist: [],
+};
 export const DEFAULT_KIOSK_POWER_THRESHOLD = 80;
 const isPlainObject = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
 const mergeLocalizedMarketingValue = (value, defaults) => {
@@ -57,6 +62,21 @@ const normalizeMarketingOptions = (marketingoptions) => {
         offerText: mergeLocalizedMarketingValue(source.offerText, DEFAULT_MARKETING_OPTIONS.offerText),
         buttonText: mergeLocalizedMarketingValue(source.buttonText, DEFAULT_MARKETING_OPTIONS.buttonText),
         buttonUrl: source.buttonUrl ?? DEFAULT_MARKETING_OPTIONS.buttonUrl,
+    };
+};
+const normalizeMediaOptions = (media) => {
+    const source = isPlainObject(media) ? media : {};
+    const playlist = Array.isArray(source.playlist) ? source.playlist.filter(isPlainObject) : [];
+    const assetIds = Array.isArray(source.assetIds) ?
+        source.assetIds.filter((value) => typeof value === 'string' && value.trim()) :
+        playlist.map((item) => String(item.assetId || '').trim()).filter(Boolean);
+
+    return {
+        ...DEFAULT_MEDIA_OPTIONS,
+        ...source,
+        active: source.active === true && playlist.length > 0,
+        assetIds,
+        playlist,
     };
 };
 
@@ -320,6 +340,7 @@ export const normalizeKioskData = (kiosks) => {
             analyticsoptions: {
                 active: kiosk.analyticsoptions?.active === true || DEFAULT_ANALYTICS_OPTIONS.active,
             },
+            media: normalizeMediaOptions(kiosk.media),
             pricing: kiosk.pricing || {},
             ui: kiosk.ui || {},
             modules: normalizedModules.sort((a, b) => a.id.localeCompare(b.id)),

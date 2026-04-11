@@ -39,6 +39,7 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     const hasReportingAccess = clientInfo?.features?.reporting === true || isAdminUser;
     const hasBindingAccess = clientInfo?.username === 'chargerent' || clientInfo?.features?.binding === true || clientInfo?.commands?.binding === true;
     const hasTestingAccess = clientInfo?.username === 'chargerent' || clientInfo?.features?.testing === true;
+    const canOpenAdminTools = isAdminUser || clientInfo?.commands?.['client edit'] === true || clientInfo?.features?.media === true;
 
     const { showWarning, handleStay } = useIdleTimer({ onLogout, idleTimeout: 540000, warningTimeout: 60000 });
     const {
@@ -441,7 +442,7 @@ return (
 	                            <QrCodeIcon className="h-6 w-6" />
 	                        </button>
 	                    )}
-	                    {((clientInfo.commands['client edit']) || isAdminUser) && (
+	                    {canOpenAdminTools && (
 	                        <button onClick={onNavigateToAdmin} className="p-2 rounded-md bg-orange-100 text-orange-700 hover:bg-orange-200" title={t('admin_tools')}>
 	                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
 	                        </button>

@@ -135,8 +135,15 @@ const wifiPassword = String(msg.wifiPassword || defaultWifiPassword).trim() || d
 msg.payload = {
     code: 200,
     type: 0,
-    data: moduleId + '|securemode=2,signmethod=hmacmd5,timestamp=' + timestamp +
-        '|,' + stationid + ',34.56.244.66,1883,' + wifiName + ',' + wifiPassword + ',1740359355246',
+    data: [
+        moduleId + '|securemode=2,signmethod=hmacmd5,timestamp=' + timestamp + '|',
+        stationid,
+        '34.56.244.66',
+        '1883',
+        wifiName,
+        wifiPassword,
+        String(timestamp)
+    ].join(','),
     msg: 'OK',
     time: timestamp
 };

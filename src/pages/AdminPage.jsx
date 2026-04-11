@@ -12,7 +12,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { collection, getDocs } from 'firebase/firestore';
 
 // permission keys
-const featuresList = ['rentals', 'details', 'stationid', 'address', 'status', 'reporting', 'lease_revenue', 'rental_counts', 'rental_revenue', 'client_commission', 'rep_commission', 'search', 'binding', 'testing'];
+const featuresList = ['rentals', 'details', 'stationid', 'address', 'status', 'reporting', 'lease_revenue', 'rental_counts', 'rental_revenue', 'client_commission', 'rep_commission', 'search', 'media', 'binding', 'testing'];
 const commandsList = ['edit', 'lock', 'eject', 'eject_multiple', 'updates', 'connectivity', 'reboot', 'reload', 'disable', 'client edit'];
 
 function AdminPage({
@@ -22,6 +22,7 @@ function AdminPage({
   onNavigateToProvisionPage,
   onNavigateToAgreement,
   onNavigateToTemplates,
+  onNavigateToMedia,
   currentUser,
 }) {
   const [clients, setClients] = useState([]);
@@ -42,6 +43,7 @@ function AdminPage({
 
   const isAdmin = currentUser?.role === 'admin' || currentUser?.username === 'chargerent';
   const canManageClients = isAdmin || currentUser?.commands?.['client edit'] === true;
+  const canAccessMedia = isAdmin || currentUser?.features?.media === true;
   const canUseProvisionTools = isAdmin || currentUser?.commands?.edit === true || canManageClients;
   const canViewTemplates = currentUser?.username === 'chargerent';
 
@@ -349,6 +351,14 @@ function AdminPage({
               </button>
             )}
 
+            {canAccessMedia && (
+              <button onClick={onNavigateToMedia} className="p-2 rounded-md bg-emerald-100 text-emerald-700 hover:bg-emerald-200" title="Media Library">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14m-9 4h8a2 2 0 002-2V8a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              </button>
+            )}
+
             <button onClick={onLogout} className="p-2 rounded-md bg-red-500 text-white hover:bg-red-600" title={t('logout')}>
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
@@ -434,6 +444,24 @@ function AdminPage({
                   </div>
                 )}
               </>
+            )}
+
+            {!canManageClients && canAccessMedia && (
+              <div className="mx-auto max-w-2xl rounded-xl bg-white p-8 shadow-md">
+                <h2 className="text-xl font-semibold text-gray-900">Media tools are enabled for this account.</h2>
+                <p className="mt-2 text-sm text-gray-600">
+                  Open the Media Library from the header to upload content and assign playlists to eligible CK48 stations.
+                </p>
+                <div className="mt-6">
+                  <button
+                    type="button"
+                    onClick={onNavigateToMedia}
+                    className="rounded-lg bg-emerald-600 px-5 py-3 font-semibold text-white hover:bg-emerald-700"
+                  >
+                    Open Media Library
+                  </button>
+                </div>
+              </div>
             )}
           </>
         )}

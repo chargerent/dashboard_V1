@@ -97,7 +97,7 @@
         "z": "ebbebe04a01eca8f",
         "g": "78694e29453b878e",
         "name": "set response",
-        "func": "const timestamp = Date.now();\nconst moduleId = String(msg.module || '').trim();\nconst stationid = String(msg.stationid || '').trim();\nconst defaultWifiName = 'chargerent';\nconst defaultWifiPassword = 'Charger33';\nconst wifiName = String(msg.wifiName || defaultWifiName).trim() || defaultWifiName;\nconst wifiPassword = String(msg.wifiPassword || defaultWifiPassword).trim() || defaultWifiPassword;\n\nmsg.payload = {\n    code: 200,\n    type: 0,\n    data: moduleId + '|securemode=2,signmethod=hmacmd5,timestamp=' + timestamp +\n        '|,' + stationid + ',34.56.244.66,1883,' + wifiName + ',' + wifiPassword + ',1740359355246',\n    msg: 'OK',\n    time: timestamp\n};\n\nreturn msg;",
+        "func": "const timestamp = Date.now();\nconst moduleId = String(msg.module || '').trim();\nconst stationid = String(msg.stationid || '').trim();\nconst defaultWifiName = 'chargerent';\nconst defaultWifiPassword = 'Charger33';\nconst wifiName = String(msg.wifiName || defaultWifiName).trim() || defaultWifiName;\nconst wifiPassword = String(msg.wifiPassword || defaultWifiPassword).trim() || defaultWifiPassword;\n\nmsg.payload = {\n    code: 200,\n    type: 0,\n    data: [\n        moduleId + '|securemode=2,signmethod=hmacmd5,timestamp=' + timestamp + '|',\n        stationid,\n        '34.56.244.66',\n        '1883',\n        wifiName,\n        wifiPassword,\n        String(timestamp)\n    ].join(','),\n    msg: 'OK',\n    time: timestamp\n};\n\nreturn msg;",
         "outputs": 1,
         "timeout": 0,
         "noerr": 0,

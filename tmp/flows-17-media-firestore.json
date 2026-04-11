@@ -1,0 +1,190 @@
+[
+    {
+        "id": "30165ecabc60ea17",
+        "type": "group",
+        "z": "ebbebe04a01eca8f",
+        "name": "Http screen ads (Firebase media)",
+        "style": {
+            "stroke": "#000000",
+            "fill": "#dbcbe7",
+            "label": true,
+            "color": "#000000"
+        },
+        "nodes": [
+            "d8b7464c704d075d",
+            "45a788f8fc046cb5",
+            "32e2cf4e0a6f4f6c",
+            "7d0f3dbf1a8b4a02",
+            "4b41e02ec492cbe2",
+            "ebddd87526251196",
+            "121143ba588ded6b",
+            "e3e3c75ac881fa15"
+        ],
+        "x": 1054,
+        "y": 2319,
+        "w": 1186,
+        "h": 222
+    },
+    {
+        "id": "d8b7464c704d075d",
+        "type": "http in",
+        "z": "ebbebe04a01eca8f",
+        "g": "30165ecabc60ea17",
+        "name": "GET Ad List for >20 Ports",
+        "url": "/api/advert/rentbox/distribute/list",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 1190,
+        "y": 2400,
+        "wires": [
+            [
+                "45a788f8fc046cb5",
+                "121143ba588ded6b"
+            ]
+        ]
+    },
+    {
+        "id": "45a788f8fc046cb5",
+        "type": "function",
+        "z": "ebbebe04a01eca8f",
+        "g": "30165ecabc60ea17",
+        "name": "Prepare media lookup",
+        "func": "const requestData = msg.payload && typeof msg.payload === 'object' && !Array.isArray(msg.payload)\n    ? msg.payload\n    : {};\nconst queryData = msg.req && msg.req.query && typeof msg.req.query === 'object'\n    ? msg.req.query\n    : {};\n\nconst rawUuid = String(requestData.uuid || queryData.uuid || '').trim();\nconst rawStationId = String(\n    requestData.stationid ||\n    requestData.stationId ||\n    queryData.stationid ||\n    queryData.stationId ||\n    ''\n).trim();\n\nfunction buildModuleCandidates(value) {\n    const normalized = String(value || '').trim();\n    const candidates = new Set();\n\n    if (!normalized) {\n        return [];\n    }\n\n    candidates.add(normalized);\n\n    if (normalized.startsWith('1000')) {\n        candidates.add(normalized.replace(/^1000/, ''));\n    } else {\n        candidates.add('1000' + normalized);\n    }\n\n    if (/^(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/.test(normalized)) {\n        const hex = normalized.replace(/[:-]/g, '');\n        const decimalValue = String(Number.parseInt(hex, 16));\n        candidates.add(decimalValue);\n        candidates.add('1000' + decimalValue);\n    }\n\n    return Array.from(candidates).filter(Boolean);\n}\n\nif (!rawUuid && !rawStationId) {\n    msg.payload = {\n        code: 400,\n        type: 0,\n        data: [],\n        msg: 'Missing uuid',\n        time: Date.now()\n    };\n    return [null, msg];\n}\n\nmsg._mediaLookup = {\n    rawUuid,\n    stationid: rawStationId,\n    moduleCandidates: buildModuleCandidates(rawUuid)\n};\n\nmsg.payload = rawStationId\n    ? {\n        path: 'kiosks',\n        query: [{ fieldPath: 'stationid', opStr: '==', value: rawStationId }]\n    }\n    : {\n        path: 'kiosks',\n        query: []\n    };\n\nreturn [msg, null];",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1540,
+        "y": 2400,
+        "wires": [
+            [
+                "32e2cf4e0a6f4f6c"
+            ],
+            [
+                "ebddd87526251196",
+                "4b41e02ec492cbe2"
+            ]
+        ]
+    },
+    {
+        "id": "32e2cf4e0a6f4f6c",
+        "type": "google-cloud-firestore",
+        "z": "ebbebe04a01eca8f",
+        "g": "30165ecabc60ea17",
+        "account": "",
+        "keyFilename": "/home/george/firestore/firestore-key.json",
+        "name": "Query kiosks for media",
+        "projectId": "node-red-alerts",
+        "mode": "query",
+        "x": 1790,
+        "y": 2400,
+        "wires": [
+            [
+                "7d0f3dbf1a8b4a02"
+            ]
+        ]
+    },
+    {
+        "id": "7d0f3dbf1a8b4a02",
+        "type": "function",
+        "z": "ebbebe04a01eca8f",
+        "g": "30165ecabc60ea17",
+        "name": "Build media response",
+        "func": "const ALLOW_PDF = false;\n\nfunction moduleMatches(moduleId, candidates) {\n    const normalized = String(moduleId || '').trim();\n    if (!normalized || !Array.isArray(candidates) || candidates.length === 0) {\n        return false;\n    }\n\n    if (candidates.includes(normalized)) {\n        return true;\n    }\n\n    if (normalized.startsWith('1000') && candidates.includes(normalized.replace(/^1000/, ''))) {\n        return true;\n    }\n\n    return candidates.includes('1000' + normalized);\n}\n\nconst docs = Array.isArray(msg.payload) ? msg.payload : [];\nconst lookup = msg._mediaLookup && typeof msg._mediaLookup === 'object' ? msg._mediaLookup : {};\nconst moduleId = String(lookup.rawUuid || '').trim();\nconst requestedStationId = String(lookup.stationid || '').trim();\nconst moduleCandidates = Array.isArray(lookup.moduleCandidates) ? lookup.moduleCandidates : [];\n\nlet matchedStation = null;\n\nif (requestedStationId) {\n    matchedStation = docs.find((doc) => String(doc && doc.stationid || '').trim() === requestedStationId) || null;\n}\n\nif (!matchedStation && moduleCandidates.length > 0) {\n    matchedStation = docs.find((doc) => {\n        const modules = Array.isArray(doc && doc.modules) ? doc.modules : [];\n        return modules.some((module) => moduleMatches(module && module.id, moduleCandidates));\n    }) || null;\n}\n\nif (!matchedStation) {\n    msg.payload = {\n        code: 404,\n        type: 0,\n        data: [],\n        msg: 'No matching station for uuid',\n        time: Date.now()\n    };\n    return msg;\n}\n\nconst media = matchedStation.media && typeof matchedStation.media === 'object' ? matchedStation.media : {};\nconst rawPlaylist = Array.isArray(media.playlist) ? media.playlist : [];\nconst screenBrightnessValue = Number(media.screenBrightness ?? 255);\nconst screenBrightness = Number.isFinite(screenBrightnessValue) ? screenBrightnessValue : 255;\nconst defaultPlayTimeValue = Number(media.playTime ?? 20);\nconst defaultPlayTime = Number.isFinite(defaultPlayTimeValue) ? defaultPlayTimeValue : 20;\n\nconst playlist = rawPlaylist\n    .filter((item) => item && typeof item.downloadUrl === 'string' && item.downloadUrl.trim())\n    .filter((item) => {\n        const contentType = String(item.contentType || '').trim().toLowerCase();\n        if (!ALLOW_PDF && contentType === 'application/pdf') {\n            return false;\n        }\n        return true;\n    })\n    .sort((left, right) => Number(left.order || 0) - Number(right.order || 0))\n    .map((item, index) => ({\n        guuid: moduleId || String(moduleCandidates[0] || ''),\n        url1: '',\n        url2: item.downloadUrl.trim(),\n        url3: '',\n        forward: '',\n        screenBrightness,\n        weight: Number(item.weight ?? 0),\n        playTime: Number(item.playTime ?? defaultPlayTime),\n        id: Number(item.id ?? (100001 + index)),\n        title: String(item.name || item.title || ''),\n        fileType: Number(item.fileType ?? 0)\n    }));\n\nif (media.active !== true || playlist.length === 0) {\n    const filteredPdfCount = rawPlaylist.filter((item) => (\n        String(item && item.contentType || '').trim().toLowerCase() === 'application/pdf'\n    )).length;\n\n    msg.payload = {\n        code: 200,\n        type: 0,\n        data: [],\n        msg: !ALLOW_PDF && filteredPdfCount > 0 ? 'No supported media assigned' : 'No media assigned',\n        time: Date.now()\n    };\n    return msg;\n}\n\nmsg.payload = {\n    code: 200,\n    type: 0,\n    data: playlist,\n    msg: 'OK',\n    time: Date.now()\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2000,
+        "y": 2400,
+        "wires": [
+            [
+                "ebddd87526251196",
+                "4b41e02ec492cbe2"
+            ]
+        ]
+    },
+    {
+        "id": "4b41e02ec492cbe2",
+        "type": "http response",
+        "z": "ebbebe04a01eca8f",
+        "g": "30165ecabc60ea17",
+        "name": "Send JSON",
+        "statusCode": "",
+        "headers": {},
+        "x": 2250,
+        "y": 2400,
+        "wires": []
+    },
+    {
+        "id": "ebddd87526251196",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "30165ecabc60ea17",
+        "name": "media response debug",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1650,
+        "y": 2360,
+        "wires": []
+    },
+    {
+        "id": "121143ba588ded6b",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "30165ecabc60ea17",
+        "name": "ad request debug",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1410,
+        "y": 2360,
+        "wires": []
+    },
+    {
+        "id": "e3e3c75ac881fa15",
+        "type": "inject",
+        "z": "ebbebe04a01eca8f",
+        "g": "30165ecabc60ea17",
+        "name": "",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "{\"uuid\":\"867652077244408\",\"position\":\"screen\",\"sign\":\"b749d76481fc7c87b5879c009d8e08e0\"}",
+        "payloadType": "json",
+        "x": 1330,
+        "y": 2460,
+        "wires": [
+            [
+                "45a788f8fc046cb5"
+            ]
+        ]
+    }
+]

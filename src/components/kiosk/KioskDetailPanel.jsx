@@ -31,6 +31,18 @@ const moduleIdsMatch = (left, right) => {
     return leftId.split('m').pop() === rightId.split('m').pop();
 };
 
+const resolvePlaylistAssetKind = (asset) => {
+    const kind = String(asset?.kind || '').trim().toLowerCase();
+    if (kind) return kind;
+
+    const contentType = String(asset?.contentType || '').trim().toLowerCase();
+    if (contentType.startsWith('image/')) return 'image';
+    if (contentType.startsWith('video/')) return 'video';
+    if (contentType === 'application/pdf') return 'pdf';
+
+    return 'other';
+};
+
 // --- Main Detail Panel Component ---
 function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSlots, ejectingSlots, failedEjectSlots, lockingSlots, t, onCommand, onNavigateToChargers, serverUiVersion, serverFlowVersion, clientInfo, mockNow }) {
     const isOnline = isKioskOnline(kiosk, mockNow);
@@ -40,6 +52,22 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     const canUpdateModules = clientInfo.commands.updates && isV2Kiosk;
     const showInlineModuleIds = ['CT3', 'CT4', 'CT8', 'CT12'].includes(kiosk.hardware?.type);
     const chargeReadyThreshold = getKioskPowerThreshold(kiosk);
+    const ck48PrimaryAsset = useMemo(() => {
+        if (kiosk?.media?.active !== true) {
+            return null;
+        }
+
+        const playlist = Array.isArray(kiosk?.media?.playlist) ? kiosk.media.playlist : [];
+        const firstAsset = playlist.find((asset) => String(asset?.downloadUrl || '').trim());
+        if (!firstAsset) {
+            return null;
+        }
+
+        return {
+            ...firstAsset,
+            previewKind: resolvePlaylistAssetKind(firstAsset),
+        };
+    }, [kiosk?.media]);
     const formatVersionDigits = useCallback((value) => {
         const numericValue = Number(value);
         if (!Number.isFinite(numericValue) || numericValue <= 0) {
@@ -556,18 +584,70 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         const { slotsByPosition } = buildCompactSlotMap(kiosk.modules);
         const leftColumnIndices = [6, 7, 8, 9, 10, 11];
         const rightColumnIndices = [0, 1, 2, 3, 4, 5];
+        const renderScreenPreview = () => {
+            if (!isVisible) {
+                return null;
+            }
+
+            if (!ck48PrimaryAsset) {
+                return (
+                    <div className="flex h-full w-full flex-col items-center justify-center bg-neutral-950 px-4 text-center text-white">
+                        <div className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-white/70">
+                            Screen Preview
+                        </div>
+                        <p className="mt-3 text-sm font-medium text-white">No media assigned</p>
+                        <p className="mt-1 text-xs text-white/60">Assign media to this station to preview the screen.</p>
+                    </div>
+                );
+            }
+
+            if (ck48PrimaryAsset.previewKind === 'image') {
+                return (
+                    <img
+                        src={ck48PrimaryAsset.downloadUrl}
+                        alt={ck48PrimaryAsset.name || `${stationId} assigned media`}
+                        className="h-full w-full object-contain"
+                        loading="lazy"
+                    />
+                );
+            }
+
+            if (ck48PrimaryAsset.previewKind === 'video') {
+                return (
+                    <video
+                        src={ck48PrimaryAsset.downloadUrl}
+                        className="h-full w-full object-contain"
+                        controls
+                        preload="metadata"
+                    />
+                );
+            }
+
+            if (ck48PrimaryAsset.previewKind === 'pdf') {
+                return (
+                    <div className="flex h-full w-full flex-col items-center justify-center bg-red-50 px-4 text-center">
+                        <div className="rounded-full bg-red-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-red-700">
+                            PDF
+                        </div>
+                        <p className="mt-3 text-sm font-medium text-gray-800">{ck48PrimaryAsset.name || 'Assigned PDF'}</p>
+                        <p className="mt-1 text-xs text-gray-500">PDF assigned to this station.</p>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="flex h-full w-full items-center justify-center bg-gray-100 px-4 text-center text-sm text-gray-500">
+                    Preview unavailable for this media type.
+                </div>
+            );
+        };
 
         return (
             <div className="p-1.5 flex flex-col items-center gap-2.5">
                 <div className="w-full space-y-2.5">
                     <div className="mx-auto w-full max-w-sm overflow-hidden rounded-lg bg-black shadow-lg">
-                        <div className="w-full" style={{ aspectRatio: '228 / 405' }}>
-                            <img
-                                src={`https://chargerentstations.com/images/${stationId}.jpg`}
-                                alt={`${stationId} screen`}
-                                className="h-full w-full object-cover"
-                                onError={(e) => { e.target.onerror = null; e.target.src = 'https://placehold.co/456x810/000000/FFFFFF?text=No+Image'; }}
-                            />
+                        <div className="w-full" style={{ aspectRatio: '9 / 16' }}>
+                            {renderScreenPreview()}
                         </div>
                     </div>
 
