@@ -50,7 +50,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     const stationId = kiosk.stationid;
     const hasAnyCommands = Object.values(clientInfo.commands).some(v => v === true) || clientInfo.features.rentals;
     const canUpdateModules = clientInfo.commands.updates && isV2Kiosk;
-    const showInlineModuleIds = ['CT3', 'CT4', 'CT8', 'CT12'].includes(kiosk.hardware?.type);
+    const showInlineModuleIds = ['CT3', 'CT4', 'CT8', 'CT12', 'CK48'].includes(kiosk.hardware?.type);
     const chargeReadyThreshold = getKioskPowerThreshold(kiosk);
     const ck48PrimaryAsset = useMemo(() => {
         if (kiosk?.media?.active !== true) {
@@ -645,6 +645,8 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         return (
             <div className="p-1.5 flex flex-col items-center gap-2.5">
                 <div className="w-full space-y-2.5">
+                    <CompactTowerHeader />
+
                     <div className="mx-auto w-full max-w-sm overflow-hidden rounded-lg bg-black shadow-lg">
                         <div className="w-full" style={{ aspectRatio: '9 / 16' }}>
                             {renderScreenPreview()}

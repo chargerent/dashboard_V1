@@ -19,6 +19,8 @@ import RentalDetailView from '../components/Dashboard/RentalDetailView';
 import { CpuChipIcon, QrCodeIcon } from '@heroicons/react/24/outline';
 import useKioskCommandFlow from '../hooks/useKioskCommandFlow';
 
+const EMPTY_RENTALS = Object.freeze([]);
+
 export default function DashboardPage({ _token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToReporting, onNavigateToTesting, rentalData, allStationsData, _setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, _setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, _ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, _setNgrokInfo, manageIgnoredKiosk, kiosksReady, initialSearch = '' }) {
     const [loading, setLoading] = useState(!kiosksReady);
     const [error] = useState(null);
@@ -355,6 +357,23 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
         return enriched;
     }, [rentalData, stationInfoForEnrichment]);
 
+    const rentalsByStationId = useMemo(() => {
+        const groupedRentals = new Map();
+
+        (enrichedRentalData || []).forEach((rental) => {
+            const stationid = String(rental?.rentalStationid || '').trim();
+            if (!stationid) return;
+
+            if (!groupedRentals.has(stationid)) {
+                groupedRentals.set(stationid, []);
+            }
+
+            groupedRentals.get(stationid).push(rental);
+        });
+
+        return groupedRentals;
+    }, [enrichedRentalData]);
+
     const offlineKiosksByCountry = useMemo(() => {
         if (!showInitialStatus) return {};
         // Use clientStations which is already filtered by permission
@@ -514,19 +533,24 @@ return (
                                             onShowRentalDetails={(kioskId, period) => handleShowRentalDetails(kioskId, period)}
                                         />
                                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                                            {kiosks.map(kiosk => (
+                                            {kiosks.map(kiosk => {
+                                                const isExpanded = expandedKioskId === kiosk.stationid;
+                                                const isEditing = editingKioskId === kiosk.stationid;
+                                                const stationRentalData = rentalsByStationId.get(kiosk.stationid) || EMPTY_RENTALS;
+
+                                                return (
                                                 <div key={kiosk.stationid}>
-                                                    <KioskPanel kiosk={kiosk} isExpanded={expandedKioskId === kiosk.stationid || editingKioskId === kiosk.stationid} onToggle={handleToggleDetails} onToggleEdit={handleToggleEditMode} mockNow={latestTimestamp} rentalData={enrichedRentalData} clientInfo={clientInfo} t={t} onCommand={handleGeneralCommand} onShowRentalDetails={handleShowRentalDetails} />
-                                                    {editingKioskId === kiosk.stationid && kioskToEdit ? (
+                                                    <KioskPanel kiosk={kiosk} isExpanded={isExpanded || isEditing} onToggle={handleToggleDetails} onToggleEdit={handleToggleEditMode} mockNow={latestTimestamp} rentalData={stationRentalData} clientInfo={clientInfo} t={t} onCommand={handleGeneralCommand} onShowRentalDetails={handleShowRentalDetails} />
+                                                    {isEditing && kioskToEdit ? (
                                                         <KioskEditPanel kiosk={kioskToEdit} onSave={handleKioskSave} clientInfo={clientInfo} isVisible={editingKioskId === kiosk.stationid} t={t} onCommand={handleGeneralCommand} />
                                                     ) : (
-                                                        clientInfo.features.details && <KioskDetailPanel kiosk={kiosk} isVisible={expandedKioskId === kiosk.stationid} onSlotClick={handleSlotClick} onLockSlot={handleLockSlotClick} pendingSlots={pendingSlots} ejectingSlots={ejectingSlots} failedEjectSlots={failedEjectSlots} lockingSlots={lockingSlots} t={t} onCommand={handleGeneralCommand} onNavigateToChargers={onNavigateToChargers} clientInfo={clientInfo} mockNow={latestTimestamp} serverFlowVersion={serverFlowVersion} serverUiVersion={serverUiVersion} />
+                                                        clientInfo.features.details && isExpanded && <KioskDetailPanel kiosk={kiosk} isVisible={true} onSlotClick={handleSlotClick} onLockSlot={handleLockSlotClick} pendingSlots={pendingSlots} ejectingSlots={ejectingSlots} failedEjectSlots={failedEjectSlots} lockingSlots={lockingSlots} t={t} onCommand={handleGeneralCommand} onNavigateToChargers={onNavigateToChargers} clientInfo={clientInfo} mockNow={latestTimestamp} serverFlowVersion={serverFlowVersion} serverUiVersion={serverUiVersion} />
                                                     )}
                                                     {rentalDetailView?.kioskId === kiosk.stationid && (
                                                         <RentalDetailView kiosk={kiosk} period={rentalDetailView.period} rentalData={enrichedRentalData} onClose={() => setRentalDetailView(null)} onCommand={handleGeneralCommand} t={t} />
                                                     )}
                                                 </div>
-                                            ))}
+                                            )})}
                                         </div>
                                     </div>
                                 ))}
