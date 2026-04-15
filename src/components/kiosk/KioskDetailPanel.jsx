@@ -476,42 +476,56 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         };
     };
 
-    const CompactGridSlot = ({ entry }) => {
+    const hasSlotCharger = (slot) => Boolean((slot?.sstat && slot.sstat !== '0C') || slot?.isSstatError);
+
+    const formatSlotPosition = (value) => String(value || 0).padStart(2, '0');
+
+    const CompactGridSlot = ({ entry, size = 'default' }) => {
+        const isComfortable = size === 'comfortable';
+        const shellClassName = isComfortable
+            ? 'min-h-[52px] rounded-lg p-1'
+            : 'min-h-[40px] rounded-md p-0.5';
+
         if (!entry?.slot || !entry?.module) {
-            return <div className="min-h-[40px] rounded-md border border-gray-300 bg-gray-100" />;
+            return <div className={`${shellClassName} border border-gray-300 bg-gray-100`} />;
         }
 
         const { slot, module, displayPosition } = entry;
         const style = getSlotStyle(slot, module);
-        const hasCharger = (slot.sstat && slot.sstat !== '0C') || slot.isSstatError;
+        const hasCharger = hasSlotCharger(slot);
         const canEject = clientInfo.commands.eject;
         const canLock = clientInfo.commands.lock;
+        const slotPosition = formatSlotPosition(displayPosition || slot.position);
+        const primaryValueClassName = isComfortable ? 'text-[15px]' : 'text-[13px]';
+        const secondaryValueClassName = isComfortable ? 'text-[10px]' : 'text-[9px]';
+        const contentPaddingClassName = isComfortable ? 'px-2.5 py-1 pr-10' : 'px-2 py-0.5 pr-7';
+        const positionColumnClassName = isComfortable ? 'w-8 pt-0.5' : 'w-7 pt-0.5';
 
         return (
-            <div className={`relative min-h-[40px] rounded-md border p-0.5 text-left transition-all duration-300 ${style.className} ${style.glow ? 'slot-glow' : ''}`}>
-                <div className="flex h-full w-full min-w-0 items-start gap-1.5 rounded-md px-2 py-0.5 pr-7">
+            <div className={`relative ${shellClassName} border text-left transition-all duration-300 ${style.className} ${style.glow ? 'slot-glow' : ''}`}>
+                <div className={`flex h-full w-full min-w-0 items-start gap-1.5 rounded-md ${contentPaddingClassName}`}>
                     <button
                         onClick={() => hasCharger && canEject && onSlotClick(kiosk.stationid, module.id, slot.position)}
                         disabled={!canEject || !isOnline || !hasCharger}
                         className="flex min-w-0 flex-grow items-start gap-1.5 disabled:cursor-not-allowed"
                         title={hasCharger ? `SN ${slot.sn}` : `Slot ${displayPosition || slot.position}`}
                     >
-                        <div className="flex w-7 flex-col items-center justify-center pt-0.5">
-                            <span className="text-[10px] font-mono leading-none text-gray-500">
-                                {String(displayPosition || slot.position).padStart(2, '0')}
+                        <div className={`flex flex-col items-center justify-center ${positionColumnClassName}`}>
+                            <span className={`${isComfortable ? 'text-[11px]' : 'text-[10px]'} font-mono leading-none text-gray-500`}>
+                                {slotPosition}
                             </span>
                             <StatusIndicator status={slot.sstat} />
                         </div>
                         <div className="flex min-w-0 flex-col pt-0.5">
-                            <span className="text-[13px] font-bold leading-none">
+                            <span className={`${primaryValueClassName} font-bold leading-none`}>
                                 {hasCharger ? `${slot.batteryLevel}%` : '—'}
                             </span>
-                            <span className="truncate font-mono text-[9px] leading-tight text-gray-500">
-                                {'\u00A0'}
+                            <span className={`truncate font-mono leading-tight text-gray-500 ${secondaryValueClassName}`}>
+                                {isComfortable && hasCharger ? String(slot.sn) : '\u00A0'}
                             </span>
                         </div>
                     </button>
-                    {hasCharger && (
+                    {hasCharger && !isComfortable && (
                         <button
                             type="button"
                             onClick={(event) => handleNavigateToCharger(event, slot.sn)}
@@ -519,6 +533,19 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                             title={`${t('chargers_page_title')}: ${slot.sn}`}
                         >
                             {slot.sn}
+                        </button>
+                    )}
+                    {hasCharger && isComfortable && (
+                        <button
+                            type="button"
+                            onClick={(event) => handleNavigateToCharger(event, slot.sn)}
+                            className="absolute right-1.5 top-1.5 flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white/80 text-sky-700 shadow-sm hover:bg-white hover:text-sky-900"
+                            title={`${t('chargers_page_title')}: ${slot.sn}`}
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M14 5h5m0 0v5m0-5L10 14" />
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M19 14v4a1 1 0 01-1 1h-4" />
+                            </svg>
                         </button>
                     )}
                 </div>
@@ -530,7 +557,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                             onLockSlot(kiosk.stationid, module.id, slot.position, slot.isLocked);
                         }}
                         disabled={!isOnline}
-                        className="absolute bottom-1 right-1 flex h-[18px] w-[18px] items-center justify-center rounded-md bg-white/75 shadow-sm hover:bg-white disabled:cursor-not-allowed"
+                        className={`absolute flex items-center justify-center rounded-md bg-white/75 shadow-sm hover:bg-white disabled:cursor-not-allowed ${isComfortable ? 'bottom-1.5 right-1.5 h-[18px] w-[18px]' : 'bottom-1 right-1 h-[18px] w-[18px]'}`}
                         title={slot.isLocked ? t('unlock_slot') : t('lock_slot')}
                     >
                         {slot.isLocked ? (
@@ -546,12 +573,12 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         );
     };
 
-    const CompactGroupCard = ({ slotsByPosition, groupIndex }) => (
-        <div className="bg-white p-1 rounded-lg shadow-inner">
-            <div className="grid grid-cols-2 gap-1">
-                {slotOrderInCompactGroup.map((slotOrder, index) => {
+    const CompactGroupCard = ({ slotsByPosition, groupIndex, slotOrder = slotOrderInCompactGroup, slotSize = 'default' }) => (
+        <div className={`bg-white rounded-lg shadow-inner ${slotSize === 'comfortable' ? 'p-1.5' : 'p-1'}`}>
+            <div className={`grid grid-cols-2 ${slotSize === 'comfortable' ? 'gap-1.5' : 'gap-1'}`}>
+                {slotOrder.map((slotOrder, index) => {
                     const position = groupIndex * 4 + slotOrder + 1;
-                    return <CompactGridSlot key={`${groupIndex}-${index}`} entry={slotsByPosition.get(position)} />;
+                    return <CompactGridSlot key={`${groupIndex}-${index}`} entry={slotsByPosition.get(position)} size={slotSize} />;
                 })}
             </div>
         </div>
@@ -578,12 +605,12 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
 
     const renderCK48 = () => {
         // CK48 stores all 48 slots flat in modules[0] with absolute positions 1–48.
-        // Visual layout: 12 logical modules arranged in 2 columns (right: 0–5, left: 6–11).
-        // Within each logical module the 4 slots are displayed in a 2×2 grid using
-        // the order [2, 0, 3, 1] applied as: position = moduleIndex * 4 + slotOrder + 1
+        // Present the logical modules in ascending order so the slot positions read
+        // naturally from 01-04 through 45-48, while keeping the original 2x2 card style.
         const { slotsByPosition } = buildCompactSlotMap(kiosk.modules);
-        const leftColumnIndices = [6, 7, 8, 9, 10, 11];
-        const rightColumnIndices = [0, 1, 2, 3, 4, 5];
+        const groupCount = Math.ceil((kiosk.modules?.[0]?.slots?.length || 0) / 4) || 12;
+        const groupIndices = Array.from({ length: groupCount }, (_, index) => index);
+        const ck48SlotOrder = [0, 1, 2, 3];
         const renderScreenPreview = () => {
             if (!isVisible) {
                 return null;
@@ -653,17 +680,16 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                         </div>
                     </div>
 
-                    <div className="grid w-full gap-3 xl:grid-cols-2">
-                        <div className="flex flex-col gap-2">
-                            {leftColumnIndices.map((groupIndex) => (
-                                <CompactGroupCard key={groupIndex} slotsByPosition={slotsByPosition} groupIndex={groupIndex} />
-                            ))}
-                        </div>
-                        <div className="flex flex-col gap-2">
-                            {rightColumnIndices.map((groupIndex) => (
-                                <CompactGroupCard key={groupIndex} slotsByPosition={slotsByPosition} groupIndex={groupIndex} />
-                            ))}
-                        </div>
+                    <div className="grid w-full gap-3 md:grid-cols-2">
+                        {groupIndices.map((groupIndex) => (
+                            <CompactGroupCard
+                                key={groupIndex}
+                                slotsByPosition={slotsByPosition}
+                                groupIndex={groupIndex}
+                                slotOrder={ck48SlotOrder}
+                                slotSize="comfortable"
+                            />
+                        ))}
                     </div>
                 </div>
             </div>

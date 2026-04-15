@@ -51,6 +51,168 @@ function formatBytes(bytes) {
   return `${size.toFixed(size >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
+function calculateUploadPercent(uploadedBytes, totalBytes) {
+  const uploaded = Number(uploadedBytes || 0);
+  const total = Number(totalBytes || 0);
+
+  if (!Number.isFinite(total) || total <= 0) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(100, Math.round((uploaded / total) * 100)));
+}
+
+function createUploadProgressState(files) {
+  const progressFiles = files.map((file, index) => ({
+    id: `${Date.now()}-${index}-${file.name}`,
+    name: file.name,
+    size: Number(file.size || 0),
+    uploadedBytes: 0,
+    progressPercent: 0,
+    status: 'pending',
+    errorMessage: '',
+  }));
+
+  return {
+    active: progressFiles.length > 0,
+    totalFiles: progressFiles.length,
+    totalBytes: progressFiles.reduce((sum, file) => sum + file.size, 0),
+    uploadedBytes: 0,
+    completedFiles: 0,
+    files: progressFiles,
+  };
+}
+
+function uploadFileToSignedUrl({ uploadUrl, file, contentType, onProgress }) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('PUT', uploadUrl);
+    xhr.setRequestHeader('Content-Type', contentType);
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) {
+        return;
+      }
+
+      onProgress?.(event.loaded, event.total || file.size);
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        onProgress?.(file.size, file.size);
+        resolve(xhr);
+        return;
+      }
+
+      reject(new Error(`Upload failed for ${file.name} (${xhr.status})`));
+    };
+
+    xhr.onerror = () => {
+      reject(new Error(`Upload failed for ${file.name}`));
+    };
+
+    xhr.onabort = () => {
+      reject(new Error(`Upload aborted for ${file.name}`));
+    };
+
+    xhr.send(file);
+  });
+}
+
+function UploadProgressPanel({ uploadProgress }) {
+  if (!uploadProgress || uploadProgress.totalFiles === 0) {
+    return null;
+  }
+
+  const hasError = uploadProgress.files.some((file) => file.status === 'error');
+  const isComplete = !uploadProgress.active && !hasError && uploadProgress.completedFiles === uploadProgress.totalFiles;
+  const overallPercent = calculateUploadPercent(uploadProgress.uploadedBytes, uploadProgress.totalBytes);
+  const overallLabel = hasError ? 'Upload stopped' : (isComplete ? 'Upload complete' : 'Uploading files');
+
+  const getFileTone = (status) => {
+    switch (status) {
+      case 'complete':
+        return 'bg-emerald-500';
+      case 'error':
+        return 'bg-red-500';
+      case 'finalizing':
+        return 'bg-sky-500';
+      case 'uploading':
+        return 'bg-emerald-500';
+      default:
+        return 'bg-gray-300';
+    }
+  };
+
+  const getFileStatusLabel = (file) => {
+    switch (file.status) {
+      case 'preparing':
+        return 'Preparing upload...';
+      case 'uploading':
+        return `Uploading... ${file.progressPercent}%`;
+      case 'finalizing':
+        return 'Finalizing...';
+      case 'complete':
+        return 'Complete';
+      case 'error':
+        return file.errorMessage || 'Upload failed';
+      default:
+        return 'Waiting...';
+    }
+  };
+
+  return (
+    <div className="mt-5 rounded-xl border border-gray-200 bg-gray-50 p-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-900">{overallLabel}</h3>
+          <p className="mt-1 text-xs text-gray-500">
+            {uploadProgress.completedFiles} of {uploadProgress.totalFiles} file{uploadProgress.totalFiles === 1 ? '' : 's'} complete
+            {' · '}
+            {formatBytes(uploadProgress.uploadedBytes)} of {formatBytes(uploadProgress.totalBytes)}
+          </p>
+        </div>
+        <div className="text-right">
+          <p className="text-lg font-semibold text-gray-900">{overallPercent}%</p>
+        </div>
+      </div>
+
+      <div className="mt-3 h-3 w-full overflow-hidden rounded-full bg-gray-200">
+        <div
+          className={`${hasError ? 'bg-red-500' : 'bg-emerald-500'} h-full rounded-full transition-[width] duration-300`}
+          style={{ width: `${overallPercent}%` }}
+        />
+      </div>
+
+      <div className="mt-4 max-h-64 space-y-3 overflow-y-auto pr-1">
+        {uploadProgress.files.map((file) => (
+          <div key={file.id} className="rounded-lg border border-gray-200 bg-white p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-gray-900">{file.name}</p>
+                <p className={`mt-1 text-xs ${file.status === 'error' ? 'text-red-600' : 'text-gray-500'}`}>
+                  {getFileStatusLabel(file)}
+                </p>
+              </div>
+              <div className="text-right text-xs text-gray-500">
+                <p>{file.progressPercent}%</p>
+                <p>{formatBytes(file.size)}</p>
+              </div>
+            </div>
+
+            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-gray-100">
+              <div
+                className={`${getFileTone(file.status)} h-full rounded-full transition-[width] duration-300`}
+                style={{ width: `${file.progressPercent}%` }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function MediaPreview({ asset }) {
   if (asset.kind === 'image') {
     return (
@@ -111,12 +273,14 @@ export default function MediaPage({
   const [assets, setAssets] = useState([]);
   const [loadingAssets, setLoadingAssets] = useState(true);
   const [status, setStatus] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(null);
   const [selectedAssetIds, setSelectedAssetIds] = useState([]);
   const [selectedStationIds, setSelectedStationIds] = useState([]);
   const [isDragActive, setIsDragActive] = useState(false);
   const fileInputRef = useRef(null);
 
   const uploadVisibility = currentUser?.isAdmin ? 'global' : 'client';
+  const isUploading = uploadProgress?.active === true;
 
   const eligibleKiosks = useMemo(() => (
     filterStationsForClient(allStationsData, currentUser)
@@ -196,8 +360,45 @@ export default function MediaPage({
     setSelectedStationIds([]);
   };
 
+  const updateUploadProgressFile = (fileIndex, patch) => {
+    setUploadProgress((prev) => {
+      if (!prev) {
+        return prev;
+      }
+
+      const nextFiles = prev.files.map((file, index) => {
+        if (index !== fileIndex) {
+          return file;
+        }
+
+        const nextPatch = typeof patch === 'function' ? patch(file) : patch;
+        return { ...file, ...nextPatch };
+      });
+
+      const uploadedBytes = nextFiles.reduce((sum, file) => sum + Math.min(file.uploadedBytes, file.size), 0);
+      const completedFiles = nextFiles.filter((file) => file.status === 'complete').length;
+      const active = nextFiles.some((file) => ['preparing', 'uploading', 'finalizing'].includes(file.status));
+
+      return {
+        ...prev,
+        files: nextFiles,
+        uploadedBytes,
+        completedFiles,
+        active,
+      };
+    });
+  };
+
   const uploadFiles = async (files) => {
     if (files.length === 0) return;
+
+    if (isUploading) {
+      setStatus({
+        state: 'error',
+        message: 'Wait for the current upload to finish before starting another upload.',
+      });
+      return;
+    }
 
     const invalidFile = files.find((file) => !isSupportedMediaFile(file));
 
@@ -209,50 +410,86 @@ export default function MediaPage({
       return;
     }
 
-    setStatus({
-      state: 'sending',
-      message: `Uploading ${files.length} media file${files.length === 1 ? '' : 's'}...`,
-    });
+    setStatus(null);
+    setUploadProgress(createUploadProgressState(files));
 
     try {
-      for (const file of files) {
+      for (const [index, file] of files.entries()) {
         const contentType = resolveUploadContentType(file);
-        const uploadConfig = await callFunctionWithAuth('media_createUploadUrl', {
-          fileName: file.name,
-          contentType,
-          size: file.size,
-          visibility: uploadVisibility,
+        updateUploadProgressFile(index, {
+          status: 'preparing',
+          uploadedBytes: 0,
+          progressPercent: 0,
+          errorMessage: '',
         });
 
-        const uploadResponse = await fetch(uploadConfig.uploadUrl, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': contentType,
-          },
-          body: file,
-        });
+        try {
+          const uploadConfig = await callFunctionWithAuth('media_createUploadUrl', {
+            fileName: file.name,
+            contentType,
+            size: file.size,
+            visibility: uploadVisibility,
+          });
 
-        if (!uploadResponse.ok) {
-          throw new Error(`Upload failed for ${file.name} (${uploadResponse.status})`);
+          updateUploadProgressFile(index, { status: 'uploading' });
+
+          await uploadFileToSignedUrl({
+            uploadUrl: uploadConfig.uploadUrl,
+            file,
+            contentType,
+            onProgress: (uploadedBytes, totalBytes) => {
+              updateUploadProgressFile(index, {
+                status: 'uploading',
+                uploadedBytes,
+                progressPercent: calculateUploadPercent(uploadedBytes, totalBytes || file.size),
+              });
+            },
+          });
+
+          updateUploadProgressFile(index, {
+            status: 'finalizing',
+            uploadedBytes: file.size,
+            progressPercent: 100,
+          });
+
+          await callFunctionWithAuth('media_finalizeUpload', {
+            assetId: uploadConfig.assetId,
+            fileName: file.name,
+            storagePath: uploadConfig.storagePath,
+            bucketName: uploadConfig.bucketName,
+            contentType,
+            size: file.size,
+            visibility: uploadConfig.visibility,
+          });
+
+          updateUploadProgressFile(index, {
+            status: 'complete',
+            uploadedBytes: file.size,
+            progressPercent: 100,
+          });
+        } catch (error) {
+          updateUploadProgressFile(index, (currentFile) => ({
+            status: 'error',
+            errorMessage: error?.message || 'Upload failed.',
+            progressPercent: currentFile.progressPercent,
+            uploadedBytes: currentFile.uploadedBytes,
+          }));
+          throw error;
         }
-
-        await callFunctionWithAuth('media_finalizeUpload', {
-          assetId: uploadConfig.assetId,
-          fileName: file.name,
-          storagePath: uploadConfig.storagePath,
-          bucketName: uploadConfig.bucketName,
-          contentType,
-          size: file.size,
-          visibility: uploadConfig.visibility,
-        });
       }
 
       await loadAssets();
+      setUploadProgress((prev) => (
+        prev ? { ...prev, active: false } : prev
+      ));
       setStatus({
         state: 'success',
         message: `Uploaded ${files.length} media file${files.length === 1 ? '' : 's'}.`,
       });
     } catch (error) {
+      setUploadProgress((prev) => (
+        prev ? { ...prev, active: false } : prev
+      ));
       setStatus({
         state: 'error',
         message: error?.message || 'Media upload failed.',
@@ -269,12 +506,14 @@ export default function MediaPage({
   const handleDragEnter = (event) => {
     event.preventDefault();
     event.stopPropagation();
+    if (isUploading) return;
     setIsDragActive(true);
   };
 
   const handleDragOver = (event) => {
     event.preventDefault();
     event.stopPropagation();
+    if (isUploading) return;
     setIsDragActive(true);
   };
 
@@ -293,6 +532,15 @@ export default function MediaPage({
     event.preventDefault();
     event.stopPropagation();
     setIsDragActive(false);
+
+    if (isUploading) {
+      setStatus({
+        state: 'error',
+        message: 'Wait for the current upload to finish before starting another upload.',
+      });
+      return;
+    }
+
     await uploadFiles(Array.from(event.dataTransfer?.files || []));
   };
 
@@ -440,11 +688,17 @@ export default function MediaPage({
             <div
               role="button"
               tabIndex={0}
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => {
+                if (!isUploading) {
+                  fileInputRef.current?.click();
+                }
+              }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault();
-                  fileInputRef.current?.click();
+                  if (!isUploading) {
+                    fileInputRef.current?.click();
+                  }
                 }
               }}
               onDragEnter={handleDragEnter}
@@ -455,26 +709,28 @@ export default function MediaPage({
                 isDragActive ?
                   'border-emerald-500 bg-emerald-50' :
                   'border-gray-300 bg-gray-50 hover:border-emerald-400 hover:bg-emerald-50/60'
-              }`}
+              } ${isUploading ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}
             >
               <input
                 ref={fileInputRef}
                 type="file"
                 className="hidden"
-                  accept="image/*,video/*,application/pdf,.pdf"
-                  multiple
-                  onChange={handleUploadFiles}
-                />
+                accept="image/*,video/*,application/pdf,.pdf"
+                multiple
+                onChange={handleUploadFiles}
+              />
               <p className="text-base font-semibold text-gray-900">
-                {isDragActive ? 'Drop files to upload' : 'Drag and drop files here'}
+                {isUploading ? 'Upload in progress...' : (isDragActive ? 'Drop files to upload' : 'Drag and drop files here')}
               </p>
               <p className="mt-2 text-sm text-gray-600">
-                or click to browse for images, videos, and PDFs
+                {isUploading ? 'Please wait for the current upload to finish.' : 'or click to browse for images, videos, and PDFs'}
               </p>
               <p className="mt-3 text-xs text-gray-500">
                 Supported formats: images, videos, and PDF files.
               </p>
             </div>
+
+            <UploadProgressPanel uploadProgress={uploadProgress} />
           </div>
 
           <div className="rounded-xl bg-white p-6 shadow-md">
