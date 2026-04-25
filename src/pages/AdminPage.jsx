@@ -23,6 +23,7 @@ function AdminPage({
   onNavigateToAgreement,
   onNavigateToTemplates,
   onNavigateToMedia,
+  onNavigateToAiBooths,
   currentUser,
 }) {
   const [clients, setClients] = useState([]);
@@ -44,6 +45,7 @@ function AdminPage({
   const isAdmin = currentUser?.role === 'admin' || currentUser?.username === 'chargerent';
   const canManageClients = isAdmin || currentUser?.commands?.['client edit'] === true;
   const canAccessMedia = isAdmin || currentUser?.features?.media === true;
+  const canUseAiBooths = canManageClients || canAccessMedia;
   const canUseProvisionTools = isAdmin || currentUser?.commands?.edit === true || canManageClients;
   const canViewTemplates = currentUser?.username === 'chargerent';
 
@@ -355,6 +357,14 @@ function AdminPage({
               <button onClick={onNavigateToMedia} className="p-2 rounded-md bg-emerald-100 text-emerald-700 hover:bg-emerald-200" title="Media Library">
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14m-9 4h8a2 2 0 002-2V8a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              </button>
+            )}
+
+            {canUseAiBooths && (
+              <button onClick={onNavigateToAiBooths} className="p-2 rounded-md bg-cyan-100 text-cyan-800 hover:bg-cyan-200" title="AI Booths">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 19l-3.096-.813a2 2 0 01-1.414-2.449l.813-3.096L9.813 15.904zm0 0l4.243-4.243m0 0l3.182-3.182a2 2 0 10-2.828-2.828L11.228 8.833m2.828 2.828l-2.828-2.828m5.657 5.657L19 21" />
                 </svg>
               </button>
             )}

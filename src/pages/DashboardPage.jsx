@@ -16,12 +16,12 @@ import { useIdleTimer } from '../hooks/useIdleTimer';
 import LocationSummary from '../components/Dashboard/LocationSummary';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
 import RentalDetailView from '../components/Dashboard/RentalDetailView';
-import { CpuChipIcon, QrCodeIcon } from '@heroicons/react/24/outline';
+import { CpuChipIcon, QrCodeIcon, SparklesIcon } from '@heroicons/react/24/outline';
 import useKioskCommandFlow from '../hooks/useKioskCommandFlow';
 
 const EMPTY_RENTALS = Object.freeze([]);
 
-export default function DashboardPage({ _token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToReporting, onNavigateToTesting, rentalData, allStationsData, _setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, _setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, _ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, _setNgrokInfo, manageIgnoredKiosk, kiosksReady, initialSearch = '' }) {
+export default function DashboardPage({ _token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToAiBooths, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToReporting, onNavigateToTesting, rentalData, allStationsData, _setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, _setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, _ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, _setNgrokInfo, manageIgnoredKiosk, kiosksReady, initialSearch = '' }) {
     const [loading, setLoading] = useState(!kiosksReady);
     const [error] = useState(null);
     const [expandedKioskId, setExpandedKioskId] = useState(null);
@@ -459,6 +459,11 @@ return (
 	                    {hasTestingAccess && (
 	                        <button onClick={onNavigateToTesting} className="p-2 rounded-md bg-slate-100 text-slate-700 hover:bg-slate-200" title={t('testing_page_title')}>
 	                            <QrCodeIcon className="h-6 w-6" />
+	                        </button>
+	                    )}
+	                    {canOpenAdminTools && (
+	                        <button onClick={onNavigateToAiBooths} className="p-2 rounded-md bg-cyan-100 text-cyan-800 hover:bg-cyan-200" title="AI Booths">
+	                            <SparklesIcon className="h-6 w-6" />
 	                        </button>
 	                    )}
 	                    {canOpenAdminTools && (

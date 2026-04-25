@@ -14,6 +14,7 @@ const STORAGE_BUCKET_CANDIDATES = Array.from(new Set([
 
 const AUTH_MAPPING_DOMAIN = "auth.charge.rent";
 const STATION_SEQUENCE_START = 8000;
+const STATION_RESERVATIONS_COLLECTION = "stationIdReservations";
 const DEFAULT_KIOSK_POWER_THRESHOLD = 80;
 const MAX_MEDIA_UPLOAD_BYTES = 250 * 1024 * 1024;
 const DEFAULT_MARKETING_OPTIONS = {
@@ -345,6 +346,122 @@ async function assertCanManageMediaFromContext(context) {
   );
 }
 
+function hasAiBoothsFeature(authState) {
+  const username = normalizeUsername(authState?.profile?.username);
+  if (username === "chargerent" || authState?.isAdmin) {
+    return true;
+  }
+
+  const features = authState?.profile?.features || {};
+  const commands = authState?.profile?.commands || {};
+  return features.media === true || commands["client edit"] === true;
+}
+
+async function assertCanManageAiBooths(req, data) {
+  const authState = await getAuthorizedProfileFromRequest(req, data);
+  if (hasAiBoothsFeature(authState)) {
+    return authState;
+  }
+
+  throw new functions.https.HttpsError(
+      "permission-denied",
+      "Not allowed to manage AI booths",
+  );
+}
+
+async function assertCanManageAiBoothsFromContext(context) {
+  const authState = await getAuthorizedProfileFromContext(context);
+  if (hasAiBoothsFeature(authState)) {
+    return authState;
+  }
+
+  throw new functions.https.HttpsError(
+      "permission-denied",
+      "Not allowed to manage AI booths",
+  );
+}
+
+function cleanAiBoothText(value, maxLength = 4000) {
+  return String(value || "").trim().slice(0, maxLength);
+}
+
+function normalizeAiBoothTopic(topic, index) {
+  if (!isPlainObject(topic)) {
+    return {
+      id: `topic-${index + 1}`,
+      title: `Topic ${index + 1}`,
+      summary: "",
+      notes: "",
+      checklistText: "",
+    };
+  }
+
+  const title = cleanAiBoothText(topic.title, 120);
+  return {
+    id: cleanAiBoothText(topic.id, 160) || `topic-${index + 1}`,
+    title: title || `Topic ${index + 1}`,
+    summary: cleanAiBoothText(topic.summary, 2000),
+    notes: cleanAiBoothText(topic.notes, 8000),
+    checklistText: cleanAiBoothText(topic.checklistText, 4000),
+  };
+}
+
+function serializeTimestamp(value) {
+  if (value && typeof value.toDate === "function") {
+    return value.toDate().toISOString();
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  return cleanAiBoothText(value, 120);
+}
+
+function serializeAiBoothEvent(snapshot) {
+  const data = typeof snapshot?.data === "function" ? snapshot.data() : snapshot || {};
+  const general = isPlainObject(data.general) ? data.general : {};
+
+  return {
+    id: String(snapshot?.id || data.id || "").trim(),
+    general: {
+      eventName: cleanAiBoothText(general.eventName, 140),
+      address: cleanAiBoothText(general.address, 300),
+      wifiUsername: cleanAiBoothText(general.wifiUsername, 120),
+      wifiPassword: cleanAiBoothText(general.wifiPassword, 120),
+      startDate: cleanAiBoothText(general.startDate, 32),
+      endDate: cleanAiBoothText(general.endDate, 32),
+      openingHours: cleanAiBoothText(general.openingHours, 32),
+      closingHours: cleanAiBoothText(general.closingHours, 32),
+      notes: cleanAiBoothText(general.notes, 8000),
+    },
+    boothStationIds: Array.isArray(data.boothStationIds) ?
+      data.boothStationIds
+          .map((value) => cleanAiBoothText(value, 80))
+          .filter(Boolean) :
+      [],
+    topics: Array.isArray(data.topics) ?
+      data.topics.map((topic, index) => normalizeAiBoothTopic(topic, index)) :
+      [],
+    createdAt: serializeTimestamp(data.createdAt),
+    updatedAt: serializeTimestamp(data.updatedAt),
+    createdBy: isPlainObject(data.createdBy) ? data.createdBy : null,
+    updatedBy: isPlainObject(data.updatedBy) ? data.updatedBy : null,
+  };
+}
+
+function compareAiBoothEvents(left, right) {
+  const leftTime = Date.parse(left.updatedAt || left.createdAt || "") || 0;
+  const rightTime = Date.parse(right.updatedAt || right.createdAt || "") || 0;
+
+  if (rightTime !== leftTime) {
+    return rightTime - leftTime;
+  }
+
+  return cleanAiBoothText(left?.general?.eventName, 140)
+      .localeCompare(cleanAiBoothText(right?.general?.eventName, 140));
+}
+
 function sendFunctionError(res, error) {
   const status = Number(error?.httpErrorCode?.status) || 500;
   const code = String(error?.code || "internal");
@@ -617,19 +734,102 @@ function extractStationId(docSnap) {
   return String(data.stationid || docSnap.id || "").trim().toUpperCase();
 }
 
-function findNextStationId(docSnaps, country) {
+function buildReservedStationSequenceSet(reservedStationIds, prefix) {
+  const reservedNumbers = new Set();
+
+  (reservedStationIds || []).forEach((stationid) => {
+    const normalizedStationid = normalizeStationId(stationid);
+    const match = normalizedStationid.match(new RegExp(`^${prefix}(\\d{4})$`));
+    if (match) {
+      reservedNumbers.add(Number(match[1]));
+    }
+  });
+
+  return reservedNumbers;
+}
+
+function findNextStationId(docSnaps, country, reservedStationIds = []) {
   const prefix = prefixForCountry(country);
   let next = STATION_SEQUENCE_START;
+  const occupiedNumbers = buildReservedStationSequenceSet(
+      reservedStationIds,
+      prefix,
+  );
 
   docSnaps.forEach((docSnap) => {
     const stationid = extractStationId(docSnap);
     const match = stationid.match(new RegExp(`^${prefix}(\\d{4})$`));
     if (match) {
-      next = Math.max(next, Number(match[1]) + 1);
+      const stationNumber = Number(match[1]);
+      occupiedNumbers.add(stationNumber);
+      next = Math.max(next, stationNumber + 1);
     }
   });
 
+  while (occupiedNumbers.has(next)) {
+    next += 1;
+  }
+
   return `${prefix}${String(next).padStart(4, "0")}`;
+}
+
+async function getActiveStationReservations(country = "") {
+  const requestedCountry = String(country || "").trim();
+  const normalizedCountry = requestedCountry ?
+    normalizeCountry(requestedCountry) :
+    "";
+  const snapshot = await db.collection(STATION_RESERVATIONS_COLLECTION).get();
+  const reservations = [];
+
+  snapshot.docs.forEach((docSnap) => {
+    const data = docSnap.data() || {};
+    const stationid = normalizeStationId(data.stationid || docSnap.id);
+    if (!stationid) return;
+    if (data.active === false) return;
+
+    const reservationCountry = normalizeCountry(
+        data.country || getCountryFromStationId(stationid) || "US",
+    );
+    if (normalizedCountry && reservationCountry !== normalizedCountry) return;
+
+    reservations.push({
+      stationid,
+      country: reservationCountry,
+      reason: String(data.reason || "").trim(),
+      active: true,
+      createdAt: data.createdAt || null,
+      createdBy: String(data.createdBy || "").trim(),
+      updatedAt: data.updatedAt || null,
+      updatedBy: String(data.updatedBy || "").trim(),
+    });
+  });
+
+  reservations.sort((left, right) => left.stationid.localeCompare(right.stationid));
+  return reservations;
+}
+
+function buildReservedStationIdSet(reservations) {
+  return new Set((reservations || []).map((reservation) => reservation.stationid));
+}
+
+function buildStationReservationConflictMessage(
+    stationid,
+    nextStationid,
+    reservations,
+) {
+  const normalizedStationid = normalizeStationId(stationid);
+  const reservation = (reservations || []).find(
+      (entry) => entry.stationid === normalizedStationid,
+  );
+
+  if (reservation) {
+    const reasonSuffix = reservation.reason ?
+      ` (${reservation.reason})` :
+      "";
+    return `Station ${normalizedStationid} is reserved${reasonSuffix}. Next station is ${nextStationid}.`;
+  }
+
+  return `Station ${normalizedStationid} is no longer available. Next station is ${nextStationid}.`;
 }
 
 function extractProvisionId(docSnap) {
@@ -1802,6 +2002,83 @@ function createBoundKioskDocument({
   return recalculateKioskTotals(kiosk);
 }
 
+async function aiBoothsListEventsImpl() {
+  const snapshot = await db.collection("aiBoothEvents").get();
+  const events = snapshot.docs
+      .map((docSnapshot) => serializeAiBoothEvent(docSnapshot))
+      .sort(compareAiBoothEvents);
+
+  return {events};
+}
+
+async function aiBoothsSaveEventImpl(data, authState) {
+  const eventInput = isPlainObject(data?.event) ? data.event : null;
+  if (!eventInput) {
+    throw new functions.https.HttpsError("invalid-argument", "event is required");
+  }
+
+  const generalInput = isPlainObject(eventInput.general) ? eventInput.general : {};
+  const eventName = cleanAiBoothText(generalInput.eventName, 140);
+  if (!eventName) {
+    throw new functions.https.HttpsError("invalid-argument", "event name is required");
+  }
+
+  const actor = {
+    uid: cleanAiBoothText(authState?.uid, 128),
+    username: cleanAiBoothText(authState?.profile?.username, 120),
+  };
+  const boothStationIds = Array.isArray(eventInput.boothStationIds) ?
+    Array.from(new Set(
+        eventInput.boothStationIds
+            .map((value) => cleanAiBoothText(value, 80))
+            .filter(Boolean),
+    )).sort() :
+    [];
+  const topics = Array.isArray(eventInput.topics) ?
+    eventInput.topics.map((topic, index) => normalizeAiBoothTopic(topic, index)) :
+    [];
+
+  const cleanEvent = {
+    general: {
+      eventName,
+      address: cleanAiBoothText(generalInput.address, 300),
+      wifiUsername: cleanAiBoothText(generalInput.wifiUsername, 120),
+      wifiPassword: cleanAiBoothText(generalInput.wifiPassword, 120),
+      startDate: cleanAiBoothText(generalInput.startDate, 32),
+      endDate: cleanAiBoothText(generalInput.endDate, 32),
+      openingHours: cleanAiBoothText(generalInput.openingHours, 32),
+      closingHours: cleanAiBoothText(generalInput.closingHours, 32),
+      notes: cleanAiBoothText(generalInput.notes, 8000),
+    },
+    boothStationIds,
+    topics,
+    boothCount: boothStationIds.length,
+    topicCount: topics.length,
+    updatedBy: actor,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  const requestedId = cleanAiBoothText(data?.eventId || eventInput.id, 160)
+      .replace(/[^a-zA-Z0-9_-]/g, "");
+  const eventRef = requestedId ?
+    db.collection("aiBoothEvents").doc(requestedId) :
+    db.collection("aiBoothEvents").doc();
+  const existingSnapshot = await eventRef.get();
+
+  if (!existingSnapshot.exists) {
+    cleanEvent.createdBy = actor;
+    cleanEvent.createdAt = admin.firestore.FieldValue.serverTimestamp();
+  }
+
+  await eventRef.set(cleanEvent, {merge: true});
+
+  const savedSnapshot = await eventRef.get();
+  return {
+    ok: true,
+    event: serializeAiBoothEvent(savedSnapshot),
+  };
+}
+
 async function listUsersImpl() {
   const snap = await db.collection("users").get();
   const users = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
@@ -2024,13 +2301,120 @@ async function unlockUserImpl(data) {
 async function stationBindingGetNextStationImpl(data) {
   const country = normalizeCountry(data?.country);
   const snapshot = await db.collection("kiosks").get();
-  const stationid = findNextStationId(snapshot.docs, country);
+  const reservations = await getActiveStationReservations(country);
+  const stationid = findNextStationId(
+      snapshot.docs,
+      country,
+      buildReservedStationIdSet(reservations),
+  );
 
   return {
     ok: true,
     country,
     stationid,
     qrUrl: buildQrUrl(stationid),
+    reservations,
+  };
+}
+
+async function stationBindingListStationReservationsImpl(data) {
+  const requestedCountry = String(data?.country || "").trim();
+  const activeOnly = data?.activeOnly !== false;
+  const snapshot = await db.collection(STATION_RESERVATIONS_COLLECTION).get();
+  const reservations = snapshot.docs
+      .map((docSnap) => {
+        const docData = docSnap.data() || {};
+        const stationid = normalizeStationId(docData.stationid || docSnap.id);
+        if (!stationid) return null;
+
+        const country = normalizeCountry(
+            docData.country || getCountryFromStationId(stationid) || "US",
+        );
+        if (requestedCountry && country !== normalizeCountry(requestedCountry)) {
+          return null;
+        }
+
+        const active = docData.active !== false;
+        if (activeOnly && !active) {
+          return null;
+        }
+
+        return {
+          stationid,
+          country,
+          active,
+          reason: String(docData.reason || "").trim(),
+          createdAt: docData.createdAt || null,
+          createdBy: String(docData.createdBy || "").trim(),
+          updatedAt: docData.updatedAt || null,
+          updatedBy: String(docData.updatedBy || "").trim(),
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => left.stationid.localeCompare(right.stationid));
+
+  return {
+    ok: true,
+    reservations,
+  };
+}
+
+async function stationBindingSetStationReservationImpl(data, authState) {
+  const stationid = normalizeStationId(data?.stationid);
+  const active = data?.active !== false;
+  const reason = String(data?.reason || "").trim();
+  const country = getCountryFromStationId(stationid);
+
+  if (!stationid) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "stationid required",
+    );
+  }
+
+  if (!country) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "stationid must start with CA, FR, or US",
+    );
+  }
+
+  const reservationRef = db.collection(STATION_RESERVATIONS_COLLECTION).doc(stationid);
+  const existingSnap = await reservationRef.get();
+  const existingData = existingSnap.exists ? existingSnap.data() || {} : {};
+
+  await reservationRef.set({
+    stationid,
+    country,
+    active,
+    reason,
+    createdAt: existingData.createdAt || admin.firestore.FieldValue.serverTimestamp(),
+    createdBy: existingData.createdBy || authState.uid,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedBy: authState.uid,
+  }, {merge: true});
+
+  const [kioskSnapshot, reservations] = await Promise.all([
+    db.collection("kiosks").get(),
+    getActiveStationReservations(country),
+  ]);
+  const nextStationid = findNextStationId(
+      kioskSnapshot.docs,
+      country,
+      buildReservedStationIdSet(reservations),
+  );
+
+  return {
+    ok: true,
+    stationid,
+    country,
+    active,
+    reason,
+    nextStationid,
+    nextQrUrl: buildQrUrl(nextStationid),
+    message: active ?
+      `Station ${stationid} reserved.` :
+      `Station ${stationid} reservation cleared.`,
   };
 }
 
@@ -2046,15 +2430,27 @@ async function stationBindingBindModuleImpl(data, authState) {
     );
   }
 
-  const snapshot = await db.collection("kiosks").get();
-  const nextStationid = findNextStationId(snapshot.docs, country);
+  const [snapshot, reservations] = await Promise.all([
+    db.collection("kiosks").get(),
+    getActiveStationReservations(country),
+  ]);
+  const reservedStationIds = buildReservedStationIdSet(reservations);
+  const nextStationid = findNextStationId(
+      snapshot.docs,
+      country,
+      reservedStationIds,
+  );
   const provisionid = findNextProvisionId(snapshot.docs);
   const stationid = requestedStationId || nextStationid;
 
   if (stationid !== nextStationid) {
     throw new functions.https.HttpsError(
         "failed-precondition",
-        `Station ${stationid} is no longer available. Next station is ${nextStationid}.`,
+        buildStationReservationConflictMessage(
+            stationid,
+            nextStationid,
+            reservations,
+        ),
     );
   }
 
@@ -2101,6 +2497,7 @@ async function stationBindingBindModuleImpl(data, authState) {
   const followingStation = findNextStationId(
       [...snapshot.docs, {id: stationid, data: () => ({stationid})}],
       country,
+      reservedStationIds,
   );
 
   return {
@@ -2246,9 +2643,12 @@ async function stationBindingUnbindModuleImpl(data, authState) {
     }, {merge: true});
   });
 
+  const nextStationCountry = requestedCountry || getCountryFromStationId(stationid) || "US";
+  const reservations = await getActiveStationReservations(nextStationCountry);
   const nextStationid = findNextStationId(
       snapshot.docs,
-      requestedCountry || getCountryFromStationId(stationid) || "US",
+      nextStationCountry,
+      buildReservedStationIdSet(reservations),
   );
 
   return {
@@ -2320,8 +2720,18 @@ async function stationBindingMoveModuleImpl(data, authState) {
     );
   }
 
+  const destinationReservations = createNewStation ?
+    await getActiveStationReservations(destinationCountry) :
+    [];
+  const destinationReservedStationIds = buildReservedStationIdSet(
+      destinationReservations,
+  );
   const nextStationid = createNewStation ?
-    findNextStationId(snapshot.docs, destinationCountry) :
+    findNextStationId(
+        snapshot.docs,
+        destinationCountry,
+        destinationReservedStationIds,
+    ) :
     "";
   const destinationStationid = createNewStation ?
     (requestedDestinationStationId || nextStationid) :
@@ -2337,7 +2747,11 @@ async function stationBindingMoveModuleImpl(data, authState) {
   if (createNewStation && destinationStationid !== nextStationid) {
     throw new functions.https.HttpsError(
         "failed-precondition",
-        `Station ${destinationStationid} is no longer available. Next station is ${nextStationid}.`,
+        buildStationReservationConflictMessage(
+            destinationStationid,
+            nextStationid,
+            destinationReservations,
+        ),
     );
   }
 
@@ -2491,6 +2905,7 @@ async function stationBindingMoveModuleImpl(data, authState) {
     findNextStationId(
         [...snapshot.docs, {id: destinationStationid, data: () => ({stationid: destinationStationid})}],
         destinationCountry,
+        destinationReservedStationIds,
     ) :
     null;
 
@@ -2583,6 +2998,26 @@ exports.media_httpAssignPlaylist = handleHttpFunction(async (data, req) => {
   return mediaAssignPlaylistImpl(data, authState);
 });
 
+exports.aiBooths_listEvents = functions.https.onCall(async (data, context) => {
+  await assertCanManageAiBoothsFromContext(context);
+  return aiBoothsListEventsImpl(data);
+});
+
+exports.aiBooths_httpListEvents = handleHttpFunction(async (data, req) => {
+  await assertCanManageAiBooths(req, data);
+  return aiBoothsListEventsImpl(data);
+});
+
+exports.aiBooths_saveEvent = functions.https.onCall(async (data, context) => {
+  const authState = await assertCanManageAiBoothsFromContext(context);
+  return aiBoothsSaveEventImpl(data, authState);
+});
+
+exports.aiBooths_httpSaveEvent = handleHttpFunction(async (data, req) => {
+  const authState = await assertCanManageAiBooths(req, data);
+  return aiBoothsSaveEventImpl(data, authState);
+});
+
 exports.auth_trackAttempt = functions.https.onCall(async (data, context) => (
   trackLoginAttemptImpl(data, context?.rawRequest || null)
 ));
@@ -2668,6 +3103,16 @@ exports.stationBinding_getNextStation = functions.https.onCall(async (data, cont
   return stationBindingGetNextStationImpl(data);
 });
 
+exports.stationBinding_listStationReservations = functions.https.onCall(async (data, context) => {
+  await assertCanManageBindingsFromContext(context);
+  return stationBindingListStationReservationsImpl(data);
+});
+
+exports.stationBinding_setStationReservation = functions.https.onCall(async (data, context) => {
+  const authState = await assertCanManageBindingsFromContext(context);
+  return stationBindingSetStationReservationImpl(data, authState);
+});
+
 exports.stationBinding_bindModule = functions.https.onCall(async (data, context) => {
   const authState = await assertCanManageBindingsFromContext(context);
   return stationBindingBindModuleImpl(data, authState);
@@ -2681,6 +3126,16 @@ exports.stationBinding_unbindModule = functions.https.onCall(async (data, contex
 exports.stationBinding_httpGetNextStation = handleHttpFunction(async (data, req) => {
   await assertCanManageBindings(req, data);
   return stationBindingGetNextStationImpl(data);
+});
+
+exports.stationBinding_httpListStationReservations = handleHttpFunction(async (data, req) => {
+  await assertCanManageBindings(req, data);
+  return stationBindingListStationReservationsImpl(data);
+});
+
+exports.stationBinding_httpSetStationReservation = handleHttpFunction(async (data, req) => {
+  const authState = await assertCanManageBindings(req, data);
+  return stationBindingSetStationReservationImpl(data, authState);
 });
 
 exports.stationBinding_httpBindModule = handleHttpFunction(async (data, req) => {

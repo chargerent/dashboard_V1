@@ -1,7 +1,7 @@
 // src/components/kiosk/KioskPanel.jsx
 
 import { useMemo, useCallback } from 'react';
-import { isKioskOnline, isModuleOnline, getKioskPowerThreshold } from '../../utils/helpers';
+import { isKioskOnline, isModuleOnline, getKioskPowerThreshold, isNewSchemaKiosk } from '../../utils/helpers';
 import { formatDateTime } from '../../utils/dateFormatter';
 import RentalStats from '../Dashboard/RentalStats';
 import GatewayIcon from './GatewayIcon';
@@ -9,6 +9,8 @@ import { useTap } from './useTap';
 
 function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rentalData, clientInfo, t, onCommand, onShowRentalDetails }) {
     const isOnline = isKioskOnline(kiosk, mockNow);
+    const isV2Kiosk = isNewSchemaKiosk(kiosk);
+    const canEditKiosk = isOnline || isV2Kiosk;
     const canExpand = clientInfo.features.details;
     const isPending = String(kiosk.status || '').toLowerCase() === 'pending';
     const hasPricing = kiosk.pricing && Object.keys(kiosk.pricing).length > 0;
@@ -84,7 +86,7 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                             </span>
                         )}
                         {clientInfo.commands.edit && (
-                            <button onClick={(e) => { e.stopPropagation(); onToggleEdit(kiosk.stationid); }} disabled={!isOnline} className="p-1 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-200 transition-colors disabled:text-gray-300 disabled:hover:bg-transparent disabled:cursor-not-allowed">
+                            <button onClick={(e) => { e.stopPropagation(); onToggleEdit(kiosk.stationid); }} disabled={!canEditKiosk} className="p-1 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-200 transition-colors disabled:text-gray-300 disabled:hover:bg-transparent disabled:cursor-not-allowed">
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L14.732 3.732z" /></svg>
                             </button>
                         )}

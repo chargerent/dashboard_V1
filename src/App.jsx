@@ -1,5 +1,5 @@
 // src/App.jsx
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { Suspense, lazy, useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useIdleTimer } from './hooks/useIdleTimer';
 import InactivityModal from './components/InactivityModal';
 import { subscribeUserToPush } from './push';
@@ -7,19 +7,7 @@ import { subscribeUserToPush } from './push';
 import { translations } from './utils/translations';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage.jsx';
-import AdminPage from './pages/AdminPage.jsx';
 import { isKioskOnline, isNewSchemaKiosk, normalizeKioskData, normalizeKioskInfoForSchema } from './utils/helpers.js';
-import KioskEditorPage from './pages/KioskEditorPage.jsx';
-import RentalsPage from './pages/RentalsPage.jsx';
-import ChargersPage from './pages/ChargersPage.jsx';
-import ProvisionPage from './pages/ProvisionPage.jsx';
-import ProfessionalAgreementPDF from './pages/AgreementPage.jsx';
-import AnalyticsPage from './pages/AnalyticsPage.jsx';
-import ReportingPage from './pages/ReportingPage.jsx';
-import BindingPage from './pages/BindingPage.jsx';
-import TemplatesPage from './pages/TemplatesPage.jsx';
-import TestingPage from './pages/TestingPage.jsx';
-import MediaPage from './pages/MediaPage.jsx';
 import { callFunctionWithAuth } from './utils/callableRequest.js';
 import {
   applyRefundConfirmationToRental,
@@ -27,11 +15,26 @@ import {
   rentalMatchesRefundConfirmation,
 } from './utils/rentals.js';
 import { markStartupStep, measureStartupDuration } from './utils/startupTrace.js';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 // 🔥 firebase-config must export BOTH db and auth
 import { db, auth } from './firebase-config';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc, collection, onSnapshot, query, where } from 'firebase/firestore';
+
+const AdminPage = lazy(() => import('./pages/AdminPage.jsx'));
+const KioskEditorPage = lazy(() => import('./pages/KioskEditorPage.jsx'));
+const RentalsPage = lazy(() => import('./pages/RentalsPage.jsx'));
+const ChargersPage = lazy(() => import('./pages/ChargersPage.jsx'));
+const ProvisionPage = lazy(() => import('./pages/ProvisionPage.jsx'));
+const ProfessionalAgreementPDF = lazy(() => import('./pages/AgreementPage.jsx'));
+const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage.jsx'));
+const ReportingPage = lazy(() => import('./pages/ReportingPage.jsx'));
+const BindingPage = lazy(() => import('./pages/BindingPage.jsx'));
+const TemplatesPage = lazy(() => import('./pages/TemplatesPage.jsx'));
+const TestingPage = lazy(() => import('./pages/TestingPage.jsx'));
+const MediaPage = lazy(() => import('./pages/MediaPage.jsx'));
+const AiBoothsPage = lazy(() => import('./pages/AiBoothsPage.jsx'));
 
 function moduleMatchesResponse(module, moduleRef) {
   const moduleId = String(module?.id || '').trim();
@@ -295,6 +298,14 @@ function isTokenExpired(token) {
     console.error("Failed to parse token, treating as expired:", e);
     return true;
   }
+}
+
+function RouteLoadingState() {
+  return (
+    <div className="flex items-center justify-center h-screen bg-gray-100">
+      <div className="text-xl font-semibold text-gray-700">Loading page...</div>
+    </div>
+  );
 }
 
 function App() {
@@ -1312,6 +1323,7 @@ function App() {
       language={language}
       setLanguage={setLanguage}
       onNavigateToAdmin={() => setPage('admin')}
+      onNavigateToAiBooths={() => setPage('ai-booths')}
       onNavigateToBinding={() => setPage('binding')}
       onNavigateToRentals={() => setPage('rentals')}
       onNavigateToChargers={(searchTerm = '') => {
@@ -1378,6 +1390,7 @@ function App() {
     const hasReportingAccess = clientInfo.isAdmin || clientInfo.features?.reporting === true;
     const hasMediaAccess = clientInfo.isAdmin || clientInfo.features?.media === true;
     const canOpenAdminTools = clientInfo.isAdmin || clientInfo.commands?.['client edit'] === true || hasMediaAccess;
+    const hasAiBoothsAccess = canOpenAdminTools;
     const isRegularReportingUser = !clientInfo.isAdmin && clientInfo.role !== 'partner';
 
     switch (page) {
@@ -1395,7 +1408,23 @@ function App() {
             onNavigateToAgreement={() => setPage('agreement')}
             onNavigateToTemplates={() => setPage('templates')}
             onNavigateToMedia={() => setPage('media')}
+            onNavigateToAiBooths={() => setPage('ai-booths')}
             currentUser={clientInfo}
+            t={t}
+          />
+        );
+      case 'ai-booths':
+        if (!hasAiBoothsAccess) {
+          return dashboard;
+        }
+
+        return (
+          <AiBoothsPage
+            onLogout={handleLogout}
+            onNavigateToDashboard={() => setPage('dashboard')}
+            onNavigateToAdmin={() => setPage('admin')}
+            onNavigateToProvisionPage={() => setPage('provision')}
+            allStationsData={dedupedStationsData}
             t={t}
           />
         );
@@ -1584,7 +1613,11 @@ function App() {
         countdown={60}
         t={t}
       />
-      {renderPage()}
+      <ErrorBoundary>
+        <Suspense fallback={<RouteLoadingState />}>
+          {renderPage()}
+        </Suspense>
+      </ErrorBoundary>
     </>
   );
 }
