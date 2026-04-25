@@ -863,6 +863,25 @@ function getCountryFromStationId(stationid) {
   return "";
 }
 
+function isBindingStationId(stationid, country = "") {
+  const normalizedStationid = normalizeStationId(stationid);
+  if (!normalizedStationid) return false;
+
+  if (country) {
+    const prefix = prefixForCountry(country);
+    return new RegExp(`^${prefix}\\d{4}$`).test(normalizedStationid);
+  }
+
+  return /^(CA|FR|US)\d{4}$/.test(normalizedStationid);
+}
+
+function buildInvalidStationIdMessage(stationid, country = "") {
+  const normalizedStationid = normalizeStationId(stationid);
+  const prefix = country ? prefixForCountry(country) : "CA, FR, or US";
+  const formatSuffix = country ? `${prefix}####` : "CA####, FR####, or US####";
+  return `Station ${normalizedStationid} is invalid. Expected format ${formatSuffix}.`;
+}
+
 function normalizeModuleId(moduleId) {
   return String(moduleId || "").trim();
 }
@@ -2443,7 +2462,14 @@ async function stationBindingBindModuleImpl(data, authState) {
   const provisionid = findNextProvisionId(snapshot.docs);
   const stationid = requestedStationId || nextStationid;
 
-  if (stationid !== nextStationid) {
+  if (!isBindingStationId(stationid, country)) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        buildInvalidStationIdMessage(stationid, country),
+    );
+  }
+
+  if (reservedStationIds.has(stationid)) {
     throw new functions.https.HttpsError(
         "failed-precondition",
         buildStationReservationConflictMessage(
@@ -2451,6 +2477,17 @@ async function stationBindingBindModuleImpl(data, authState) {
             nextStationid,
             reservations,
         ),
+    );
+  }
+
+  const existingStationDoc = snapshot.docs.find(
+      (docSnap) => extractStationId(docSnap) === stationid,
+  );
+
+  if (existingStationDoc) {
+    throw new functions.https.HttpsError(
+        "already-exists",
+        `Station ${stationid} already exists.`,
     );
   }
 
@@ -2472,11 +2509,24 @@ async function stationBindingBindModuleImpl(data, authState) {
   const pendingRef = db.collection("pending").doc(moduleId);
 
   await db.runTransaction(async (transaction) => {
-    const stationSnap = await transaction.get(docRef);
-    if (stationSnap.exists) {
+    const [stationSnap, existingStationSnap] = await Promise.all([
+      transaction.get(docRef),
+      transaction.get(
+          db.collection("kiosks").where("stationid", "==", stationid).limit(1),
+      ),
+    ]);
+
+    if (!existingStationSnap.empty) {
       throw new functions.https.HttpsError(
           "already-exists",
           `Station ${stationid} already exists.`,
+      );
+    }
+
+    if (stationSnap.exists) {
+      throw new functions.https.HttpsError(
+          "aborted",
+          `Provision ${provisionid} already exists. Retry binding.`,
       );
     }
 
@@ -2744,7 +2794,17 @@ async function stationBindingMoveModuleImpl(data, authState) {
     );
   }
 
-  if (createNewStation && destinationStationid !== nextStationid) {
+  if (createNewStation && !isBindingStationId(
+      destinationStationid,
+      destinationCountry,
+  )) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        buildInvalidStationIdMessage(destinationStationid, destinationCountry),
+    );
+  }
+
+  if (createNewStation && destinationReservedStationIds.has(destinationStationid)) {
     throw new functions.https.HttpsError(
         "failed-precondition",
         buildStationReservationConflictMessage(
@@ -2758,6 +2818,13 @@ async function stationBindingMoveModuleImpl(data, authState) {
   const destinationDoc = snapshot.docs.find(
       (docSnap) => extractStationId(docSnap) === destinationStationid,
   );
+
+  if (createNewStation && destinationDoc) {
+    throw new functions.https.HttpsError(
+        "already-exists",
+        `Station ${destinationStationid} already exists.`,
+    );
+  }
 
   if (!createNewStation && !destinationDoc) {
     throw new functions.https.HttpsError(
@@ -2792,8 +2859,16 @@ async function stationBindingMoveModuleImpl(data, authState) {
     if (createNewStation || destinationRef.path !== sourceRef.path) {
       reads.push(transaction.get(destinationRef));
     }
+    if (createNewStation) {
+      reads.push(transaction.get(
+          db.collection("kiosks")
+              .where("stationid", "==", destinationStationid)
+              .limit(1),
+      ));
+    }
 
-    const [sourceSnap, pendingSnap, destinationSnap] = await Promise.all(reads);
+    const [sourceSnap, pendingSnap, destinationSnap, destinationStationSnap] =
+      await Promise.all(reads);
 
     if (!sourceSnap.exists) {
       throw new functions.https.HttpsError(
@@ -2822,10 +2897,17 @@ async function stationBindingMoveModuleImpl(data, authState) {
     );
 
     if (createNewStation) {
-      if (destinationSnap?.exists) {
+      if (destinationStationSnap && !destinationStationSnap.empty) {
         throw new functions.https.HttpsError(
             "already-exists",
             `Station ${destinationStationid} already exists.`,
+        );
+      }
+
+      if (destinationSnap?.exists) {
+        throw new functions.https.HttpsError(
+            "aborted",
+            `Provision ${destinationProvisionid} already exists. Retry move.`,
         );
       }
 
