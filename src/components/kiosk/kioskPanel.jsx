@@ -69,7 +69,7 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
             onPointerMove={tapHandlers.onPointerMove}
             onPointerUp={tapHandlers.onPointerUp}
             style={tapHandlers.style}
-            className={`${kiosk.count === 0 ? 'bg-yellow-50' : 'bg-white'} shadow-md flex flex-col justify-between transition-all duration-300 rounded-lg ${isExpanded && canExpand ? 'ring-2 ring-blue-500' : ''} ${!isOnline ? 'border-red-400 border-2' : ''} ${canExpand ? 'cursor-pointer' : 'cursor-default'}`}>
+            className={`${kiosk.count === 0 ? 'bg-purple-50' : 'bg-white'} shadow-md flex flex-col justify-between transition-all duration-300 rounded-lg ${isExpanded && canExpand ? 'ring-2 ring-blue-500' : ''} ${!isOnline ? 'border-red-400 border-2' : ''} ${canExpand ? 'cursor-pointer' : 'cursor-default'}`}>
             <div 
                 className="p-4"
             >

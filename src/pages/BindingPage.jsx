@@ -48,7 +48,7 @@ function findStandalone15Digit(value) {
 }
 
 function isNewKioskStation(stationid) {
-  return /^(CA|FR|US)8\d{3}$/.test(normalizeStationId(stationid));
+  return /^(CA|FR|US)[89]\d{3}$/.test(normalizeStationId(stationid));
 }
 
 function isBindingStationId(stationid) {

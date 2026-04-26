@@ -18,6 +18,8 @@ const HTTP_FUNCTION_NAME_MAP = {
   media_assignPlaylist: 'media_httpAssignPlaylist',
   aiBooths_listEvents: 'aiBooths_httpListEvents',
   aiBooths_saveEvent: 'aiBooths_httpSaveEvent',
+  aiBooths_listElevenLabsAgents: 'aiBooths_httpListElevenLabsAgents',
+  aiBooths_publishAgent: 'aiBooths_httpPublishAgent',
   stationBinding_getNextStation: 'stationBinding_httpGetNextStation',
   stationBinding_listStationReservations: 'stationBinding_httpListStationReservations',
   stationBinding_setStationReservation: 'stationBinding_httpSetStationReservation',
@@ -26,14 +28,27 @@ const HTTP_FUNCTION_NAME_MAP = {
   stationBinding_moveModule: 'stationBinding_httpMoveModule',
 };
 
+function shouldUseLocalFunctionProxy() {
+  if (!import.meta.env.DEV || typeof window === 'undefined') {
+    return false;
+  }
+
+  return ['localhost', '127.0.0.1'].includes(window.location.hostname);
+}
+
 function getCallableUrl(functionName) {
+  const resolvedName = HTTP_FUNCTION_NAME_MAP[functionName] || functionName;
+
+  if (shouldUseLocalFunctionProxy()) {
+    return `/__functions/${resolvedName}`;
+  }
+
   const projectId = app?.options?.projectId;
 
   if (!projectId) {
     throw new Error('Missing Firebase project ID.');
   }
 
-  const resolvedName = HTTP_FUNCTION_NAME_MAP[functionName] || functionName;
   return `https://${FUNCTIONS_REGION}-${projectId}.cloudfunctions.net/${resolvedName}`;
 }
 

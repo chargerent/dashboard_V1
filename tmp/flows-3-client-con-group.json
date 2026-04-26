@@ -1,0 +1,391 @@
+[
+    {
+        "id": "30a61b37cf13a733",
+        "type": "group",
+        "z": "ebbebe04a01eca8f",
+        "g": "d0d998605b159179",
+        "name": "set stationid / mqtt / pending",
+        "style": {
+            "stroke": "#000000",
+            "fill": "#dbcbe7",
+            "label": true,
+            "color": "#000000"
+        },
+        "nodes": [
+            "20541c1ec783115c",
+            "6a438ec14f4b6e03",
+            "743c2ccf3d29ce01",
+            "5c8d6029712367fd",
+            "79e05d10a7492d52",
+            "197f86a32b577202",
+            "b12a1e8d679de135",
+            "f9611cfb6796f848",
+            "08544443f0accb0c",
+            "2caa546b83a300e0",
+            "7d2da05258fc2bb9",
+            "8ca9b20bf71e3fbe",
+            "0ea94bd6ab894ce1",
+            "c45f213afb85937e",
+            "82117785ce0b95e7",
+            "8bd5ee2aa6e75b65",
+            "d2b6f5de82e62690",
+            "c7eb104c96d854d8"
+        ],
+        "x": 74,
+        "y": 3759,
+        "w": 2292,
+        "h": 222
+    },
+    {
+        "id": "20541c1ec783115c",
+        "type": "http in",
+        "z": "ebbebe04a01eca8f",
+        "g": "30a61b37cf13a733",
+        "name": "",
+        "url": "/api/iot/client/con",
+        "method": "post",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 200,
+        "y": 3860,
+        "wires": [
+            [
+                "f9611cfb6796f848",
+                "c45f213afb85937e"
+            ]
+        ]
+    },
+    {
+        "id": "6a438ec14f4b6e03",
+        "type": "http response",
+        "z": "ebbebe04a01eca8f",
+        "g": "30a61b37cf13a733",
+        "name": "",
+        "statusCode": "",
+        "headers": {},
+        "x": 2290,
+        "y": 3800,
+        "wires": []
+    },
+    {
+        "id": "743c2ccf3d29ce01",
+        "type": "function",
+        "z": "ebbebe04a01eca8f",
+        "g": "30a61b37cf13a733",
+        "name": "resolve stationid from Firebase or queue pending",
+        "func": "const docs = Array.isArray(msg.payload) ? msg.payload : [];\nconst moduleId = String(msg.module || '').trim();\nconst requestData = msg.payloadRaw || (msg.req && msg.req.query) || {};\nconst rawUuid = String(requestData.uuid || msg._rawUuid || '').trim() || null;\nconst simUUID = String(requestData.simUUID || '').trim();\nconst simMobile = String(requestData.simMobile || '').trim();\nconst deviceId = String(requestData.deviceId || '').trim();\nconst ssl = String(requestData.ssl || '').trim();\nconst screen = String(requestData.screen || '').trim();\nconst defaultWifiName = 'chargerent';\nconst defaultWifiPassword = 'Charger33';\nconst lookupStrategy = String(msg.lookupStrategy || 'scan').trim() || 'scan';\n\nif (!moduleId) {\n    node.error('Missing msg.module');\n    return null;\n}\n\nlet matched = null;\nfor (const doc of docs) {\n    const modules = Array.isArray(doc.modules) ? doc.modules : [];\n    for (const mod of modules) {\n        const modId = mod && mod.id != null ? String(mod.id).trim() : '';\n        if (!modId) continue;\n\n        if (modId === moduleId || ('1000' + modId) === moduleId || modId === moduleId.replace(/^1000/, '')) {\n            matched = doc;\n            break;\n        }\n    }\n    if (matched) break;\n}\n\nmsg.lookupDocCount = docs.length;\nmsg.lookupDurationMs = Number(msg._startedAt) ? (Date.now() - Number(msg._startedAt)) : null;\nmsg.lookupStrategy = lookupStrategy;\nmsg.lookupFallbackUsed = Boolean(msg._didFullScanFallback);\nmsg.simUUID = simUUID;\nmsg.simMobile = simMobile;\nmsg.deviceId = deviceId;\nmsg.ssl = ssl;\nmsg.screen = screen;\n\nif (!matched && lookupStrategy === 'moduleIds' && !msg._didFullScanFallback) {\n    msg._didFullScanFallback = true;\n    msg.lookupStrategy = 'scan';\n    msg.lookupFallbackUsed = true;\n    msg.payload = {\n        path: 'kiosks',\n        query: []\n    };\n    return [null, null, msg];\n}\n\nif (matched && matched.stationid) {\n    msg.branch = 'provisioned';\n    msg.stationid = matched.stationid;\n    msg.matchStationid = matched.stationid;\n    msg.kioskDoc = matched;\n    msg.wifiName = String(matched.wifi && matched.wifi.name || defaultWifiName).trim() || defaultWifiName;\n    msg.wifiPassword = String(matched.wifi && matched.wifi.password || defaultWifiPassword).trim() || defaultWifiPassword;\n    return [msg, null, null];\n}\n\nmsg.branch = 'pending';\nmsg.stationid = 'pending';\nmsg.matchStationid = null;\nmsg.wifiName = defaultWifiName;\nmsg.wifiPassword = defaultWifiPassword;\nmsg.payload = {\n    path: 'pending/' + moduleId,\n    content: {\n        moduleId,\n        rawUuid,\n        simUUID,\n        simMobile,\n        deviceId,\n        ssl,\n        screen,\n        stationid: 'pending',\n        active: false,\n        firstSeen: new Date().toISOString(),\n        lastSeen: new Date().toISOString()\n    }\n};\n\nreturn [null, msg, null];",
+        "outputs": 3,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1550,
+        "y": 3860,
+        "wires": [
+            [
+                "5c8d6029712367fd",
+                "8ca9b20bf71e3fbe"
+            ],
+            [
+                "7d2da05258fc2bb9",
+                "0ea94bd6ab894ce1"
+            ],
+            [
+                "2caa546b83a300e0"
+            ]
+        ]
+    },
+    {
+        "id": "5c8d6029712367fd",
+        "type": "function",
+        "z": "ebbebe04a01eca8f",
+        "g": "30a61b37cf13a733",
+        "name": "set response",
+        "func": "const timestamp = Date.now();\nconst moduleId = String(msg.module || '').trim();\nconst stationid = String(msg.stationid || '').trim();\nconst defaultWifiName = 'chargerent';\nconst defaultWifiPassword = 'Charger33';\nconst wifiName = String(msg.wifiName || defaultWifiName).trim() || defaultWifiName;\nconst wifiPassword = String(msg.wifiPassword || defaultWifiPassword).trim() || defaultWifiPassword;\n\nmsg.responseDurationMs = Number(msg._startedAt) ? (timestamp - Number(msg._startedAt)) : null;\nmsg.configPreview = {\n    moduleId,\n    stationid,\n    wifiName,\n    wifiPassword,\n    branch: String(msg.branch || ''),\n    lookupStrategy: String(msg.lookupStrategy || ''),\n    lookupFallbackUsed: Boolean(msg.lookupFallbackUsed),\n    lookupDocCount: Number(msg.lookupDocCount || 0),\n    lookupDurationMs: msg.lookupDurationMs,\n    responseDurationMs: msg.responseDurationMs\n};\n\nmsg.payload = {\n    code: 200,\n    type: 0,\n    data: [\n        moduleId + '|securemode=2,signmethod=hmacmd5,timestamp=' + timestamp + '|',\n        stationid,\n        '34.56.244.66',\n        '1883',\n        wifiName,\n        wifiPassword,\n        String(timestamp)\n    ].join(','),\n    msg: 'OK',\n    time: timestamp\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 2110,
+        "y": 3860,
+        "wires": [
+            [
+                "79e05d10a7492d52",
+                "6a438ec14f4b6e03"
+            ]
+        ]
+    },
+    {
+        "id": "79e05d10a7492d52",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "30a61b37cf13a733",
+        "name": "config response",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 2270,
+        "y": 3920,
+        "wires": []
+    },
+    {
+        "id": "197f86a32b577202",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "30a61b37cf13a733",
+        "name": "initial com",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 630,
+        "y": 3820,
+        "wires": []
+    },
+    {
+        "id": "b12a1e8d679de135",
+        "type": "function",
+        "z": "ebbebe04a01eca8f",
+        "g": "30a61b37cf13a733",
+        "name": "parse kiosk module id",
+        "func": "const rawUuid = String(\n    (msg.payload && msg.payload.uuid) ||\n    (msg.req && msg.req.query && msg.req.query.uuid) ||\n    ''\n).trim();\n\nmsg._startedAt = Number(msg._startedAt || Date.now());\nmsg._rawUuid = rawUuid;\n\nif (!rawUuid) {\n    node.error('Missing uuid', msg);\n    return null;\n}\n\n// Kiosk IMEI-style module ids should pass through unchanged.\nif (/^\\d{15}$/.test(rawUuid)) {\n    msg.module = rawUuid;\n    return msg;\n}\n\n// MAC-like UUIDs are converted into the stored 1000-prefixed module id.\nconst normalizedHex = rawUuid.replace(/[:-]/g, '').toUpperCase();\nif (/^[0-9A-F]{12}$/.test(normalizedHex)) {\n    msg.module = '1000' + BigInt('0x' + normalizedHex).toString(10);\n    return msg;\n}\n\nmsg.module = rawUuid;\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 660,
+        "y": 3860,
+        "wires": [
+            [
+                "82117785ce0b95e7",
+                "08544443f0accb0c"
+            ]
+        ]
+    },
+    {
+        "id": "f9611cfb6796f848",
+        "type": "change",
+        "z": "ebbebe04a01eca8f",
+        "g": "30a61b37cf13a733",
+        "name": "preserve raw payload",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payloadRaw",
+                "pt": "msg",
+                "to": "payload",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 420,
+        "y": 3860,
+        "wires": [
+            [
+                "b12a1e8d679de135",
+                "197f86a32b577202"
+            ]
+        ]
+    },
+    {
+        "id": "08544443f0accb0c",
+        "type": "function",
+        "z": "ebbebe04a01eca8f",
+        "g": "30a61b37cf13a733",
+        "name": "Prepare kiosk lookup query",
+        "func": "const moduleId = String(msg.module || '').trim();\nconst isV2Lookup = /^\\d{15,}$/.test(moduleId);\n\nmsg.lookupStrategy = isV2Lookup ? 'moduleIds' : 'scan';\nmsg.lookupFallbackUsed = Boolean(msg._didFullScanFallback);\n\nmsg.payload = isV2Lookup\n    ? {\n        path: 'kiosks',\n        query: [{ fieldPath: 'moduleIds', opStr: 'array-contains', value: moduleId }]\n    }\n    : {\n        path: 'kiosks',\n        query: []\n    };\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 980,
+        "y": 3860,
+        "wires": [
+            [
+                "2caa546b83a300e0",
+                "c7eb104c96d854d8"
+            ]
+        ]
+    },
+    {
+        "id": "2caa546b83a300e0",
+        "type": "google-cloud-firestore",
+        "z": "ebbebe04a01eca8f",
+        "g": "30a61b37cf13a733",
+        "account": "",
+        "keyFilename": "/home/george/firestore/firestore-key.json",
+        "name": "Query kiosks",
+        "projectId": "node-red-alerts",
+        "mode": "query",
+        "x": 1250,
+        "y": 3860,
+        "wires": [
+            [
+                "743c2ccf3d29ce01",
+                "d2b6f5de82e62690"
+            ]
+        ]
+    },
+    {
+        "id": "7d2da05258fc2bb9",
+        "type": "google-cloud-firestore",
+        "z": "ebbebe04a01eca8f",
+        "g": "30a61b37cf13a733",
+        "account": "",
+        "keyFilename": "/home/george/firestore/firestore-key.json",
+        "name": "Upsert pending module",
+        "projectId": "node-red-alerts",
+        "mode": "update",
+        "x": 1910,
+        "y": 3900,
+        "wires": [
+            [
+                "5c8d6029712367fd"
+            ]
+        ]
+    },
+    {
+        "id": "8ca9b20bf71e3fbe",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "30a61b37cf13a733",
+        "name": "provisioned branch",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1750,
+        "y": 3820,
+        "wires": []
+    },
+    {
+        "id": "0ea94bd6ab894ce1",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "30a61b37cf13a733",
+        "name": "pending branch",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1820,
+        "y": 3940,
+        "wires": []
+    },
+    {
+        "id": "c45f213afb85937e",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "30a61b37cf13a733",
+        "name": "debug 552",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 490,
+        "y": 3940,
+        "wires": []
+    },
+    {
+        "id": "82117785ce0b95e7",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "30a61b37cf13a733",
+        "name": "parsed module",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "module",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 940,
+        "y": 3820,
+        "wires": []
+    },
+    {
+        "id": "8bd5ee2aa6e75b65",
+        "type": "http in",
+        "z": "ebbebe04a01eca8f",
+        "g": "30a61b37cf13a733",
+        "name": "",
+        "url": "/api/iot/client/con",
+        "method": "get",
+        "upload": false,
+        "swaggerDoc": "",
+        "x": 200,
+        "y": 3900,
+        "wires": [
+            [
+                "f9611cfb6796f848"
+            ]
+        ]
+    },
+    {
+        "id": "d2b6f5de82e62690",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "30a61b37cf13a733",
+        "name": "kiosk query result",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1360,
+        "y": 3940,
+        "wires": [],
+        "targetType": "full"
+    },
+    {
+        "id": "c7eb104c96d854d8",
+        "type": "debug",
+        "z": "ebbebe04a01eca8f",
+        "g": "30a61b37cf13a733",
+        "name": "debug 599",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1110,
+        "y": 3940,
+        "wires": []
+    }
+]

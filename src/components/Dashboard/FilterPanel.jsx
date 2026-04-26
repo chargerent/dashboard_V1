@@ -72,11 +72,11 @@ export default function FilterPanel({ activeFilters, onFilterChange, showActiveO
                             )}
                         </div>
                     </FilterButton>
-                    <FilterButton filterKey="soldout" isActive={activeFilters.soldout} onClick={onFilterChange}>
+                    <FilterButton filterKey="soldout" isActive={activeFilters.soldout} onClick={onFilterChange} className={activeFilters.soldout ? 'bg-purple-600 text-white' : 'text-purple-700 hover:bg-purple-100'}>
                         <div className="flex items-center"> {/* Icon container */}
                             <span className="font-bold">0</span>
                             {soldOutCount > 0 && (
-                                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[0.6rem] font-bold rounded-full px-1 py-0.5 leading-none"> {/* Badge styling */}
+                                <span className="absolute -top-1 -right-1 bg-purple-500 text-white text-[0.6rem] font-bold rounded-full px-1 py-0.5 leading-none"> {/* Badge styling */}
                                     {soldOutCount}
                                 </span>
                             )}

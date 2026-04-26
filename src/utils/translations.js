@@ -124,6 +124,10 @@ export const translations = {
         sold_out_kiosks_title: "Sold Out Kiosks",
         offline_kiosks_title: "Offline Kiosks",
         no_sold_out_kiosks: "No sold out kiosks to report.",
+        station_status_title: "Station Status Issues",
+        no_station_status_issues: "No station status issues to report.",
+        module_disconnected: "Module disconnected",
+        modules_disconnected: "modules disconnected",
         // Login
         login_title: "Client Dashboard",
         username: "Username",
@@ -557,6 +561,10 @@ export const translations = {
         sold_out_kiosks_title: "Kiosques Épuisés",
         offline_kiosks_title: "Kiosques Hors Ligne",
         no_sold_out_kiosks: "Aucun kiosque épuisé à signaler.",
+        station_status_title: "Problèmes de statut des stations",
+        no_station_status_issues: "Aucun problème de statut de station à signaler.",
+        module_disconnected: "Module déconnecté",
+        modules_disconnected: "modules déconnectés",
         // Login
         login_title: "Tableau de Bord Client",
         username: "Nom d'utilisateur",

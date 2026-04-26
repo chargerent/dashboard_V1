@@ -150,6 +150,7 @@ const ProvisionPage = ({ onNavigateToDashboard, onLogout, t, onCommand, allStati
                 const moduleMap = {
                     'CT3': 1,
                     'CT10': 1,
+                    'CA36': 1,
                     'CK20': 2,
                     'CK30': 3,
                     'CK48': 12,
@@ -315,7 +316,7 @@ const ProvisionPage = ({ onNavigateToDashboard, onLogout, t, onCommand, allStati
                             <div className="p-4 rounded-lg">
                                 <SectionTitle title="Hardware" />
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <FormMultiSwitch label="Type" name="type" options={['CT3', 'CT10', 'CK20', 'CK30', 'CK48', 'CK50']} value={formData.hardware.type} section="hardware" onDataChange={onDataChange} />
+                                    <FormMultiSwitch label="Type" name="type" options={['CT3', 'CT10', 'CA36', 'CK20', 'CK30', 'CK48', 'CK50']} value={formData.hardware.type} section="hardware" onDataChange={onDataChange} />
                                     <FormMultiSwitch label="Module Version" name="modversion" options={['1.0', '2.0']} value={formData.hardware.modversion} section="hardware" onDataChange={onDataChange} />
                                     <FormMultiSwitch label="Mode" name="mode" options={['LIVE', 'TEST']} value={formData.hardware.mode} section="hardware" onDataChange={onDataChange} />
                                     <FormInput label="Modules" name="modules" type="number" value={formData.hardware.modules} section="hardware" onDataChange={onDataChange} />

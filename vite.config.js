@@ -70,6 +70,11 @@ export default defineConfig(({ command }) => ({
   // ✅ Proxy setup for Node-RED APIs and WebSockets
   server: {
     proxy: {
+      '/__functions': {
+        target: 'https://us-central1-node-red-alerts.cloudfunctions.net',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/__functions/, ''),
+      },
       '/api': {
         target: 'https://chargerentstations.com',
         changeOrigin: true,

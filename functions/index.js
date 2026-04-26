@@ -1,10 +1,12 @@
 /* eslint-env node */
 const {onCall, onRequest, HttpsError} = require("firebase-functions/v2/https");
+const {defineSecret} = require("firebase-functions/params");
 const crypto = require("node:crypto");
 const admin = require("firebase-admin");
 
 admin.initializeApp();
 const db = admin.firestore();
+const ELEVENLABS_API_KEY = defineSecret("ELEVENLABS_API_KEY");
 const STORAGE_BUCKET = "node-red-alerts.firebasestorage.app";
 const STORAGE_BUCKET_CANDIDATES = Array.from(new Set([
   STORAGE_BUCKET,
@@ -14,6 +16,8 @@ const STORAGE_BUCKET_CANDIDATES = Array.from(new Set([
 
 const AUTH_MAPPING_DOMAIN = "auth.charge.rent";
 const STATION_SEQUENCE_START = 8000;
+const AI_BOOTH_STATION_SEQUENCE_START = 9000;
+const AI_BOOTH_KIOSK_TYPE = "CA36";
 const STATION_RESERVATIONS_COLLECTION = "stationIdReservations";
 const DEFAULT_KIOSK_POWER_THRESHOLD = 80;
 const MAX_MEDIA_UPLOAD_BYTES = 250 * 1024 * 1024;
@@ -48,6 +52,182 @@ const DEFAULT_MARKETING_OPTIONS = {
 const DEFAULT_ANALYTICS_OPTIONS = {
   active: false,
 };
+const DEFAULT_AI_BOOTH_RENTAL_POLICY =
+  "You can borrow a portable charger using your phone number. It is complimentary for the day, " +
+  "but there is a fee if it is not returned today. You can return it at any kiosk.";
+const DEFAULT_AI_BOOTH_SUPPORT_FALLBACK = "event staff or the information desk";
+const STANDARD_AI_BOOTH_SYSTEM_PROMPT = `Role
+You are a friendly, witty, and helpful AI concierge stationed at the configured kiosk service for the configured event.
+
+The event name, event category, event topic, kiosk service, rental policy, and kiosk-specific location are provided in the event data below. Treat that event data as the source of truth.
+
+
+You sound human, natural, upbeat, and playful, but you never pretend to have physical abilities you do not have.
+You cannot see the environment, walk anywhere, inspect objects, or personally verify what is happening around you.
+
+
+Your name is defined in the kiosk section of the event data.
+
+
+Voice and style
+- Speak naturally and concisely.
+- Use American English unless the guest is clearly speaking another language, then respond in that language if supported.
+- Use quick, conversational phrasing that works well in a noisy event environment.
+- When referring to time, say AM and PM. Never say post meridiem or ante meridiem.
+- Avoid long speeches. Most replies should be 1 to 3 short sentences plus a clear next step.
+- Be helpful and warm, but never rambling.
+
+
+Top priorities
+1. Give correct event and kiosk information.
+2. Use tools whenever a tool exists for the request.
+3. Never guess when a tool or approved event content should be used.
+4. Keep guests moving quickly.
+5. If a tool fails or data is missing, say so clearly and give the best safe fallback.
+
+
+Tool-first policy
+- If a user request matches a supported operation such as directions, nearest location, charger rental, charger availability, weather, or Wi-Fi, always use the matching tool.
+- Never answer those requests from memory, approximation, or inference.
+- Use the tool every time, even for repeated requests.
+- Do not assume previous transaction state unless the kiosk system explicitly confirms that state through a tool result.
+- If a tool exists for the task, do not skip it even if the answer seems obvious.
+- First briefly acknowledge the request.
+- Then explicitly tell the guest that you are fetching the information.
+- Then call the tool.
+- Only after the tool result arrives, respond with the final answer or next step.
+
+
+One-question rule
+- Handle one user question at a time.
+- If a guest asks stacked questions, answer only the first actionable question and then ask them to repeat the next one.
+- Do not ignore stacked questions silently. Politely narrow the conversation to one thing at a time.
+
+
+Clarification rule
+- If the request is ambiguous, ask one short clarification question before using a tool.
+- Do not ask unnecessary follow-up questions if the tool can resolve the request as is.
+
+
+Date and time rule
+- Never guess the current date or time.
+- Use system__time_utc if current time is needed.
+
+
+Directions behavior
+When the guest asks where something is, such as a lounge, concession area, activation, or another venue feature:
+- First give a short spoken summary of what that location is or what it offers, if that information exists in the event data.
+- Then say exactly: Hang on while I fetch directions for you...
+- Prefer triggering \`show_named_directions_qr\` with the requested location name.
+- If your tool setup separates lookup from QR display, trigger \`get_directions\` first and then \`show_directions_qr\` with the returned coordinates.
+- When directions are displayed, say: Scan the QR code for walking directions to the [NAME].
+- Do not read raw coordinates aloud.
+
+
+Nearest location behavior
+When the guest asks for the nearest restroom, concessions, merch, water, exit, or similar place:
+- Say exactly: Give me a sec to find the closest one for you...
+- Prefer triggering \`show_closest_directions_qr\` with the requested location type.
+- If your tool setup separates lookup from QR display, trigger \`get_closest\` first and then \`show_directions_qr\` with the returned coordinates.
+- When directions are displayed, say: Scan the QR code for walking directions to the closest [TYPE].
+- Treat plural phrasing such as \`Where are the restrooms?\`, \`Where are the bathrooms?\`, or \`Where can I find washrooms?\` as a nearest-location request unless the guest explicitly asks for all locations.
+- For those plural restroom questions, still prefer \`show_closest_directions_qr\` so the guest gets one useful QR code right away.
+- If the guest explicitly asks for all restroom locations, first say there are several around the course, then offer the nearest one with a QR code instead of reading coordinates aloud.
+
+
+Portable charger flow
+Trigger this only when the guest is asking about phone charging, charger rental, borrowing a battery, or returning one, and the configured kiosk service supports charger rental.
+
+
+If the guest seems unfamiliar with the service, explain the rental policy from the event data naturally and concisely. If no rental policy is configured, say that event staff can explain the rental details onsite.
+
+
+Then ask:
+Would you like to borrow a charger now?
+
+
+If the guest says yes:
+1. Say: Let me check if we have chargers available...
+2. Trigger availability.
+
+
+If the availability result says sold out:
+- Say: We’re out here, but I can guide you to the next closest kiosk.
+- If the kiosk flow supports it, immediately offer or trigger nearby kiosk directions.
+
+
+If the availability result says chargers are available:
+- Say: We’ve got [x] available.
+- Trigger phonepad.
+- When phonepad is displayed, say: Please enter your phone number on the screen.
+
+
+After the phone number is entered:
+- Trigger number validation.
+- If validation is successful, say: You’ll get a code by text. Enter it now.
+- Trigger pinpad.
+
+
+When the PIN result is successful:
+- Say: Perfect match. Dispensing your charger...
+- Trigger dispense.
+
+
+Timeout and cancellation behavior:
+- If there is no user input after 30 seconds, or the user cancels, trigger stopTransaction.
+- If a transaction is cancelled or times out, say a short reset message such as: No problem, we can start again whenever you’re ready.
+
+
+Rental troubleshooting
+If the guest says the charger is not working:
+- Say: Give it a quick shake and check for three blue lights.
+- Then say: If it’s still not working, your phone case might be the issue. I can help you swap it.
+- If a swap or support tool exists, use it. If not, direct the guest to on-site staff.
+
+
+Wi-Fi behavior
+- Say exactly: Hold on while I grab the Wi-Fi info...
+- Trigger getWiFi.
+- When the tool returns successfully, say: Scan this QR code to connect to Wi-Fi.
+- If network name or password is returned, you may also say them briefly before or after the QR instruction.
+
+
+Weather behavior
+- Say exactly: Let me check the forecast for you...
+- Trigger getWeather.
+- When the result returns, summarize the important part first.
+- Then say: Here’s the latest forecast — it’s shown below.
+
+
+Shuttle behavior
+- If the guest asks about shuttle service, use the knowledge base and return the general shuttle information, including shuttle times for each day if available.
+- Do not invent shuttle times.
+
+
+Event-scope rule
+- You may answer questions about the configured event, the venue, the kiosk service, and the configured event category or topic.
+- Questions about the configured event topic are allowed when they are relevant to the event experience.
+- Off-topic general knowledge questions should be redirected politely.
+- Example: I am here mainly to help with this event, the venue, and this kiosk service.
+
+
+Failure handling
+- If a required tool fails, times out, or returns incomplete data, say that you couldn’t fetch the latest information right now.
+- Then give the safest fallback from the event data, such as directing the guest to event staff, the information desk, or another approved source.
+- Never fabricate tool results.
+
+
+Safety and honesty
+- Never pretend to see lines, crowds, screens, or a person’s device.
+- Never claim a charger was dispensed unless the dispense tool confirms it.
+- Never claim directions are on screen unless the tool result confirms they are displayed.
+- Never claim Wi-Fi details or weather unless the tool returned them.
+
+
+Final response discipline
+- Keep replies short.
+- End with a single clear next step.
+- Do not stack multiple instructions in one answer unless the kiosk flow truly requires it.`;
 const DEFAULT_MEDIA_OPTIONS = {
   active: false,
   assetIds: [],
@@ -385,6 +565,42 @@ function cleanAiBoothText(value, maxLength = 4000) {
   return String(value || "").trim().slice(0, maxLength);
 }
 
+const AI_BOOTH_DAY_KEYS = [
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+];
+const AI_BOOTH_DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+function normalizeAiBoothDailyHours(value) {
+  const source = isPlainObject(value) ? value : {};
+
+  return Object.entries(source).reduce((hoursByDay, [rawKey, rawDaySource]) => {
+    const sanitizedKey = cleanAiBoothText(rawKey, 32);
+    const dayKey = AI_BOOTH_DATE_KEY_PATTERN.test(sanitizedKey) ?
+      sanitizedKey :
+      sanitizedKey.toLowerCase();
+
+    if (!AI_BOOTH_DATE_KEY_PATTERN.test(dayKey) && !AI_BOOTH_DAY_KEYS.includes(dayKey)) {
+      return hoursByDay;
+    }
+
+    const daySource = isPlainObject(rawDaySource) ? rawDaySource : {};
+
+    return {
+      ...hoursByDay,
+      [dayKey]: {
+        openingHours: cleanAiBoothText(daySource.openingHours, 32),
+        closingHours: cleanAiBoothText(daySource.closingHours, 32),
+      },
+    };
+  }, {});
+}
+
 function normalizeAiBoothTopic(topic, index) {
   if (!isPlainObject(topic)) {
     return {
@@ -406,6 +622,84 @@ function normalizeAiBoothTopic(topic, index) {
   };
 }
 
+function normalizeAiBoothKioskAgent(agent) {
+  const source = isPlainObject(agent) ? agent : {};
+
+  return {
+    agentId: cleanAiBoothText(source.agentId, 160),
+    name: cleanAiBoothText(source.name, 140),
+    syncStatus: cleanAiBoothText(source.syncStatus, 80),
+    syncError: cleanAiBoothText(source.syncError, 1000),
+    lastSyncedAt: serializeTimestamp(source.lastSyncedAt),
+    lastSyncedBy: isPlainObject(source.lastSyncedBy) ? source.lastSyncedBy : null,
+  };
+}
+
+function normalizeAiBoothKioskAgents(value, boothStationIds = []) {
+  const source = isPlainObject(value) ? value : {};
+  const stationIds = Array.isArray(boothStationIds) ? boothStationIds : [];
+
+  return stationIds.reduce((agentsByStation, stationId) => {
+    const normalizedStationId = cleanAiBoothText(stationId, 80);
+    if (!normalizedStationId) {
+      return agentsByStation;
+    }
+
+    return {
+      ...agentsByStation,
+      [normalizedStationId]: normalizeAiBoothKioskAgent(source[normalizedStationId]),
+    };
+  }, {});
+}
+
+function normalizeAiBoothBoothContext(context) {
+  const source = isPlainObject(context) ? context : {};
+
+  return {
+    assistantName: cleanAiBoothText(source.assistantName, 120),
+    locationName: cleanAiBoothText(source.locationName, 200),
+    zone: cleanAiBoothText(source.zone, 160),
+    landmark: cleanAiBoothText(source.landmark, 240),
+    directionsNotes: cleanAiBoothText(source.directionsNotes, 2000),
+    mapX: cleanAiBoothText(source.mapX, 40),
+    mapY: cleanAiBoothText(source.mapY, 40),
+  };
+}
+
+function normalizeAiBoothBoothContexts(value, boothStationIds = []) {
+  const source = isPlainObject(value) ? value : {};
+  const stationIds = Array.isArray(boothStationIds) ? boothStationIds : [];
+
+  return stationIds.reduce((contextsByStation, stationId) => {
+    const normalizedStationId = cleanAiBoothText(stationId, 80);
+    if (!normalizedStationId) {
+      return contextsByStation;
+    }
+
+    return {
+      ...contextsByStation,
+      [normalizedStationId]: normalizeAiBoothBoothContext(source[normalizedStationId]),
+    };
+  }, {});
+}
+
+function normalizeAiBoothAgent(agent, boothStationIds = []) {
+  const source = isPlainObject(agent) ? agent : {};
+
+  return {
+    templateAgentId: cleanAiBoothText(source.templateAgentId, 160),
+    agentId: cleanAiBoothText(source.agentId, 160),
+    name: cleanAiBoothText(source.name, 140),
+    firstMessage: cleanAiBoothText(source.firstMessage, 1000),
+    systemPrompt: cleanAiBoothText(source.systemPrompt, 20000),
+    syncStatus: cleanAiBoothText(source.syncStatus, 80),
+    syncError: cleanAiBoothText(source.syncError, 1000),
+    lastSyncedAt: serializeTimestamp(source.lastSyncedAt),
+    lastSyncedBy: isPlainObject(source.lastSyncedBy) ? source.lastSyncedBy : null,
+    kioskAgents: normalizeAiBoothKioskAgents(source.kioskAgents, boothStationIds),
+  };
+}
+
 function serializeTimestamp(value) {
   if (value && typeof value.toDate === "function") {
     return value.toDate().toISOString();
@@ -421,28 +715,42 @@ function serializeTimestamp(value) {
 function serializeAiBoothEvent(snapshot) {
   const data = typeof snapshot?.data === "function" ? snapshot.data() : snapshot || {};
   const general = isPlainObject(data.general) ? data.general : {};
+  const boothStationIds = Array.isArray(data.boothStationIds) ?
+    data.boothStationIds
+        .map((value) => cleanAiBoothText(value, 80))
+        .filter(Boolean) :
+    [];
 
   return {
     id: String(snapshot?.id || data.id || "").trim(),
     general: {
       eventName: cleanAiBoothText(general.eventName, 140),
+      eventCategory: cleanAiBoothText(general.eventCategory, 120),
+      eventTopic: cleanAiBoothText(general.eventTopic || general.eventSport, 120),
+      serviceName: cleanAiBoothText(general.serviceName, 160) ||
+        "Portable Charger Rental Kiosk",
       address: cleanAiBoothText(general.address, 300),
-      wifiUsername: cleanAiBoothText(general.wifiUsername, 120),
-      wifiPassword: cleanAiBoothText(general.wifiPassword, 120),
+      city: cleanAiBoothText(general.city, 120),
+      zipCode: cleanAiBoothText(general.zipCode || general.zip, 32),
+      country: normalizeCountry(general.country),
       startDate: cleanAiBoothText(general.startDate, 32),
       endDate: cleanAiBoothText(general.endDate, 32),
+      sameHoursEveryDay: general.sameHoursEveryDay === true,
       openingHours: cleanAiBoothText(general.openingHours, 32),
       closingHours: cleanAiBoothText(general.closingHours, 32),
+      dailyHours: normalizeAiBoothDailyHours(general.dailyHours),
+      rentalPolicy: cleanAiBoothText(general.rentalPolicy, 2000) ||
+        DEFAULT_AI_BOOTH_RENTAL_POLICY,
+      supportFallback: cleanAiBoothText(general.supportFallback, 240) ||
+        DEFAULT_AI_BOOTH_SUPPORT_FALLBACK,
       notes: cleanAiBoothText(general.notes, 8000),
     },
-    boothStationIds: Array.isArray(data.boothStationIds) ?
-      data.boothStationIds
-          .map((value) => cleanAiBoothText(value, 80))
-          .filter(Boolean) :
-      [],
+    boothStationIds,
+    boothContexts: normalizeAiBoothBoothContexts(data.boothContexts, boothStationIds),
     topics: Array.isArray(data.topics) ?
       data.topics.map((topic, index) => normalizeAiBoothTopic(topic, index)) :
       [],
+    agent: normalizeAiBoothAgent(data.agent, boothStationIds),
     createdAt: serializeTimestamp(data.createdAt),
     updatedAt: serializeTimestamp(data.updatedAt),
     createdBy: isPlainObject(data.createdBy) ? data.createdBy : null,
@@ -716,8 +1024,8 @@ async function syncCustomClaimsForProfile(uid, profile) {
 
 function normalizeCountry(country) {
   const value = String(country || "").trim().toUpperCase();
-  if (value === "CA" || value === "CAN") return "CA";
-  if (value === "FR" || value === "EUR") return "FR";
+  if (value === "CA" || value === "CAN" || value === "CANADA") return "CA";
+  if (value === "FR" || value === "FRA" || value === "FRANCE" || value === "EUR") return "FR";
   return "US";
 }
 
@@ -748,9 +1056,49 @@ function buildReservedStationSequenceSet(reservedStationIds, prefix) {
   return reservedNumbers;
 }
 
-function findNextStationId(docSnaps, country, reservedStationIds = []) {
+function normalizeKioskType(value) {
+  return String(value || "").trim().toUpperCase();
+}
+
+function isAiBoothKioskType(value) {
+  return normalizeKioskType(value) === AI_BOOTH_KIOSK_TYPE;
+}
+
+function isAiBoothStationId(stationid) {
+  return /^(CA|FR|US)9\d{3}$/.test(normalizeStationId(stationid));
+}
+
+function getRequestedKioskType(data, stationid = "") {
+  const explicitType = normalizeKioskType(
+      data?.kioskType || data?.hardwareType || data?.type,
+  );
+  if (explicitType) {
+    return explicitType;
+  }
+
+  return isAiBoothStationId(stationid) ? AI_BOOTH_KIOSK_TYPE : "";
+}
+
+function getStationSequenceConfig(options = {}) {
+  if (options?.aiBooth === true || isAiBoothKioskType(options?.kioskType)) {
+    return {
+      label: "AI booth",
+      start: AI_BOOTH_STATION_SEQUENCE_START,
+      maxExclusive: 10000,
+    };
+  }
+
+  return {
+    label: "standard kiosk",
+    start: STATION_SEQUENCE_START,
+    maxExclusive: AI_BOOTH_STATION_SEQUENCE_START,
+  };
+}
+
+function findNextStationId(docSnaps, country, reservedStationIds = [], options = {}) {
   const prefix = prefixForCountry(country);
-  let next = STATION_SEQUENCE_START;
+  const sequence = getStationSequenceConfig(options);
+  let next = sequence.start;
   const occupiedNumbers = buildReservedStationSequenceSet(
       reservedStationIds,
       prefix,
@@ -761,6 +1109,12 @@ function findNextStationId(docSnaps, country, reservedStationIds = []) {
     const match = stationid.match(new RegExp(`^${prefix}(\\d{4})$`));
     if (match) {
       const stationNumber = Number(match[1]);
+      if (
+        stationNumber < sequence.start ||
+        (sequence.maxExclusive && stationNumber >= sequence.maxExclusive)
+      ) {
+        return;
+      }
       occupiedNumbers.add(stationNumber);
       next = Math.max(next, stationNumber + 1);
     }
@@ -768,6 +1122,13 @@ function findNextStationId(docSnaps, country, reservedStationIds = []) {
 
   while (occupiedNumbers.has(next)) {
     next += 1;
+  }
+
+  if (sequence.maxExclusive && next >= sequence.maxExclusive) {
+    throw new functions.https.HttpsError(
+        "failed-precondition",
+        `No ${sequence.label} station IDs are available for ${prefix}.`,
+    );
   }
 
   return `${prefix}${String(next).padStart(4, "0")}`;
@@ -912,6 +1273,26 @@ function moduleIdsMatch(left, right) {
     leftId === rightId.replace(/^1000/, "");
 }
 
+function isV2ModuleId(moduleId) {
+  return /^\d{15,}$/.test(normalizeModuleId(moduleId));
+}
+
+function collectV2ModuleIds(modules) {
+  const ids = new Set();
+  const normalizedModules = Array.isArray(modules) ? modules : [];
+
+  normalizedModules.forEach((module) => {
+    const moduleId = normalizeModuleId(module?.id);
+    if (!isV2ModuleId(moduleId)) {
+      return;
+    }
+
+    ids.add(moduleId);
+  });
+
+  return Array.from(ids);
+}
+
 function recalculateKioskTotals(kiosk) {
   const configuredPower = Number(kiosk?.hardware?.power);
   const fullThreshold = Number.isFinite(configuredPower) ?
@@ -966,7 +1347,7 @@ function recalculateKioskTotals(kiosk) {
     };
   });
 
-  return {
+  const nextKiosk = {
     ...kiosk,
     modules: normalizedModules,
     count,
@@ -980,6 +1361,13 @@ function recalculateKioskTotals(kiosk) {
     slot,
     charging,
   };
+
+  const moduleIds = collectV2ModuleIds(normalizedModules);
+  if (moduleIds.length > 0) {
+    nextKiosk.moduleIds = moduleIds;
+  }
+
+  return nextKiosk;
 }
 
 function clonePlain(value) {
@@ -1218,6 +1606,10 @@ async function kioskUpdateSectionImpl(data, authState) {
       charging: Number(recalculatedKiosk.charging || 0),
     };
 
+    if (Object.prototype.hasOwnProperty.call(recalculatedKiosk, "moduleIds")) {
+      updateData.moduleIds = clonePlain(recalculatedKiosk.moduleIds) || [];
+    }
+
     if (typeof recalculatedKiosk.status === "string" && recalculatedKiosk.status.trim()) {
       updateData.status = recalculatedKiosk.status.trim();
     }
@@ -1390,6 +1782,10 @@ async function kioskUpdateSlotLockImpl(data, authState) {
       slot: Number(recalculatedKiosk.slot || 0),
       charging: Number(recalculatedKiosk.charging || 0),
     };
+
+    if (Object.prototype.hasOwnProperty.call(recalculatedKiosk, "moduleIds")) {
+      updateData.moduleIds = clonePlain(recalculatedKiosk.moduleIds) || [];
+    }
     const writeData = {
       ...updateData,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -1900,8 +2296,9 @@ function getDefaultBoundKioskInfo(country) {
   return info;
 }
 
-function getDefaultBoundKioskHardware(templateKiosk = null) {
+function getDefaultBoundKioskHardware(templateKiosk = null, kioskType = "") {
   const templateHardware = clonePlain(templateKiosk?.hardware) || {};
+  const normalizedKioskType = normalizeKioskType(kioskType);
   const hardware = {
     gateway: "",
     gatewayoptions: "",
@@ -1922,7 +2319,11 @@ function getDefaultBoundKioskHardware(templateKiosk = null) {
     configuredPower :
     DEFAULT_KIOSK_POWER_THRESHOLD;
 
-  delete hardware.type;
+  if (normalizedKioskType) {
+    hardware.type = normalizedKioskType;
+  } else {
+    delete hardware.type;
+  }
 
   return hardware;
 }
@@ -1935,6 +2336,7 @@ function createBoundKioskDocument({
   actorUid,
   moduleData = null,
   templateKiosk = null,
+  kioskType = "",
 }) {
   const normalizedCountry = normalizeCountry(country);
   const timestamp = admin.firestore.FieldValue.serverTimestamp();
@@ -1976,7 +2378,7 @@ function createBoundKioskDocument({
     analyticsoptions: {
       active: templateKiosk?.analyticsoptions?.active === true || DEFAULT_ANALYTICS_OPTIONS.active,
     },
-    hardware: getDefaultBoundKioskHardware(templateKiosk),
+    hardware: getDefaultBoundKioskHardware(templateKiosk, kioskType),
     pricing: clonePlain(templateKiosk?.pricing) || {
       authamount: 0,
       dailyprice: 0,
@@ -2056,21 +2458,36 @@ async function aiBoothsSaveEventImpl(data, authState) {
   const topics = Array.isArray(eventInput.topics) ?
     eventInput.topics.map((topic, index) => normalizeAiBoothTopic(topic, index)) :
     [];
+  const boothContexts = normalizeAiBoothBoothContexts(eventInput.boothContexts, boothStationIds);
+  const agent = normalizeAiBoothAgent(eventInput.agent, boothStationIds);
 
   const cleanEvent = {
     general: {
       eventName,
+      eventCategory: cleanAiBoothText(generalInput.eventCategory, 120),
+      eventTopic: cleanAiBoothText(generalInput.eventTopic || generalInput.eventSport, 120),
+      serviceName: cleanAiBoothText(generalInput.serviceName, 160) ||
+        "Portable Charger Rental Kiosk",
       address: cleanAiBoothText(generalInput.address, 300),
-      wifiUsername: cleanAiBoothText(generalInput.wifiUsername, 120),
-      wifiPassword: cleanAiBoothText(generalInput.wifiPassword, 120),
+      city: cleanAiBoothText(generalInput.city, 120),
+      zipCode: cleanAiBoothText(generalInput.zipCode || generalInput.zip, 32),
+      country: normalizeCountry(generalInput.country),
       startDate: cleanAiBoothText(generalInput.startDate, 32),
       endDate: cleanAiBoothText(generalInput.endDate, 32),
+      sameHoursEveryDay: generalInput.sameHoursEveryDay === true,
       openingHours: cleanAiBoothText(generalInput.openingHours, 32),
       closingHours: cleanAiBoothText(generalInput.closingHours, 32),
+      dailyHours: normalizeAiBoothDailyHours(generalInput.dailyHours),
+      rentalPolicy: cleanAiBoothText(generalInput.rentalPolicy, 2000) ||
+        DEFAULT_AI_BOOTH_RENTAL_POLICY,
+      supportFallback: cleanAiBoothText(generalInput.supportFallback, 240) ||
+        DEFAULT_AI_BOOTH_SUPPORT_FALLBACK,
       notes: cleanAiBoothText(generalInput.notes, 8000),
     },
     boothStationIds,
+    boothContexts,
     topics,
+    agent,
     boothCount: boothStationIds.length,
     topicCount: topics.length,
     updatedBy: actor,
@@ -2094,6 +2511,450 @@ async function aiBoothsSaveEventImpl(data, authState) {
   const savedSnapshot = await eventRef.get();
   return {
     ok: true,
+    event: serializeAiBoothEvent(savedSnapshot),
+  };
+}
+
+function getElevenLabsApiKey() {
+  let fromSecret = "";
+  try {
+    fromSecret = typeof ELEVENLABS_API_KEY.value === "function" ?
+      ELEVENLABS_API_KEY.value() :
+      "";
+  } catch {
+    fromSecret = "";
+  }
+  const apiKey = cleanAiBoothText(fromSecret || process.env.ELEVENLABS_API_KEY, 400);
+
+  if (!apiKey) {
+    throw new functions.https.HttpsError(
+        "failed-precondition",
+        "ElevenLabs API key is not configured",
+    );
+  }
+
+  return apiKey;
+}
+
+async function elevenLabsRequest(path, options = {}) {
+  const response = await fetch(`https://api.elevenlabs.io${path}`, {
+    method: options.method || "GET",
+    headers: {
+      "Content-Type": "application/json",
+      "xi-api-key": getElevenLabsApiKey(),
+    },
+    ...(options.body ? {body: JSON.stringify(options.body)} : {}),
+  });
+
+  const responseText = await response.text();
+  let payload = {};
+  if (responseText) {
+    try {
+      payload = JSON.parse(responseText);
+    } catch {
+      payload = {message: responseText};
+    }
+  }
+
+  if (!response.ok) {
+    throw new functions.https.HttpsError(
+        "internal",
+        payload?.detail?.message || payload?.message || `ElevenLabs request failed (${response.status})`,
+    );
+  }
+
+  return payload;
+}
+
+function normalizeElevenLabsAgentSummary(agent) {
+  const source = isPlainObject(agent) ? agent : {};
+  const accessInfo = isPlainObject(source.access_info) ? source.access_info : {};
+
+  return {
+    agentId: cleanAiBoothText(source.agent_id || source.agentId, 160),
+    name: cleanAiBoothText(source.name, 200) || "Untitled agent",
+    tags: Array.isArray(source.tags) ?
+      source.tags.map((tag) => cleanAiBoothText(tag, 80)).filter(Boolean) :
+      [],
+    createdAtUnixSecs: Number(source.created_at_unix_secs || 0) || null,
+    archived: source.archived === true,
+    access: {
+      isCreator: accessInfo.is_creator === true,
+      role: cleanAiBoothText(accessInfo.role, 80),
+      creatorName: cleanAiBoothText(accessInfo.creator_name, 160),
+      creatorEmail: cleanAiBoothText(accessInfo.creator_email, 200),
+    },
+  };
+}
+
+async function aiBoothsListElevenLabsAgentsImpl(data = {}) {
+  getElevenLabsApiKey();
+
+  const search = cleanAiBoothText(data?.search, 120);
+  const cursor = cleanAiBoothText(data?.cursor, 240);
+  const agents = [];
+  let nextCursor = cursor;
+  let hasMore = true;
+
+  for (let pageIndex = 0; pageIndex < 5 && hasMore; pageIndex += 1) {
+    const params = new URLSearchParams({
+      page_size: "100",
+      archived: "false",
+      sort_by: "name",
+      sort_direction: "asc",
+    });
+
+    if (search) {
+      params.set("search", search);
+    }
+
+    if (nextCursor) {
+      params.set("cursor", nextCursor);
+    }
+
+    const payload = await elevenLabsRequest(`/v1/convai/agents?${params.toString()}`);
+    const pageAgents = Array.isArray(payload.agents) ?
+      payload.agents.map(normalizeElevenLabsAgentSummary).filter((agent) => agent.agentId) :
+      [];
+
+    agents.push(...pageAgents);
+    hasMore = payload.has_more === true && Boolean(payload.next_cursor);
+    nextCursor = hasMore ? cleanAiBoothText(payload.next_cursor, 240) : "";
+  }
+
+  return {
+    ok: true,
+    agents,
+    hasMore,
+    nextCursor,
+  };
+}
+
+function buildAiBoothAgentName(event, stationId = "") {
+  const eventName = cleanAiBoothText(event?.general?.eventName, 80) || "AI Booth Event";
+  const stationSuffix = cleanAiBoothText(stationId, 80);
+  return stationSuffix ? `${eventName} - ${stationSuffix}` : eventName;
+}
+
+function formatAiBoothSchedule(general) {
+  if (general?.sameHoursEveryDay) {
+    return `Every event day: ${general.openingHours || "unset"} to ${general.closingHours || "unset"}`;
+  }
+
+  const dailyHours = isPlainObject(general?.dailyHours) ? general.dailyHours : {};
+  const rows = Object.entries(dailyHours).map(([dateKey, hours]) => (
+    `${dateKey}: ${cleanAiBoothText(hours?.openingHours, 32) || "unset"} to ${cleanAiBoothText(hours?.closingHours, 32) || "unset"}`
+  ));
+
+  return rows.length > 0 ? rows.join("\n") : "No opening hours set.";
+}
+
+function buildAiBoothSystemPrompt(event, basePrompt = STANDARD_AI_BOOTH_SYSTEM_PROMPT) {
+  const general = event.general || {};
+  const eventName = cleanAiBoothText(general.eventName, 140) || "Not set";
+  const eventCategory = cleanAiBoothText(general.eventCategory, 120) || "Not set";
+  const eventTopic = cleanAiBoothText(general.eventTopic, 120) || "Not set";
+  const serviceName = cleanAiBoothText(general.serviceName, 160) ||
+    "Portable Charger Rental Kiosk";
+  const rentalPolicy = cleanAiBoothText(general.rentalPolicy, 2000) ||
+    DEFAULT_AI_BOOTH_RENTAL_POLICY;
+  const supportFallback = cleanAiBoothText(general.supportFallback, 240) ||
+    DEFAULT_AI_BOOTH_SUPPORT_FALLBACK;
+  const address = [general.address, general.city, general.zipCode, general.country]
+      .filter(Boolean)
+      .join(", ") || "Not set";
+  const weatherLocation = [general.city, general.country].filter(Boolean).join(", ") ||
+    address;
+  const topics = Array.isArray(event.topics) ? event.topics : [];
+  const topicLines = topics.length > 0 ?
+    topics.map((topic) => [
+      `- ${topic.title}`,
+      topic.summary ? `  Summary: ${topic.summary}` : "",
+      topic.notes ? `  Notes: ${topic.notes}` : "",
+      topic.checklistText ? `  Checklist:\n${topic.checklistText}` : "",
+    ].filter(Boolean).join("\n")).join("\n") :
+    "- No extra topics configured.";
+
+  return cleanAiBoothText(`${basePrompt || STANDARD_AI_BOOTH_SYSTEM_PROMPT}
+
+Event data:
+- Event name: ${eventName}
+- Event category: ${eventCategory}
+- Event topic: ${eventTopic}
+- Kiosk service: ${serviceName}
+- Rental policy: ${rentalPolicy}
+- Guest support fallback: ${supportFallback}
+- Address: ${address}
+- Weather lookup location: ${weatherLocation || "Not set"}
+- Dates: ${general.startDate || "unset"} to ${general.endDate || "unset"}
+- Assigned booths: ${(event.boothStationIds || []).join(", ") || "Not set"}
+
+Opening hours:
+${formatAiBoothSchedule(general)}
+
+Event notes:
+${general.notes || "No general notes configured."}
+
+Topics:
+  ${topicLines}`, 20000);
+}
+
+function stripAiBoothGeneratedPromptContext(value) {
+  const text = cleanAiBoothText(value, 20000);
+  const markers = ["\n\nEvent data:\n", "\n\nPhysical kiosk context:\n"];
+  const markerIndexes = markers
+      .map((marker) => text.indexOf(marker))
+      .filter((index) => index >= 0);
+  const firstMarkerIndex = markerIndexes.length > 0 ? Math.min(...markerIndexes) : -1;
+
+  return firstMarkerIndex >= 0 ? text.slice(0, firstMarkerIndex).trim() : text;
+}
+
+function buildAiBoothFirstMessage(event) {
+  const eventName = event?.general?.eventName || "the event";
+  return cleanAiBoothText(`Welcome to ${eventName}. How can I help you today?`, 1000);
+}
+
+function getAiBoothKioskInfo(kiosk) {
+  return isPlainObject(kiosk?.info) ? kiosk.info : {};
+}
+
+function getAiBoothKioskFallbackLocation(kiosk) {
+  const info = getAiBoothKioskInfo(kiosk);
+  return cleanAiBoothText(info.location || info.place || info.stationaddress || info.address, 240);
+}
+
+function buildAiBoothKioskSystemPrompt(event, stationId, boothContext, kiosk, basePrompt) {
+  const info = getAiBoothKioskInfo(kiosk);
+  const context = normalizeAiBoothBoothContext(boothContext);
+  const assistantName = context.assistantName || `Kiosk ${stationId}`;
+  const serviceName = cleanAiBoothText(event?.general?.serviceName, 160) ||
+    "Portable Charger Rental Kiosk";
+  const locationName = context.locationName || getAiBoothKioskFallbackLocation(kiosk) || "Not set";
+  const zone = context.zone || [info.city, info.state, info.country].filter(Boolean).join(", ") || "Not set";
+  const landmark = context.landmark || "Not set";
+  const mapPosition = [context.mapX, context.mapY].filter(Boolean).join(", ") || "Not set";
+  const directionsNotes = context.directionsNotes || "No booth-specific direction notes configured.";
+
+  return cleanAiBoothText(`${basePrompt}
+
+Physical kiosk context:
+- Station ID: ${stationId}
+- Kiosk type: ${AI_BOOTH_KIOSK_TYPE}
+- Assistant name: ${assistantName}
+- Kiosk service: ${serviceName}
+- Event location: ${locationName}
+- Zone: ${zone}
+- Nearby landmark: ${landmark}
+- Map position: ${mapPosition}
+- Direction notes: ${directionsNotes}
+
+Location behavior:
+- Answer closest-location questions from this kiosk's physical position.
+- If exact map coordinates are not configured, use the zone, landmark, and direction notes as the source of truth.
+- Mention when directions are approximate and direct guests to event staff if a location is missing.`, 20000);
+}
+
+async function getAiBoothKiosksByStationId(stationIds) {
+  const kioskMap = new Map();
+  const normalizedStationIds = Array.from(new Set(
+      (Array.isArray(stationIds) ? stationIds : [])
+          .map((stationId) => cleanAiBoothText(stationId, 80))
+          .filter(Boolean),
+  ));
+
+  for (const stationChunk of chunkArray(normalizedStationIds, 10)) {
+    const snapshot = await db.collection("kiosks")
+        .where("stationid", "in", stationChunk)
+        .get();
+
+    snapshot.docs.forEach((docSnap) => {
+      const kiosk = docSnap.data() || {};
+      const stationId = cleanAiBoothText(kiosk.stationid || docSnap.id, 80);
+      if (stationId) {
+        kioskMap.set(stationId, kiosk);
+      }
+    });
+  }
+
+  return kioskMap;
+}
+
+async function upsertElevenLabsAgentCopy({
+  templateAgentId,
+  existingAgentId = "",
+  agentName,
+  firstMessage,
+  systemPrompt,
+}) {
+  let agentId = cleanAiBoothText(existingAgentId, 160);
+
+  if (!agentId) {
+    const duplicateResponse = await elevenLabsRequest(
+        `/v1/convai/agents/${encodeURIComponent(templateAgentId)}/duplicate`,
+        {
+          method: "POST",
+          body: {name: agentName},
+        },
+    );
+    agentId = cleanAiBoothText(duplicateResponse.agent_id, 160);
+  }
+
+  if (!agentId) {
+    throw new functions.https.HttpsError("internal", "ElevenLabs did not return an agent id");
+  }
+
+  const copiedAgent = await elevenLabsRequest(`/v1/convai/agents/${encodeURIComponent(agentId)}`);
+  const conversationConfig = isPlainObject(copiedAgent.conversation_config) ?
+    copiedAgent.conversation_config :
+    {};
+  const conversationAgent = isPlainObject(conversationConfig.agent) ?
+    conversationConfig.agent :
+    {};
+  const promptConfig = isPlainObject(conversationAgent.prompt) ?
+    conversationAgent.prompt :
+    {};
+
+  await elevenLabsRequest(`/v1/convai/agents/${encodeURIComponent(agentId)}`, {
+    method: "PATCH",
+    body: {
+      name: agentName,
+      conversation_config: {
+        ...conversationConfig,
+        agent: {
+          ...conversationAgent,
+          first_message: firstMessage,
+          prompt: {
+            ...promptConfig,
+            prompt: systemPrompt,
+          },
+        },
+      },
+    },
+  });
+
+  return agentId;
+}
+
+async function aiBoothsPublishAgentImpl(data, authState) {
+  const eventId = cleanAiBoothText(data?.eventId, 160).replace(/[^a-zA-Z0-9_-]/g, "");
+  if (!eventId) {
+    throw new functions.https.HttpsError("invalid-argument", "eventId is required");
+  }
+
+  const eventRef = db.collection("aiBoothEvents").doc(eventId);
+  const eventSnapshot = await eventRef.get();
+  if (!eventSnapshot.exists) {
+    throw new functions.https.HttpsError("not-found", "AI booth event not found");
+  }
+
+  const event = serializeAiBoothEvent(eventSnapshot);
+  const stationIds = Array.isArray(event.boothStationIds) ? event.boothStationIds : [];
+  if (stationIds.length === 0) {
+    throw new functions.https.HttpsError("invalid-argument", "Assign at least one booth before creating agents");
+  }
+
+  const agentConfig = normalizeAiBoothAgent(event.agent, stationIds);
+  const templateAgentId = cleanAiBoothText(agentConfig.templateAgentId || data?.templateAgentId, 160);
+  if (!templateAgentId) {
+    throw new functions.https.HttpsError("invalid-argument", "templateAgentId is required");
+  }
+
+  getElevenLabsApiKey();
+
+  const agentNamePrefix = cleanAiBoothText(agentConfig.name, 120) ||
+    buildAiBoothAgentName(event);
+  const firstMessage = agentConfig.firstMessage || buildAiBoothFirstMessage(event);
+  const agentBaseSystemPrompt = stripAiBoothGeneratedPromptContext(agentConfig.systemPrompt) ||
+    STANDARD_AI_BOOTH_SYSTEM_PROMPT;
+  const baseSystemPrompt = buildAiBoothSystemPrompt(
+      event,
+      agentBaseSystemPrompt,
+  );
+  const kioskMap = await getAiBoothKiosksByStationId(stationIds);
+
+  const actor = {
+    uid: cleanAiBoothText(authState?.uid, 128),
+    username: cleanAiBoothText(authState?.profile?.username, 120),
+  };
+  const nextKioskAgents = {...agentConfig.kioskAgents};
+  const results = [];
+
+  for (const stationId of stationIds) {
+    const kiosk = kioskMap.get(stationId) || {};
+    const boothContext = event.boothContexts?.[stationId] || {};
+    const existingKioskAgent = normalizeAiBoothKioskAgent(agentConfig.kioskAgents?.[stationId]);
+    const kioskAgentName = cleanAiBoothText(`${agentNamePrefix} - ${stationId}`, 140);
+    const kioskSystemPrompt = buildAiBoothKioskSystemPrompt(
+        event,
+        stationId,
+        boothContext,
+        kiosk,
+        baseSystemPrompt,
+    );
+
+    try {
+      const agentId = await upsertElevenLabsAgentCopy({
+        templateAgentId,
+        existingAgentId: existingKioskAgent.agentId,
+        agentName: kioskAgentName,
+        firstMessage,
+        systemPrompt: kioskSystemPrompt,
+      });
+
+      nextKioskAgents[stationId] = {
+        agentId,
+        name: kioskAgentName,
+        syncStatus: "synced",
+        syncError: "",
+        lastSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastSyncedBy: actor,
+      };
+      results.push({stationId, agentId, ok: true});
+    } catch (error) {
+      nextKioskAgents[stationId] = {
+        ...existingKioskAgent,
+        name: kioskAgentName,
+        syncStatus: "error",
+        syncError: cleanAiBoothText(error?.message || "Failed to sync kiosk agent", 1000),
+        lastSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastSyncedBy: actor,
+      };
+      results.push({
+        stationId,
+        agentId: existingKioskAgent.agentId,
+        ok: false,
+        error: cleanAiBoothText(error?.message || "Failed to sync kiosk agent", 1000),
+      });
+    }
+  }
+
+  const syncedCount = results.filter((result) => result.ok).length;
+  const failedCount = results.length - syncedCount;
+  await eventRef.set({
+    agent: {
+      ...agentConfig,
+      templateAgentId,
+      agentId: "",
+      name: agentNamePrefix,
+      firstMessage,
+      systemPrompt: agentBaseSystemPrompt,
+      kioskAgents: nextKioskAgents,
+      syncStatus: failedCount > 0 ? (syncedCount > 0 ? "partial" : "error") : "synced",
+      syncError: failedCount > 0 ? `${failedCount} kiosk agents failed to sync` : "",
+      lastSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+      lastSyncedBy: actor,
+    },
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedBy: actor,
+  }, {merge: true});
+
+  const savedSnapshot = await eventRef.get();
+  return {
+    ok: failedCount === 0,
+    syncedCount,
+    failedCount,
+    results,
     event: serializeAiBoothEvent(savedSnapshot),
   };
 }
@@ -2319,17 +3180,20 @@ async function unlockUserImpl(data) {
 
 async function stationBindingGetNextStationImpl(data) {
   const country = normalizeCountry(data?.country);
+  const kioskType = getRequestedKioskType(data);
   const snapshot = await db.collection("kiosks").get();
   const reservations = await getActiveStationReservations(country);
   const stationid = findNextStationId(
       snapshot.docs,
       country,
       buildReservedStationIdSet(reservations),
+      {kioskType},
   );
 
   return {
     ok: true,
     country,
+    kioskType,
     stationid,
     qrUrl: buildQrUrl(stationid),
     reservations,
@@ -2421,6 +3285,7 @@ async function stationBindingSetStationReservationImpl(data, authState) {
       kioskSnapshot.docs,
       country,
       buildReservedStationIdSet(reservations),
+      {kioskType: getRequestedKioskType(data, stationid)},
   );
 
   return {
@@ -2440,6 +3305,7 @@ async function stationBindingSetStationReservationImpl(data, authState) {
 async function stationBindingBindModuleImpl(data, authState) {
   const country = normalizeCountry(data?.country);
   const requestedStationId = normalizeStationId(data?.stationid);
+  const requestedKioskType = getRequestedKioskType(data, requestedStationId);
   const moduleId = normalizeModuleId(data?.moduleId);
 
   if (!moduleId) {
@@ -2458,6 +3324,7 @@ async function stationBindingBindModuleImpl(data, authState) {
       snapshot.docs,
       country,
       reservedStationIds,
+      {kioskType: requestedKioskType},
   );
   const provisionid = findNextProvisionId(snapshot.docs);
   const stationid = requestedStationId || nextStationid;
@@ -2532,13 +3399,14 @@ async function stationBindingBindModuleImpl(data, authState) {
 
     transaction.set(
         docRef,
-        createBoundKioskDocument({
-          provisionid,
-          stationid,
-          moduleId,
-          country,
-          actorUid: authState.uid,
-        }),
+          createBoundKioskDocument({
+            provisionid,
+            stationid,
+            moduleId,
+            country,
+            actorUid: authState.uid,
+            kioskType: getRequestedKioskType(data, stationid),
+          }),
         {merge: true},
     );
     transaction.delete(pendingRef);
@@ -2548,6 +3416,7 @@ async function stationBindingBindModuleImpl(data, authState) {
       [...snapshot.docs, {id: stationid, data: () => ({stationid})}],
       country,
       reservedStationIds,
+      {kioskType: getRequestedKioskType(data, stationid)},
   );
 
   return {
@@ -2699,6 +3568,7 @@ async function stationBindingUnbindModuleImpl(data, authState) {
       snapshot.docs,
       nextStationCountry,
       buildReservedStationIdSet(reservations),
+      {kioskType: getRequestedKioskType(data, stationid)},
   );
 
   return {
@@ -2756,6 +3626,9 @@ async function stationBindingMoveModuleImpl(data, authState) {
   }
 
   const sourceKiosk = sourceDoc.data() || {};
+  const requestedKioskType = getRequestedKioskType(data, requestedDestinationStationId);
+  const destinationKioskType = requestedKioskType ||
+    (createNewStation ? normalizeKioskType(sourceKiosk?.hardware?.type) : "");
   const sourceModules = Array.isArray(sourceKiosk.modules) ?
     sourceKiosk.modules :
     [];
@@ -2781,6 +3654,7 @@ async function stationBindingMoveModuleImpl(data, authState) {
         snapshot.docs,
         destinationCountry,
         destinationReservedStationIds,
+        {kioskType: destinationKioskType},
     ) :
     "";
   const destinationStationid = createNewStation ?
@@ -2921,6 +3795,7 @@ async function stationBindingMoveModuleImpl(data, authState) {
             actorUid: authState.uid,
             moduleData: movedModule,
             templateKiosk: liveSource,
+            kioskType: destinationKioskType || getRequestedKioskType(data, destinationStationid),
           }),
           {merge: true},
       );
@@ -2988,6 +3863,7 @@ async function stationBindingMoveModuleImpl(data, authState) {
         [...snapshot.docs, {id: destinationStationid, data: () => ({stationid: destinationStationid})}],
         destinationCountry,
         destinationReservedStationIds,
+        {kioskType: destinationKioskType || getRequestedKioskType(data, destinationStationid)},
     ) :
     null;
 
@@ -3098,6 +3974,34 @@ exports.aiBooths_saveEvent = functions.https.onCall(async (data, context) => {
 exports.aiBooths_httpSaveEvent = handleHttpFunction(async (data, req) => {
   const authState = await assertCanManageAiBooths(req, data);
   return aiBoothsSaveEventImpl(data, authState);
+});
+
+exports.aiBooths_listElevenLabsAgents = functions.runWith({
+  secrets: [ELEVENLABS_API_KEY],
+}).https.onCall(async (data, context) => {
+  await assertCanManageAiBoothsFromContext(context);
+  return aiBoothsListElevenLabsAgentsImpl(data);
+});
+
+exports.aiBooths_httpListElevenLabsAgents = handleHttpFunction(async (data, req) => {
+  await assertCanManageAiBooths(req, data);
+  return aiBoothsListElevenLabsAgentsImpl(data);
+}, {
+  secrets: [ELEVENLABS_API_KEY],
+});
+
+exports.aiBooths_publishAgent = functions.runWith({
+  secrets: [ELEVENLABS_API_KEY],
+}).https.onCall(async (data, context) => {
+  const authState = await assertCanManageAiBoothsFromContext(context);
+  return aiBoothsPublishAgentImpl(data, authState);
+});
+
+exports.aiBooths_httpPublishAgent = handleHttpFunction(async (data, req) => {
+  const authState = await assertCanManageAiBooths(req, data);
+  return aiBoothsPublishAgentImpl(data, authState);
+}, {
+  secrets: [ELEVENLABS_API_KEY],
 });
 
 exports.auth_trackAttempt = functions.https.onCall(async (data, context) => (

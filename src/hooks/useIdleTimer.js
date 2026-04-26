@@ -1,9 +1,21 @@
 // src/hooks/useIdleTimer.js
 import { useState, useEffect, useRef, useCallback } from 'react';
 
-export const useIdleTimer = ({ onIdle, onLogout, idleTimeout = 600000, promptTimeout = 60000 }) => {
+const NOOP = () => {};
+
+export const useIdleTimer = ({
+    onIdle = NOOP,
+    onLogout = NOOP,
+    idleTimeout = 600000,
+    promptTimeout,
+    warningTimeout,
+}) => {
+    const resolvedPromptTimeout = Number(promptTimeout ?? warningTimeout ?? 60000);
+    const safePromptTimeout = Number.isFinite(resolvedPromptTimeout) && resolvedPromptTimeout > 0
+        ? resolvedPromptTimeout
+        : 60000;
     const [showWarning, setShowWarning] = useState(false);
-    const [countdown, setCountdown] = useState(promptTimeout / 1000);
+    const [countdown, setCountdown] = useState(safePromptTimeout / 1000);
 
     const idleTimer = useRef(null);
     const logoutTimer = useRef(null);
@@ -15,14 +27,14 @@ export const useIdleTimer = ({ onIdle, onLogout, idleTimeout = 600000, promptTim
         
         // Reset state
         setShowWarning(false);
-        setCountdown(promptTimeout / 1000);
+        setCountdown(safePromptTimeout / 1000);
         
         // Start the main idle timer
         idleTimer.current = setTimeout(() => {
             setShowWarning(true);
-            onIdle(); // Callback to show a modal
+            onIdle();
         }, idleTimeout);
-    }, [idleTimeout, onIdle, promptTimeout]);
+    }, [idleTimeout, onIdle, safePromptTimeout]);
 
     const handleStay = useCallback(() => {
         reset();
@@ -44,10 +56,10 @@ export const useIdleTimer = ({ onIdle, onLogout, idleTimeout = 600000, promptTim
     // Countdown timer when warning is shown
     useEffect(() => {
         if (showWarning) {
-            logoutTimer.current = setTimeout(onLogout, promptTimeout);
+            logoutTimer.current = setTimeout(onLogout, safePromptTimeout);
         }
         return () => clearTimeout(logoutTimer.current);
-    }, [showWarning, onLogout, promptTimeout]);
+    }, [showWarning, onLogout, safePromptTimeout]);
 
     return { showWarning, handleStay, countdown };
 };

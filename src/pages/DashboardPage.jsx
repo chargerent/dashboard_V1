@@ -10,16 +10,62 @@ import LoadingSpinner from '../components/UI/LoadingSpinner';
 import InitialStatusPage from '../components/UI/InitialStatusPage';
 import SoldOutKiosksModal from '../components/UI/SoldOutKiosksModal.jsx';
 import TimeoutWarningModal from '../components/UI/TimeoutWarningModal';
-import { filterStationsForClient, isKioskOnline, isKioskActive } from '../utils/helpers';
+import { filterStationsForClient, isKioskOnline, isKioskActive, isModuleOnline } from '../utils/helpers';
 import GlobalRentalActivity from '../components/Dashboard/GlobalRentalActivity';
 import { useIdleTimer } from '../hooks/useIdleTimer';
 import LocationSummary from '../components/Dashboard/LocationSummary';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
 import RentalDetailView from '../components/Dashboard/RentalDetailView';
-import { CpuChipIcon, QrCodeIcon, SparklesIcon } from '@heroicons/react/24/outline';
+import { CheckCircleIcon, CpuChipIcon, ExclamationTriangleIcon, QrCodeIcon, SparklesIcon } from '@heroicons/react/24/outline';
 import useKioskCommandFlow from '../hooks/useKioskCommandFlow';
 
 const EMPTY_RENTALS = Object.freeze([]);
+const COUNTRY_ORDER = { CA: 1, FR: 2, US: 3 };
+const STATUS_BUTTON_CLASSES = {
+    offline: 'bg-red-100 text-red-700 hover:bg-red-200',
+    disconnected: 'bg-orange-100 text-orange-700 hover:bg-orange-200',
+    soldout: 'bg-purple-100 text-purple-700 hover:bg-purple-200',
+    healthy: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200',
+};
+const STATUS_BADGE_CLASSES = {
+    offline: 'bg-red-500',
+    disconnected: 'bg-orange-500',
+    soldout: 'bg-purple-500',
+    healthy: 'bg-emerald-500',
+};
+
+const getCountrySortOrder = (country) => COUNTRY_ORDER[(country || 'ZZ').toUpperCase()] || 99;
+
+const getDisconnectedModules = (kiosk, referenceTime) => {
+    const modules = Array.isArray(kiosk?.modules) ? kiosk.modules : [];
+
+    return modules.filter(module => (
+        kiosk?.isNewSchema ? !isModuleOnline(module, referenceTime) : module?.output === false
+    ));
+};
+
+const buildStationStatusIssues = (kiosk, referenceTime) => {
+    const issues = [];
+
+    if (!isKioskOnline(kiosk, referenceTime)) {
+        issues.push({ type: 'offline' });
+    }
+
+    if (kiosk?.count === 0) {
+        issues.push({ type: 'soldout' });
+    }
+
+    const disconnectedModules = getDisconnectedModules(kiosk, referenceTime);
+    if (disconnectedModules.length > 0) {
+        issues.push({
+            type: 'disconnected',
+            count: disconnectedModules.length,
+            moduleIds: disconnectedModules.map(module => module?.id).filter(Boolean),
+        });
+    }
+
+    return issues;
+};
 
 export default function DashboardPage({ _token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToAiBooths, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToReporting, onNavigateToTesting, rentalData, allStationsData, _setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, _setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, _ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, _setNgrokInfo, manageIgnoredKiosk, kiosksReady, initialSearch = '' }) {
     const [loading, setLoading] = useState(!kiosksReady);
@@ -37,7 +83,9 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     const [showInitialStatus, setShowInitialStatus] = useState(false);
     const [rentalDetailView, setRentalDetailView] = useState(null); // { kioskId, period }
     const [showSoldOutModal, setShowSoldOutModal] = useState(false);
+    const [statusFocusedKioskId, setStatusFocusedKioskId] = useState('');
     const isAdminUser = !!clientInfo?.isAdmin;
+    const hasStatusAccess = clientInfo?.features?.status === true;
     const hasReportingAccess = clientInfo?.features?.reporting === true || isAdminUser;
     const hasBindingAccess = clientInfo?.username === 'chargerent' || clientInfo?.features?.binding === true || clientInfo?.commands?.binding === true;
     const hasTestingAccess = clientInfo?.username === 'chargerent' || clientInfo?.features?.testing === true;
@@ -76,6 +124,7 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
 
     useEffect(() => {
         setSearchTerm(initialSearch);
+        setStatusFocusedKioskId('');
     }, [initialSearch]);
     const handleToggleDetails = (stationid) => {
         setEditingKioskId(null); 
@@ -128,10 +177,46 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
         }, null);
         return latestStation ? latestStation.lastUpdated : new Date().toISOString();
     }, [allStationsData]);
+
+    const initialStatusStations = useMemo(() => {
+        const countryFilter = clientInfo?.features?.country;
+        if (!countryFilter || countryFilter.toLowerCase() === 'all') {
+            return clientStations;
+        }
+
+        return clientStations.filter(station => (
+            station.info.country?.toUpperCase() === countryFilter.toUpperCase()
+        ));
+    }, [clientStations, clientInfo]);
+
+    const stationStatusRows = useMemo(() => {
+        return initialStatusStations
+            .filter(kiosk => isKioskActive(kiosk, latestTimestamp))
+            .map(kiosk => ({
+                kiosk,
+                issues: buildStationStatusIssues(kiosk, latestTimestamp),
+            }))
+            .filter(row => row.issues.length > 0)
+            .sort((a, b) => {
+                const countryOrder = getCountrySortOrder(a.kiosk.info.country) - getCountrySortOrder(b.kiosk.info.country);
+                if (countryOrder !== 0) return countryOrder;
+                return a.kiosk.stationid.localeCompare(b.kiosk.stationid);
+            });
+    }, [initialStatusStations, latestTimestamp]);
+
+    const stationStatusIssueCount = stationStatusRows.length;
+    const stationStatusSeverity = stationStatusRows.some(row => row.issues.some(issue => issue.type === 'offline'))
+        ? 'offline'
+        : stationStatusRows.some(row => row.issues.some(issue => issue.type === 'disconnected'))
+            ? 'disconnected'
+            : stationStatusRows.some(row => row.issues.some(issue => issue.type === 'soldout'))
+                ? 'soldout'
+                : 'healthy';
+    const StatusButtonIcon = stationStatusSeverity === 'healthy' ? CheckCircleIcon : ExclamationTriangleIcon;
     
     const preFilteredKiosks = useMemo(() => {
         // If a search term is present, we start with all client stations and ignore other filters.
-        if (debouncedSearchTerm && (clientInfo.features.search || isAdminUser)) {
+        if (debouncedSearchTerm && (clientInfo.features.search || isAdminUser || !!statusFocusedKioskId)) {
             const lowercasedSearch = debouncedSearchTerm.toLowerCase();
             return clientStations.filter(k => 
                 k.info.location?.toLowerCase().includes(lowercasedSearch) ||
@@ -178,7 +263,7 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
         }
 
         return kiosks;
-    }, [clientStations, debouncedSearchTerm, showActiveOnly, showV1, showV2, activeFilters, latestTimestamp, clientInfo]);
+    }, [clientStations, debouncedSearchTerm, showActiveOnly, showV1, showV2, activeFilters, latestTimestamp, clientInfo, statusFocusedKioskId, isAdminUser]);
     
             const offlineKioskCount = useMemo(() => {
         return preFilteredKiosks.filter(kiosk => !isKioskOnline(kiosk, latestTimestamp)).length;
@@ -189,8 +274,8 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     }, [preFilteredKiosks]);
 
     const disconnectedKioskCount = useMemo(() => {
-        return preFilteredKiosks.filter(kiosk => kiosk.modules.some(m => m.output === false)).length;
-    }, [preFilteredKiosks]);
+        return preFilteredKiosks.filter(kiosk => getDisconnectedModules(kiosk, latestTimestamp).length > 0).length;
+    }, [preFilteredKiosks, latestTimestamp]);
 
     const totalLeaseRevenue = useMemo(() => {
         if (!clientInfo?.features?.lease_revenue) return 0;
@@ -219,7 +304,7 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
                         case 'soldout':
                             return kiosks.some(k => k.count === 0);
                         case 'disconnected':
-                            return kiosks.some(k => k.modules.some(m => m.output === false));
+                            return kiosks.some(k => getDisconnectedModules(k, latestTimestamp).length > 0);
                         default:
                             return true;
                     }
@@ -231,8 +316,6 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
 
     }, [preFilteredKiosks, activeFilters, latestTimestamp]);
 
-    const countryOrder = { 'CA': 1, 'FR': 2, 'US': 3 };
-
     // 1. Sort kiosks within each location group by stationid
     for (const [_location, kiosks] of filteredLocations) {
         kiosks.sort((a, b) => a.stationid.localeCompare(b.stationid));
@@ -240,8 +323,8 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
 
     // 2. Sort the location groups themselves by country, then by the first stationid in the group
     filteredLocations.sort(([_locationA, kiosksA], [_locationB, kiosksB]) => {
-        const orderA = countryOrder[(kiosksA[0]?.info.country || 'ZZ').toUpperCase()] || 99;
-        const orderB = countryOrder[(kiosksB[0]?.info.country || 'ZZ').toUpperCase()] || 99;
+        const orderA = getCountrySortOrder(kiosksA[0]?.info.country);
+        const orderB = getCountrySortOrder(kiosksB[0]?.info.country);
         if (orderA !== orderB) return orderA - orderB;
         return kiosksA[0].stationid.localeCompare(kiosksB[0].stationid);
     });
@@ -260,35 +343,32 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
         return editingKioskId ? allStationsData.find(k => k.stationid === editingKioskId) : null;
     }, [editingKioskId, allStationsData]);
     
-    useEffect(() => { // This is the correct location for this hook
-        // Show the offline kiosks modal on initial load if conditions are met.
-        // To avoid race conditions with state updates, we derive the stations directly from the `kioskData` prop for this check.
-        if (!loading && clientInfo?.features?.status && !initialStatusCheck && allStationsData.length > 0) {
-            let stations = allStationsData; // Use the already normalized data
-
-            if (!isAdminUser) {
-                stations = stations.filter(s => s.info.client === clientInfo.clientId);
-            }
-
-            const countryFilter = clientInfo.features.country;
-            if (countryFilter && countryFilter.toLowerCase() !== 'all') {
-                stations = stations.filter(s => s.info.country?.toUpperCase() === countryFilter.toUpperCase());
-            }
-
-            const initialOfflineCount = stations.filter(k => isKioskActive(k, latestTimestamp) && !isKioskOnline(k, latestTimestamp)).length;
-            if (initialOfflineCount > 0) {
+    useEffect(() => {
+        if (!loading && hasStatusAccess && !initialStatusCheck && initialStatusStations.length > 0) {
+            if (stationStatusIssueCount > 0) {
                 setShowInitialStatus(true);
             }
         }
-    }, [loading, clientInfo, allStationsData, initialStatusCheck, isAdminUser]); // Dependencies are correct
+    }, [loading, hasStatusAccess, initialStatusCheck, initialStatusStations, stationStatusIssueCount]);
 
     const handleInitialStatusDone = () => {
         setShowInitialStatus(false);
         setInitialStatusCheck(true); // Mark it as seen for this session
     };
 
+    const handleStatusKioskSelect = (stationid) => {
+        setShowInitialStatus(false);
+        setInitialStatusCheck(true);
+        setActiveFilters({ all: true });
+        setStatusFocusedKioskId(stationid);
+        setSearchTerm(stationid);
+        setDebouncedSearchTerm(stationid);
+        setCurrentPage(1);
+    };
+
     const handleFilterChange = (filterKey) => {
         setSearchTerm(''); // Clear search when a filter is clicked
+        setStatusFocusedKioskId('');
         const countryFilters = ['us', 'ca', 'fr']; // Disney is handled separately
         const statusFilters = ['offline', 'soldout', 'disconnected'];
         const exclusiveFilters = ['master', 'disney', 'event', ...countryFilters];
@@ -332,6 +412,9 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     };
 
     const handleSearchChange = (value) => {
+        if (!value) {
+            setStatusFocusedKioskId('');
+        }
         setSearchTerm(value);
     }
 
@@ -374,19 +457,15 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
         return groupedRentals;
     }, [enrichedRentalData]);
 
-    const offlineKiosksByCountry = useMemo(() => {
-        if (!showInitialStatus) return {};
-        // Use clientStations which is already filtered by permission
-        const activeButOffline = clientStations.filter(k => isKioskActive(k, latestTimestamp) && !isKioskOnline(k, latestTimestamp));
-        return activeButOffline.reduce((acc, kiosk) => {
+    const statusKiosksByCountry = useMemo(() => {
+        return stationStatusRows.reduce((acc, row) => {
+            const { kiosk } = row;
             const country = kiosk.info.country || 'Unknown';
             if (!acc[country]) acc[country] = [];
-            acc[country].push(kiosk);
-            // Sort kiosks within each country
-            acc[country].sort((a, b) => a.stationid.localeCompare(b.stationid));
+            acc[country].push(row);
             return acc;
         }, {});
-    }, [clientStations, latestTimestamp, showInitialStatus]);
+    }, [stationStatusRows]);
     
 return (
     <div>
@@ -413,8 +492,9 @@ return (
         <div className="min-h-screen bg-gray-100">
             {showInitialStatus ? (
                 <InitialStatusPage
-                    offlineKiosksByCountry={offlineKiosksByCountry}
+                    statusKiosksByCountry={statusKiosksByCountry}
                     onDone={handleInitialStatusDone}
+                    onSelectKiosk={handleStatusKioskSelect}
                     t={t}
                 />
             ) : (
@@ -430,6 +510,20 @@ return (
                     </div>
                     {/* Action buttons on the right */}
                     <div className="flex items-center gap-4">
+                    {hasStatusAccess && (
+                        <button
+                            onClick={() => setShowInitialStatus(true)}
+                            className={`relative p-2 rounded-md transition-colors ${STATUS_BUTTON_CLASSES[stationStatusSeverity]}`}
+                            title={t('station_status_title')}
+                        >
+                            <StatusButtonIcon className="h-6 w-6" />
+                            {stationStatusIssueCount > 0 && (
+                                <span className={`absolute -top-1 -right-1 text-white text-[0.6rem] font-bold rounded-full px-1 py-0.5 leading-none ${STATUS_BADGE_CLASSES[stationStatusSeverity]}`}>
+                                    {stationStatusIssueCount}
+                                </span>
+                            )}
+                        </button>
+                    )}
                     {(clientInfo.features.rentals || isAdminUser) && (
                         <>
                             <button onClick={onNavigateToRentals} className="p-2 rounded-md bg-green-100 text-green-700 hover:bg-green-200" title={t('rentals_page_title')}>
@@ -488,7 +582,7 @@ return (
             ) : (
                 <>
                         {error && <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">{error}</div>}
-                        {(clientInfo.features.rentals || clientInfo.features.search || isAdminUser) && (
+                        {(clientInfo.features.rentals || clientInfo.features.search || isAdminUser || !!statusFocusedKioskId) && (
                             <FilterPanel
                                 activeFilters={activeFilters}
                                 onFilterChange={handleFilterChange}
@@ -505,7 +599,7 @@ return (
                                 disconnectedCount={disconnectedKioskCount}
                                 clientInfo={clientInfo}
                                 t={t}
-                                searchEnabled={!!clientInfo.features.search || isAdminUser}
+                                searchEnabled={!!clientInfo.features.search || isAdminUser || !!statusFocusedKioskId}
                             />
                         )}
                         {(clientInfo.features.rentals || isAdminUser) && (
