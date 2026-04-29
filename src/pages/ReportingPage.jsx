@@ -10,6 +10,7 @@ import { ChartBarIcon } from '@heroicons/react/24/outline';
 import ChartDataLabels from 'chartjs-plugin-datalabels';
 import { db } from '../firebase-config';
 import { collection, query, where, getDocs } from 'firebase/firestore';
+import { isNewSchemaKiosk } from '../utils/helpers';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, PointElement, LineElement, Title, Tooltip, Legend, ArcElement, ChartDataLabels);
 
@@ -39,6 +40,8 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
     const [selectedCountry, setSelectedCountry] = useState('');
     const [selectedLocations, setSelectedLocations] = useState([]);
     const [selectedKiosks, setSelectedKiosks] = useState([]);
+    const [showV1Kiosks, setShowV1Kiosks] = useState(true);
+    const [showV2Kiosks, setShowV2Kiosks] = useState(true);
     const [startDate, setStartDate] = useState(null);
     const [endDate, setEndDate] = useState(null);
     const [adjustmentPercentage, setAdjustmentPercentage] = useState(100);
@@ -47,7 +50,7 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
     const [reportTitle, setReportTitle] = useState('Rental Report');
     const [reportPreparedFor, setReportPreparedFor] = useState(userMode ? (clientInfo?.username || '') : '');
     const [uploadedRentalData, setUploadedRentalData] = useState(null);
-    const [timeSeriesInterval, setTimeSeriesInterval] = useState('daily'); // 'daily' or 'monthly'
+    const [timeSeriesInterval, setTimeSeriesInterval] = useState('monthly'); // 'daily' or 'monthly'
     const [fetchedRentalData, setFetchedRentalData] = useState(null);
     const [isFetchingRentals, setIsFetchingRentals] = useState(false);
     const [timeSeriesOverrides, setTimeSeriesOverrides] = useState(null);
@@ -60,6 +63,8 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
         setSelectedCountry('');
         setSelectedLocations([]);
         setSelectedKiosks([]);
+        setShowV1Kiosks(true);
+        setShowV2Kiosks(true);
         setStartDate(null);
         setEndDate(null);
         setAdjustmentPercentage(100);
@@ -165,18 +170,43 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
         return Array.from(locations).sort();
     }, [clientKiosks, selectedCountry]);
 
+    const stationDataById = useMemo(() => {
+        const map = new Map();
+        allStationsData.forEach(station => {
+            if (station.stationid) {
+                map.set(station.stationid, station);
+            }
+        });
+        return map;
+    }, [allStationsData]);
+
     const availableKiosksForFilter = useMemo(() => {
+        const matchesVersionFilter = (kiosk) => {
+            const kioskWithVersionInfo = stationDataById.get(kiosk.stationid) || kiosk;
+            const isV2 = isNewSchemaKiosk(kioskWithVersionInfo);
+            return isV2 ? showV2Kiosks : showV1Kiosks;
+        };
+
+        let kiosksInScope = [];
         if (userMode) {
-            return clientKiosks;
+            kiosksInScope = clientKiosks;
+        } else if (selectedLocations.length > 0) {
+            kiosksInScope = clientKiosks.filter(kiosk =>
+                (!selectedCountry || kiosk.info.country === selectedCountry) &&
+                selectedLocations.includes(kiosk.info.location)
+            );
         }
-        if (selectedLocations.length === 0) {
-            return [];
-        }
-        return clientKiosks.filter(kiosk =>
-            (!selectedCountry || kiosk.info.country === selectedCountry) &&
-            selectedLocations.includes(kiosk.info.location)
-        );
-    }, [clientKiosks, selectedCountry, selectedLocations, userMode]);
+
+        return kiosksInScope.filter(matchesVersionFilter);
+    }, [clientKiosks, selectedCountry, selectedLocations, userMode, stationDataById, showV1Kiosks, showV2Kiosks]);
+
+    useEffect(() => {
+        const availableKioskIds = new Set(availableKiosksForFilter.map(kiosk => kiosk.stationid));
+        setSelectedKiosks(prevSelected => {
+            const nextSelected = prevSelected.filter(kioskId => availableKioskIds.has(kioskId));
+            return nextSelected.length === prevSelected.length ? prevSelected : nextSelected;
+        });
+    }, [availableKiosksForFilter]);
 
     const stationToLocationMap = useMemo(() => {
         const map = new Map();
@@ -566,6 +596,28 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                             )}
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">{t('kiosk')}</label>
+                                <div className="mt-1 flex items-center gap-4">
+                                    <div className="flex items-center">
+                                        <input
+                                            id="reporting-show-v1"
+                                            type="checkbox"
+                                            checked={showV1Kiosks}
+                                            onChange={(e) => setShowV1Kiosks(e.target.checked)}
+                                            className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                        />
+                                        <label htmlFor="reporting-show-v1" className="ml-2 text-sm text-gray-900">V1</label>
+                                    </div>
+                                    <div className="flex items-center">
+                                        <input
+                                            id="reporting-show-v2"
+                                            type="checkbox"
+                                            checked={showV2Kiosks}
+                                            onChange={(e) => setShowV2Kiosks(e.target.checked)}
+                                            className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                        />
+                                        <label htmlFor="reporting-show-v2" className="ml-2 text-sm text-gray-900">V2</label>
+                                    </div>
+                                </div>
                                 <select multiple value={selectedKiosks} onChange={e => setSelectedKiosks(Array.from(e.target.selectedOptions, option => option.value))} className={`mt-1 block w-full ${userMode ? 'h-48' : 'h-24'} border border-gray-300 rounded-md`} disabled={!userMode && selectedLocations.length === 0}>
                                     {availableKiosksForFilter.map(kiosk => <option key={kiosk.stationid} value={kiosk.stationid}>{kiosk.stationid} - {kiosk.info.place}</option>)}
                                 </select>
@@ -601,7 +653,7 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                             {!userMode && (
                                 <div>
                                     <label htmlFor="adjustment" className="block text-sm font-medium text-gray-700">{t('adjust_totals')} ({adjustmentPercentage}%)</label>
-                                    <input id="adjustment" type="range" min="0" max="500" value={adjustmentPercentage} onChange={e => setAdjustmentPercentage(e.target.value)} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer mt-2" />
+                                    <input id="adjustment" type="range" min="100" max="500" value={adjustmentPercentage} onChange={e => setAdjustmentPercentage(Math.max(100, Number(e.target.value)))} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer mt-2" />
                                 </div>
                             )}
                             <div className="bg-gray-50 p-3 rounded-md border border-gray-200 text-center">

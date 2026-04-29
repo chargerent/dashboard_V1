@@ -995,6 +995,7 @@ function App() {
           break;
         case 'eject count':
         case 'eject module':
+        case 'reboot module':
           commandData = { ...baseData, ...details };
           break;
         case 'refund':
@@ -1219,6 +1220,9 @@ function App() {
             }
           } else if (data.action === 'update module') {
             const isSuccess = Number(data.status) === 1 || data.status === 'accepted';
+            setCommandStatus({ state: isSuccess ? 'success' : 'error', message: data.status_en || (isSuccess ? t('command_success') : t('command_failed')) });
+          } else if (data.action === 'reboot module' || data.action === 'module reboot') {
+            const isSuccess = Number(data.status) === 1 || data.status === 'accepted' || data.status === 'success';
             setCommandStatus({ state: isSuccess ? 'success' : 'error', message: data.status_en || (isSuccess ? t('command_success') : t('command_failed')) });
           } else if (data.action === 'odroid reboot') {
             setCommandStatus({ state: 'success', message: data.status_en });

@@ -248,19 +248,42 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         return { className, glow: isCharging };
     }, [chargeReadyThreshold, ejectingSet, hasFailedEject, lockingSet, pendingSet, stationId]);
 
-    const ModuleControls = ({ module }) => (
-        <div className="flex items-center mt-1 pt-1 border-t border-gray-200">
-            <button 
-                title={t('eject_all_from_module')} 
-                onClick={(e) => { e.stopPropagation(); onCommand(stationId, 'eject module', module.id); }} 
-                className="p-1 w-full text-gray-500 hover:bg-gray-100 rounded flex justify-center items-center"
-            >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M7 11l5-5m0 0l5 5m-5-5v12" />
-                </svg>
-            </button>
-        </div>
-    );
+    const ModuleControls = ({ module }) => {
+        const canEjectModule = clientInfo.commands.eject;
+        const canRebootModule = !isV2Kiosk && clientInfo.commands.reboot;
+
+        if (!canEjectModule && !canRebootModule) {
+            return null;
+        }
+
+        return (
+            <div className="flex items-center gap-1 mt-1 pt-1 border-t border-gray-200">
+                {canEjectModule && (
+                    <button
+                        title={t('eject_all_from_module')}
+                        onClick={(e) => { e.stopPropagation(); onCommand(stationId, 'eject module', module.id); }}
+                        className="p-1 flex-1 text-gray-500 hover:bg-gray-100 rounded flex justify-center items-center"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M7 11l5-5m0 0l5 5m-5-5v12" />
+                        </svg>
+                    </button>
+                )}
+                {canRebootModule && (
+                    <button
+                        title={t('reboot_module')}
+                        onClick={(e) => { e.stopPropagation(); onCommand(stationId, 'reboot module', module.id); }}
+                        disabled={!isOnline}
+                        className="p-1 flex-1 text-gray-500 hover:bg-gray-100 rounded flex justify-center items-center disabled:cursor-not-allowed disabled:text-gray-300 disabled:hover:bg-transparent"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                    </button>
+                )}
+            </div>
+        );
+    };
     
     const SlotButton = React.memo(function SlotButton({ slot, module, style }) {
         const canEject = clientInfo.commands.eject;
@@ -335,7 +358,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                     return <SlotButton key={slot.position} slot={slot} module={module} style={style} />
                 })}
             </div>
-            {(clientInfo.commands.eject || clientInfo.commands.lock) && <ModuleControls module={module} />}
+            <ModuleControls module={module} />
         </div>
     );
 

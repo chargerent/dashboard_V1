@@ -167,7 +167,7 @@ export default function useKioskCommandFlow({
       ...(commandDetails.action.includes('change') && { kiosk: kioskPayload, autoGeocode: commandDetails.autoGeocode }),
       ...((commandDetails.action === 'lock slot' || commandDetails.action === 'unlock slot' || commandDetails.action === 'eject specific' || commandDetails.action === 'rent' || commandDetails.action === 'vend') && { slotid: commandDetails.slotid, info: lockReason }),
       ...((commandDetails.action === 'eject specific' || commandDetails.action === 'vend') && commandDetails.chargerid ? { chargerid: commandDetails.chargerid } : {}),
-      ...(commandDetails.action === 'eject count' && { slotid: commandDetails.slotid }),
+      ...((commandDetails.action === 'eject count' || commandDetails.action === 'reboot module') && { slotid: commandDetails.slotid }),
       ...extraConfirmationDetails,
     };
 
@@ -241,6 +241,9 @@ export default function useKioskCommandFlow({
       confirmationText = t('disable_confirmation');
     } else if (action === 'eject module') {
       confirmationText = `${t('eject_module_confirmation')}?`;
+      commandDetailsPayload.slotid = moduleid;
+    } else if (action === 'reboot module') {
+      confirmationText = `${t('reboot_module_confirmation')} ${moduleid}?`;
       commandDetailsPayload.slotid = moduleid;
     } else if (action === 'update module') {
       confirmationText = `${t('update_module_confirmation')} ${moduleid}?`;
