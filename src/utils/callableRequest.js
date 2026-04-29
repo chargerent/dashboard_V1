@@ -18,6 +18,7 @@ const HTTP_FUNCTION_NAME_MAP = {
   media_assignPlaylist: 'media_httpAssignPlaylist',
   aiBooths_listEvents: 'aiBooths_httpListEvents',
   aiBooths_saveEvent: 'aiBooths_httpSaveEvent',
+  aiBooths_provisionPendingKiosk: 'aiBooths_httpProvisionPendingKiosk',
   aiBooths_listElevenLabsAgents: 'aiBooths_httpListElevenLabsAgents',
   aiBooths_publishAgent: 'aiBooths_httpPublishAgent',
   stationBinding_getNextStation: 'stationBinding_httpGetNextStation',

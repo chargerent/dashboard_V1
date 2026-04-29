@@ -26,6 +26,12 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Public display-only AI booth screen settings. Writes are mirrored by Cloud Functions.
+    match /aiBoothScreenUi/{screenUiId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
     // Everything else: no public read, no writes
     match /{document=**} {
       allow read: if request.auth != null; // signed-in only

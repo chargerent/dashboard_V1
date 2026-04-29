@@ -56,10 +56,48 @@ const DEFAULT_AI_BOOTH_RENTAL_POLICY =
   "You can borrow a portable charger using your phone number. It is complimentary for the day, " +
   "but there is a fee if it is not returned today. You can return it at any kiosk.";
 const DEFAULT_AI_BOOTH_SUPPORT_FALLBACK = "event staff or the information desk";
+const DEFAULT_AI_BOOTH_PHONE_CHARGING_ENABLED = false;
+const DEFAULT_AI_BOOTH_PAYMENT_TYPE = "apollo";
+const AI_BOOTH_PHONE_CHARGING_TOPIC_KIND = "phoneCharging";
+const AI_BOOTH_WIFI_TOPIC_KIND = "wifi";
+const AI_BOOTH_TRANSPORTATION_TOPIC_KIND = "transportation";
+const AI_BOOTH_CONCESSIONS_TOPIC_KIND = "concessions";
+const AI_BOOTH_HOSPITALITY_TOPIC_KIND = "hospitality";
+const AI_BOOTH_BATHROOMS_TOPIC_KIND = "bathrooms";
+const AI_BOOTH_FAN_SERVICES_TOPIC_KIND = "fanServices";
+const AI_BOOTH_COURSE_TOPIC_KIND = "course";
+const AI_BOOTH_SCHEDULE_TOPIC_KIND = "schedule";
+const DEFAULT_AI_BOOTH_SCREEN_TOPIC_COLORS = {
+  eventInfo: "#38bdf8",
+};
+const DEFAULT_AI_BOOTH_SCREEN_UI = {
+  preset: "midnight",
+  theme: {
+    background: "#060606",
+    backgroundAlt: "#111216",
+    glow: "#568aff",
+    secondaryGlow: "#94ffb5",
+    primary: "#5cf4b0",
+    accent: "#ec7c92",
+    agentButton: "#182434",
+    agentListening: "#00a2ff",
+    agentSpeaking: "#ff9f30",
+    topicColors: DEFAULT_AI_BOOTH_SCREEN_TOPIC_COLORS,
+  },
+  features: {
+    showConversationControls: true,
+    showStopButton: true,
+    qrDisplay: true,
+    keyboardShortcuts: true,
+    showVisualSwitcher: false,
+    demoTalk: false,
+    debugOverlay: false,
+  },
+};
 const STANDARD_AI_BOOTH_SYSTEM_PROMPT = `Role
-You are a friendly, witty, and helpful AI concierge stationed at the configured kiosk service for the configured event.
+You are a friendly, witty, and helpful AI concierge stationed at the configured event kiosk.
 
-The event name, event category, event topic, kiosk service, rental policy, and kiosk-specific location are provided in the event data below. Treat that event data as the source of truth.
+The event name, venue category, basic event info, phone charging configuration, payment type, rental policy, and kiosk-specific location are provided in the event data below. Treat that event data as the source of truth.
 
 
 You sound human, natural, upbeat, and playful, but you never pretend to have physical abilities you do not have.
@@ -136,7 +174,10 @@ When the guest asks for the nearest restroom, concessions, merch, water, exit, o
 
 
 Portable charger flow
-Trigger this only when the guest is asking about phone charging, charger rental, borrowing a battery, or returning one, and the configured kiosk service supports charger rental.
+Trigger this only when the guest is asking about phone charging, charger rental, borrowing a battery, or returning one, and phone charging is enabled in the event data.
+
+
+If phone charging is disabled, say charger rental is not available at this event and offer help with event information instead.
 
 
 If the guest seems unfamiliar with the service, explain the rental policy from the event data naturally and concisely. If no rental policy is configured, say that event staff can explain the rental details onsite.
@@ -205,10 +246,9 @@ Shuttle behavior
 
 
 Event-scope rule
-- You may answer questions about the configured event, the venue, the kiosk service, and the configured event category or topic.
-- Questions about the configured event topic are allowed when they are relevant to the event experience.
+- You may answer questions about the configured event, the venue, the configured venue category, and phone charging when it is enabled.
 - Off-topic general knowledge questions should be redirected politely.
-- Example: I am here mainly to help with this event, the venue, and this kiosk service.
+- Example: I am here mainly to help with this event, the venue, and booth support.
 
 
 Failure handling
@@ -565,6 +605,87 @@ function cleanAiBoothText(value, maxLength = 4000) {
   return String(value || "").trim().slice(0, maxLength);
 }
 
+function normalizeAiBoothHexColor(value, fallback) {
+  const raw = cleanAiBoothText(value, 16).toLowerCase();
+  if (/^#[0-9a-f]{6}$/.test(raw)) {
+    return raw;
+  }
+
+  return fallback;
+}
+
+function cloneDefaultAiBoothScreenUi() {
+  return JSON.parse(JSON.stringify(DEFAULT_AI_BOOTH_SCREEN_UI));
+}
+
+function normalizeAiBoothScreenUi(value) {
+  const source = isPlainObject(value) ? value : {};
+  const themeSource = isPlainObject(source.theme) ? source.theme : {};
+  const featuresSource = isPlainObject(source.features) ? source.features : {};
+  const topicColorSource = isPlainObject(themeSource.topicColors) ? themeSource.topicColors : {};
+  const defaults = cloneDefaultAiBoothScreenUi();
+  const extraTopicColors = Object.entries(topicColorSource).reduce((colors, [key, color]) => {
+    const normalizedKey = cleanAiBoothText(key, 160);
+    if (!normalizedKey) {
+      return colors;
+    }
+
+    const normalizedColor = normalizeAiBoothHexColor(color, "");
+    if (!normalizedColor) {
+      return colors;
+    }
+
+    return {
+      ...colors,
+      [normalizedKey]: normalizedColor,
+    };
+  }, {});
+
+  return {
+    preset: cleanAiBoothText(source.preset, 40) || defaults.preset,
+    theme: {
+      background: normalizeAiBoothHexColor(themeSource.background, defaults.theme.background),
+      backgroundAlt: normalizeAiBoothHexColor(themeSource.backgroundAlt, defaults.theme.backgroundAlt),
+      glow: normalizeAiBoothHexColor(themeSource.glow, defaults.theme.glow),
+      secondaryGlow: normalizeAiBoothHexColor(themeSource.secondaryGlow, defaults.theme.secondaryGlow),
+      primary: normalizeAiBoothHexColor(themeSource.primary, defaults.theme.primary),
+      accent: normalizeAiBoothHexColor(themeSource.accent, defaults.theme.accent),
+      agentButton: normalizeAiBoothHexColor(themeSource.agentButton, defaults.theme.agentButton),
+      agentListening: normalizeAiBoothHexColor(themeSource.agentListening, defaults.theme.agentListening),
+      agentSpeaking: normalizeAiBoothHexColor(themeSource.agentSpeaking, defaults.theme.agentSpeaking),
+      topicColors: {
+        ...extraTopicColors,
+        eventInfo: normalizeAiBoothHexColor(
+            topicColorSource.eventInfo,
+            defaults.theme.topicColors.eventInfo,
+        ),
+      },
+    },
+    features: Object.entries(defaults.features).reduce((features, [key, defaultValue]) => ({
+      ...features,
+      [key]: typeof featuresSource[key] === "boolean" ? featuresSource[key] : defaultValue,
+    }), {}),
+  };
+}
+
+function normalizeAiBoothScreenUiByStationId(value, boothStationIds = [], fallbackScreenUi = null) {
+  const source = isPlainObject(value) ? value : {};
+  const fallback = normalizeAiBoothScreenUi(fallbackScreenUi);
+  const stationIds = Array.isArray(boothStationIds) ? boothStationIds : [];
+
+  return stationIds.reduce((screenUiByStationId, stationId) => {
+    const normalizedStationId = cleanAiBoothText(stationId, 80);
+    if (!normalizedStationId) {
+      return screenUiByStationId;
+    }
+
+    return {
+      ...screenUiByStationId,
+      [normalizedStationId]: normalizeAiBoothScreenUi(source[normalizedStationId] || fallback),
+    };
+  }, {});
+}
+
 const AI_BOOTH_DAY_KEYS = [
   "monday",
   "tuesday",
@@ -601,24 +722,448 @@ function normalizeAiBoothDailyHours(value) {
   }, {});
 }
 
+function normalizeAiBoothTransportationSection(value) {
+  const source = isPlainObject(value) ? value : {};
+  const rawLocations = Array.isArray(source.locations) ?
+    source.locations :
+    Array.isArray(source.stops) ? source.stops : [];
+  const hasLegacyLocation = [
+    source.location,
+    source.pickup,
+    source.area,
+    source.place,
+    source.latitude,
+    source.lat,
+    source.longitude,
+    source.lng,
+    source.lon,
+    source.hours,
+    source.openHours,
+    source.startTime,
+    source.from,
+    source.endTime,
+    source.to,
+    source.frequency,
+    source.details,
+    source.instructions,
+    source.notes,
+  ].some((entry) => cleanAiBoothText(entry, 4000));
+
+  return {
+    locations: rawLocations.length > 0 ?
+      rawLocations.map(normalizeAiBoothTransportationLocation) :
+      hasLegacyLocation ? [normalizeAiBoothTransportationLocation(source, 0)] : [],
+  };
+}
+
+function normalizeAiBoothTransportationLocation(location, index) {
+  const source = isPlainObject(location) ? location : {};
+
+  return {
+    id: cleanAiBoothText(source.id, 160) ||
+      `transportation-location-${index + 1}`,
+    location: cleanAiBoothText(
+        source.location || source.pickup || source.area || source.place,
+        500,
+    ),
+    latitude: cleanAiBoothText(source.latitude || source.lat, 80),
+    longitude: cleanAiBoothText(source.longitude || source.lng || source.lon, 80),
+    hours: cleanAiBoothText(source.hours || source.openHours, 240),
+    startTime: cleanAiBoothText(source.startTime || source.from || source.start, 120),
+    endTime: cleanAiBoothText(source.endTime || source.to || source.end, 120),
+    frequency: cleanAiBoothText(source.frequency || source.interval, 240),
+    details: cleanAiBoothText(
+        source.details || source.instructions || source.notes,
+        4000,
+    ),
+  };
+}
+
+function normalizeAiBoothTransportationDetails(value) {
+  const source = isPlainObject(value) ? value : {};
+
+  return {
+    shuttle: normalizeAiBoothTransportationSection(source.shuttle),
+    rideShare: normalizeAiBoothTransportationSection(source.rideShare || source.rideshare),
+    parking: normalizeAiBoothTransportationSection(source.parking),
+  };
+}
+
+function normalizeAiBoothFanZoneActivation(activation, index) {
+  const source = isPlainObject(activation) ? activation : {};
+  const name = cleanAiBoothText(source.name, 160);
+
+  return {
+    id: cleanAiBoothText(source.id, 160) || `fan-activation-${index + 1}`,
+    name: name || `Activation ${index + 1}`,
+    sponsor: cleanAiBoothText(source.sponsor, 200),
+    location: cleanAiBoothText(source.location, 300),
+    hours: cleanAiBoothText(source.hours || source.openHours, 160),
+    details: cleanAiBoothText(
+        source.details || source.description || source.instructions,
+        4000,
+    ),
+  };
+}
+
+function normalizeAiBoothFanZone(zone, index) {
+  const source = isPlainObject(zone) ? zone : {};
+  const name = cleanAiBoothText(source.name, 160);
+  const activations = Array.isArray(source.activations) ?
+    source.activations.map(normalizeAiBoothFanZoneActivation) :
+    [];
+
+  return {
+    id: cleanAiBoothText(source.id, 160) || `fan-zone-${index + 1}`,
+    name: name || `Fan Zone ${index + 1}`,
+    latitude: cleanAiBoothCoordinateText(source.latitude || source.lat),
+    longitude: cleanAiBoothCoordinateText(source.longitude || source.lng || source.lon),
+    openHours: cleanAiBoothText(source.openHours || source.hours, 240),
+    details: cleanAiBoothText(source.details || source.description || source.notes, 6000),
+    activations,
+  };
+}
+
+function normalizeAiBoothFanZones(value) {
+  return Array.isArray(value) ? value.map(normalizeAiBoothFanZone) : [];
+}
+
+function normalizeAiBoothHospitalityClient(client, index) {
+  const source = isPlainObject(client) ? client : {};
+  const clientName = cleanAiBoothText(
+      source.clientName || source.name || source.company,
+      240,
+  );
+
+  return {
+    id: cleanAiBoothText(source.id, 160) || `hospitality-client-${index + 1}`,
+    clientName: clientName || `Client ${index + 1}`,
+    contactName: cleanAiBoothText(source.contactName || source.contact, 200),
+    contactPhone: cleanAiBoothText(source.contactPhone || source.phone, 80),
+    contactEmail: cleanAiBoothText(source.contactEmail || source.email, 200),
+    hostName: cleanAiBoothText(source.hostName || source.host, 200),
+    credentialNotes: cleanAiBoothText(
+        source.credentialNotes || source.credentials,
+        2000,
+    ),
+    arrivalNotes: cleanAiBoothText(source.arrivalNotes || source.arrival, 2000),
+    specialRequests: cleanAiBoothText(
+        source.specialRequests || source.requests || source.notes,
+        2000,
+    ),
+  };
+}
+
+function normalizeAiBoothHospitalityClients(value) {
+  return Array.isArray(value) ? value.map(normalizeAiBoothHospitalityClient) : [];
+}
+
+function normalizeAiBoothHospitalityLocation(location, index) {
+  const source = isPlainObject(location) ? location : {};
+  const name = cleanAiBoothText(source.name || source.product, 200);
+
+  return {
+    id: cleanAiBoothText(source.id, 160) || `hospitality-location-${index + 1}`,
+    name: name || `Hospitality Location ${index + 1}`,
+    venueType: cleanAiBoothText(source.venueType || source.category, 80),
+    location: cleanAiBoothText(source.location || source.place, 300),
+    latitude: cleanAiBoothCoordinateText(source.latitude || source.lat),
+    longitude: cleanAiBoothCoordinateText(source.longitude || source.lng || source.lon),
+    amenities: cleanAiBoothText(source.amenities || source.includes, 4000),
+    accessNotes: cleanAiBoothText(
+        source.accessNotes || source.access || source.credentials,
+        3000,
+    ),
+    details: cleanAiBoothText(source.details || source.description || source.notes, 5000),
+    clients: normalizeAiBoothHospitalityClients(
+        source.clients || source.assignedClients,
+    ),
+  };
+}
+
+function normalizeAiBoothHospitalityLocations(value) {
+  return Array.isArray(value) ? value.map(normalizeAiBoothHospitalityLocation) : [];
+}
+
+function normalizeAiBoothBathroomLocation(location, index) {
+  const source = isPlainObject(location) ? location : {};
+  const place = cleanAiBoothText(source.place || source.name || source.location, 240);
+
+  return {
+    id: cleanAiBoothText(source.id, 160) || `bathroom-location-${index + 1}`,
+    place: place || `Bathroom ${index + 1}`,
+    latitude: cleanAiBoothCoordinateText(source.latitude || source.lat),
+    longitude: cleanAiBoothCoordinateText(source.longitude || source.lng || source.lon),
+  };
+}
+
+function normalizeAiBoothBathroomLocations(value) {
+  return Array.isArray(value) ? value.map(normalizeAiBoothBathroomLocation) : [];
+}
+
+const DEFAULT_AI_BOOTH_FAN_SERVICE_NAMES = Object.freeze([
+  "First aid",
+  "Lost and found",
+  "Accessibility help",
+]);
+
+function createDefaultAiBoothFanServices() {
+  return DEFAULT_AI_BOOTH_FAN_SERVICE_NAMES.map((name, index) => ({
+    id: `fan-service-${index + 1}`,
+    name,
+    location: "",
+    latitude: "",
+    longitude: "",
+  }));
+}
+
+function normalizeAiBoothFanService(service, index) {
+  const source = isPlainObject(service) ? service : {};
+  const name = cleanAiBoothText(source.name, 160);
+
+  return {
+    id: cleanAiBoothText(source.id, 160) || `fan-service-${index + 1}`,
+    name: name || `Service ${index + 1}`,
+    location: cleanAiBoothText(source.location || source.place, 300),
+    latitude: cleanAiBoothCoordinateText(source.latitude || source.lat),
+    longitude: cleanAiBoothCoordinateText(source.longitude || source.lng || source.lon),
+  };
+}
+
+function normalizeAiBoothFanServices(value, includeDefaults = false) {
+  const services = Array.isArray(value) ? value.map(normalizeAiBoothFanService) : [];
+  return includeDefaults && services.length === 0 ? createDefaultAiBoothFanServices() : services;
+}
+
+function createDefaultAiBoothCourseHoles() {
+  return Array.from({length: 18}, (_, index) => ({
+    id: `hole-${index + 1}`,
+    holeNumber: index + 1,
+    teeLatitude: "",
+    teeLongitude: "",
+    greenLatitude: "",
+    greenLongitude: "",
+  }));
+}
+
+function normalizeAiBoothCourseHole(hole, index) {
+  const source = isPlainObject(hole) ? hole : {};
+  const holeNumber = Number(source.holeNumber || source.number || index + 1);
+
+  return {
+    id: cleanAiBoothText(source.id, 160) || `hole-${index + 1}`,
+    holeNumber: Number.isFinite(holeNumber) ? holeNumber : index + 1,
+    teeLatitude: cleanAiBoothCoordinateText(
+        source.teeLatitude || source.teeLat || source.tee?.latitude || source.tee?.lat,
+    ),
+    teeLongitude: cleanAiBoothCoordinateText(
+        source.teeLongitude ||
+        source.teeLng ||
+        source.teeLon ||
+        source.tee?.longitude ||
+        source.tee?.lng ||
+        source.tee?.lon,
+    ),
+    greenLatitude: cleanAiBoothCoordinateText(
+        source.greenLatitude || source.greenLat || source.green?.latitude || source.green?.lat,
+    ),
+    greenLongitude: cleanAiBoothCoordinateText(
+        source.greenLongitude ||
+        source.greenLng ||
+        source.greenLon ||
+        source.green?.longitude ||
+        source.green?.lng ||
+        source.green?.lon,
+    ),
+  };
+}
+
+function normalizeAiBoothCourseHoles(value, includeDefaults = false) {
+  const holes = Array.isArray(value) ? value.map(normalizeAiBoothCourseHole) : [];
+  const holesByNumber = new Map(holes.map((hole) => [hole.holeNumber, hole]));
+
+  if (!includeDefaults) {
+    return holes;
+  }
+
+  return createDefaultAiBoothCourseHoles().map((defaultHole) => ({
+    ...defaultHole,
+    ...(holesByNumber.get(defaultHole.holeNumber) || {}),
+  }));
+}
+
+function normalizeAiBoothScheduleEvent(scheduleEvent, dayIndex, eventIndex) {
+  const source = isPlainObject(scheduleEvent) ? scheduleEvent : {};
+  const title = cleanAiBoothText(source.title || source.name, 220);
+
+  return {
+    id: cleanAiBoothText(source.id, 160) || `schedule-event-${dayIndex + 1}-${eventIndex + 1}`,
+    title: title || `Schedule Item ${eventIndex + 1}`,
+    category: cleanAiBoothText(source.category || source.type, 120),
+    startTime: cleanAiBoothText(source.startTime || source.start, 80),
+    endTime: cleanAiBoothText(source.endTime || source.end, 80),
+    location: cleanAiBoothText(source.location || source.place, 240),
+    audience: cleanAiBoothText(source.audience || source.access, 160),
+    details: cleanAiBoothText(
+        source.details || source.description || source.notes,
+        5000,
+    ),
+    sourceNote: cleanAiBoothText(source.sourceNote || source.warning, 2000),
+    needsReview: source.needsReview === true,
+  };
+}
+
+function normalizeAiBoothScheduleDay(day, index) {
+  const source = isPlainObject(day) ? day : {};
+  const dayLabel = cleanAiBoothText(source.dayLabel || source.label, 180);
+  const events = Array.isArray(source.events || source.items) ?
+    (source.events || source.items).map((event, eventIndex) => (
+      normalizeAiBoothScheduleEvent(event, index, eventIndex)
+    )) :
+    [];
+
+  return {
+    id: cleanAiBoothText(source.id, 160) || `schedule-day-${index + 1}`,
+    date: cleanAiBoothText(source.date, 40),
+    dayLabel: dayLabel || `Day ${index + 1}`,
+    publicStatus: cleanAiBoothText(source.publicStatus || source.status, 160),
+    theme: cleanAiBoothText(source.theme || source.title, 180),
+    gatesOpen: cleanAiBoothText(source.gatesOpen || source.gates?.open, 80),
+    gatesClose: cleanAiBoothText(source.gatesClose || source.gates?.close, 80),
+    dailyNotes: cleanAiBoothText(source.dailyNotes || source.notes, 5000),
+    events,
+  };
+}
+
+function normalizeAiBoothScheduleDays(value) {
+  return Array.isArray(value) ? value.map(normalizeAiBoothScheduleDay) : [];
+}
+
 function normalizeAiBoothTopic(topic, index) {
   if (!isPlainObject(topic)) {
     return {
       id: `topic-${index + 1}`,
       title: `Topic ${index + 1}`,
+      kind: "",
       summary: "",
       notes: "",
       checklistText: "",
+      wifiSsid: "",
+      wifiPassword: "",
+      transportation: normalizeAiBoothTransportationDetails({}),
+      fanZones: [],
+      hospitalityLocations: [],
+      bathroomLocations: [],
+      fanServices: [],
+      courseHoles: [],
+      scheduleDays: [],
     };
   }
 
   const title = cleanAiBoothText(topic.title, 120);
+  const rawKind = cleanAiBoothText(topic.kind, 80);
+  const normalizedTitle = title.toLowerCase().replace(/[^a-z0-9]/g, "");
+  let kind = "";
+  if (rawKind === AI_BOOTH_PHONE_CHARGING_TOPIC_KIND || title.toLowerCase() === "phone chargers") {
+    kind = AI_BOOTH_PHONE_CHARGING_TOPIC_KIND;
+  } else if (rawKind === AI_BOOTH_WIFI_TOPIC_KIND || normalizedTitle === "wifi") {
+    kind = AI_BOOTH_WIFI_TOPIC_KIND;
+  } else if (
+    rawKind === AI_BOOTH_TRANSPORTATION_TOPIC_KIND ||
+    normalizedTitle === "transportation"
+  ) {
+    kind = AI_BOOTH_TRANSPORTATION_TOPIC_KIND;
+  } else if (
+    rawKind === AI_BOOTH_CONCESSIONS_TOPIC_KIND ||
+    normalizedTitle === "concessions"
+  ) {
+    kind = AI_BOOTH_CONCESSIONS_TOPIC_KIND;
+  } else if (
+    rawKind === AI_BOOTH_HOSPITALITY_TOPIC_KIND ||
+    normalizedTitle === "hospitality"
+  ) {
+    kind = AI_BOOTH_HOSPITALITY_TOPIC_KIND;
+  } else if (
+    rawKind === AI_BOOTH_BATHROOMS_TOPIC_KIND ||
+    normalizedTitle === "bathrooms"
+  ) {
+    kind = AI_BOOTH_BATHROOMS_TOPIC_KIND;
+  } else if (
+    rawKind === AI_BOOTH_FAN_SERVICES_TOPIC_KIND ||
+    normalizedTitle === "fanservices"
+  ) {
+    kind = AI_BOOTH_FAN_SERVICES_TOPIC_KIND;
+  } else if (
+    rawKind === AI_BOOTH_COURSE_TOPIC_KIND ||
+    normalizedTitle === "course"
+  ) {
+    kind = AI_BOOTH_COURSE_TOPIC_KIND;
+  } else if (
+    rawKind === AI_BOOTH_SCHEDULE_TOPIC_KIND ||
+    normalizedTitle === "schedule"
+  ) {
+    kind = AI_BOOTH_SCHEDULE_TOPIC_KIND;
+  }
+
   return {
     id: cleanAiBoothText(topic.id, 160) || `topic-${index + 1}`,
     title: title || `Topic ${index + 1}`,
+    kind,
     summary: cleanAiBoothText(topic.summary, 2000),
     notes: cleanAiBoothText(topic.notes, 8000),
     checklistText: cleanAiBoothText(topic.checklistText, 4000),
+    wifiSsid: cleanAiBoothText(topic.wifiSsid || topic.wifi?.ssid, 240),
+    wifiPassword: cleanAiBoothText(topic.wifiPassword || topic.wifi?.password, 240),
+    transportation: normalizeAiBoothTransportationDetails(topic.transportation),
+    fanZones: normalizeAiBoothFanZones(topic.fanZones || topic.zones),
+    hospitalityLocations: normalizeAiBoothHospitalityLocations(
+        topic.hospitalityLocations || topic.hospitality || topic.venues || (
+          kind === AI_BOOTH_HOSPITALITY_TOPIC_KIND ? topic.locations : []
+        ),
+    ),
+    bathroomLocations: normalizeAiBoothBathroomLocations(
+        topic.bathroomLocations || (
+          kind === AI_BOOTH_BATHROOMS_TOPIC_KIND ? topic.locations : []
+        ),
+    ),
+    fanServices: normalizeAiBoothFanServices(
+        topic.fanServices || topic.services,
+        kind === AI_BOOTH_FAN_SERVICES_TOPIC_KIND,
+    ),
+    courseHoles: normalizeAiBoothCourseHoles(
+        topic.courseHoles || topic.holes,
+        kind === AI_BOOTH_COURSE_TOPIC_KIND,
+    ),
+    scheduleDays: normalizeAiBoothScheduleDays(
+        topic.scheduleDays || topic.schedule || topic.days,
+    ),
+  };
+}
+
+function normalizeAiBoothActivation(activation, index) {
+  const source = isPlainObject(activation) ? activation : {};
+  const name = cleanAiBoothText(source.name, 160);
+
+  return {
+    id: cleanAiBoothText(source.id, 160) || `activation-${index + 1}`,
+    name: name || `Activation ${index + 1}`,
+    sponsor: cleanAiBoothText(source.sponsor, 200),
+    category: cleanAiBoothText(source.category, 120),
+    location: cleanAiBoothText(source.location, 300),
+    hours: cleanAiBoothText(source.hours, 160),
+    description: cleanAiBoothText(source.description, 4000),
+    guestInstructions: cleanAiBoothText(
+        source.guestInstructions || source.instructions,
+        4000,
+    ),
+  };
+}
+
+function normalizeAiBoothScreenTopic(topic, index) {
+  const normalizedTopic = normalizeAiBoothTopic(topic, index);
+  return {
+    id: normalizedTopic.id,
+    title: normalizedTopic.title,
   };
 }
 
@@ -658,6 +1203,9 @@ function normalizeAiBoothBoothContext(context) {
   return {
     assistantName: cleanAiBoothText(source.assistantName, 120),
     locationName: cleanAiBoothText(source.locationName, 200),
+    place: cleanAiBoothText(source.place, 200),
+    latitude: cleanAiBoothCoordinateText(source.latitude ?? source.lat),
+    longitude: cleanAiBoothCoordinateText(source.longitude ?? source.lon),
     zone: cleanAiBoothText(source.zone, 160),
     landmark: cleanAiBoothText(source.landmark, 240),
     directionsNotes: cleanAiBoothText(source.directionsNotes, 2000),
@@ -683,6 +1231,47 @@ function normalizeAiBoothBoothContexts(value, boothStationIds = []) {
   }, {});
 }
 
+function parseAiBoothCoordinate(value, min, max) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const coordinate = Number(value);
+  if (!Number.isFinite(coordinate) || coordinate < min || coordinate > max) {
+    return null;
+  }
+
+  return coordinate;
+}
+
+function cleanAiBoothCoordinateText(value) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  return String(value).trim().slice(0, 40);
+}
+
+function normalizeAiBoothKnowledgeBase(value) {
+  const source = isPlainObject(value) ? value : {};
+  const previousDocumentIds = Array.isArray(source.previousDocumentIds) ?
+    source.previousDocumentIds
+        .map((documentId) => cleanAiBoothText(documentId, 160))
+        .filter(Boolean) :
+    [];
+
+  return {
+    documentId: cleanAiBoothText(source.documentId || source.documentationId, 160),
+    documentName: cleanAiBoothText(source.documentName || source.name, 240),
+    documentType: cleanAiBoothText(source.documentType || source.type, 40),
+    syncStatus: cleanAiBoothText(source.syncStatus, 80),
+    syncError: cleanAiBoothText(source.syncError, 1000),
+    lastSyncedAt: serializeTimestamp(source.lastSyncedAt),
+    lastSyncedBy: isPlainObject(source.lastSyncedBy) ? source.lastSyncedBy : null,
+    previousDocumentIds: Array.from(new Set(previousDocumentIds)).slice(0, 10),
+  };
+}
+
 function normalizeAiBoothAgent(agent, boothStationIds = []) {
   const source = isPlainObject(agent) ? agent : {};
 
@@ -696,6 +1285,7 @@ function normalizeAiBoothAgent(agent, boothStationIds = []) {
     syncError: cleanAiBoothText(source.syncError, 1000),
     lastSyncedAt: serializeTimestamp(source.lastSyncedAt),
     lastSyncedBy: isPlainObject(source.lastSyncedBy) ? source.lastSyncedBy : null,
+    knowledgeBase: normalizeAiBoothKnowledgeBase(source.knowledgeBase),
     kioskAgents: normalizeAiBoothKioskAgents(source.kioskAgents, boothStationIds),
   };
 }
@@ -726,9 +1316,12 @@ function serializeAiBoothEvent(snapshot) {
     general: {
       eventName: cleanAiBoothText(general.eventName, 140),
       eventCategory: cleanAiBoothText(general.eventCategory, 120),
-      eventTopic: cleanAiBoothText(general.eventTopic || general.eventSport, 120),
-      serviceName: cleanAiBoothText(general.serviceName, 160) ||
-        "Portable Charger Rental Kiosk",
+      open24Hours: general.open24Hours === true,
+      phoneChargingEnabled: typeof general.phoneChargingEnabled === "boolean" ?
+        general.phoneChargingEnabled :
+        DEFAULT_AI_BOOTH_PHONE_CHARGING_ENABLED,
+      paymentType: normalizeAiBoothPaymentType(general.paymentType),
+      eventInfo: cleanAiBoothText(general.eventInfo || general.basicEventInfo, 8000),
       address: cleanAiBoothText(general.address, 300),
       city: cleanAiBoothText(general.city, 120),
       zipCode: cleanAiBoothText(general.zipCode || general.zip, 32),
@@ -743,12 +1336,20 @@ function serializeAiBoothEvent(snapshot) {
         DEFAULT_AI_BOOTH_RENTAL_POLICY,
       supportFallback: cleanAiBoothText(general.supportFallback, 240) ||
         DEFAULT_AI_BOOTH_SUPPORT_FALLBACK,
-      notes: cleanAiBoothText(general.notes, 8000),
     },
     boothStationIds,
     boothContexts: normalizeAiBoothBoothContexts(data.boothContexts, boothStationIds),
+    screenUi: normalizeAiBoothScreenUi(data.screenUi),
+    screenUiByStationId: normalizeAiBoothScreenUiByStationId(
+        data.screenUiByStationId,
+        boothStationIds,
+        data.screenUi,
+    ),
     topics: Array.isArray(data.topics) ?
       data.topics.map((topic, index) => normalizeAiBoothTopic(topic, index)) :
+      [],
+    activations: Array.isArray(data.activations) ?
+      data.activations.map((activation, index) => normalizeAiBoothActivation(activation, index)) :
       [],
     agent: normalizeAiBoothAgent(data.agent, boothStationIds),
     createdAt: serializeTimestamp(data.createdAt),
@@ -1027,6 +1628,12 @@ function normalizeCountry(country) {
   if (value === "CA" || value === "CAN" || value === "CANADA") return "CA";
   if (value === "FR" || value === "FRA" || value === "FRANCE" || value === "EUR") return "FR";
   return "US";
+}
+
+function normalizeAiBoothPaymentType(paymentType) {
+  return String(paymentType || "").trim().toLowerCase() === "stripe" ?
+    "stripe" :
+    DEFAULT_AI_BOOTH_PAYMENT_TYPE;
 }
 
 function prefixForCountry(country) {
@@ -2296,6 +2903,30 @@ function getDefaultBoundKioskInfo(country) {
   return info;
 }
 
+function mergeDefinedProvisionFields(target, source) {
+  const next = isPlainObject(target) ? {...target} : {};
+  const input = isPlainObject(source) ? source : {};
+
+  Object.entries(input).forEach(([key, value]) => {
+    if (value === undefined || value === null) {
+      return;
+    }
+
+    if (typeof value === "string" && value.trim() === "") {
+      return;
+    }
+
+    if (isPlainObject(value) && isPlainObject(next[key])) {
+      next[key] = mergeDefinedProvisionFields(next[key], value);
+      return;
+    }
+
+    next[key] = value;
+  });
+
+  return next;
+}
+
 function getDefaultBoundKioskHardware(templateKiosk = null, kioskType = "") {
   const templateHardware = clonePlain(templateKiosk?.hardware) || {};
   const normalizedKioskType = normalizeKioskType(kioskType);
@@ -2423,6 +3054,700 @@ function createBoundKioskDocument({
   return recalculateKioskTotals(kiosk);
 }
 
+function normalizeAiBoothProvisionId(value) {
+  const provisionid = cleanAiBoothText(value, 32).toLowerCase();
+  return /^aid-\d{10,13}$/.test(provisionid) ? provisionid : "";
+}
+
+function hashAiBoothDeviceSecret(value) {
+  const secret = cleanAiBoothText(value, 256);
+  if (secret.length < 24) {
+    return "";
+  }
+
+  return crypto.createHash("sha256").update(secret).digest("hex");
+}
+
+function buildPendingAiBoothRegistrationDocument({
+  provisionid,
+  deviceSecretHash,
+  appVersion = "",
+  platform = "",
+  hostname = "",
+  existingData = {},
+}) {
+  const nowIso = new Date().toISOString();
+  const registrationSource = isPlainObject(existingData.registration) ?
+    existingData.registration :
+    {};
+
+  return {
+    provisionid,
+    status: "pending-provision",
+    active: false,
+    enabled: false,
+    source: "ai-booth-electron",
+    timestamp: nowIso,
+    lastUpdated: nowIso,
+    kioskType: AI_BOOTH_KIOSK_TYPE,
+    hardware: {
+      ...(isPlainObject(existingData.hardware) ? existingData.hardware : {}),
+      type: AI_BOOTH_KIOSK_TYPE,
+      mode: "AI",
+      modules: 12,
+      screen: "49",
+      audio: existingData.hardware?.audio || "on",
+      power: existingData.hardware?.power || DEFAULT_KIOSK_POWER_THRESHOLD,
+    },
+    info: {
+      country: "US",
+      autoGeocode: true,
+      location: "",
+      place: "",
+      address: "",
+      stationaddress: "",
+      city: "",
+      state: "",
+      zip: "",
+      locationtype: "EVENT",
+      client: "",
+      account: "",
+      group: "",
+      rep: "",
+      ...(isPlainObject(existingData.info) ? existingData.info : {}),
+    },
+    pricing: isPlainObject(existingData.pricing) ? existingData.pricing : {
+      currency: "US",
+      symbol: "$",
+      kioskmode: "LEASE",
+      text: "EVENT - SIMPLE",
+      authamount: 0,
+      dailyprice: 0,
+      buyprice: 0,
+      taxrate: 0,
+      initialperiod: 24,
+      overdue: 30,
+      profile: "AI-BOOTH",
+      online: true,
+      webapp: false,
+      mobileapp: false,
+      rate: [],
+    },
+    ui: isPlainObject(existingData.ui) ? existingData.ui : {
+      colors: {
+        bcolor1: "#000000",
+        bcolor2: "#38bdf8",
+      },
+      idletime: 20,
+      defaultlanguage: "ENGLISH",
+      mode: "media",
+    },
+    modules: isPlainObject(existingData.modules) ? existingData.modules : {},
+    registration: {
+      ...registrationSource,
+      deviceSecretHash,
+      appVersion: cleanAiBoothText(appVersion, 80),
+      platform: cleanAiBoothText(platform, 80),
+      hostname: cleanAiBoothText(hostname, 160),
+      firstSeen: registrationSource.firstSeen || admin.firestore.FieldValue.serverTimestamp(),
+      lastSeen: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    createdAt: existingData.createdAt || admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+}
+
+async function aiBoothsRegisterPendingKioskImpl(data) {
+  const provisionid = normalizeAiBoothProvisionId(data?.provisionid);
+  const deviceSecretHash = hashAiBoothDeviceSecret(data?.deviceSecret);
+
+  if (!provisionid) {
+    throw new functions.https.HttpsError("invalid-argument", "valid aid provisionid required");
+  }
+
+  if (!deviceSecretHash) {
+    throw new functions.https.HttpsError("invalid-argument", "valid device secret required");
+  }
+
+  const docRef = db.collection("kiosks").doc(provisionid);
+
+  await db.runTransaction(async (transaction) => {
+    const docSnap = await transaction.get(docRef);
+    const existingData = docSnap.exists ? docSnap.data() || {} : {};
+    const existingStatus = cleanAiBoothText(existingData.status, 80).toLowerCase();
+    const existingSecretHash = cleanAiBoothText(existingData.registration?.deviceSecretHash, 128);
+
+    if (docSnap.exists && existingStatus && existingStatus !== "pending-provision") {
+      throw new functions.https.HttpsError(
+          "failed-precondition",
+          `${provisionid} is already provisioned.`,
+      );
+    }
+
+    if (existingSecretHash && existingSecretHash !== deviceSecretHash) {
+      throw new functions.https.HttpsError(
+          "permission-denied",
+          `${provisionid} belongs to another device.`,
+      );
+    }
+
+    transaction.set(docRef, buildPendingAiBoothRegistrationDocument({
+      provisionid,
+      deviceSecretHash,
+      appVersion: data?.appVersion,
+      platform: data?.platform,
+      hostname: data?.hostname,
+      existingData,
+    }), {merge: true});
+  });
+
+  return {
+    ok: true,
+    provisionid,
+    message: `${provisionid} added to the AI booth pending list.`,
+  };
+}
+
+async function aiBoothsDeletePendingKioskRegistrationImpl(data) {
+  const provisionid = normalizeAiBoothProvisionId(data?.provisionid);
+  const deviceSecretHash = hashAiBoothDeviceSecret(data?.deviceSecret);
+
+  if (!provisionid) {
+    throw new functions.https.HttpsError("invalid-argument", "valid aid provisionid required");
+  }
+
+  if (!deviceSecretHash) {
+    throw new functions.https.HttpsError("invalid-argument", "valid device secret required");
+  }
+
+  const docRef = db.collection("kiosks").doc(provisionid);
+
+  await db.runTransaction(async (transaction) => {
+    const docSnap = await transaction.get(docRef);
+    if (!docSnap.exists) {
+      return;
+    }
+
+    const existingData = docSnap.data() || {};
+    const existingStatus = cleanAiBoothText(existingData.status, 80).toLowerCase();
+    const existingSecretHash = cleanAiBoothText(existingData.registration?.deviceSecretHash, 128);
+
+    if (existingStatus !== "pending-provision") {
+      throw new functions.https.HttpsError(
+          "failed-precondition",
+          `${provisionid} is not pending provisioning.`,
+      );
+    }
+
+    if (existingSecretHash && existingSecretHash !== deviceSecretHash) {
+      throw new functions.https.HttpsError(
+          "permission-denied",
+          `${provisionid} belongs to another device.`,
+      );
+    }
+
+    transaction.delete(docRef);
+  });
+
+  return {
+    ok: true,
+    provisionid,
+    message: `${provisionid} deleted from the AI booth pending list.`,
+  };
+}
+
+function buildProvisionedAiBoothKioskDocument({
+  provisionid,
+  stationid,
+  country,
+  actorUid,
+  existingData = {},
+  kioskInput = {},
+}) {
+  const normalizedCountry = normalizeCountry(country);
+  const timestamp = admin.firestore.FieldValue.serverTimestamp();
+  const {currency, symbol} = getDefaultCurrencyConfig(normalizedCountry);
+  const defaultInfo = getDefaultBoundKioskInfo(normalizedCountry);
+  const submittedInfo = isPlainObject(kioskInput.info) ? kioskInput.info : {};
+  const existingInfo = isPlainObject(existingData.info) ? existingData.info : {};
+  const mergedInfo = mergeDefinedProvisionFields(
+      {
+        ...defaultInfo,
+        stationaddress: defaultInfo.address,
+        account: defaultInfo.account || "OCHARGELLC",
+        rep: normalizedCountry === "CA" ? "WADE" : "OCHARGELLC",
+      },
+      existingInfo,
+  );
+  const provisionInfo = mergeDefinedProvisionFields(mergedInfo, submittedInfo);
+  if (String(provisionInfo.locationtype || "").trim().toUpperCase() === "EVENT") {
+    provisionInfo.locationtype = defaultInfo.locationtype;
+  }
+  const info = normalizeKioskInfoForSchema(
+      {
+        ...provisionInfo,
+        country: normalizedCountry,
+      },
+      true,
+  );
+
+  const existingHardware = isPlainObject(existingData.hardware) ? existingData.hardware : {};
+  const submittedHardware = isPlainObject(kioskInput.hardware) ? kioskInput.hardware : {};
+  const hardware = mergeDefinedProvisionFields(
+      {
+        type: AI_BOOTH_KIOSK_TYPE,
+        mode: "AI",
+        modules: 12,
+        screen: "49",
+        hrate: "20",
+        cpu: "C4",
+        gateway: "PAYTERP68",
+        gatewayoptions: "INITIALPRICE",
+        port: "1884",
+        server: "chargerent.io",
+        audio: "on",
+        power: DEFAULT_KIOSK_POWER_THRESHOLD,
+        quarantine: {time: 0, unit: "min"},
+      },
+      existingHardware,
+  );
+  Object.assign(hardware, mergeDefinedProvisionFields(hardware, submittedHardware));
+  hardware.type = AI_BOOTH_KIOSK_TYPE;
+  hardware.mode = "AI";
+  hardware.modules = Number(hardware.modules || 12);
+  hardware.screen = String(hardware.screen || "49").trim() || "49";
+  delete hardware.modversion;
+
+  const existingPricing = isPlainObject(existingData.pricing) ? existingData.pricing : {};
+  const submittedPricing = isPlainObject(kioskInput.pricing) ? kioskInput.pricing : {};
+  const pricing = mergeDefinedProvisionFields(
+      {
+        currency,
+        symbol,
+        kioskmode: "LEASE",
+        text: "EVENT - SIMPLE",
+        authamount: 0,
+        dailyprice: 0,
+        buyprice: 0,
+        taxrate: 0,
+        initialperiod: 24,
+        overdue: 30,
+        profile: "AI-BOOTH",
+        online: true,
+        webapp: false,
+        mobileapp: false,
+        rate: [],
+      },
+      existingPricing,
+  );
+  Object.assign(pricing, mergeDefinedProvisionFields(pricing, submittedPricing));
+
+  const existingUi = isPlainObject(existingData.ui) ? existingData.ui : {};
+  const submittedUi = isPlainObject(kioskInput.ui) ? kioskInput.ui : {};
+  const ui = mergeDefinedProvisionFields(existingUi, submittedUi);
+  const registration = isPlainObject(existingData.registration) ? existingData.registration : {};
+  const modules = Array.isArray(kioskInput.modules) ?
+    kioskInput.modules :
+    (Array.isArray(existingData.modules) ? existingData.modules : []);
+  const nextKiosk = {
+    ...existingData,
+    ...clonePlain(kioskInput),
+    provisionid,
+    stationid,
+    active: true,
+    enabled: true,
+    status: "PENDING",
+    source: existingData.source || "ai-booth-electron",
+    kioskType: AI_BOOTH_KIOSK_TYPE,
+    info,
+    hardware,
+    pricing,
+    ui,
+    modules,
+    total: 0,
+    full: 0,
+    slot: 0,
+    empty: 0,
+    charging: 0,
+    count: 0,
+    slotscount: 0,
+    lockcount: 0,
+    zerocount: 0,
+    chargers: "soldout",
+    binding: {
+      state: "bound",
+      boundAt: timestamp,
+      boundBy: actorUid,
+    },
+    registration: {
+      ...registration,
+      provisionedAt: timestamp,
+      provisionedBy: actorUid,
+    },
+    updatedAt: timestamp,
+    createdAt: existingData.createdAt || timestamp,
+  };
+
+  return recalculateKioskTotals(nextKiosk);
+}
+
+async function aiBoothsProvisionPendingKioskImpl(data, authState) {
+  const provisionid = normalizeAiBoothProvisionId(data?.provisionid || data?.kiosk?.provisionid);
+  const stationid = normalizeStationId(data?.stationid || data?.kiosk?.stationid);
+  const country = normalizeCountry(
+      data?.country ||
+      data?.kiosk?.info?.country ||
+      getCountryFromStationId(stationid),
+  );
+  const stationCountry = getCountryFromStationId(stationid);
+
+  if (!provisionid) {
+    throw new functions.https.HttpsError("invalid-argument", "valid aid provisionid required");
+  }
+
+  if (!stationid) {
+    throw new functions.https.HttpsError("invalid-argument", "stationid required");
+  }
+
+  if (!isBindingStationId(stationid, country) || stationCountry !== country) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        buildInvalidStationIdMessage(stationid, country),
+    );
+  }
+
+  if (!isAiBoothStationId(stationid)) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "AI booth station IDs must use the 9000 sequence.",
+    );
+  }
+
+  const docRef = db.collection("kiosks").doc(provisionid);
+  const reservationRef = db.collection(STATION_RESERVATIONS_COLLECTION).doc(stationid);
+  const kioskInput = clonePlain(data?.kiosk) || {};
+
+  return db.runTransaction(async (transaction) => {
+    const [docSnap, existingStationSnap, reservationSnap] = await Promise.all([
+      transaction.get(docRef),
+      transaction.get(
+          db.collection("kiosks").where("stationid", "==", stationid).limit(1),
+      ),
+      transaction.get(reservationRef),
+    ]);
+
+    if (!docSnap.exists) {
+      throw new functions.https.HttpsError(
+          "not-found",
+          `${provisionid} is not in the AI booth pending list.`,
+      );
+    }
+
+    const existingData = docSnap.data() || {};
+    const existingStatus = cleanAiBoothText(existingData.status, 80).toLowerCase();
+
+    if (existingStatus !== "pending-provision") {
+      throw new functions.https.HttpsError(
+          "failed-precondition",
+          `${provisionid} is not pending provisioning.`,
+      );
+    }
+
+    const stationConflict = existingStationSnap.docs.find((stationDoc) => stationDoc.id !== provisionid);
+    if (stationConflict) {
+      throw new functions.https.HttpsError(
+          "already-exists",
+          `Station ${stationid} already exists.`,
+      );
+    }
+
+    const reservationData = reservationSnap.exists ? reservationSnap.data() || {} : {};
+    if (reservationSnap.exists && reservationData.active !== false) {
+      throw new functions.https.HttpsError(
+          "failed-precondition",
+          `Station ${stationid} is reserved.`,
+      );
+    }
+
+    const nextKiosk = buildProvisionedAiBoothKioskDocument({
+      provisionid,
+      stationid,
+      country,
+      actorUid: authState.uid,
+      existingData,
+      kioskInput,
+    });
+
+    transaction.set(docRef, nextKiosk, {merge: true});
+
+    return {
+      ok: true,
+      provisionid,
+      stationid,
+      status: "PENDING",
+      qrUrl: buildQrUrl(stationid),
+      message: "AI booth provisioned on server",
+    };
+  });
+}
+
+async function getAiBoothRuntimeConfigForStation(stationid) {
+  const stationId = normalizeStationId(stationid);
+  if (!stationId) {
+    return {
+      stationId: "",
+      stationid: "",
+      eventId: "",
+      eventName: "",
+      agentId: "",
+      agentName: "",
+      agentSyncStatus: "",
+      knowledgeBaseDocumentId: "",
+      knowledgeBaseDocumentName: "",
+      eventUpdatedAt: "",
+      agentUpdatedAt: "",
+      screenUiUpdatedAt: "",
+      configVersion: "",
+    };
+  }
+
+  const [eventSnapshot, screenUiSnapshot] = await Promise.all([
+    db.collection("aiBoothEvents")
+        .where("boothStationIds", "array-contains", stationId)
+        .get(),
+    db.collection("aiBoothScreenUi").doc(stationId).get(),
+  ]);
+  const events = eventSnapshot.docs
+      .map((docSnapshot) => serializeAiBoothEvent(docSnapshot))
+      .sort(compareAiBoothEvents);
+  const event = events[0] || null;
+  const screenUiData = screenUiSnapshot.exists ? screenUiSnapshot.data() || {} : {};
+  const eventId = cleanAiBoothText(event?.id || screenUiData.eventId, 160);
+  const stationIds = Array.isArray(event?.boothStationIds) ? event.boothStationIds : [];
+  const agentConfig = normalizeAiBoothAgent(event?.agent, stationIds);
+  const kioskAgent = normalizeAiBoothKioskAgent(agentConfig.kioskAgents?.[stationId]);
+  const knowledgeBase = normalizeAiBoothKnowledgeBase(agentConfig.knowledgeBase);
+  const agentId = kioskAgent.agentId || agentConfig.agentId;
+  const agentUpdatedAt = kioskAgent.lastSyncedAt || agentConfig.lastSyncedAt;
+  const screenUiUpdatedAt = serializeTimestamp(screenUiData.updatedAt);
+  const eventUpdatedAt = event?.updatedAt || event?.createdAt || "";
+  const configVersion = [
+    stationId,
+    eventId,
+    eventUpdatedAt,
+    agentId,
+    agentUpdatedAt,
+    screenUiUpdatedAt,
+  ].filter(Boolean).join("|");
+
+  return {
+    stationId,
+    stationid: stationId,
+    eventId,
+    eventName: cleanAiBoothText(event?.general?.eventName, 140),
+    agentId,
+    agentName: kioskAgent.name || agentConfig.name,
+    agentSyncStatus: kioskAgent.syncStatus || agentConfig.syncStatus,
+    knowledgeBaseDocumentId: knowledgeBase.documentId,
+    knowledgeBaseDocumentName: knowledgeBase.documentName,
+    eventUpdatedAt,
+    agentUpdatedAt,
+    screenUiUpdatedAt,
+    configVersion,
+  };
+}
+
+async function aiBoothsGetDeviceConfigImpl(data) {
+  const provisionid = normalizeAiBoothProvisionId(data?.provisionid);
+  const deviceSecretHash = hashAiBoothDeviceSecret(data?.deviceSecret);
+
+  if (!provisionid) {
+    throw new functions.https.HttpsError("invalid-argument", "valid aid provisionid required");
+  }
+
+  if (!deviceSecretHash) {
+    throw new functions.https.HttpsError("invalid-argument", "valid device secret required");
+  }
+
+  const docSnapshot = await db.collection("kiosks").doc(provisionid).get();
+  if (!docSnapshot.exists) {
+    throw new functions.https.HttpsError(
+        "not-found",
+        `${provisionid} is not registered.`,
+    );
+  }
+
+  const kiosk = docSnapshot.data() || {};
+  const existingSecretHash = cleanAiBoothText(kiosk.registration?.deviceSecretHash, 128);
+  if (!existingSecretHash || existingSecretHash !== deviceSecretHash) {
+    throw new functions.https.HttpsError(
+        "permission-denied",
+        `${provisionid} belongs to another device.`,
+    );
+  }
+
+  const status = cleanAiBoothText(kiosk.status, 80);
+  const normalizedStatus = status.toLowerCase();
+  const stationId = normalizeStationId(kiosk.stationid);
+
+  if (normalizedStatus === "pending-provision" || !stationId) {
+    return {
+      ok: true,
+      state: "pending",
+      provisionid,
+      stationId: "",
+      stationid: "",
+      status: status || "pending-provision",
+      active: kiosk.active === true,
+      enabled: kiosk.enabled === true,
+      runtimeReady: false,
+    };
+  }
+
+  const runtimeConfig = await getAiBoothRuntimeConfigForStation(stationId);
+
+  return {
+    ok: true,
+    state: "provisioned",
+    provisionid,
+    status,
+    active: kiosk.active === true,
+    enabled: kiosk.enabled !== false,
+    kioskType: cleanAiBoothText(kiosk.kioskType || kiosk.hardware?.type, 80),
+    runtimeReady: Boolean(runtimeConfig.agentId),
+    ...runtimeConfig,
+  };
+}
+
+function buildAiBoothDeviceRuntimeChecks({
+  reportedEventId,
+  reportedAgentId,
+  reportedConfigVersion,
+  serverReady,
+  pageLoaded,
+  runtimeConfig,
+}) {
+  const expectedEventId = cleanAiBoothText(runtimeConfig?.eventId, 160);
+  const expectedAgentId = cleanAiBoothText(runtimeConfig?.agentId, 160);
+  const expectedConfigVersion = cleanAiBoothText(runtimeConfig?.configVersion, 1000);
+
+  return {
+    eventAssigned: Boolean(expectedEventId),
+    eventMatches: Boolean(expectedEventId && reportedEventId === expectedEventId),
+    agentSynced: Boolean(expectedAgentId && runtimeConfig?.agentSyncStatus === "synced"),
+    agentMatches: Boolean(expectedAgentId && reportedAgentId === expectedAgentId),
+    configCurrent: Boolean(expectedConfigVersion && reportedConfigVersion === expectedConfigVersion),
+    serverReady: serverReady === true,
+    pageLoaded: pageLoaded === true,
+  };
+}
+
+function getAiBoothFailedRuntimeChecks(checks) {
+  return Object.entries(checks || {})
+      .filter(([, value]) => value !== true)
+      .map(([key]) => key);
+}
+
+async function aiBoothsDeviceHeartbeatImpl(data) {
+  const provisionid = normalizeAiBoothProvisionId(data?.provisionid);
+  const deviceSecretHash = hashAiBoothDeviceSecret(data?.deviceSecret);
+
+  if (!provisionid) {
+    throw new functions.https.HttpsError("invalid-argument", "valid aid provisionid required");
+  }
+
+  if (!deviceSecretHash) {
+    throw new functions.https.HttpsError("invalid-argument", "valid device secret required");
+  }
+
+  const docRef = db.collection("kiosks").doc(provisionid);
+  const docSnapshot = await docRef.get();
+  if (!docSnapshot.exists) {
+    throw new functions.https.HttpsError(
+        "not-found",
+        `${provisionid} is not registered.`,
+    );
+  }
+
+  const kiosk = docSnapshot.data() || {};
+  const existingSecretHash = cleanAiBoothText(kiosk.registration?.deviceSecretHash, 128);
+  if (!existingSecretHash || existingSecretHash !== deviceSecretHash) {
+    throw new functions.https.HttpsError(
+        "permission-denied",
+        `${provisionid} belongs to another device.`,
+    );
+  }
+
+  const stationId = normalizeStationId(kiosk.stationid || data?.stationId || data?.stationid);
+  const reportedEventId = cleanAiBoothText(data?.eventId, 160);
+  const reportedAgentId = cleanAiBoothText(data?.agentId, 160);
+  const reportedConfigVersion = cleanAiBoothText(data?.configVersion, 1000);
+  const mode = cleanAiBoothText(data?.mode, 40) || (stationId ? "runtime" : "registration");
+  const serverReady = data?.serverReady === true;
+  const pageLoaded = data?.pageLoaded === true;
+  const nowIso = new Date().toISOString();
+  const runtimeConfig = stationId ?
+    await getAiBoothRuntimeConfigForStation(stationId) :
+    null;
+  const checks = stationId ?
+    buildAiBoothDeviceRuntimeChecks({
+      reportedEventId,
+      reportedAgentId,
+      reportedConfigVersion,
+      serverReady,
+      pageLoaded,
+      runtimeConfig,
+    }) :
+    {registered: true, stationAssigned: false};
+  const failedChecks = getAiBoothFailedRuntimeChecks(checks);
+  const runtimeReady = stationId && failedChecks.length === 0;
+  const state = runtimeReady ?
+    "running" :
+    stationId ? "needs-attention" : "registration";
+
+  await docRef.set({
+    aiBoothRuntime: {
+      state,
+      runtimeReady: Boolean(runtimeReady),
+      checks,
+      failedChecks,
+      lastHeartbeatAt: admin.firestore.FieldValue.serverTimestamp(),
+      lastHeartbeatAtIso: nowIso,
+      provisionid,
+      stationId,
+      mode,
+      appVersion: cleanAiBoothText(data?.appVersion, 80),
+      platform: cleanAiBoothText(data?.platform, 80),
+      hostname: cleanAiBoothText(data?.hostname, 160),
+      pageUrl: cleanAiBoothText(data?.pageUrl, 500),
+      lastError: cleanAiBoothText(data?.lastError, 1000),
+      kioskMode: data?.kioskMode === true,
+      fullscreen: data?.fullscreen === true,
+      reportedEventId,
+      expectedEventId: cleanAiBoothText(runtimeConfig?.eventId, 160),
+      reportedAgentId,
+      expectedAgentId: cleanAiBoothText(runtimeConfig?.agentId, 160),
+      reportedConfigVersion,
+      expectedConfigVersion: cleanAiBoothText(runtimeConfig?.configVersion, 1000),
+      eventName: cleanAiBoothText(runtimeConfig?.eventName, 140),
+      agentName: cleanAiBoothText(runtimeConfig?.agentName, 140),
+    },
+    lastSeen: admin.firestore.FieldValue.serverTimestamp(),
+    online: true,
+    timestamp: nowIso,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, {merge: true});
+
+  return {
+    ok: true,
+    state,
+    runtimeReady: Boolean(runtimeReady),
+    checks,
+    failedChecks,
+    expectedConfigVersion: cleanAiBoothText(runtimeConfig?.configVersion, 1000),
+  };
+}
+
 async function aiBoothsListEventsImpl() {
   const snapshot = await db.collection("aiBoothEvents").get();
   const events = snapshot.docs
@@ -2430,6 +3755,106 @@ async function aiBoothsListEventsImpl() {
       .sort(compareAiBoothEvents);
 
   return {events};
+}
+
+function buildAiBoothEventKioskInfoUpdate(eventId, general, boothContext, actor) {
+  const eventName = cleanAiBoothText(general?.eventName, 140);
+  const context = normalizeAiBoothBoothContext(boothContext);
+  const place = cleanAiBoothText(context.place || context.locationName || general?.place, 200);
+  const address = cleanAiBoothText(general?.address, 300);
+  const city = cleanAiBoothText(general?.city, 120);
+  const zipCode = cleanAiBoothText(general?.zipCode || general?.zip, 32);
+  const country = normalizeCountry(general?.country);
+  const latitude = parseAiBoothCoordinate(context.latitude || general?.latitude || general?.lat, -90, 90);
+  const longitude = parseAiBoothCoordinate(context.longitude || general?.longitude || general?.lon, -180, 180);
+  const timestamp = admin.firestore.FieldValue.serverTimestamp();
+
+  return {
+    "info.location": eventName,
+    "info.place": place,
+    "info.address": address,
+    "info.stationaddress": address,
+    "info.city": city,
+    "info.zip": zipCode,
+    "info.country": country,
+    "info.lat": latitude,
+    "info.lon": longitude,
+    "info.locationtype": "EVENT",
+    aiBoothEvent: {
+      eventId,
+      eventName,
+      assignedAt: timestamp,
+      assignedBy: actor,
+    },
+    updatedAt: timestamp,
+    updatedBy: actor,
+  };
+}
+
+async function syncAiBoothEventKioskInfo({
+  eventId,
+  general,
+  boothContexts,
+  boothStationIds,
+  actor,
+}) {
+  const stationIds = Array.from(new Set(
+      (Array.isArray(boothStationIds) ? boothStationIds : [])
+          .map((stationId) => cleanAiBoothText(stationId, 80))
+          .filter(Boolean),
+  ));
+
+  if (stationIds.length === 0) {
+    return {updatedStationIds: [], missingStationIds: []};
+  }
+
+  const updatedStationIds = [];
+  const foundStationIds = new Set();
+  const commitPromises = [];
+  let batch = db.batch();
+  let writes = 0;
+
+  for (const stationChunk of chunkArray(stationIds, 10)) {
+    const snapshot = await db.collection("kiosks")
+        .where("stationid", "in", stationChunk)
+        .get();
+
+    snapshot.docs.forEach((docSnap) => {
+      const kiosk = docSnap.data() || {};
+      const stationId = cleanAiBoothText(kiosk.stationid || docSnap.id, 80);
+      if (!stationId || foundStationIds.has(stationId)) {
+        return;
+      }
+
+      foundStationIds.add(stationId);
+      updatedStationIds.push(stationId);
+      const updates = buildAiBoothEventKioskInfoUpdate(
+          eventId,
+          general,
+          boothContexts?.[stationId],
+          actor,
+      );
+      batch.update(docSnap.ref, updates);
+      writes += 1;
+
+      if (writes >= 450) {
+        commitPromises.push(batch.commit());
+        batch = db.batch();
+        writes = 0;
+      }
+    });
+  }
+
+  if (writes > 0) {
+    commitPromises.push(batch.commit());
+  }
+
+  await Promise.all(commitPromises);
+
+  return {
+    updatedStationIds,
+    missingStationIds: stationIds.filter((stationId) => !foundStationIds.has(stationId)),
+  };
 }
 
 async function aiBoothsSaveEventImpl(data, authState) {
@@ -2458,20 +3883,35 @@ async function aiBoothsSaveEventImpl(data, authState) {
   const topics = Array.isArray(eventInput.topics) ?
     eventInput.topics.map((topic, index) => normalizeAiBoothTopic(topic, index)) :
     [];
+  const activations = Array.isArray(eventInput.activations) ?
+    eventInput.activations.map((activation, index) => normalizeAiBoothActivation(activation, index)) :
+    [];
   const boothContexts = normalizeAiBoothBoothContexts(eventInput.boothContexts, boothStationIds);
+  const screenUi = normalizeAiBoothScreenUi(eventInput.screenUi);
+  const screenUiByStationId = normalizeAiBoothScreenUiByStationId(
+      eventInput.screenUiByStationId,
+      boothStationIds,
+      screenUi,
+  );
   const agent = normalizeAiBoothAgent(eventInput.agent, boothStationIds);
 
   const cleanEvent = {
     general: {
       eventName,
       eventCategory: cleanAiBoothText(generalInput.eventCategory, 120),
-      eventTopic: cleanAiBoothText(generalInput.eventTopic || generalInput.eventSport, 120),
-      serviceName: cleanAiBoothText(generalInput.serviceName, 160) ||
-        "Portable Charger Rental Kiosk",
+      open24Hours: generalInput.open24Hours === true,
+      phoneChargingEnabled: typeof generalInput.phoneChargingEnabled === "boolean" ?
+        generalInput.phoneChargingEnabled :
+        DEFAULT_AI_BOOTH_PHONE_CHARGING_ENABLED,
+      paymentType: normalizeAiBoothPaymentType(generalInput.paymentType),
+      eventInfo: cleanAiBoothText(generalInput.eventInfo || generalInput.basicEventInfo, 8000),
+      place: admin.firestore.FieldValue.delete(),
       address: cleanAiBoothText(generalInput.address, 300),
       city: cleanAiBoothText(generalInput.city, 120),
       zipCode: cleanAiBoothText(generalInput.zipCode || generalInput.zip, 32),
       country: normalizeCountry(generalInput.country),
+      latitude: admin.firestore.FieldValue.delete(),
+      longitude: admin.firestore.FieldValue.delete(),
       startDate: cleanAiBoothText(generalInput.startDate, 32),
       endDate: cleanAiBoothText(generalInput.endDate, 32),
       sameHoursEveryDay: generalInput.sameHoursEveryDay === true,
@@ -2482,14 +3922,17 @@ async function aiBoothsSaveEventImpl(data, authState) {
         DEFAULT_AI_BOOTH_RENTAL_POLICY,
       supportFallback: cleanAiBoothText(generalInput.supportFallback, 240) ||
         DEFAULT_AI_BOOTH_SUPPORT_FALLBACK,
-      notes: cleanAiBoothText(generalInput.notes, 8000),
     },
     boothStationIds,
     boothContexts,
+    screenUi,
+    screenUiByStationId,
     topics,
+    activations,
     agent,
     boothCount: boothStationIds.length,
     topicCount: topics.length,
+    activationCount: activations.length,
     updatedBy: actor,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   };
@@ -2500,6 +3943,11 @@ async function aiBoothsSaveEventImpl(data, authState) {
     db.collection("aiBoothEvents").doc(requestedId) :
     db.collection("aiBoothEvents").doc();
   const existingSnapshot = await eventRef.get();
+  const previousBoothStationIds = existingSnapshot.exists && Array.isArray(existingSnapshot.data()?.boothStationIds) ?
+    existingSnapshot.data().boothStationIds
+        .map((value) => cleanAiBoothText(value, 80))
+        .filter(Boolean) :
+    [];
 
   if (!existingSnapshot.exists) {
     cleanEvent.createdBy = actor;
@@ -2508,10 +3956,54 @@ async function aiBoothsSaveEventImpl(data, authState) {
 
   await eventRef.set(cleanEvent, {merge: true});
 
+  const screenUiCollection = db.collection("aiBoothScreenUi");
+  const screenUiBatch = db.batch();
+  const screenUiTopics = topics.map(normalizeAiBoothScreenTopic);
+  const currentStationIdSet = new Set(boothStationIds);
+  const staleStationIds = Array.from(new Set(previousBoothStationIds))
+      .filter((stationId) => !currentStationIdSet.has(stationId));
+  const staleSnapshots = await Promise.all(
+      staleStationIds.map((stationId) => screenUiCollection.doc(stationId).get()),
+  );
+
+  if (!currentStationIdSet.has(eventRef.id)) {
+    screenUiBatch.delete(screenUiCollection.doc(eventRef.id));
+  }
+  boothStationIds.forEach((stationId) => {
+    screenUiBatch.set(screenUiCollection.doc(stationId), {
+      eventId: eventRef.id,
+      stationId,
+      boothStationIds: [stationId],
+      screenUi: screenUiByStationId[stationId] || screenUi,
+      topics: screenUiTopics,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, {merge: true});
+  });
+  staleSnapshots.forEach((stationSnapshot) => {
+    if (stationSnapshot.exists && stationSnapshot.data()?.eventId === eventRef.id) {
+      screenUiBatch.delete(stationSnapshot.ref);
+    }
+  });
+  await screenUiBatch.commit();
+
+  const kioskSync = await syncAiBoothEventKioskInfo({
+    eventId: eventRef.id,
+    general: {
+      ...cleanEvent.general,
+      place: cleanAiBoothText(generalInput.place, 200),
+      latitude: cleanAiBoothCoordinateText(generalInput.latitude ?? generalInput.lat),
+      longitude: cleanAiBoothCoordinateText(generalInput.longitude ?? generalInput.lon),
+    },
+    boothContexts,
+    boothStationIds,
+    actor,
+  });
+
   const savedSnapshot = await eventRef.get();
   return {
     ok: true,
     event: serializeAiBoothEvent(savedSnapshot),
+    kioskSync,
   };
 }
 
@@ -2630,6 +4122,25 @@ async function aiBoothsListElevenLabsAgentsImpl(data = {}) {
   };
 }
 
+async function findElevenLabsAgentIdByName(agentName) {
+  const search = cleanAiBoothText(agentName, 120);
+  if (!search) {
+    return "";
+  }
+
+  const params = new URLSearchParams({
+    page_size: "100",
+    archived: "false",
+    search,
+  });
+  const payload = await elevenLabsRequest(`/v1/convai/agents?${params.toString()}`);
+  const matchingAgent = (Array.isArray(payload.agents) ? payload.agents : [])
+      .map(normalizeElevenLabsAgentSummary)
+      .find((agent) => agent.name === search);
+
+  return matchingAgent?.agentId || "";
+}
+
 function buildAiBoothAgentName(event, stationId = "") {
   const eventName = cleanAiBoothText(event?.general?.eventName, 80) || "AI Booth Event";
   const stationSuffix = cleanAiBoothText(stationId, 80);
@@ -2637,6 +4148,10 @@ function buildAiBoothAgentName(event, stationId = "") {
 }
 
 function formatAiBoothSchedule(general) {
+  if (general?.open24Hours) {
+    return "Open 24 hours every event day.";
+  }
+
   if (general?.sameHoursEveryDay) {
     return `Every event day: ${general.openingHours || "unset"} to ${general.closingHours || "unset"}`;
   }
@@ -2649,13 +4164,474 @@ function formatAiBoothSchedule(general) {
   return rows.length > 0 ? rows.join("\n") : "No opening hours set.";
 }
 
+function formatAiBoothKnowledgeLine(label, value, fallback = "Not set") {
+  return `- ${label}: ${cleanAiBoothText(value, 8000) || fallback}`;
+}
+
+function formatAiBoothKnowledgeBlock(label, value, fallback = "Not set") {
+  return [
+    `### ${label}`,
+    cleanAiBoothText(value, 12000) || fallback,
+  ].join("\n");
+}
+
+function buildAiBoothTransportationLocationKnowledge(location, index) {
+  const normalizedLocation = normalizeAiBoothTransportationLocation(
+      location,
+      index,
+  );
+  const coordinates = [
+    normalizedLocation.latitude,
+    normalizedLocation.longitude,
+  ].filter(Boolean).join(", ");
+  const timeWindow = [
+    normalizedLocation.startTime,
+    normalizedLocation.endTime,
+  ].filter(Boolean).join(" - ");
+  const hours = timeWindow || normalizedLocation.hours;
+  const heading = normalizedLocation.location ||
+    `Location ${index + 1}`;
+
+  return [
+    `##### ${heading}`,
+    formatAiBoothKnowledgeLine("Location", normalizedLocation.location),
+    formatAiBoothKnowledgeLine("Coordinates", coordinates),
+    formatAiBoothKnowledgeLine("Hours", hours),
+    formatAiBoothKnowledgeLine("Frequency", normalizedLocation.frequency),
+    [
+      "Details:",
+      normalizedLocation.details || "Not set",
+    ].join("\n"),
+  ].join("\n\n");
+}
+
+function buildAiBoothTransportationSectionKnowledge(label, section) {
+  const normalizedSection = normalizeAiBoothTransportationSection(section);
+  const locations = normalizedSection.locations.length > 0 ?
+    normalizedSection.locations
+        .map(buildAiBoothTransportationLocationKnowledge)
+        .join("\n\n") :
+    "No locations configured.";
+
+  return [
+    `#### ${label}`,
+    locations,
+  ].join("\n\n");
+}
+
+function buildAiBoothFanZoneActivationKnowledge(activation, index) {
+  const normalizedActivation = normalizeAiBoothFanZoneActivation(activation, index);
+
+  return [
+    `##### ${normalizedActivation.name}`,
+    formatAiBoothKnowledgeLine("Activation ID", normalizedActivation.id),
+    formatAiBoothKnowledgeLine("Sponsor", normalizedActivation.sponsor),
+    formatAiBoothKnowledgeLine("Location", normalizedActivation.location),
+    formatAiBoothKnowledgeLine("Hours", normalizedActivation.hours),
+    formatAiBoothKnowledgeBlock("Details", normalizedActivation.details),
+  ].join("\n\n");
+}
+
+function buildAiBoothFanZoneKnowledge(zone, index) {
+  const normalizedZone = normalizeAiBoothFanZone(zone, index);
+  const coordinates = [normalizedZone.latitude, normalizedZone.longitude]
+      .filter(Boolean)
+      .join(", ");
+  const activations = normalizedZone.activations.length > 0 ?
+    normalizedZone.activations.map(buildAiBoothFanZoneActivationKnowledge).join("\n\n") :
+    "No activations configured.";
+
+  return [
+    `#### ${normalizedZone.name}`,
+    formatAiBoothKnowledgeLine("Fan Zone ID", normalizedZone.id),
+    formatAiBoothKnowledgeLine("Coordinates", coordinates),
+    formatAiBoothKnowledgeLine("Open Hours", normalizedZone.openHours),
+    formatAiBoothKnowledgeBlock("Details", normalizedZone.details),
+    `#### Activations\n${activations}`,
+  ].join("\n\n");
+}
+
+function buildAiBoothHospitalityClientKnowledge(client, index) {
+  const normalizedClient = normalizeAiBoothHospitalityClient(client, index);
+
+  return [
+    `##### ${normalizedClient.clientName}`,
+    formatAiBoothKnowledgeLine("Client ID", normalizedClient.id),
+    formatAiBoothKnowledgeLine("Contact name", normalizedClient.contactName),
+    formatAiBoothKnowledgeLine("Contact phone", normalizedClient.contactPhone),
+    formatAiBoothKnowledgeLine("Contact email", normalizedClient.contactEmail),
+    formatAiBoothKnowledgeLine("Host name", normalizedClient.hostName),
+    formatAiBoothKnowledgeBlock("Credential notes", normalizedClient.credentialNotes),
+    formatAiBoothKnowledgeBlock("Arrival notes", normalizedClient.arrivalNotes),
+    formatAiBoothKnowledgeBlock("Special requests", normalizedClient.specialRequests),
+  ].join("\n\n");
+}
+
+function buildAiBoothHospitalityLocationKnowledge(location, index) {
+  const normalizedLocation = normalizeAiBoothHospitalityLocation(location, index);
+  const coordinates = [normalizedLocation.latitude, normalizedLocation.longitude]
+      .filter(Boolean)
+      .join(", ");
+  const clients = normalizedLocation.clients.length > 0 ?
+    normalizedLocation.clients.map(buildAiBoothHospitalityClientKnowledge).join("\n\n") :
+    "No clients assigned.";
+
+  return [
+    `#### ${normalizedLocation.name}`,
+    formatAiBoothKnowledgeLine("Location ID", normalizedLocation.id),
+    formatAiBoothKnowledgeLine("Venue type", normalizedLocation.venueType),
+    formatAiBoothKnowledgeLine("Location", normalizedLocation.location),
+    formatAiBoothKnowledgeLine("Coordinates", coordinates),
+    formatAiBoothKnowledgeBlock("Amenities", normalizedLocation.amenities),
+    formatAiBoothKnowledgeBlock("Access notes", normalizedLocation.accessNotes),
+    formatAiBoothKnowledgeBlock("Details", normalizedLocation.details),
+    `#### Assigned Clients\n${clients}`,
+  ].join("\n\n");
+}
+
+function buildAiBoothBathroomLocationKnowledge(location, index) {
+  const normalizedLocation = normalizeAiBoothBathroomLocation(location, index);
+  const coordinates = [normalizedLocation.latitude, normalizedLocation.longitude]
+      .filter(Boolean)
+      .join(", ");
+
+  return [
+    `#### ${normalizedLocation.place}`,
+    formatAiBoothKnowledgeLine("Location ID", normalizedLocation.id),
+    formatAiBoothKnowledgeLine("Coordinates", coordinates),
+  ].join("\n\n");
+}
+
+function buildAiBoothFanServiceKnowledge(service, index) {
+  const normalizedService = normalizeAiBoothFanService(service, index);
+  const coordinates = [normalizedService.latitude, normalizedService.longitude]
+      .filter(Boolean)
+      .join(", ");
+
+  return [
+    `#### ${normalizedService.name}`,
+    formatAiBoothKnowledgeLine("Service ID", normalizedService.id),
+    formatAiBoothKnowledgeLine("Location", normalizedService.location),
+    formatAiBoothKnowledgeLine("Coordinates", coordinates),
+  ].join("\n\n");
+}
+
+function buildAiBoothCourseHoleKnowledge(hole, index) {
+  const normalizedHole = normalizeAiBoothCourseHole(hole, index);
+  const teeCoordinates = [normalizedHole.teeLatitude, normalizedHole.teeLongitude]
+      .filter(Boolean)
+      .join(", ");
+  const greenCoordinates = [normalizedHole.greenLatitude, normalizedHole.greenLongitude]
+      .filter(Boolean)
+      .join(", ");
+
+  return [
+    `#### Hole ${normalizedHole.holeNumber}`,
+    formatAiBoothKnowledgeLine("Tee coordinates", teeCoordinates),
+    formatAiBoothKnowledgeLine("Green coordinates", greenCoordinates),
+  ].join("\n\n");
+}
+
+function buildAiBoothScheduleEventKnowledge(scheduleEvent, dayIndex, eventIndex) {
+  const normalizedEvent = normalizeAiBoothScheduleEvent(scheduleEvent, dayIndex, eventIndex);
+  const timeWindow = [normalizedEvent.startTime, normalizedEvent.endTime]
+      .filter(Boolean)
+      .join(" - ");
+
+  return [
+    `#### ${normalizedEvent.title}`,
+    formatAiBoothKnowledgeLine("Schedule item ID", normalizedEvent.id),
+    formatAiBoothKnowledgeLine("Category", normalizedEvent.category),
+    formatAiBoothKnowledgeLine("Time", timeWindow),
+    formatAiBoothKnowledgeLine("Location", normalizedEvent.location),
+    formatAiBoothKnowledgeLine("Audience / access", normalizedEvent.audience),
+    formatAiBoothKnowledgeLine("Needs review", normalizedEvent.needsReview ? "Yes" : "No"),
+    formatAiBoothKnowledgeBlock("Details", normalizedEvent.details),
+    formatAiBoothKnowledgeBlock("Source note", normalizedEvent.sourceNote),
+  ].join("\n\n");
+}
+
+function buildAiBoothScheduleDayKnowledge(day, index) {
+  const normalizedDay = normalizeAiBoothScheduleDay(day, index);
+  const gateWindow = [normalizedDay.gatesOpen, normalizedDay.gatesClose]
+      .filter(Boolean)
+      .join(" - ");
+  const scheduleItems = normalizedDay.events.length > 0 ?
+    normalizedDay.events.map((event, eventIndex) => (
+      buildAiBoothScheduleEventKnowledge(event, index, eventIndex)
+    )).join("\n\n") :
+    "No schedule items configured.";
+
+  return [
+    `### ${normalizedDay.dayLabel}`,
+    formatAiBoothKnowledgeLine("Date", normalizedDay.date),
+    formatAiBoothKnowledgeLine("Status / access", normalizedDay.publicStatus),
+    formatAiBoothKnowledgeLine("Theme", normalizedDay.theme),
+    formatAiBoothKnowledgeLine("Gate window", gateWindow),
+    formatAiBoothKnowledgeBlock("Daily notes", normalizedDay.dailyNotes),
+    `### Schedule Items\n${scheduleItems}`,
+  ].join("\n\n");
+}
+
+function buildAiBoothTopicKnowledge(topic, index) {
+  const normalizedTopic = normalizeAiBoothTopic(topic, index);
+
+  if (normalizedTopic.kind === AI_BOOTH_WIFI_TOPIC_KIND) {
+    return [
+      `### ${normalizedTopic.title}`,
+      formatAiBoothKnowledgeLine("Topic ID", normalizedTopic.id),
+      formatAiBoothKnowledgeLine("Type", "Wi-Fi"),
+      formatAiBoothKnowledgeLine("SSID", normalizedTopic.wifiSsid),
+      formatAiBoothKnowledgeLine("Password", normalizedTopic.wifiPassword),
+      formatAiBoothKnowledgeBlock("Instructions", normalizedTopic.summary),
+    ].join("\n\n");
+  }
+
+  if (normalizedTopic.kind === AI_BOOTH_TRANSPORTATION_TOPIC_KIND) {
+    return [
+      `### ${normalizedTopic.title}`,
+      formatAiBoothKnowledgeLine("Topic ID", normalizedTopic.id),
+      formatAiBoothKnowledgeLine("Type", "Transportation"),
+      formatAiBoothKnowledgeBlock("Summary", normalizedTopic.summary),
+      buildAiBoothTransportationSectionKnowledge(
+          "Shuttle",
+          normalizedTopic.transportation.shuttle,
+      ),
+      buildAiBoothTransportationSectionKnowledge(
+          "Ride Share",
+          normalizedTopic.transportation.rideShare,
+      ),
+      buildAiBoothTransportationSectionKnowledge(
+          "Parking",
+          normalizedTopic.transportation.parking,
+      ),
+    ].join("\n\n");
+  }
+
+  if (normalizedTopic.kind === AI_BOOTH_CONCESSIONS_TOPIC_KIND) {
+    const fanZones = normalizedTopic.fanZones.length > 0 ?
+      normalizedTopic.fanZones.map(buildAiBoothFanZoneKnowledge).join("\n\n") :
+      "No fan zones configured.";
+
+    return [
+      `### ${normalizedTopic.title}`,
+      formatAiBoothKnowledgeLine("Topic ID", normalizedTopic.id),
+      formatAiBoothKnowledgeLine("Type", "Concessions"),
+      formatAiBoothKnowledgeBlock("Summary", normalizedTopic.summary),
+      formatAiBoothKnowledgeBlock("Concession Details", normalizedTopic.notes),
+      `### Fan Zones\n${fanZones}`,
+    ].join("\n\n");
+  }
+
+  if (normalizedTopic.kind === AI_BOOTH_HOSPITALITY_TOPIC_KIND) {
+    const hospitalityLocations = normalizedTopic.hospitalityLocations.length > 0 ?
+      normalizedTopic.hospitalityLocations
+          .map(buildAiBoothHospitalityLocationKnowledge)
+          .join("\n\n") :
+      "No hospitality locations configured.";
+
+    return [
+      `### ${normalizedTopic.title}`,
+      formatAiBoothKnowledgeLine("Topic ID", normalizedTopic.id),
+      formatAiBoothKnowledgeLine("Type", "Hospitality"),
+      formatAiBoothKnowledgeBlock("Summary", normalizedTopic.summary),
+      formatAiBoothKnowledgeBlock("Hospitality Notes", normalizedTopic.notes),
+      `### Hospitality Locations\n${hospitalityLocations}`,
+    ].join("\n\n");
+  }
+
+  if (normalizedTopic.kind === AI_BOOTH_BATHROOMS_TOPIC_KIND) {
+    const bathroomLocations = normalizedTopic.bathroomLocations.length > 0 ?
+      normalizedTopic.bathroomLocations.map(buildAiBoothBathroomLocationKnowledge).join("\n\n") :
+      "No bathroom locations configured.";
+
+    return [
+      `### ${normalizedTopic.title}`,
+      formatAiBoothKnowledgeLine("Topic ID", normalizedTopic.id),
+      formatAiBoothKnowledgeLine("Type", "Bathrooms"),
+      formatAiBoothKnowledgeBlock("Summary", normalizedTopic.summary),
+      `### Bathroom Locations\n${bathroomLocations}`,
+    ].join("\n\n");
+  }
+
+  if (normalizedTopic.kind === AI_BOOTH_FAN_SERVICES_TOPIC_KIND) {
+    const fanServices = normalizedTopic.fanServices.length > 0 ?
+      normalizedTopic.fanServices.map(buildAiBoothFanServiceKnowledge).join("\n\n") :
+      "No fan services configured.";
+
+    return [
+      `### ${normalizedTopic.title}`,
+      formatAiBoothKnowledgeLine("Topic ID", normalizedTopic.id),
+      formatAiBoothKnowledgeLine("Type", "Fan Services"),
+      formatAiBoothKnowledgeBlock("Summary", normalizedTopic.summary),
+      `### Services\n${fanServices}`,
+    ].join("\n\n");
+  }
+
+  if (normalizedTopic.kind === AI_BOOTH_COURSE_TOPIC_KIND) {
+    const holes = normalizedTopic.courseHoles.length > 0 ?
+      normalizedTopic.courseHoles.map(buildAiBoothCourseHoleKnowledge).join("\n\n") :
+      "No course holes configured.";
+
+    return [
+      `### ${normalizedTopic.title}`,
+      formatAiBoothKnowledgeLine("Topic ID", normalizedTopic.id),
+      formatAiBoothKnowledgeLine("Type", "Course"),
+      formatAiBoothKnowledgeBlock("Summary", normalizedTopic.summary),
+      `### Holes\n${holes}`,
+    ].join("\n\n");
+  }
+
+  if (normalizedTopic.kind === AI_BOOTH_SCHEDULE_TOPIC_KIND) {
+    const scheduleDays = normalizedTopic.scheduleDays.length > 0 ?
+      normalizedTopic.scheduleDays.map(buildAiBoothScheduleDayKnowledge).join("\n\n") :
+      "No tournament schedule days configured.";
+
+    return [
+      `### ${normalizedTopic.title}`,
+      formatAiBoothKnowledgeLine("Topic ID", normalizedTopic.id),
+      formatAiBoothKnowledgeLine("Type", "Tournament Schedule"),
+      formatAiBoothKnowledgeBlock("Summary", normalizedTopic.summary),
+      formatAiBoothKnowledgeBlock("Schedule Notes", normalizedTopic.notes),
+      `### Tournament Days\n${scheduleDays}`,
+    ].join("\n\n");
+  }
+
+  return [
+    `### ${normalizedTopic.title}`,
+    formatAiBoothKnowledgeLine("Topic ID", normalizedTopic.id),
+    formatAiBoothKnowledgeLine("Type", normalizedTopic.kind || "General"),
+    formatAiBoothKnowledgeBlock("Summary", normalizedTopic.summary),
+    formatAiBoothKnowledgeBlock("Detailed Notes", normalizedTopic.notes),
+    formatAiBoothKnowledgeBlock("Checklist", normalizedTopic.checklistText),
+  ].join("\n\n");
+}
+
+function buildAiBoothActivationKnowledge(activation, index) {
+  const normalizedActivation = normalizeAiBoothActivation(activation, index);
+
+  return [
+    `### ${normalizedActivation.name}`,
+    formatAiBoothKnowledgeLine("Activation ID", normalizedActivation.id),
+    formatAiBoothKnowledgeLine("Sponsor", normalizedActivation.sponsor),
+    formatAiBoothKnowledgeLine("Category", normalizedActivation.category),
+    formatAiBoothKnowledgeLine("Location", normalizedActivation.location),
+    formatAiBoothKnowledgeLine("Hours", normalizedActivation.hours),
+    formatAiBoothKnowledgeBlock("Description", normalizedActivation.description),
+    formatAiBoothKnowledgeBlock(
+        "Guest Instructions",
+        normalizedActivation.guestInstructions,
+    ),
+  ].join("\n\n");
+}
+
+function buildAiBoothKioskKnowledge(stationId, boothContext, kiosk) {
+  const info = getAiBoothKioskInfo(kiosk);
+  const context = normalizeAiBoothBoothContext(boothContext);
+  const locationName = context.locationName || getAiBoothKioskFallbackLocation(kiosk);
+  const place = context.place || cleanAiBoothText(info.place, 200);
+  const zone = context.zone || [info.city, info.state, info.country].filter(Boolean).join(", ");
+  const mapPosition = [context.mapX, context.mapY].filter(Boolean).join(", ");
+  const coordinates = [
+    context.latitude || cleanAiBoothCoordinateText(info.lat),
+    context.longitude || cleanAiBoothCoordinateText(info.lon),
+  ].filter(Boolean).join(", ");
+
+  return [
+    `### ${stationId}`,
+    formatAiBoothKnowledgeLine("Assistant name", context.assistantName || `Kiosk ${stationId}`),
+    formatAiBoothKnowledgeLine("Event location", locationName),
+    formatAiBoothKnowledgeLine("Place at event", place),
+    formatAiBoothKnowledgeLine("Zone", zone),
+    formatAiBoothKnowledgeLine("Coordinates", coordinates),
+    formatAiBoothKnowledgeLine("Nearby landmark", context.landmark),
+    formatAiBoothKnowledgeLine("Map position", mapPosition),
+    formatAiBoothKnowledgeBlock("Direction notes", context.directionsNotes),
+  ].join("\n\n");
+}
+
+function buildAiBoothKnowledgeBaseMarkdown(event, kiosksByStationId = new Map()) {
+  const general = event.general || {};
+  const eventName = cleanAiBoothText(general.eventName, 140) || "AI Booth Event";
+  const eventCategory = cleanAiBoothText(general.eventCategory, 120);
+  const eventInfo = cleanAiBoothText(general.eventInfo || general.basicEventInfo, 8000);
+  const phoneChargingEnabled = general.phoneChargingEnabled === true;
+  const paymentType = normalizeAiBoothPaymentType(general.paymentType);
+  const address = [general.address, general.city, general.zipCode, general.country]
+      .filter(Boolean)
+      .join(", ");
+  const weatherLocation = [general.city, general.country].filter(Boolean).join(", ") ||
+    address;
+  const boothStationIds = Array.isArray(event.boothStationIds) ? event.boothStationIds : [];
+  const topics = Array.isArray(event.topics) ? event.topics : [];
+  const activations = Array.isArray(event.activations) ? event.activations : [];
+  const topicText = topics.length > 0 ?
+    topics.map(buildAiBoothTopicKnowledge).join("\n\n") :
+    "No additional topics have been configured.";
+  const activationText = activations.length > 0 ?
+    activations.map(buildAiBoothActivationKnowledge).join("\n\n") :
+    "No event activations have been configured.";
+  const kioskText = boothStationIds.length > 0 ?
+    boothStationIds.map((stationId) => buildAiBoothKioskKnowledge(
+        stationId,
+        event.boothContexts?.[stationId],
+        kiosksByStationId.get(stationId) || {},
+    )).join("\n\n") :
+    "No kiosk booth assignments have been configured.";
+
+  return cleanAiBoothText([
+    `# ${eventName} AI Booth Knowledge`,
+    "",
+    "This document is generated from the Firebase event configuration.",
+    "Use it as the source of truth for event facts, activations, topics, and kiosk guidance.",
+    "",
+    "## Venue Info",
+    formatAiBoothKnowledgeLine("Event name", eventName),
+    formatAiBoothKnowledgeLine("Category", eventCategory),
+    formatAiBoothKnowledgeBlock("General event info", eventInfo),
+    formatAiBoothKnowledgeLine("Address", address),
+    formatAiBoothKnowledgeLine("Weather lookup location", weatherLocation),
+    formatAiBoothKnowledgeLine("Start date", general.startDate),
+    formatAiBoothKnowledgeLine("End date", general.endDate),
+    "",
+    "## Opening Hours",
+    formatAiBoothSchedule(general),
+    "",
+    "## Phone Charging",
+    formatAiBoothKnowledgeLine("Enabled", phoneChargingEnabled ? "Yes" : "No"),
+    formatAiBoothKnowledgeLine("Payment type", phoneChargingEnabled ? paymentType : "Not active"),
+    formatAiBoothKnowledgeBlock(
+        "Rental policy",
+        phoneChargingEnabled ?
+          general.rentalPolicy || DEFAULT_AI_BOOTH_RENTAL_POLICY :
+          "Phone charging is disabled for this event.",
+    ),
+    formatAiBoothKnowledgeLine(
+        "Guest support fallback",
+        general.supportFallback || DEFAULT_AI_BOOTH_SUPPORT_FALLBACK,
+    ),
+    "",
+    "## Assigned Booths",
+    boothStationIds.length > 0 ? boothStationIds.join(", ") : "No assigned booths.",
+    "",
+    "## Topics",
+    topicText,
+    "",
+    "## Event Activations",
+    activationText,
+    "",
+    "## Kiosk Contexts",
+    kioskText,
+  ].join("\n"), 250000);
+}
+
 function buildAiBoothSystemPrompt(event, basePrompt = STANDARD_AI_BOOTH_SYSTEM_PROMPT) {
   const general = event.general || {};
   const eventName = cleanAiBoothText(general.eventName, 140) || "Not set";
   const eventCategory = cleanAiBoothText(general.eventCategory, 120) || "Not set";
-  const eventTopic = cleanAiBoothText(general.eventTopic, 120) || "Not set";
-  const serviceName = cleanAiBoothText(general.serviceName, 160) ||
-    "Portable Charger Rental Kiosk";
+  const eventInfo = cleanAiBoothText(general.eventInfo || general.basicEventInfo, 8000) || "Not set";
+  const phoneChargingEnabled = general.phoneChargingEnabled === true;
+  const paymentType = normalizeAiBoothPaymentType(general.paymentType);
   const rentalPolicy = cleanAiBoothText(general.rentalPolicy, 2000) ||
     DEFAULT_AI_BOOTH_RENTAL_POLICY;
   const supportFallback = cleanAiBoothText(general.supportFallback, 240) ||
@@ -2667,33 +4643,221 @@ function buildAiBoothSystemPrompt(event, basePrompt = STANDARD_AI_BOOTH_SYSTEM_P
     address;
   const topics = Array.isArray(event.topics) ? event.topics : [];
   const topicLines = topics.length > 0 ?
-    topics.map((topic) => [
-      `- ${topic.title}`,
-      topic.summary ? `  Summary: ${topic.summary}` : "",
-      topic.notes ? `  Notes: ${topic.notes}` : "",
-      topic.checklistText ? `  Checklist:\n${topic.checklistText}` : "",
-    ].filter(Boolean).join("\n")).join("\n") :
+    topics.map((topic, index) => {
+      const normalizedTopic = normalizeAiBoothTopic(topic, index);
+      if (normalizedTopic.kind === AI_BOOTH_WIFI_TOPIC_KIND) {
+        return [
+          `- ${normalizedTopic.title}`,
+          normalizedTopic.wifiSsid ? `  SSID: ${normalizedTopic.wifiSsid}` : "",
+          normalizedTopic.wifiPassword ? `  Password: ${normalizedTopic.wifiPassword}` : "",
+          normalizedTopic.summary ? `  Instructions: ${normalizedTopic.summary}` : "",
+        ].filter(Boolean).join("\n");
+      }
+
+      if (normalizedTopic.kind === AI_BOOTH_TRANSPORTATION_TOPIC_KIND) {
+        const transportationSections = [
+          ["Shuttle", normalizedTopic.transportation.shuttle],
+          ["Ride Share", normalizedTopic.transportation.rideShare],
+          ["Parking", normalizedTopic.transportation.parking],
+        ].map(([label, section]) => {
+          const locations = section.locations.map((location, locationIndex) => {
+            const coordinates = [
+              location.latitude,
+              location.longitude,
+            ].filter(Boolean).join(", ");
+            const timeWindow = [
+              location.startTime,
+              location.endTime,
+            ].filter(Boolean).join(" - ");
+            const hours = timeWindow || location.hours;
+
+            return [
+              `    Location ${locationIndex + 1}: ${location.location || "Unnamed"}`,
+              coordinates ? `      Coordinates: ${coordinates}` : "",
+              hours ? `      Hours: ${hours}` : "",
+              location.frequency ? `      Frequency: ${location.frequency}` : "",
+              location.details ? `      Details: ${location.details}` : "",
+            ].filter(Boolean).join("\n");
+          }).join("\n");
+
+          return [
+            `  ${label}:`,
+            locations || "    No locations configured.",
+          ].join("\n");
+        }).join("\n");
+
+        return [
+          `- ${normalizedTopic.title}`,
+          normalizedTopic.summary ? `  Summary: ${normalizedTopic.summary}` : "",
+          transportationSections,
+        ].filter(Boolean).join("\n");
+      }
+
+      if (normalizedTopic.kind === AI_BOOTH_CONCESSIONS_TOPIC_KIND) {
+        const fanZoneLines = normalizedTopic.fanZones.map((zone) => {
+          const activationNames = zone.activations
+              .map((activation) => activation.name)
+              .filter(Boolean)
+              .join(", ");
+
+          return [
+            `  Fan zone: ${zone.name}`,
+            zone.openHours ? `    Open hours: ${zone.openHours}` : "",
+            zone.latitude || zone.longitude ?
+              `    Coordinates: ${[zone.latitude, zone.longitude].filter(Boolean).join(", ")}` :
+              "",
+            zone.details ? `    Details: ${zone.details}` : "",
+            activationNames ? `    Activations: ${activationNames}` : "",
+          ].filter(Boolean).join("\n");
+        }).join("\n");
+
+        return [
+          `- ${normalizedTopic.title}`,
+          normalizedTopic.summary ? `  Summary: ${normalizedTopic.summary}` : "",
+          normalizedTopic.notes ? `  Details: ${normalizedTopic.notes}` : "",
+          fanZoneLines,
+        ].filter(Boolean).join("\n");
+      }
+
+      if (normalizedTopic.kind === AI_BOOTH_HOSPITALITY_TOPIC_KIND) {
+        const hospitalityLines = normalizedTopic.hospitalityLocations.map((location) => {
+          const coordinates = [
+            location.latitude,
+            location.longitude,
+          ].filter(Boolean).join(", ");
+          const clients = location.clients
+              .map((client) => client.clientName)
+              .filter(Boolean)
+              .join(", ");
+
+          return [
+            `  Hospitality: ${location.name}`,
+            location.venueType ? `    Venue type: ${location.venueType}` : "",
+            location.location ? `    Location: ${location.location}` : "",
+            coordinates ? `    Coordinates: ${coordinates}` : "",
+            location.amenities ? `    Amenities: ${location.amenities}` : "",
+            location.accessNotes ? `    Access notes: ${location.accessNotes}` : "",
+            clients ? `    Assigned clients: ${clients}` : "",
+          ].filter(Boolean).join("\n");
+        }).join("\n");
+
+        return [
+          `- ${normalizedTopic.title}`,
+          normalizedTopic.summary ? `  Summary: ${normalizedTopic.summary}` : "",
+          normalizedTopic.notes ? `  Notes: ${normalizedTopic.notes}` : "",
+          hospitalityLines,
+        ].filter(Boolean).join("\n");
+      }
+
+      if (normalizedTopic.kind === AI_BOOTH_BATHROOMS_TOPIC_KIND) {
+        const bathroomLines = normalizedTopic.bathroomLocations.map((location) => [
+          `  Location: ${location.place}`,
+          location.latitude || location.longitude ?
+            `    Coordinates: ${[location.latitude, location.longitude].filter(Boolean).join(", ")}` :
+            "",
+        ].filter(Boolean).join("\n")).join("\n");
+
+        return [
+          `- ${normalizedTopic.title}`,
+          normalizedTopic.summary ? `  Summary: ${normalizedTopic.summary}` : "",
+          bathroomLines,
+        ].filter(Boolean).join("\n");
+      }
+
+      if (normalizedTopic.kind === AI_BOOTH_FAN_SERVICES_TOPIC_KIND) {
+        const serviceLines = normalizedTopic.fanServices.map((service) => [
+          `  Service: ${service.name}`,
+          service.location ? `    Location: ${service.location}` : "",
+          service.latitude || service.longitude ?
+            `    Coordinates: ${[service.latitude, service.longitude].filter(Boolean).join(", ")}` :
+            "",
+        ].filter(Boolean).join("\n")).join("\n");
+
+        return [
+          `- ${normalizedTopic.title}`,
+          normalizedTopic.summary ? `  Summary: ${normalizedTopic.summary}` : "",
+          serviceLines,
+        ].filter(Boolean).join("\n");
+      }
+
+      if (normalizedTopic.kind === AI_BOOTH_COURSE_TOPIC_KIND) {
+        const holeLines = normalizedTopic.courseHoles.map((hole) => [
+          `  Hole ${hole.holeNumber}:`,
+          hole.teeLatitude || hole.teeLongitude ?
+            `    Tee: ${[hole.teeLatitude, hole.teeLongitude].filter(Boolean).join(", ")}` :
+            "",
+          hole.greenLatitude || hole.greenLongitude ?
+            `    Green: ${[hole.greenLatitude, hole.greenLongitude].filter(Boolean).join(", ")}` :
+            "",
+        ].filter(Boolean).join("\n")).join("\n");
+
+        return [
+          `- ${normalizedTopic.title}`,
+          normalizedTopic.summary ? `  Summary: ${normalizedTopic.summary}` : "",
+          holeLines,
+        ].filter(Boolean).join("\n");
+      }
+
+      if (normalizedTopic.kind === AI_BOOTH_SCHEDULE_TOPIC_KIND) {
+        const scheduleLines = normalizedTopic.scheduleDays.map((day) => {
+          const itemLines = day.events.map((scheduleEvent) => [
+            `    - ${scheduleEvent.title}`,
+            scheduleEvent.category ? `      Category: ${scheduleEvent.category}` : "",
+            scheduleEvent.startTime || scheduleEvent.endTime ?
+              `      Time: ${[scheduleEvent.startTime, scheduleEvent.endTime].filter(Boolean).join(" - ")}` :
+              "",
+            scheduleEvent.location ? `      Location: ${scheduleEvent.location}` : "",
+            scheduleEvent.audience ? `      Audience: ${scheduleEvent.audience}` : "",
+            scheduleEvent.needsReview ? "      Needs review before publishing." : "",
+          ].filter(Boolean).join("\n")).join("\n");
+
+          return [
+            `  ${day.dayLabel}:`,
+            day.date ? `    Date: ${day.date}` : "",
+            day.publicStatus ? `    Status: ${day.publicStatus}` : "",
+            day.theme ? `    Theme: ${day.theme}` : "",
+            day.gatesOpen || day.gatesClose ?
+              `    Gates: ${[day.gatesOpen, day.gatesClose].filter(Boolean).join(" - ")}` :
+              "",
+            itemLines,
+          ].filter(Boolean).join("\n");
+        }).join("\n");
+
+        return [
+          `- ${normalizedTopic.title}`,
+          normalizedTopic.summary ? `  Summary: ${normalizedTopic.summary}` : "",
+          normalizedTopic.notes ? `  Notes: ${normalizedTopic.notes}` : "",
+          scheduleLines,
+        ].filter(Boolean).join("\n");
+      }
+
+      return [
+        `- ${normalizedTopic.title}`,
+        normalizedTopic.summary ? `  Summary: ${normalizedTopic.summary}` : "",
+        normalizedTopic.notes ? `  Notes: ${normalizedTopic.notes}` : "",
+        normalizedTopic.checklistText ? `  Checklist:\n${normalizedTopic.checklistText}` : "",
+      ].filter(Boolean).join("\n");
+    }).join("\n") :
     "- No extra topics configured.";
 
   return cleanAiBoothText(`${basePrompt || STANDARD_AI_BOOTH_SYSTEM_PROMPT}
 
 Event data:
 - Event name: ${eventName}
-- Event category: ${eventCategory}
-- Event topic: ${eventTopic}
-- Kiosk service: ${serviceName}
-- Rental policy: ${rentalPolicy}
+- Category: ${eventCategory}
+- General event info: ${eventInfo}
+- Phone charging: ${phoneChargingEnabled ? "Enabled" : "Disabled"}
+- Payment type: ${phoneChargingEnabled ? paymentType : "Not active"}
+- Rental policy: ${phoneChargingEnabled ? rentalPolicy : "Phone charging is disabled for this event."}
 - Guest support fallback: ${supportFallback}
 - Address: ${address}
 - Weather lookup location: ${weatherLocation || "Not set"}
 - Dates: ${general.startDate || "unset"} to ${general.endDate || "unset"}
 - Assigned booths: ${(event.boothStationIds || []).join(", ") || "Not set"}
+- Detailed event knowledge is attached through the ElevenLabs knowledge base. Use it for topics, activations, schedules, and guest-facing details.
 
 Opening hours:
 ${formatAiBoothSchedule(general)}
-
-Event notes:
-${general.notes || "No general notes configured."}
 
 Topics:
   ${topicLines}`, 20000);
@@ -2728,11 +4892,14 @@ function buildAiBoothKioskSystemPrompt(event, stationId, boothContext, kiosk, ba
   const info = getAiBoothKioskInfo(kiosk);
   const context = normalizeAiBoothBoothContext(boothContext);
   const assistantName = context.assistantName || `Kiosk ${stationId}`;
-  const serviceName = cleanAiBoothText(event?.general?.serviceName, 160) ||
-    "Portable Charger Rental Kiosk";
-  const locationName = context.locationName || getAiBoothKioskFallbackLocation(kiosk) || "Not set";
+  const locationName = context.locationName || context.place || getAiBoothKioskFallbackLocation(kiosk) || "Not set";
+  const place = context.place || cleanAiBoothText(info.place, 200) || "Not set";
   const zone = context.zone || [info.city, info.state, info.country].filter(Boolean).join(", ") || "Not set";
   const landmark = context.landmark || "Not set";
+  const coordinates = [
+    context.latitude || cleanAiBoothCoordinateText(info.lat),
+    context.longitude || cleanAiBoothCoordinateText(info.lon),
+  ].filter(Boolean).join(", ") || "Not set";
   const mapPosition = [context.mapX, context.mapY].filter(Boolean).join(", ") || "Not set";
   const directionsNotes = context.directionsNotes || "No booth-specific direction notes configured.";
 
@@ -2742,9 +4909,10 @@ Physical kiosk context:
 - Station ID: ${stationId}
 - Kiosk type: ${AI_BOOTH_KIOSK_TYPE}
 - Assistant name: ${assistantName}
-- Kiosk service: ${serviceName}
 - Event location: ${locationName}
+- Place at event: ${place}
 - Zone: ${zone}
+- Coordinates: ${coordinates}
 - Nearby landmark: ${landmark}
 - Map position: ${mapPosition}
 - Direction notes: ${directionsNotes}
@@ -2780,14 +4948,95 @@ async function getAiBoothKiosksByStationId(stationIds) {
   return kioskMap;
 }
 
+function getElevenLabsKnowledgeBaseDocumentId(document) {
+  return cleanAiBoothText(
+      document?.id || document?.documentation_id || document?.document_id,
+      160,
+  );
+}
+
+function normalizeElevenLabsPromptKnowledgeBase(value) {
+  return (Array.isArray(value) ? value : [])
+      .filter(isPlainObject)
+      .map((document) => ({...document}));
+}
+
+function mergeElevenLabsPromptKnowledgeBase(
+    currentKnowledgeBase,
+    knowledgeBaseEntry,
+    managedDocumentIds = [],
+) {
+  const nextDocumentId = getElevenLabsKnowledgeBaseDocumentId(knowledgeBaseEntry);
+  const managedIds = new Set(
+      [...managedDocumentIds, nextDocumentId]
+          .map((documentId) => cleanAiBoothText(documentId, 160))
+          .filter(Boolean),
+  );
+  const preservedKnowledgeBase = normalizeElevenLabsPromptKnowledgeBase(currentKnowledgeBase)
+      .filter((document) => !managedIds.has(getElevenLabsKnowledgeBaseDocumentId(document)));
+
+  if (!nextDocumentId) {
+    return preservedKnowledgeBase;
+  }
+
+  return [
+    ...preservedKnowledgeBase,
+    {
+      ...knowledgeBaseEntry,
+      id: nextDocumentId,
+      usage_mode: knowledgeBaseEntry?.usage_mode || knowledgeBaseEntry?.usageMode || "auto",
+    },
+  ];
+}
+
+async function createElevenLabsKnowledgeBaseTextDocument({name, text}) {
+  const documentText = cleanAiBoothText(text, 250000);
+  if (!documentText) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Knowledge base text is empty",
+    );
+  }
+
+  const fallbackName = "AI Booth Event Knowledge";
+  const documentName = cleanAiBoothText(name, 240) || fallbackName;
+  const payload = await elevenLabsRequest("/v1/convai/knowledge-base/text", {
+    method: "POST",
+    body: {
+      name: documentName,
+      text: documentText,
+    },
+  });
+  const documentId = getElevenLabsKnowledgeBaseDocumentId(payload);
+
+  if (!documentId) {
+    throw new functions.https.HttpsError(
+        "internal",
+        "ElevenLabs did not return a knowledge base document id",
+    );
+  }
+
+  return {
+    id: documentId,
+    name: cleanAiBoothText(payload.name, 240) || documentName,
+    type: cleanAiBoothText(payload.type, 40) || "text",
+  };
+}
+
 async function upsertElevenLabsAgentCopy({
   templateAgentId,
   existingAgentId = "",
   agentName,
   firstMessage,
   systemPrompt,
+  knowledgeBaseEntry = null,
+  managedKnowledgeBaseDocumentIds = [],
 }) {
   let agentId = cleanAiBoothText(existingAgentId, 160);
+
+  if (!agentId) {
+    agentId = await findElevenLabsAgentIdByName(agentName);
+  }
 
   if (!agentId) {
     const duplicateResponse = await elevenLabsRequest(
@@ -2814,24 +5063,37 @@ async function upsertElevenLabsAgentCopy({
   const promptConfig = isPlainObject(conversationAgent.prompt) ?
     conversationAgent.prompt :
     {};
+  const nextPromptConfig = {
+    ...promptConfig,
+    prompt: systemPrompt,
+    knowledge_base: mergeElevenLabsPromptKnowledgeBase(
+        promptConfig.knowledge_base,
+        knowledgeBaseEntry,
+        managedKnowledgeBaseDocumentIds,
+    ),
+  };
 
-  await elevenLabsRequest(`/v1/convai/agents/${encodeURIComponent(agentId)}`, {
-    method: "PATCH",
-    body: {
-      name: agentName,
-      conversation_config: {
-        ...conversationConfig,
-        agent: {
-          ...conversationAgent,
-          first_message: firstMessage,
-          prompt: {
-            ...promptConfig,
-            prompt: systemPrompt,
+  delete nextPromptConfig.tools;
+
+  try {
+    await elevenLabsRequest(`/v1/convai/agents/${encodeURIComponent(agentId)}`, {
+      method: "PATCH",
+      body: {
+        name: agentName,
+        conversation_config: {
+          ...conversationConfig,
+          agent: {
+            ...conversationAgent,
+            first_message: firstMessage,
+            prompt: nextPromptConfig,
           },
         },
       },
-    },
-  });
+    });
+  } catch (error) {
+    error.agentId = agentId;
+    throw error;
+  }
 
   return agentId;
 }
@@ -2872,6 +5134,21 @@ async function aiBoothsPublishAgentImpl(data, authState) {
       agentBaseSystemPrompt,
   );
   const kioskMap = await getAiBoothKiosksByStationId(stationIds);
+  const previousKnowledgeBase = normalizeAiBoothKnowledgeBase(agentConfig.knowledgeBase);
+  const managedKnowledgeBaseDocumentIds = Array.from(new Set([
+    previousKnowledgeBase.documentId,
+    ...previousKnowledgeBase.previousDocumentIds,
+  ].filter(Boolean)));
+  const knowledgeBaseDocument = await createElevenLabsKnowledgeBaseTextDocument({
+    name: `${agentNamePrefix} Event Knowledge`,
+    text: buildAiBoothKnowledgeBaseMarkdown(event, kioskMap),
+  });
+  const knowledgeBaseEntry = {
+    type: knowledgeBaseDocument.type || "text",
+    name: knowledgeBaseDocument.name,
+    id: knowledgeBaseDocument.id,
+    usage_mode: "auto",
+  };
 
   const actor = {
     uid: cleanAiBoothText(authState?.uid, 128),
@@ -2900,6 +5177,8 @@ async function aiBoothsPublishAgentImpl(data, authState) {
         agentName: kioskAgentName,
         firstMessage,
         systemPrompt: kioskSystemPrompt,
+        knowledgeBaseEntry,
+        managedKnowledgeBaseDocumentIds,
       });
 
       nextKioskAgents[stationId] = {
@@ -2912,8 +5191,10 @@ async function aiBoothsPublishAgentImpl(data, authState) {
       };
       results.push({stationId, agentId, ok: true});
     } catch (error) {
+      const failedAgentId = cleanAiBoothText(error?.agentId || existingKioskAgent.agentId, 160);
       nextKioskAgents[stationId] = {
         ...existingKioskAgent,
+        agentId: failedAgentId,
         name: kioskAgentName,
         syncStatus: "error",
         syncError: cleanAiBoothText(error?.message || "Failed to sync kiosk agent", 1000),
@@ -2922,7 +5203,7 @@ async function aiBoothsPublishAgentImpl(data, authState) {
       };
       results.push({
         stationId,
-        agentId: existingKioskAgent.agentId,
+        agentId: failedAgentId,
         ok: false,
         error: cleanAiBoothText(error?.message || "Failed to sync kiosk agent", 1000),
       });
@@ -2931,6 +5212,13 @@ async function aiBoothsPublishAgentImpl(data, authState) {
 
   const syncedCount = results.filter((result) => result.ok).length;
   const failedCount = results.length - syncedCount;
+  const previousDocumentIds = Array.from(new Set([
+    ...managedKnowledgeBaseDocumentIds,
+    previousKnowledgeBase.documentId,
+  ].filter(Boolean)))
+      .filter((documentId) => documentId !== knowledgeBaseDocument.id)
+      .slice(0, 10);
+
   await eventRef.set({
     agent: {
       ...agentConfig,
@@ -2940,6 +5228,16 @@ async function aiBoothsPublishAgentImpl(data, authState) {
       firstMessage,
       systemPrompt: agentBaseSystemPrompt,
       kioskAgents: nextKioskAgents,
+      knowledgeBase: {
+        documentId: knowledgeBaseDocument.id,
+        documentName: knowledgeBaseDocument.name,
+        documentType: knowledgeBaseDocument.type || "text",
+        syncStatus: failedCount > 0 ? (syncedCount > 0 ? "partial" : "error") : "synced",
+        syncError: failedCount > 0 ? `${failedCount} kiosk agents failed to sync` : "",
+        lastSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
+        lastSyncedBy: actor,
+        previousDocumentIds,
+      },
       syncStatus: failedCount > 0 ? (syncedCount > 0 ? "partial" : "error") : "synced",
       syncError: failedCount > 0 ? `${failedCount} kiosk agents failed to sync` : "",
       lastSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -2954,6 +5252,7 @@ async function aiBoothsPublishAgentImpl(data, authState) {
     ok: failedCount === 0,
     syncedCount,
     failedCount,
+    knowledgeBaseDocument,
     results,
     event: serializeAiBoothEvent(savedSnapshot),
   };
@@ -3974,6 +6273,32 @@ exports.aiBooths_saveEvent = functions.https.onCall(async (data, context) => {
 exports.aiBooths_httpSaveEvent = handleHttpFunction(async (data, req) => {
   const authState = await assertCanManageAiBooths(req, data);
   return aiBoothsSaveEventImpl(data, authState);
+});
+
+exports.aiBooths_httpRegisterPendingKiosk = handleHttpFunction(async (data) => (
+  aiBoothsRegisterPendingKioskImpl(data)
+));
+
+exports.aiBooths_httpDeletePendingKioskRegistration = handleHttpFunction(async (data) => (
+  aiBoothsDeletePendingKioskRegistrationImpl(data)
+));
+
+exports.aiBooths_httpGetDeviceConfig = handleHttpFunction(async (data) => (
+  aiBoothsGetDeviceConfigImpl(data)
+));
+
+exports.aiBooths_httpDeviceHeartbeat = handleHttpFunction(async (data) => (
+  aiBoothsDeviceHeartbeatImpl(data)
+));
+
+exports.aiBooths_provisionPendingKiosk = functions.https.onCall(async (data, context) => {
+  const authState = await assertCanManageAiBoothsFromContext(context);
+  return aiBoothsProvisionPendingKioskImpl(data, authState);
+});
+
+exports.aiBooths_httpProvisionPendingKiosk = handleHttpFunction(async (data, req) => {
+  const authState = await assertCanManageAiBooths(req, data);
+  return aiBoothsProvisionPendingKioskImpl(data, authState);
 });
 
 exports.aiBooths_listElevenLabsAgents = functions.runWith({

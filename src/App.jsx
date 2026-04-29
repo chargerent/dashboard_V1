@@ -1596,10 +1596,13 @@ function App() {
           <ProvisionPage
             onLogout={handleLogout}
             onNavigateToDashboard={() => setPage('dashboard')}
+            onNavigateToAiBooths={() => setPage('ai-booths')}
             t={t}
             onCommand={onCommand}
             allStationsData={allStationsData}
             lastProvisionedId={lastProvisionedId}
+            commandStatus={commandStatus}
+            setCommandStatus={setCommandStatus}
           />
         );
       case 'dashboard':

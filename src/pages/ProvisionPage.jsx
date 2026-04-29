@@ -1,6 +1,7 @@
 // src/pages/ProvisionPage.jsx
 
 import { useState, useCallback, useMemo, useEffect } from 'react';
+import { SparklesIcon } from '@heroicons/react/24/outline';
 import {
     FormInput,
     FormToggle,
@@ -11,10 +12,11 @@ import {
 } from '../components/forms/FormFields.jsx';
 import ConfirmationModal from '../components/UI/ConfirmationModal';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
+import { callFunctionWithAuth } from '../utils/callableRequest';
 
 const initialFormData = {
     provisionid: '',
-    hardware: { type: 'CT10', modversion: '2.0', mode: 'LIVE', modules: 1, hrate: '20', cpu: 'C4', gateway: 'PAYTERP68', screen: 'no screen', quarantine: { time: 0, unit: 'min' }, audio: 'on', power: '90', gatewayoptions: 'INITIALPRICE', port: '1884', server: 'chargerent.io' },
+    hardware: { type: 'CA36', mode: 'AI', modules: 12, hrate: '20', cpu: 'C4', gateway: 'PAYTERP68', screen: '49', quarantine: { time: 0, unit: 'min' }, audio: 'on', power: '90', gatewayoptions: 'INITIALPRICE', port: '1884', server: 'chargerent.io' },
     info: { country: 'US', autoGeocode: true, account: 'OCHARGELLC', group: 'OCHARGELLC', rep: 'OCHARGELLC' },
     ui: { colors: { bcolor1: '#0000FF', bcolor2: '#008000' }, idletime: 20, defaultlanguage: 'ENGLISH', mode: 'media', reminder: {}, receipt: {}, coupons: {}, map: { active: false }, terms: { active: true }, languages: { active: true }, information: { active: true }, screensaver: { active: true } },
     pricing: { currency: 'US', symbol: '$', kioskmode: 'LEASE', text: 'LEASE - SIMPLE DAILY', webapp: true, mobileapp: true, online: true, startpage: { active: true }, taxrate: 0 }
@@ -80,24 +82,242 @@ const calculateRateArray = (pricing) => {
     return rentprice;
 };
 
-const ProvisionPage = ({ onNavigateToDashboard, onLogout, t, onCommand, allStationsData, lastProvisionedId, commandStatus, setCommandStatus }) => {
-    const [formData, setFormData] = useState(initialFormData);
+const isAiBoothPendingStation = (station) => (
+    String(station?.provisionid || '').toLowerCase().startsWith('aid-') ||
+    String(station?.hardware?.type || '').toUpperCase() === 'CA36'
+);
+
+const formatPendingStationOption = (station) => {
+    const prefix = isAiBoothPendingStation(station) ? 'AI Booth - ' : '';
+    return `${station.provisionid} (${prefix}${formatWaitTime(station.lastUpdated)})`;
+};
+
+const COUNTRY_OPTIONS = ['US', 'Canada', 'France'];
+
+const normalizeCountryOption = (value) => {
+    const normalized = String(value || '').trim().toUpperCase();
+    if (normalized === 'CANADA' || normalized === 'CA' || normalized === 'CAN') return 'CA';
+    if (normalized === 'FRANCE' || normalized === 'FR' || normalized === 'EUR') return 'FR';
+    return 'US';
+};
+
+const formatCountryOption = (value) => {
+    const country = normalizeCountryOption(value);
+    if (country === 'CA') return 'Canada';
+    if (country === 'FR') return 'France';
+    return 'US';
+};
+
+const HQ_INFO_BY_COUNTRY = {
+    US: {
+        location: 'HQ',
+        place: 'OFFICE',
+        locationtype: 'HQ',
+        stationaddress: '4514 Conchita Way',
+        city: 'Tarzana',
+        state: 'CA',
+        zip: '91356-4904',
+        client: 'BESITER',
+        account: 'OCHARGELLC',
+        group: 'OCHARGELLC',
+        rep: 'OCHARGELLC',
+    },
+    CA: {
+        location: 'CANADA HQ',
+        place: 'OFFICE 2',
+        locationtype: 'OFFICE',
+        stationaddress: '700 THIRD LINE',
+        city: 'OAKVILLE',
+        state: 'ON',
+        zip: 'L6L 4B1.',
+        client: 'BESITER',
+        account: 'OCHARGELLC',
+        group: 'OCHARGELLC',
+        rep: 'WADE',
+    },
+    FR: {
+        location: 'PARIS HQ',
+        place: 'OFFICE',
+        locationtype: 'HQ',
+        stationaddress: '212 RUE DE RIVOLI',
+        city: 'PARIS',
+        state: 'FR',
+        zip: '75001',
+        client: 'BESITER',
+        account: 'OCHARGELLC',
+        group: 'OCHARGELLC',
+        rep: 'OCHARGELLC',
+    },
+};
+
+const HQ_DEFAULT_FIELDS = [
+    'location',
+    'place',
+    'locationtype',
+    'stationaddress',
+    'city',
+    'state',
+    'zip',
+    'client',
+    'account',
+    'group',
+    'rep',
+];
+
+const REQUIRED_FIELD_LABELS = {
+    provisionid: 'Provision ID',
+    stationid: 'Assigned Station ID',
+    'info.location': 'Location',
+    'info.place': 'Place',
+    'info.stationaddress': 'Address',
+    'info.city': 'City',
+    'info.state': 'State',
+    'info.zip': 'Zip Code',
+    'info.locationtype': 'Location Type',
+    'info.client': 'Client',
+    'info.account': 'Account Name',
+    'info.group': 'Group',
+    'info.rep': 'Rep',
+    'hardware.sn': 'SN',
+    'pricing.authamount': 'Auth Amount',
+    'pricing.dailyprice': 'Daily Price',
+    'pricing.buyprice': 'Buy Price',
+    'pricing.initialperiod': 'Initial Period',
+    'pricing.overdue': 'Overdue',
+    'pricing.profile': 'Profile',
+    'ui.colors.bcolor1': 'Background Color 1',
+    'ui.colors.bcolor2': 'Background Color 2',
+    'ui.idletime': 'Idle Time',
+};
+
+const formatMissingField = (field) => REQUIRED_FIELD_LABELS[field] || field;
+
+const isKnownHqDefault = (field, value) => (
+    Object.values(HQ_INFO_BY_COUNTRY).some((defaults) => defaults[field] === value) ||
+    (field === 'locationtype' && String(value || '').trim().toUpperCase() === 'EVENT')
+);
+
+const normalizeStationId = (value) => String(value || '').trim().toUpperCase();
+
+const getCountryPrefix = (country) => {
+    return normalizeCountryOption(country);
+};
+
+const getStationSequenceRange = (isAiBooth) => ({
+    start: isAiBooth ? 9000 : 8000,
+    end: isAiBooth ? 9999 : 8999,
+});
+
+const buildAvailableStationIds = (allStationsData, country, isAiBooth) => {
+    const prefix = getCountryPrefix(country);
+    const { start, end } = getStationSequenceRange(isAiBooth);
+    const occupiedStationIds = new Set(
+        (allStationsData || [])
+            .map((station) => normalizeStationId(station?.stationid))
+            .filter((stationid) => new RegExp(`^${prefix}\\d{4}$`).test(stationid))
+    );
+    const available = [];
+
+    for (let stationNumber = start; stationNumber <= end; stationNumber += 1) {
+        const stationid = `${prefix}${stationNumber}`;
+        if (!occupiedStationIds.has(stationid)) {
+            available.push(stationid);
+        }
+    }
+
+    return available;
+};
+
+const applyAiBoothHardwareDefaults = (data) => {
+    data.hardware = {
+        ...(data.hardware || {}),
+        type: 'CA36',
+        mode: 'AI',
+        modules: 12,
+        screen: '49',
+    };
+    delete data.hardware.modversion;
+    return data;
+};
+
+const withCountryDefaults = (data, countryValue) => {
+    const country = normalizeCountryOption(countryValue);
+    const nextData = JSON.parse(JSON.stringify(data));
+    const previousCountry = normalizeCountryOption(nextData.info?.country);
+    const defaults = HQ_INFO_BY_COUNTRY[country] || HQ_INFO_BY_COUNTRY.US;
+    nextData.info = {
+        ...(nextData.info || {}),
+        country,
+    };
+
+    HQ_DEFAULT_FIELDS.forEach((field) => {
+        if (
+            previousCountry !== country ||
+            !nextData.info[field] ||
+            isKnownHqDefault(field, nextData.info[field])
+        ) {
+            nextData.info[field] = defaults[field];
+        }
+    });
+
+    return nextData;
+};
+
+const createInitialFormData = () => withCountryDefaults(initialFormData, initialFormData.info.country);
+
+const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAiBooths, onLogout, t, onCommand, allStationsData, lastProvisionedId, commandStatus, setCommandStatus }) => {
+    const [formData, setFormData] = useState(createInitialFormData);
     const [showConfirmation, setShowConfirmation] = useState(false);
     const [missingFields, setMissingFields] = useState([]);
+    const [validationPopupFields, setValidationPopupFields] = useState([]);
+    const [stationIdOffset, setStationIdOffset] = useState(0);
 
     const pendingStations = useMemo(() => {
         return (allStationsData || []).filter(k => k.status === 'pending-provision');
     }, [allStationsData]);
 
+    const selectedPendingStation = useMemo(() => {
+        return pendingStations.find((station) => station.provisionid === formData.provisionid) || null;
+    }, [pendingStations, formData.provisionid]);
+
+    const selectedIsAiBooth = useMemo(() => (
+        isAiBoothPendingStation(selectedPendingStation) ||
+        String(formData.hardware?.type || '').trim().toUpperCase() === 'CA36'
+    ), [selectedPendingStation, formData.hardware?.type]);
+
+    const stationIdCandidates = useMemo(() => (
+        buildAvailableStationIds(allStationsData, formData.info?.country, selectedIsAiBooth)
+    ), [allStationsData, formData.info?.country, selectedIsAiBooth]);
+
+    const boundedStationIdOffset = stationIdCandidates.length > 0
+        ? Math.min(stationIdOffset, stationIdCandidates.length - 1)
+        : 0;
+    const assignedStationId = formData.provisionid ? (stationIdCandidates[boundedStationIdOffset] || '') : '';
+
+    useEffect(() => {
+        setStationIdOffset(0);
+    }, [formData.provisionid, formData.info?.country, selectedIsAiBooth]);
+
+    useEffect(() => {
+        if (stationIdCandidates.length > 0 && stationIdOffset > stationIdCandidates.length - 1) {
+            setStationIdOffset(stationIdCandidates.length - 1);
+        }
+    }, [stationIdCandidates.length, stationIdOffset]);
+
     useEffect(() => {
         if (lastProvisionedId && lastProvisionedId === formData.provisionid) {
-            setFormData(initialFormData);
+            setFormData(createInitialFormData());
+            setStationIdOffset(0);
         }
     }, [lastProvisionedId]);
 
     useEffect(() => {
-        if (commandStatus && commandStatus.message === 'kiosk provisioned on server') {
-            setFormData(initialFormData);
+        if (
+            commandStatus &&
+            ['kiosk provisioned on server', 'AI booth provisioned on server'].includes(commandStatus.message)
+        ) {
+            setFormData(createInitialFormData());
+            setStationIdOffset(0);
         }
     }, [commandStatus]);
 
@@ -106,7 +326,7 @@ const ProvisionPage = ({ onNavigateToDashboard, onLogout, t, onCommand, allStati
         const selectedStation = pendingStations.find(s => s.provisionid === provisionId);
         if (selectedStation) {
             // Create a deep copy to avoid mutation
-            const newFormData = JSON.parse(JSON.stringify(initialFormData));
+            const newFormData = createInitialFormData();
 
             // Deep merge function
             const deepMerge = (target, source) => {
@@ -122,12 +342,21 @@ const ProvisionPage = ({ onNavigateToDashboard, onLogout, t, onCommand, allStati
 
             // Merge selected station data into the new form data object
             deepMerge(newFormData, selectedStation);
+            applyAiBoothHardwareDefaults(newFormData);
+            const withDefaults = withCountryDefaults(newFormData, newFormData.info?.country);
+            delete withDefaults.stationid;
 
-            setFormData(newFormData);
+            setFormData(withDefaults);
+            setStationIdOffset(0);
         } else {
-            setFormData(initialFormData);
+            setFormData(createInitialFormData());
+            setStationIdOffset(0);
         }
     };
+
+    const handleCountryChange = useCallback((_section, _name, value) => {
+        setFormData((previous) => withCountryDefaults(previous, value));
+    }, []);
 
     const onDataChange = useCallback((section, path, value) => {
         setFormData(prev => {
@@ -150,7 +379,7 @@ const ProvisionPage = ({ onNavigateToDashboard, onLogout, t, onCommand, allStati
                 const moduleMap = {
                     'CT3': 1,
                     'CT10': 1,
-                    'CA36': 1,
+                    'CA36': 12,
                     'CK20': 2,
                     'CK30': 3,
                     'CK48': 12,
@@ -198,6 +427,10 @@ const ProvisionPage = ({ onNavigateToDashboard, onLogout, t, onCommand, allStati
             missing.push('provisionid');
         }
 
+        if (!assignedStationId) {
+            missing.push('stationid');
+        }
+
         const requiredInfoFields = [
             'location', 'place', 'stationaddress', 'city', 'state', 'zip',
             'locationtype', 'client', 'account', 'group', 'rep'
@@ -209,7 +442,7 @@ const ProvisionPage = ({ onNavigateToDashboard, onLogout, t, onCommand, allStati
             }
         }
 
-        const requiredHardwareFields = ['sn'];
+        const requiredHardwareFields = selectedIsAiBooth ? [] : ['sn'];
         for (const field of requiredHardwareFields) {
             if (!formData.hardware[field]) {
                 missing.push(`hardware.${field}`);
@@ -237,11 +470,14 @@ const ProvisionPage = ({ onNavigateToDashboard, onLogout, t, onCommand, allStati
         setMissingFields(missing);
 
         if (missing.length === 0) {
+            setValidationPopupFields([]);
             setShowConfirmation(true);
+        } else {
+            setValidationPopupFields(missing);
         }
     };
 
-    const confirmProvision = () => {
+    const confirmProvision = async () => {
         setShowConfirmation(false);
         const payload = JSON.parse(JSON.stringify(formData));
         
@@ -250,9 +486,35 @@ const ProvisionPage = ({ onNavigateToDashboard, onLogout, t, onCommand, allStati
         
         // Add empty modules object
         payload.modules = {};
+        delete payload.hardware.modversion;
 
-        // Ensure stationid is not part of the payload for provisioning
-        delete payload.stationid;
+        payload.stationid = assignedStationId;
+
+        if (selectedIsAiBooth && String(payload.provisionid || '').toLowerCase().startsWith('aid-')) {
+            setCommandStatus?.({ state: 'sending', message: t('sending_command') });
+
+            try {
+                const result = await callFunctionWithAuth('aiBooths_provisionPendingKiosk', {
+                    provisionid: payload.provisionid,
+                    stationid: assignedStationId,
+                    country: payload.info?.country,
+                    kiosk: payload,
+                });
+
+                setCommandStatus?.({
+                    state: 'success',
+                    message: result?.message || 'AI booth provisioned on server',
+                });
+                setFormData(createInitialFormData());
+                setStationIdOffset(0);
+            } catch (error) {
+                setCommandStatus?.({
+                    state: 'error',
+                    message: error?.message ? `${t('command_failed')} ${error.message}` : t('command_failed'),
+                });
+            }
+            return;
+        }
 
         onCommand(null, 'provision', null, payload.provisionid, null, { kiosk: payload });
     };
@@ -269,6 +531,16 @@ const ProvisionPage = ({ onNavigateToDashboard, onLogout, t, onCommand, allStati
                 <div className="max-w-4xl mx-auto py-4 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
                     <img className="h-12 w-auto" src="/logo.png" alt="Company Logo" onError={(e) => { e.target.onerror = null; e.target.style.display='none' }}/>
                     <div className="flex items-center space-x-4">
+                        {onNavigateToAiBooths && (
+                            <button
+                                onClick={onNavigateToAiBooths}
+                                className="inline-flex items-center gap-2 rounded-md bg-cyan-100 px-3 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-200"
+                                title="AI Booths"
+                            >
+                                <SparklesIcon className="h-5 w-5" />
+                                Back to AI Booths
+                            </button>
+                        )}
                         <button onClick={onNavigateToDashboard} className="p-2 rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300" title={t('back_to_dashboard')}><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg></button>
                         <button onClick={onLogout} className="p-2 rounded-md bg-red-500 text-white hover:bg-red-600" title={t('logout')}>
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
@@ -279,14 +551,66 @@ const ProvisionPage = ({ onNavigateToDashboard, onLogout, t, onCommand, allStati
             <main className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto">
                 <div className="bg-white p-6 rounded-lg shadow-md space-y-6">
                     <div>
-                        <SectionTitle title="New Kiosk" />
+                        <SectionTitle title="New AI Booth" />
                         <FormSelect 
                             label="Provision ID" 
                             name="provisionid" 
                             value={formData.provisionid} 
                             section="" 
                             onDataChange={handleProvisionIdChange} 
-                            options={['', ...pendingStations.map(s => `${s.provisionid} (${formatWaitTime(s.lastUpdated)})`)]} isInvalid={missingFields.includes('provisionid')} />
+                            options={['', ...pendingStations.map(formatPendingStationOption)]} isInvalid={missingFields.includes('provisionid')} />
+                        <div className={`mt-4 rounded-lg border p-4 ${missingFields.includes('stationid') ? 'border-red-500 bg-red-50' : 'border-gray-200 bg-gray-50'}`}>
+                            <div className="mb-4">
+                                <FormMultiSwitch
+                                    label="Country"
+                                    name="country"
+                                    options={COUNTRY_OPTIONS}
+                                    value={formatCountryOption(formData.info?.country)}
+                                    section="info"
+                                    onDataChange={handleCountryChange}
+                                />
+                            </div>
+                            <div className="mb-3 flex items-center justify-between gap-3">
+                                <div>
+                                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Assigned Station ID</p>
+                                    <p className="text-xs text-gray-500">
+                                        {selectedIsAiBooth ? 'AI booth sequence' : 'Kiosk sequence'} for {getCountryPrefix(formData.info?.country)}
+                                    </p>
+                                </div>
+                                <span className="rounded-md bg-white px-2 py-1 text-xs font-semibold text-gray-600 shadow-sm">
+                                    {stationIdCandidates.length ? boundedStationIdOffset + 1 : 0} / {stationIdCandidates.length || 0}
+                                </span>
+                            </div>
+                            <div className="flex items-stretch gap-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setStationIdOffset((previous) => Math.max(0, previous - 1))}
+                                    disabled={!assignedStationId || boundedStationIdOffset <= 0}
+                                    className="flex h-12 w-12 items-center justify-center rounded-md bg-white text-gray-700 shadow-sm transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40"
+                                    title="Previous available station ID"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                        <path fillRule="evenodd" d="M12.79 5.23a.75.75 0 010 1.06L9.06 10l3.73 3.71a.75.75 0 11-1.06 1.06l-4.25-4.24a.75.75 0 010-1.06l4.25-4.24a.75.75 0 011.06 0z" clipRule="evenodd" />
+                                    </svg>
+                                </button>
+                                <div className="flex min-h-12 flex-1 items-center justify-center rounded-lg bg-white px-4 text-center shadow-sm">
+                                    <span className={`font-mono text-2xl font-black tracking-normal ${assignedStationId ? 'text-gray-900' : 'text-gray-400'}`}>
+                                        {formData.provisionid ? (assignedStationId || 'No IDs available') : 'Select a provision ID'}
+                                    </span>
+                                </div>
+                                <button
+                                    type="button"
+                                    onClick={() => setStationIdOffset((previous) => Math.min(stationIdCandidates.length - 1, previous + 1))}
+                                    disabled={!assignedStationId || boundedStationIdOffset >= stationIdCandidates.length - 1}
+                                    className="flex h-12 w-12 items-center justify-center rounded-md bg-white text-gray-700 shadow-sm transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40"
+                                    title="Next available station ID"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                        <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 010-1.06L10.94 10 7.21 6.29a.75.75 0 111.06-1.06l4.25 4.24a.75.75 0 010 1.06l-4.25 4.24a.75.75 0 01-1.06 0z" clipRule="evenodd" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
                     </div>
 
                     {formData.provisionid && (
@@ -305,7 +629,6 @@ const ProvisionPage = ({ onNavigateToDashboard, onLogout, t, onCommand, allStati
                                     <FormInput label="Account Name" name="account" value={formData.info.account} section="info" onDataChange={onDataChange} isInvalid={missingFields.includes('info.account')} />
                                     <FormInput label="Group" name="group" value={formData.info.group} section="info" onDataChange={onDataChange} isInvalid={missingFields.includes('info.group')} />
                                     <FormInput label="Rep" name="rep" value={formData.info.rep} section="info" onDataChange={onDataChange} isInvalid={missingFields.includes('info.rep')} />
-                                    <FormMultiSwitch label="Country" name="country" options={['US', 'CA', 'FR']} value={formData.info.country} section="info" onDataChange={onDataChange} />
                                     <FormToggle label="Auto-Geocode" name="autoGeocode" checked={formData.info.autoGeocode} section="info" onDataChange={onDataChange} />
                                     {!formData.info.autoGeocode && (
                                         <><FormInput label="Latitude" name="lat" value={formData.info.lat} section="info" onDataChange={onDataChange} /><FormInput label="Longitude" name="lon" value={formData.info.lon} section="info" onDataChange={onDataChange} /></>
@@ -317,8 +640,7 @@ const ProvisionPage = ({ onNavigateToDashboard, onLogout, t, onCommand, allStati
                                 <SectionTitle title="Hardware" />
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <FormMultiSwitch label="Type" name="type" options={['CT3', 'CT10', 'CA36', 'CK20', 'CK30', 'CK48', 'CK50']} value={formData.hardware.type} section="hardware" onDataChange={onDataChange} />
-                                    <FormMultiSwitch label="Module Version" name="modversion" options={['1.0', '2.0']} value={formData.hardware.modversion} section="hardware" onDataChange={onDataChange} />
-                                    <FormMultiSwitch label="Mode" name="mode" options={['LIVE', 'TEST']} value={formData.hardware.mode} section="hardware" onDataChange={onDataChange} />
+                                    <FormMultiSwitch label="Mode" name="mode" options={['AI', 'LIVE', 'TEST']} value={formData.hardware.mode} section="hardware" onDataChange={onDataChange} />
                                     <FormInput label="Modules" name="modules" type="number" value={formData.hardware.modules} section="hardware" onDataChange={onDataChange} />
                                     <FormInput label="CPU" name="cpu" value={formData.hardware.cpu} section="hardware" onDataChange={onDataChange} />
                                     <FormMultiSwitch label="Heartbeat Rate" name="hrate" options={['20', '40', '60']} value={String(formData.hardware.hrate)} section="hardware" onDataChange={onDataChange} />
@@ -328,9 +650,9 @@ const ProvisionPage = ({ onNavigateToDashboard, onLogout, t, onCommand, allStati
                                     <FormSlider label="Volume" name="volume" value={formData.hardware.volume} section="hardware" min="0" max="100" onDataChange={onDataChange} />
                                     <FormSlider label="Power Threshold" name="power" value={formData.hardware.power} section="hardware" min="0" max="100" onDataChange={onDataChange} />
                                     <FormMultiSwitch label="Gateway" name="gateway" options={['P68', 'SWIPE', 'SCAN', 'RFID', 'STRIPE', 'APO', 'TOUCH']} value={{'PAYTERP68': 'P68', 'APOLLO': 'APO'}[formData.hardware.gateway] || formData.hardware.gateway} section="hardware" onDataChange={(sec, name, val) => handleMultiSwitchChange(sec, name, val, {'P68': 'PAYTERP68', 'APO': 'APOLLO'})} />
-                                    <FormInput label="SN" name="sn" value={formData.hardware.sn} section="hardware" onDataChange={onDataChange} isInvalid={missingFields.includes('hardware.sn')} />
+                                    <FormInput label={selectedIsAiBooth ? 'SN (Optional)' : 'SN'} name="sn" value={formData.hardware.sn} section="hardware" onDataChange={onDataChange} isInvalid={missingFields.includes('hardware.sn')} />
                                     <FormMultiSwitch label="Gateway Options" name="gatewayoptions" options={['INITIAL', 'FULL', 'OPEN', 'CLOSED', 'RES']} value={{'INITIALPRICE': 'INITIAL', 'FULLPRICE':'FULL', 'OPENMODE':'OPEN', 'CLOSEDLOOP':'CLOSED', 'RESERVATION':'RES'}[formData.hardware.gatewayoptions] || formData.hardware.gatewayoptions} section="hardware" onDataChange={(sec, name, val) => handleMultiSwitchChange(sec, name, val, {'INITIAL': 'INITIALPRICE', 'FULL': 'FULLPRICE', 'OPEN': 'OPENMODE', 'CLOSED': 'CLOSEDLOOP', 'RES': 'RESERVATION'})} />
-                                    <FormMultiSwitch label="Screen" name="screen" options={['NO', '7', '10', '21', '32']} value={formData.hardware.screen?.toUpperCase() === 'NO SCREEN' ? 'NO' : formData.hardware.screen?.toUpperCase().replace('IN', '')} section="hardware" onDataChange={(sec, name, val) => handleMultiSwitchChange(sec, name, val, {'NO': 'no screen'}, false)} />
+                                    <FormMultiSwitch label="Screen" name="screen" options={['7', '10', '21', '32', '49']} value={String(formData.hardware.screen || '49').toUpperCase().replace('IN', '')} section="hardware" onDataChange={onDataChange} />
                                     <FormInput label="Port" name="port" value={formData.hardware.port} section="hardware" onDataChange={onDataChange} />
                                     <FormInput label="Server" name="server" value={formData.hardware.server} section="hardware" onDataChange={onDataChange} />
                                 </div>
@@ -402,11 +724,35 @@ const ProvisionPage = ({ onNavigateToDashboard, onLogout, t, onCommand, allStati
                 details={{
                     title: t('confirm_provisioning'),
                     confirmationText: t('provisioning_confirmation_message'),
-                    data: formData
+                    data: { ...formData, stationid: assignedStationId }
                 }}
                 t={t}
             />
             <CommandStatusToast status={commandStatus} onDismiss={() => setCommandStatus && setCommandStatus(null)} />
+            {validationPopupFields.length > 0 && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+                    <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+                        <h2 className="mb-3 text-lg font-bold text-gray-900">Missing Required Values</h2>
+                        <p className="mb-4 text-sm text-gray-600">
+                            Complete these fields before provisioning this AI booth.
+                        </p>
+                        <ul className="max-h-64 list-disc space-y-1 overflow-y-auto rounded-md border border-red-100 bg-red-50 p-4 pl-8 text-sm font-semibold text-red-700">
+                            {validationPopupFields.map((field) => (
+                                <li key={field}>{formatMissingField(field)}</li>
+                            ))}
+                        </ul>
+                        <div className="mt-6 flex justify-end">
+                            <button
+                                type="button"
+                                onClick={() => setValidationPopupFields([])}
+                                className="rounded-md bg-blue-600 px-6 py-2 font-semibold text-white transition hover:bg-blue-700"
+                            >
+                                OK
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
