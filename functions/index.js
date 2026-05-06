@@ -169,8 +169,12 @@ Date and time rule
   Current timezone: {{current_timezone}}
   Current ISO timestamp: {{current_iso_datetime}}
 - Use those values when the guest asks about the current date, current time, or relative dates like today, tomorrow, or yesterday.
+- If those custom variables are not available, use the ElevenLabs system variables instead:
+  System local time: {{system__time}}
+  System UTC time: {{system__time_utc}}
+  System timezone: {{system__timezone}}
 - Use event schedule data when the guest asks about planned event times.
-- If the live current time variables are missing, say you cannot confirm the live time from here.
+- Only say you cannot confirm the live time if both the kiosk variables and system time variables are missing.
 
 
 Directions behavior
