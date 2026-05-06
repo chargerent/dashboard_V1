@@ -6568,60 +6568,79 @@ export default function AiBoothsPage({
               <div className="mt-5 grid gap-3 sm:grid-cols-2">
                 {SCREEN_UI_VISUAL_MODES.map((mode) => {
                   const isSelected = activeScreenUi.visualMode === mode.id;
+                  const isGolfMode = mode.id === 'golf-scorecard';
+
+                  if (!isGolfMode) {
+                    return (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        onClick={() => updateScreenUiVisualMode(mode.id)}
+                        aria-pressed={isSelected}
+                        className={`rounded-md border px-4 py-4 text-left shadow-sm transition ${
+                          isSelected
+                            ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
+                            : 'border-gray-200 bg-white text-slate-700 hover:border-emerald-200 hover:bg-emerald-50/40'
+                        }`}
+                      >
+                        <span className="text-sm font-semibold">{mode.label}</span>
+                        <span className="mt-2 block text-xs leading-5 text-slate-600">{mode.description}</span>
+                      </button>
+                    );
+                  }
 
                   return (
-                    <button
+                    <div
                       key={mode.id}
-                      type="button"
-                      onClick={() => updateScreenUiVisualMode(mode.id)}
-                      aria-pressed={isSelected}
                       className={`rounded-md border px-4 py-4 text-left shadow-sm transition ${
                         isSelected
                           ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
                           : 'border-gray-200 bg-white text-slate-700 hover:border-emerald-200 hover:bg-emerald-50/40'
                       }`}
                     >
-                      <span className="text-sm font-semibold">{mode.label}</span>
-                      <span className="mt-2 block text-xs leading-5 text-slate-600">{mode.description}</span>
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => updateScreenUiVisualMode(mode.id)}
+                        aria-pressed={isSelected}
+                        className="block w-full text-left"
+                      >
+                        <span className="text-sm font-semibold">{mode.label}</span>
+                        <span className="mt-2 block text-xs leading-5 text-slate-600">{mode.description}</span>
+                      </button>
+
+                      {isSelected && (
+                        <div className="mt-4 border-t border-emerald-200/80 pt-4">
+                          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-700">
+                            QR Animation
+                          </p>
+                          <div className="mt-3 grid gap-2">
+                            {SCREEN_UI_GOLF_QR_MODES.map((qrMode) => {
+                              const isQrSelected = activeScreenUi.golfQrMode === qrMode.id;
+
+                              return (
+                                <button
+                                  key={qrMode.id}
+                                  type="button"
+                                  onClick={() => updateScreenUiGolfQrMode(qrMode.id)}
+                                  aria-pressed={isQrSelected}
+                                  className={`rounded-md border px-3 py-2 text-left text-xs font-semibold shadow-sm transition ${
+                                    isQrSelected
+                                      ? 'border-emerald-400 bg-white text-emerald-950'
+                                      : 'border-emerald-100 bg-white/70 text-emerald-800 hover:border-emerald-300'
+                                  }`}
+                                  title={qrMode.description}
+                                >
+                                  {qrMode.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
               </div>
-
-              {activeScreenUi.visualMode === 'golf-scorecard' && (
-                <div className="mt-5 rounded-md border border-emerald-100 bg-emerald-50/50 p-4">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <p className="text-sm font-semibold text-emerald-950">Golf QR animation</p>
-                      <p className="mt-1 text-xs leading-5 text-emerald-800">
-                        Choose how the kiosk reveals QR codes in the golf scene.
-                      </p>
-                    </div>
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      {SCREEN_UI_GOLF_QR_MODES.map((mode) => {
-                        const isSelected = activeScreenUi.golfQrMode === mode.id;
-
-                        return (
-                          <button
-                            key={mode.id}
-                            type="button"
-                            onClick={() => updateScreenUiGolfQrMode(mode.id)}
-                            aria-pressed={isSelected}
-                            className={`rounded-md border px-3 py-2 text-left text-xs font-semibold shadow-sm transition ${
-                              isSelected
-                                ? 'border-emerald-400 bg-white text-emerald-950'
-                                : 'border-emerald-100 bg-white/70 text-emerald-800 hover:border-emerald-300'
-                            }`}
-                            title={mode.description}
-                          >
-                            {mode.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
 
             <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-md sm:p-6">
