@@ -7,6 +7,7 @@ import { callFunctionWithAuth } from '../utils/callableRequest.js';
 
 const DEFAULT_RENTAL_POLICY = 'You can borrow a portable charger using your phone number. It is complimentary for the day, but there is a fee if it is not returned today. You can return it at any kiosk.';
 const DEFAULT_SUPPORT_FALLBACK = 'event staff or the information desk';
+const WIFI_SECURITY_OPTIONS = Object.freeze(['WPA', 'WEP', 'nopass']);
 
 const DEFAULT_GENERAL = Object.freeze({
   eventName: '',
@@ -28,16 +29,16 @@ const DEFAULT_GENERAL = Object.freeze({
   supportFallback: DEFAULT_SUPPORT_FALLBACK,
 });
 const STANDARD_SYSTEM_PROMPT = `Role
-You are a friendly, witty, and helpful AI concierge stationed at the configured event kiosk.
+You are a friendly, witty, and helpful AI concierge for the configured event booth.
 
-The event name, venue category, basic event info, phone charging configuration, payment type, rental policy, and kiosk-specific location are provided in the event data below. Treat that event data as the source of truth.
+The event data and attached knowledge base are the source of truth for venue info, topics, schedules, hospitality, concessions, fan services, transportation, bathrooms, course details, Wi-Fi, and approved links.
 
 
 You sound human, natural, upbeat, and playful, but you never pretend to have physical abilities you do not have.
 You cannot see the environment, walk anywhere, inspect objects, or personally verify what is happening around you.
 
 
-Your name is defined in the kiosk section of the event data.
+Use the agent name configured for this booth.
 
 
 Voice and style
@@ -50,18 +51,30 @@ Voice and style
 
 
 Top priorities
-1. Give correct event and kiosk information.
+1. Give correct event and venue information.
 2. Use tools whenever a tool exists for the request.
 3. Never guess when a tool or approved event content should be used.
 4. Keep guests moving quickly.
 5. If a tool fails or data is missing, say so clearly and give the best safe fallback.
 
 
+Current client tools
+- \`show_named_directions_qr\`: use for directions to a specific named destination.
+- \`show_closest_directions_qr\`: use for the closest destination in a category such as restroom, concessions, merch, water, exit, first aid, admissions, ticketing, or fan services.
+- \`show_qr\`: use for an exact approved HTTPS link from event data or for the exact generated Wi-Fi QR payload provided in the Wi-Fi topic.
+- \`miss_putt\`: use when a guest asks an off-topic question and you need to redirect them back to event help.
+
+
+Kiosk mode
+- Never use an End conversation, end_call, hang up, or call-ending tool.
+- Never end the session because a guest taps a topic, pauses, or asks a short question.
+- Stay available for follow-up questions until the guest or kiosk app explicitly stops the conversation.
+
+
 Tool-first policy
-- If a user request matches a supported operation such as directions, nearest location, charger rental, charger availability, weather, or Wi-Fi, always use the matching tool.
+- If a user request matches a supported operation such as named directions, closest location directions, or displaying an approved link, always use the matching tool.
 - Never answer those requests from memory, approximation, or inference.
 - Use the tool every time, even for repeated requests.
-- Do not assume previous transaction state unless the kiosk system explicitly confirms that state through a tool result.
 - If a tool exists for the task, do not skip it even if the answer seems obvious.
 - First briefly acknowledge the request.
 - Then explicitly tell the guest that you are fetching the information.
@@ -82,15 +95,15 @@ Clarification rule
 
 Date and time rule
 - Never guess the current date or time.
-- Use system__time_utc if current time is needed.
+- Use event schedule data when the guest asks about planned event times.
+- If live current time is required and not provided by the conversation platform, say you cannot confirm the live time from here.
 
 
 Directions behavior
 When the guest asks where something is, such as a lounge, concession area, activation, or another venue feature:
 - First give a short spoken summary of what that location is or what it offers, if that information exists in the event data.
 - Then say exactly: Hang on while I fetch directions for you...
-- Prefer triggering \`show_named_directions_qr\` with the requested location name.
-- If your tool setup separates lookup from QR display, trigger \`get_directions\` first and then \`show_directions_qr\` with the returned coordinates.
+- Trigger \`show_named_directions_qr\` with the requested location name.
 - When directions are displayed, say: Scan the QR code for walking directions to the [NAME].
 - Do not read raw coordinates aloud.
 
@@ -98,79 +111,25 @@ When the guest asks where something is, such as a lounge, concession area, activ
 Nearest location behavior
 When the guest asks for the nearest restroom, concessions, merch, water, exit, or similar place:
 - Say exactly: Give me a sec to find the closest one for you...
-- Prefer triggering \`show_closest_directions_qr\` with the requested location type.
-- If your tool setup separates lookup from QR display, trigger \`get_closest\` first and then \`show_directions_qr\` with the returned coordinates.
+- Trigger \`show_closest_directions_qr\` with the requested location type.
 - When directions are displayed, say: Scan the QR code for walking directions to the closest [TYPE].
 - Treat plural phrasing such as \`Where are the restrooms?\`, \`Where are the bathrooms?\`, or \`Where can I find washrooms?\` as a nearest-location request unless the guest explicitly asks for all locations.
-- For those plural restroom questions, still prefer \`show_closest_directions_qr\` so the guest gets one useful QR code right away.
+- For those plural restroom questions, still use \`show_closest_directions_qr\` so the guest gets one useful QR code right away.
 - If the guest explicitly asks for all restroom locations, first say there are several around the course, then offer the nearest one with a QR code instead of reading coordinates aloud.
-
-
-Portable charger flow
-Trigger this only when the guest is asking about phone charging, charger rental, borrowing a battery, or returning one, and phone charging is enabled in the event data.
-
-
-If phone charging is disabled, say charger rental is not available at this event and offer help with event information instead.
-
-
-If the guest seems unfamiliar with the service, explain the rental policy from the event data naturally and concisely. If no rental policy is configured, say that event staff can explain the rental details onsite.
-
-
-Then ask:
-Would you like to borrow a charger now?
-
-
-If the guest says yes:
-1. Say: Let me check if we have chargers available...
-2. Trigger availability.
-
-
-If the availability result says sold out:
-- Say: We’re out here, but I can guide you to the next closest kiosk.
-- If the kiosk flow supports it, immediately offer or trigger nearby kiosk directions.
-
-
-If the availability result says chargers are available:
-- Say: We’ve got [x] available.
-- Trigger phonepad.
-- When phonepad is displayed, say: Please enter your phone number on the screen.
-
-
-After the phone number is entered:
-- Trigger number validation.
-- If validation is successful, say: You’ll get a code by text. Enter it now.
-- Trigger pinpad.
-
-
-When the PIN result is successful:
-- Say: Perfect match. Dispensing your charger...
-- Trigger dispense.
-
-
-Timeout and cancellation behavior:
-- If there is no user input after 30 seconds, or the user cancels, trigger stopTransaction.
-- If a transaction is cancelled or times out, say a short reset message such as: No problem, we can start again whenever you’re ready.
-
-
-Rental troubleshooting
-If the guest says the charger is not working:
-- Say: Give it a quick shake and check for three blue lights.
-- Then say: If it’s still not working, your phone case might be the issue. I can help you swap it.
-- If a swap or support tool exists, use it. If not, direct the guest to on-site staff.
 
 
 Wi-Fi behavior
 - Say exactly: Hold on while I grab the Wi-Fi info...
-- Trigger getWiFi.
-- When the tool returns successfully, say: Scan this QR code to connect to Wi-Fi.
-- If network name or password is returned, you may also say them briefly before or after the QR instruction.
+- Use the Wi-Fi topic in the event data or knowledge base.
+- If SSID and password are available, say them briefly.
+- Always call \`show_qr\` with the exact \`Wi-Fi QR payload\` value from the Wi-Fi topic.
+- Pass \`label\` as \`Wi-Fi\`, \`topicKey\` as \`wifi\`, and \`preheatMs\` as 450.
+- If the Wi-Fi QR payload is missing, say the Wi-Fi QR code is not configured and direct the guest to fan services.
 
 
 Weather behavior
-- Say exactly: Let me check the forecast for you...
-- Trigger getWeather.
-- When the result returns, summarize the important part first.
-- Then say: Here’s the latest forecast — it’s shown below.
+- Only answer weather from approved event data or an attached knowledge source.
+- If live weather is needed and no live weather tool is configured, say you cannot confirm the live forecast from here and direct the guest to event staff or the official event source.
 
 
 Shuttle behavior
@@ -178,9 +137,22 @@ Shuttle behavior
 - Do not invent shuttle times.
 
 
+Topic behavior
+- If the guest taps or asks about a topic, focus on that topic first.
+- Ask one concise follow-up if the topic is broad, such as what they want to know about hospitality, concessions, transportation, or the course.
+- For the Golf category, golf-related event questions are in scope when they help the guest experience.
+
+
+Approved links and QR behavior
+- Use \`show_qr\` only when the event data or knowledge base provides an exact approved HTTPS link or an exact generated Wi-Fi QR payload.
+- Pass \`url\`, a short \`label\`, and \`preheatMs\` 450.
+- Do not create, shorten, rewrite, or guess URLs.
+- Do not alter a Wi-Fi QR payload; pass it exactly as provided.
+
+
 Event-scope rule
 - You may answer questions about the configured event, the venue, the configured venue category, and phone charging when it is enabled.
-- Off-topic general knowledge questions should be redirected politely.
+- Off-topic general knowledge questions should trigger \`miss_putt\` with reason \`off_topic\`, then be redirected politely.
 - Example: I am here mainly to help with this event, the venue, and booth support.
 
 
@@ -192,9 +164,8 @@ Failure handling
 
 Safety and honesty
 - Never pretend to see lines, crowds, screens, or a person’s device.
-- Never claim a charger was dispensed unless the dispense tool confirms it.
 - Never claim directions are on screen unless the tool result confirms they are displayed.
-- Never claim Wi-Fi details or weather unless the tool returned them.
+- Never claim Wi-Fi details, weather, or schedule changes unless they are in event data, the knowledge base, or a tool result.
 
 
 Final response discipline
@@ -551,7 +522,9 @@ const EVENT_TOPIC_TEMPLATES = Object.freeze({
     },
   ],
 });
-const SCREEN_UI_PREVIEW_BASE_URL = import.meta.env.VITE_AI_BOOTH_PREVIEW_URL || 'http://127.0.0.1:3000/';
+const SCREEN_UI_PREVIEW_BASE_URL = import.meta.env.VITE_AI_BOOTH_PREVIEW_URL || (
+  import.meta.env.DEV ? 'http://127.0.0.1:3000/' : '/booth-preview/'
+);
 const SCREEN_UI_PREVIEW_WIDTH = 340;
 const SCREEN_UI_PREVIEW_HEIGHT = 1209;
 const SCREEN_UI_PREVIEW_SCALE = 0.52;
@@ -559,6 +532,30 @@ const SCREEN_UI_PREVIEW_EXPANDED_SCALE = 0.62;
 const EVENT_INFO_TOPIC_KEY = 'eventInfo';
 const CUSTOM_SCREEN_UI_PALETTES_STORAGE_KEY = 'aiBoothCustomScreenUiPalettes';
 const SCREEN_UI_TOPIC_PALETTE = ['#b4a6ff', '#f2ff48', '#ffaac6', '#9ab4ff', '#5cf4b0', '#ec9eff', '#9cff56'];
+const SCREEN_UI_VISUAL_MODES = Object.freeze([
+  {
+    id: 'knowledge-web',
+    label: 'Original UI',
+    description: 'Topic circles orbit around the selected knowledge topic.',
+  },
+  {
+    id: 'golf-scorecard',
+    label: 'Golf UI',
+    description: 'A golf scorecard and ball scene where QR codes appear printed on the ball.',
+  },
+]);
+const SCREEN_UI_GOLF_QR_MODES = Object.freeze([
+  {
+    id: 'rotate-ball',
+    label: 'Rotate Ball',
+    description: 'The center ball turns to reveal the QR code printed on its face.',
+  },
+  {
+    id: 'cup-putt',
+    label: 'Putt Into Hole',
+    description: 'The ball rolls into the cup, then the QR code appears inside the hole.',
+  },
+]);
 const SCREEN_UI_PRESETS = Object.freeze([
   {
     id: 'midnight',
@@ -714,6 +711,8 @@ const SCREEN_UI_FEATURES = Object.freeze([
 ]);
 const DEFAULT_SCREEN_UI = Object.freeze({
   preset: 'midnight',
+  visualMode: 'knowledge-web',
+  golfQrMode: 'rotate-ball',
   theme: SCREEN_UI_PRESETS[0].theme,
   features: {
     showConversationControls: true,
@@ -782,6 +781,31 @@ function createDefaultScreenUi() {
   return JSON.parse(JSON.stringify(DEFAULT_SCREEN_UI));
 }
 
+function normalizeScreenUiVisualMode(value, fallback = DEFAULT_SCREEN_UI.visualMode) {
+  const raw = String(value || '').trim();
+  const normalized = {
+    original: 'knowledge-web',
+    'golf-green': 'golf-scorecard',
+    'golf-3d': 'golf-scorecard',
+    golf: 'golf-scorecard',
+  }[raw] || raw;
+  return SCREEN_UI_VISUAL_MODES.some((mode) => mode.id === normalized) ? normalized : fallback;
+}
+
+function normalizeScreenUiGolfQrMode(value, fallback = DEFAULT_SCREEN_UI.golfQrMode) {
+  const raw = String(value || '').trim();
+  const normalized = {
+    ball: 'rotate-ball',
+    rotate: 'rotate-ball',
+    'printed-ball': 'rotate-ball',
+    cup: 'cup-putt',
+    hole: 'cup-putt',
+    putt: 'cup-putt',
+    'putt-cup': 'cup-putt',
+  }[raw] || raw;
+  return SCREEN_UI_GOLF_QR_MODES.some((mode) => mode.id === normalized) ? normalized : fallback;
+}
+
 function normalizeScreenUi(screenUi) {
   const source = screenUi && typeof screenUi === 'object' ? screenUi : {};
   const themeSource = source.theme && typeof source.theme === 'object' ? source.theme : {};
@@ -807,6 +831,8 @@ function normalizeScreenUi(screenUi) {
 
   return {
     preset: String(source.preset || defaults.preset),
+    visualMode: normalizeScreenUiVisualMode(source.visualMode || source.mode, defaults.visualMode),
+    golfQrMode: normalizeScreenUiGolfQrMode(source.golfQrMode || source.qrVisualization, defaults.golfQrMode),
     theme: {
       background: normalizeHexColor(themeSource.background, defaults.theme.background),
       backgroundAlt: normalizeHexColor(themeSource.backgroundAlt, defaults.theme.backgroundAlt),
@@ -1543,6 +1569,8 @@ function createTopicDraft(index = 0) {
     checklistText: '',
     wifiSsid: '',
     wifiPassword: '',
+    wifiSecurity: 'WPA',
+    wifiHidden: false,
     transportation: createDefaultTransportationDetails(),
     fanZones: [],
     hospitalityLocations: [],
@@ -1730,6 +1758,8 @@ function createMockRbcCanadianOpenTopics() {
       summary: 'Guest Wi-Fi is available around major fan zones, hospitality areas, and the clubhouse. Use the public network first; direct guests to fan services if coverage is weak.',
       wifiSsid: 'RBCOpenGuest',
       wifiPassword: 'golf2026',
+      wifiSecurity: 'WPA',
+      wifiHidden: false,
     }),
     createMockRbcTopic(1, {
       title: 'Transportation',
@@ -2048,7 +2078,7 @@ function createMockRbcCanadianOpenDraft(currentDraft = createEmptyEventDraft()) 
       ...createDefaultAgent(),
       ...(currentDraft.agent || {}),
       name: 'RBC Canadian Open Concierge',
-      firstMessage: 'Welcome to the RBC Canadian Open. I can help with bathrooms, concessions, shuttles, hospitality, the course, schedule, merch, and fan services.',
+      firstMessage: 'Welcome to the RBC Canadian Open. How can I help you?',
       systemPrompt: currentDraft.agent?.systemPrompt || STANDARD_SYSTEM_PROMPT,
       kioskAgents: currentDraft.agent?.kioskAgents || {},
     },
@@ -2062,6 +2092,17 @@ function createMockRbcCanadianOpenDraft(currentDraft = createEmptyEventDraft()) 
     ),
     topics: createMockRbcCanadianOpenTopics(),
   });
+}
+
+function normalizeWifiSecurity(value, password = '') {
+  const raw = String(value || '').trim().toUpperCase();
+  if (raw === 'NOPASS' || raw === 'NONE' || raw === 'OPEN') {
+    return 'nopass';
+  }
+  if (raw === 'WEP') {
+    return 'WEP';
+  }
+  return password ? 'WPA' : 'nopass';
 }
 
 function cloneEvent(event) {
@@ -2092,6 +2133,11 @@ function normalizeTopic(topic, index) {
     checklistText: String(topic?.checklistText || ''),
     wifiSsid: String(topic?.wifiSsid || topic?.wifi?.ssid || ''),
     wifiPassword: String(topic?.wifiPassword || topic?.wifi?.password || ''),
+    wifiSecurity: normalizeWifiSecurity(
+      topic?.wifiSecurity || topic?.wifi?.security,
+      topic?.wifiPassword || topic?.wifi?.password
+    ),
+    wifiHidden: topic?.wifiHidden === true || topic?.wifi?.hidden === true,
     transportation: normalizeTransportationDetails(topic?.transportation),
     fanZones: normalizeFanZones(topic?.fanZones || topic?.zones),
     hospitalityLocations: normalizeHospitalityLocations(
@@ -2655,7 +2701,7 @@ function getStationScreenUi(event, stationId) {
   return normalizeScreenUi((stationId && screenUiByStationId[stationId]) || event?.screenUi);
 }
 
-function buildScreenUiPreviewUrl({ eventId = '', stationId = '' } = {}) {
+function buildScreenUiPreviewUrl({ eventId = '', stationId = '', agentId = '' } = {}) {
   const url = new URL(SCREEN_UI_PREVIEW_BASE_URL, window.location.origin);
 
   if (eventId) {
@@ -2664,6 +2710,10 @@ function buildScreenUiPreviewUrl({ eventId = '', stationId = '' } = {}) {
 
   if (stationId) {
     url.searchParams.set('stationId', stationId);
+  }
+
+  if (agentId) {
+    url.searchParams.set('agentId', agentId);
   }
 
   url.searchParams.set('preview', '1');
@@ -3926,9 +3976,11 @@ export default function AiBoothsPage({
     eventDraft.agent?.kioskAgents?.[stationId]?.syncStatus === 'synced'
   )).length;
   const previewStationId = activeScreenUiStationId;
+  const previewAgentId = eventDraft.agent?.kioskAgents?.[previewStationId]?.agentId || eventDraft.agent?.agentId || '';
   const screenUiPreviewUrl = buildScreenUiPreviewUrl({
     eventId: selectedEventId || eventDraft.id,
     stationId: previewStationId,
+    agentId: previewAgentId,
   });
   const screenUiPreviewOrigin = getScreenUiPreviewOrigin(screenUiPreviewUrl);
   const screenUiTopicRows = useMemo(() => getScreenUiTopicRows(eventDraft.topics), [eventDraft.topics]);
@@ -4830,6 +4882,20 @@ export default function AiBoothsPage({
     }));
   }
 
+  function updateScreenUiVisualMode(visualMode) {
+    updateActiveStationScreenUi((screenUi) => ({
+      ...screenUi,
+      visualMode: normalizeScreenUiVisualMode(visualMode, screenUi.visualMode),
+    }));
+  }
+
+  function updateScreenUiGolfQrMode(golfQrMode) {
+    updateActiveStationScreenUi((screenUi) => ({
+      ...screenUi,
+      golfQrMode: normalizeScreenUiGolfQrMode(golfQrMode, screenUi.golfQrMode),
+    }));
+  }
+
   function applyScreenUiPreset(preset) {
     updateActiveStationScreenUi((screenUi, current) => {
       const topicRows = getScreenUiTopicRows(current.topics);
@@ -4890,6 +4956,7 @@ export default function AiBoothsPage({
         id: topic.id,
         title: topic.title,
       })),
+      eventName: eventDraft.general?.eventName || '',
       stationId: activeScreenUiStationId,
       ...extraPayload,
     }, screenUiPreviewOrigin);
@@ -5622,6 +5689,28 @@ export default function AiBoothsPage({
                         onChange={(event) => updateTopicField(activeTopic.id, 'wifiPassword', event.target.value)}
                         placeholder="Network password"
                       />
+                      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                        <label className="block">
+                          <span className="text-sm font-semibold text-slate-700">Security</span>
+                          <select
+                            value={activeTopic.wifiSecurity || 'WPA'}
+                            onChange={(event) => updateTopicField(activeTopic.id, 'wifiSecurity', event.target.value)}
+                            className={FIELD_CLASSES}
+                          >
+                            {WIFI_SECURITY_OPTIONS.map((option) => (
+                              <option key={option} value={option}>
+                                {option === 'nopass' ? 'Open' : option}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <EventInfoToggle
+                          label="Hidden network"
+                          description="Include hidden-network mode in the generated Wi-Fi QR code."
+                          checked={activeTopic.wifiHidden === true}
+                          onChange={(checked) => updateTopicField(activeTopic.id, 'wifiHidden', checked)}
+                        />
+                      </div>
                     </div>
 
                     <GeneralField
@@ -6409,61 +6498,130 @@ export default function AiBoothsPage({
         <section className="grid gap-6 xl:grid-cols-[minmax(0,0.92fr)_minmax(420px,1.08fr)]">
           <div className="space-y-6">
             <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-md sm:p-6">
-              <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(220px,0.55fr)_auto_auto] md:items-end">
-                <label className="block">
-                  <span className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-700">Saved Events</span>
-                  <select
-                    value={selectedEventId}
-                    onChange={handleSelectEvent}
-                    className="mt-2 w-full rounded-md border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                  >
-                    <option value="" className="text-slate-900">
-                      New unsaved event
-                    </option>
-                    {events.map((event) => (
-                      <option key={event.id} value={event.id} className="text-slate-900">
-                        {getEventLabel(event)}
+              <div className="grid gap-4">
+                <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(180px,0.55fr)] md:items-end">
+                  <label className="block min-w-0">
+                    <span className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-700">Saved Events</span>
+                    <select
+                      value={selectedEventId}
+                      onChange={handleSelectEvent}
+                      className="mt-2 w-full min-w-0 truncate rounded-md border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                    >
+                      <option value="" className="text-slate-900">
+                        New unsaved event
                       </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="block">
-                  <span className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-700">Screen Kiosk</span>
-                  <select
-                    value={activeScreenUiStationId}
-                    onChange={(event) => setSelectedScreenUiStationId(event.target.value)}
-                    disabled={assignedBooths.length === 0}
-                    className="mt-2 w-full rounded-md border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500"
-                  >
-                    {assignedBooths.length === 0 ? (
-                      <option value="">Assign a kiosk first</option>
-                    ) : (
-                      assignedBooths.map((booth) => (
-                        <option key={booth.stationid} value={booth.stationid}>
-                          {booth.stationid}
+                      {events.map((event) => (
+                        <option key={event.id} value={event.id} className="text-slate-900">
+                          {getEventLabel(event)}
                         </option>
-                      ))
-                    )}
-                  </select>
-                </label>
+                      ))}
+                    </select>
+                  </label>
 
-                <button
-                  type="button"
-                  onClick={handleCreateNewEvent}
-                  className="rounded-md bg-gray-200 px-5 py-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-300"
-                >
-                  New Event
-                </button>
+                  <label className="block min-w-0">
+                    <span className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-700">Screen Kiosk</span>
+                    <select
+                      value={activeScreenUiStationId}
+                      onChange={(event) => setSelectedScreenUiStationId(event.target.value)}
+                      disabled={assignedBooths.length === 0}
+                      className="mt-2 w-full min-w-0 truncate rounded-md border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500"
+                    >
+                      {assignedBooths.length === 0 ? (
+                        <option value="">Assign a kiosk first</option>
+                      ) : (
+                        assignedBooths.map((booth) => (
+                          <option key={booth.stationid} value={booth.stationid}>
+                            {booth.stationid}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </label>
+                </div>
 
-                <button
-                  type="button"
-                  onClick={handleSaveEvent}
-                  className="rounded-md bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
-                >
-                  Save Screen UI
-                </button>
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={handleCreateNewEvent}
+                    className="rounded-md bg-gray-200 px-5 py-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-300"
+                  >
+                    New Event
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleSaveEvent}
+                    className="rounded-md bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+                  >
+                    Save Screen UI
+                  </button>
+                </div>
               </div>
+            </div>
+
+            <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-md sm:p-6">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.28em] text-sky-600">Visualization</p>
+                <h2 className="mt-2 text-2xl font-semibold text-slate-900">Knowledge base view</h2>
+              </div>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                {SCREEN_UI_VISUAL_MODES.map((mode) => {
+                  const isSelected = activeScreenUi.visualMode === mode.id;
+
+                  return (
+                    <button
+                      key={mode.id}
+                      type="button"
+                      onClick={() => updateScreenUiVisualMode(mode.id)}
+                      aria-pressed={isSelected}
+                      className={`rounded-md border px-4 py-4 text-left shadow-sm transition ${
+                        isSelected
+                          ? 'border-emerald-300 bg-emerald-50 text-emerald-900'
+                          : 'border-gray-200 bg-white text-slate-700 hover:border-emerald-200 hover:bg-emerald-50/40'
+                      }`}
+                    >
+                      <span className="text-sm font-semibold">{mode.label}</span>
+                      <span className="mt-2 block text-xs leading-5 text-slate-600">{mode.description}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {activeScreenUi.visualMode === 'golf-scorecard' && (
+                <div className="mt-5 rounded-md border border-emerald-100 bg-emerald-50/50 p-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-emerald-950">Golf QR animation</p>
+                      <p className="mt-1 text-xs leading-5 text-emerald-800">
+                        Choose how the kiosk reveals QR codes in the golf scene.
+                      </p>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {SCREEN_UI_GOLF_QR_MODES.map((mode) => {
+                        const isSelected = activeScreenUi.golfQrMode === mode.id;
+
+                        return (
+                          <button
+                            key={mode.id}
+                            type="button"
+                            onClick={() => updateScreenUiGolfQrMode(mode.id)}
+                            aria-pressed={isSelected}
+                            className={`rounded-md border px-3 py-2 text-left text-xs font-semibold shadow-sm transition ${
+                              isSelected
+                                ? 'border-emerald-400 bg-white text-emerald-950'
+                                : 'border-emerald-100 bg-white/70 text-emerald-800 hover:border-emerald-300'
+                            }`}
+                            title={mode.description}
+                          >
+                            {mode.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-md sm:p-6">
@@ -6593,7 +6751,7 @@ export default function AiBoothsPage({
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.28em] text-sky-600">Live Preview</p>
                   <h2 className="mt-2 text-2xl font-semibold text-slate-900">AI booth screen</h2>
-                  <p className="mt-2 text-sm text-slate-600">
+                  <p className="mt-2 max-w-xl break-words text-sm leading-5 text-slate-600">
                     {selectedEventId || eventDraft.id ? getEventLabel(eventDraft) : 'Save the event to publish this screen UI to Firebase.'}
                   </p>
                   <p className="mt-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
@@ -6747,7 +6905,7 @@ export default function AiBoothsPage({
                   type="textarea"
                   value={eventDraft.agent?.firstMessage || ''}
                   onChange={(event) => updateAgentField('firstMessage', event.target.value)}
-                  placeholder="Welcome to the event. How can I help you today?"
+                  placeholder="Welcome to the event. How can I help you?"
                 />
                 <GeneralField
                   label="System Prompt"

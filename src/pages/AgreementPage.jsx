@@ -4,6 +4,41 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { FormMultiSwitch } from "../components/forms/FormFields.jsx";
 
+const REGIONAL_REP_AGREEMENT = "Regional Rep";
+const COMPANY_LEGAL_ADDRESS = "12757 Bloomfield St, Studio City CA 91604";
+const COMPANY_NOTICE_ADDRESS = "Ocharge LLC, 12757 Bloomfield Street, Studio City, CA 91604";
+
+const formatAddress = ({ street, city, state, zip }) => {
+  const cityStateZip = [
+    city,
+    [state, zip].filter(Boolean).join(" "),
+  ].filter(Boolean).join(", ");
+
+  return [street, cityStateZip].filter(Boolean).join(", ");
+};
+
+const formatDateForAgreement = (dateValue) => {
+  if (!dateValue) return "";
+  const date = new Date(`${dateValue}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return dateValue;
+  return date.toLocaleDateString();
+};
+
+const getOrdinal = (value) => {
+  const day = parseInt(value, 10);
+  if (!day) return "";
+  const suffix =
+    day % 100 >= 11 && day % 100 <= 13
+      ? "th"
+      : ["th", "st", "nd", "rd"][day % 10] || "th";
+  return `${day}${suffix}`;
+};
+
+const formatCommission = (value) => {
+  const commission = String(value || "").trim();
+  return commission === "20" ? "Twenty percent (20%)" : `${commission || "20"}%`;
+};
+
 const EventLegalText = ({ _t }) => (
   <>
     <p>
@@ -481,6 +516,189 @@ const LeaseLegalText = ({ t }) => (
   </>
 );
 
+const RegionalRepresentativeLegalText = ({ form }) => {
+  const representativeName = form.companyName || "[Insert Name]";
+  const representativeAddress =
+    formatAddress({
+      street: form.proprietorAddress,
+      city: form.proprietorCity,
+      state: form.proprietorState,
+      zip: form.proprietorZip,
+    }) || "[Insert Address]";
+  const territory = form.territory || "[Define Territory]";
+  const effectiveDate = formatDateForAgreement(form.effectiveDate) || "[Insert Date]";
+  const commissionPaymentDay = getOrdinal(form.commissionPaymentDay) || "10th";
+
+  return (
+    <>
+      <h3 className="font-bold text-sm">REGIONAL REPRESENTATIVE AGREEMENT</h3>
+      <p>
+        THIS AGREEMENT is made effective as of {effectiveDate}, by and between
+        Ocharge LLC, whose address is {COMPANY_LEGAL_ADDRESS}, hereinafter
+        referred to as "Company", and {representativeName}, of{" "}
+        {representativeAddress}, hereinafter referred to as "Regional
+        Representative".
+      </p>
+      <p>
+        WHEREAS, Company is engaged in the business of installing and operating
+        automated cashless vending machines at various business locations for
+        the purpose of renting or selling portable chargers, hereinafter
+        referred to as "Powerbanks", to the public through such machines;
+      </p>
+      <p>
+        WHEREAS, Regional Representative desires to represent Company and to
+        promote and sell Company's services in accordance with all the terms and
+        conditions of this Agreement;
+      </p>
+      <p>NOW, THEREFORE, it is agreed as follows:</p>
+
+      <h3 className="font-bold text-sm pt-2">ARTICLE 1 - DEFINITIONS</h3>
+      <p>
+        1. "Products" shall mean the Company's automated vending machines and
+        charging stations for renting Powerbanks. 2. "Territory" shall mean the
+        following described geographic area and/or specific accounts: {territory},
+        United States of America. 3. "Customer" shall mean any end user of the
+        Company's Products within the Territory. 4. "Contract" shall mean the
+        written and executed agreement between Company and a Customer regarding
+        the Company's Products offered to Customer's patrons.
+      </p>
+
+      <h3 className="font-bold text-sm pt-2">ARTICLE 2 - APPOINTMENT</h3>
+      <p>
+        Company hereby appoints Regional Representative as an authorized
+        non-exclusive independent contractor to represent Company and to promote
+        and sell Company's Products within the Territory. The rights and duties
+        of Regional Representative under this Agreement are personal and may not
+        be assigned or delegated without the prior written consent of the
+        Company.
+      </p>
+
+      <h3 className="font-bold text-sm pt-2">ARTICLE 3 - GENERAL DUTIES</h3>
+      <p>
+        1. Promotion and Sales: Regional Representative shall devote adequate
+        time, energy, and skill on a regular and consistent basis as necessary to
+        promote and maximize the growth of the Company's Products in the
+        Territory during the term of this Agreement by identifying and
+        contacting potential Customers for the placement of new machines.
+        Regional Representative shall provide periodic reports, or as requested
+        by the Company, on the status of such promotional and sales activities.
+      </p>
+      <p>
+        2. No Service or Maintenance Responsibility: Regional Representative
+        shall not be responsible for stocking, recharging, cleaning, repairing,
+        servicing, or maintaining any Company machines or Powerbanks, except as
+        may be separately agreed.
+      </p>
+
+      <h3 className="font-bold text-sm pt-2">ARTICLE 4 - COMMISSIONS</h3>
+      <p>
+        1. New Contracts: For each new Contract for the placement of Company's
+        Products as arranged by the Regional Representative under this
+        Agreement, the Regional Representative shall be entitled to a recurring
+        commission of {formatCommission(form.newContractCommission)} of the
+        Contract's monthly gross sales thereafter until the end of the Contract
+        period or the termination of this Agreement.
+      </p>
+      <p>
+        2. Existing Contracts: For each existing Contract for the placement of
+        Company's Products as arranged by the Company under this Agreement, the
+        Regional Representative shall be entitled to a commission of{" "}
+        {formatCommission(form.existingContractCommission)} of the Contract's
+        monthly gross sales until the end of the Contract period or the
+        termination of this Agreement.
+      </p>
+      <p>
+        3. Payment of Commissions: Commissions to the Regional Representative
+        are due and payable on the {commissionPaymentDay} day of each calendar
+        month and reflect the prior calendar month's gross sales.
+      </p>
+
+      <h3 className="font-bold text-sm pt-2">ARTICLE 5 - CONFIDENTIALITY</h3>
+      <p>
+        Regional Representative acknowledges that, during the term of this
+        Agreement and for three years following its termination, it will have
+        access to certain confidential and valuable information relating to the
+        Company's business plans, customers, technology, and products. Regional
+        Representative agrees not to use this information for any purpose other
+        than those directly related to this Agreement, nor disclose it to any
+        third party. Upon termination of this Agreement, Regional Representative
+        shall cease using and shall not disclose any confidential information of
+        the Company, nor manufacture or have manufactured any products utilizing
+        the Company's intellectual property.
+      </p>
+
+      <h3 className="font-bold text-sm pt-2">ARTICLE 6 - CONFLICT OF INTEREST</h3>
+      <p>
+        Regional Representative warrants that it does not currently promote or
+        represent any products that compete with the Company's Products. During
+        the term of this Agreement and for three years afterward, the Regional
+        Representative and any agents under its control will not directly or
+        indirectly engage in any business that competes with the Company within
+        the Territory. Regional Representative shall provide a list of all
+        companies and products it currently represents and shall promptly notify
+        the Company in writing of any new representations.
+      </p>
+
+      <h3 className="font-bold text-sm pt-2">ARTICLE 7 - INDEPENDENT CONTRACTOR</h3>
+      <p>
+        This Agreement does not create a partnership, joint venture, or
+        employer/employee relationship between Company and Regional
+        Representative. Regional Representative is an independent contractor and
+        is solely responsible for all taxes, withholdings, and other statutory
+        or contractual obligations of any sort, including, but not limited to,
+        travel expenses, insurance, and other business expenses incurred in the
+        course of performing services under this Agreement.
+      </p>
+
+      <h3 className="font-bold text-sm pt-2">ARTICLE 8 - INDEMNIFICATION BY REGIONAL REPRESENTATIVE</h3>
+      <p>
+        Regional Representative agrees to indemnify and hold the Company
+        harmless from any claims, losses, or liabilities arising from the
+        Regional Representative's acts or omissions in violation of this
+        Agreement.
+      </p>
+
+      <h3 className="font-bold text-sm pt-2">ARTICLE 9 - INDEMNIFICATION BY COMPANY</h3>
+      <p>
+        Company agrees to indemnify and hold the Regional Representative
+        harmless from any claims, losses, or liabilities arising solely from the
+        Company's acts or omissions in violation of this Agreement.
+      </p>
+
+      <h3 className="font-bold text-sm pt-2">ARTICLE 10 - NOTICES</h3>
+      <p>
+        All notices under this Agreement shall be in writing and sent by
+        certified mail or recognized overnight delivery service to the following
+        addresses: If to Company: {COMPANY_NOTICE_ADDRESS}. If to Regional
+        Representative: {representativeAddress}.
+      </p>
+
+      <h3 className="font-bold text-sm pt-2">ARTICLE 11 - GOVERNING LAW</h3>
+      <p>
+        This Agreement and all matters arising out of or relating to this
+        Agreement are governed by the laws of the State of California, without
+        regard to its conflict of law provisions. The parties consent to the
+        personal jurisdiction of and venue in the state and federal courts
+        located in Los Angeles County, California.
+      </p>
+
+      <h3 className="font-bold text-sm pt-2">ARTICLE 12 - ENTIRE AGREEMENT</h3>
+      <p>
+        This Agreement constitutes the entire agreement between the parties with
+        respect to its subject matter and supersedes all prior or
+        contemporaneous agreements, representations, or understandings of any
+        kind. This Agreement may only be amended or modified by a written
+        document executed by both parties.
+      </p>
+
+      <p>
+        IN WITNESS WHEREOF, the parties have hereunto executed this Agreement on
+        the day and year first above written.
+      </p>
+    </>
+  );
+};
+
 export default function ProfessionalAgreementPDF({
   t,
   language,
@@ -499,6 +717,8 @@ export default function ProfessionalAgreementPDF({
     telephone: "",
     email: "",
     locationName: "",
+    effectiveDate: "",
+    territory: "",
     leaseStartDate: "",
     loadInDate: "",
     eventDates: "",
@@ -526,6 +746,13 @@ export default function ProfessionalAgreementPDF({
     totalPrice: "",
     paymentTerms: "On Receipt",
     leaseAgreementVersion: "V.11.01.2024",
+    newContractCommission: "20",
+    existingContractCommission: "20",
+    commissionPaymentDay: "10",
+    companyOfficerSignerName: "",
+    companyOfficerSignedDate: "",
+    regionalRepresentativeSignerName: "",
+    regionalRepresentativeSignedDate: "",
     info: {
       accountpercent: "",
       reppercent: "",
@@ -533,6 +760,7 @@ export default function ProfessionalAgreementPDF({
     jurisdiction: "California",
     preparedBy: "George",
   });
+  const isRegionalAgreement = agreementType === REGIONAL_REP_AGREEMENT;
 
   const formatLabel = (str) => {
     if (!str) return "";
@@ -546,6 +774,7 @@ export default function ProfessionalAgreementPDF({
       "Rev. Share": t("rev_share_agreement"),
       Event: t("event_agreement"),
       Genesis: t("genesis_agreement"),
+      [REGIONAL_REP_AGREEMENT]: t("regional_representative_agreement"),
     };
     return formatLabel(titles[agreementType] || t("lease_agreement"));
   }, [agreementType, t]);
@@ -670,15 +899,50 @@ export default function ProfessionalAgreementPDF({
       addFooter(data);
     };
 
+    const representativeAddress = formatAddress({
+      street: form.proprietorAddress,
+      city: form.proprietorCity,
+      state: form.proprietorState,
+      zip: form.proprietorZip,
+    });
+
     const proprietorData = [
-      [formatLabel(t("company_name")), form.companyName],
+      [
+        isRegionalAgreement
+          ? formatLabel(t("representative_name"))
+          : formatLabel(t("company_name")),
+        form.companyName,
+      ],
       [
         formatLabel(t("address")),
-        `${form.proprietorAddress} ${form.proprietorCity}, ${form.proprietorState} ${form.proprietorZip}`,
+        isRegionalAgreement
+          ? representativeAddress
+          : `${form.proprietorAddress} ${form.proprietorCity}, ${form.proprietorState} ${form.proprietorZip}`,
       ],
-      [formatLabel(t("contact_name")), form.contactName],
+      ...(isRegionalAgreement ? [] : [[formatLabel(t("contact_name")), form.contactName]]),
       [formatLabel(t("telephone")), form.telephone],
       [formatLabel(t("email")), form.email],
+    ];
+
+    const regionalDetailsData = [
+      [formatLabel(t("effective_date")), formatDateForAgreement(form.effectiveDate)],
+      [formatLabel(t("territory")), form.territory],
+      [formatLabel(t("governing_law")), "California"],
+    ];
+
+    const commissionTermsData = [
+      [
+        formatLabel(t("new_contract_commission")),
+        form.newContractCommission ? `${form.newContractCommission}%` : "",
+      ],
+      [
+        formatLabel(t("existing_contract_commission")),
+        form.existingContractCommission ? `${form.existingContractCommission}%` : "",
+      ],
+      [
+        formatLabel(t("commission_payment_day")),
+        getOrdinal(form.commissionPaymentDay),
+      ],
     ];
 
     const locationData = [
@@ -813,7 +1077,9 @@ export default function ProfessionalAgreementPDF({
       head: [
         [
           {
-            content: t("proprietor_information"),
+            content: isRegionalAgreement
+              ? formatLabel(t("regional_representative_information"))
+              : t("proprietor_information"),
             colSpan: 2,
             styles: {
               fillColor: [225, 239, 255],
@@ -827,7 +1093,43 @@ export default function ProfessionalAgreementPDF({
       didDrawPage: didDrawPage,
     });
 
-    if (agreementType === "Event" || agreementType === "Genesis") {
+    if (isRegionalAgreement) {
+      autoTable(doc, {
+        ...tableOptions,
+        head: [
+          [
+            {
+              content: formatLabel(t("agreement_details")),
+              colSpan: 2,
+              styles: {
+                fillColor: [222, 247, 232],
+                textColor: [22, 163, 74],
+              },
+            },
+          ],
+        ],
+        body: regionalDetailsData,
+        didDrawPage: didDrawPage,
+      });
+
+      autoTable(doc, {
+        ...tableOptions,
+        head: [
+          [
+            {
+              content: formatLabel(t("commission_terms")),
+              colSpan: 2,
+              styles: {
+                fillColor: [255, 251, 235],
+                textColor: [217, 119, 6],
+              },
+            },
+          ],
+        ],
+        body: commissionTermsData,
+        didDrawPage: didDrawPage,
+      });
+    } else if (agreementType === "Event" || agreementType === "Genesis") {
       autoTable(doc, {
         ...tableOptions,
         head: [
@@ -865,23 +1167,25 @@ export default function ProfessionalAgreementPDF({
       });
     }
 
-    autoTable(doc, {
-      ...tableOptions,
-      head: [
-        [
-          {
-            content: t("charger_rental_details"),
-            colSpan: 2,
-            styles: {
-              fillColor: [243, 232, 255],
-              textColor: [126, 34, 206],
+    if (!isRegionalAgreement) {
+      autoTable(doc, {
+        ...tableOptions,
+        head: [
+          [
+            {
+              content: t("charger_rental_details"),
+              colSpan: 2,
+              styles: {
+                fillColor: [243, 232, 255],
+                textColor: [126, 34, 206],
+              },
             },
-          },
+          ],
         ],
-      ],
-      body: rentalDetailsData,
-      didDrawPage: didDrawPage,
-    });
+        body: rentalDetailsData,
+        didDrawPage: didDrawPage,
+      });
+    }
 
     if (agreementType === "Event" || agreementType === "Genesis") {
       autoTable(doc, {
@@ -1001,26 +1305,71 @@ export default function ProfessionalAgreementPDF({
       });
 
       const finalYAfterText = yPos;
+      const leftSignatureLabel = isRegionalAgreement
+        ? `${t("company_officer")}: Ocharge LLC`
+        : `${t("Proprietor")}: ${form.companyName}`;
+      const rightSignatureLabel = isRegionalAgreement
+        ? `${t("regional_representative")}: ${form.companyName}`
+        : "Lessor: Ocharge LLC";
 
       doc.setFontSize(12);
-      doc.text(
-        `${t("Proprietor")}: ${form.companyName}`,
-        40,
-        finalYAfterText + 60
-      );
-      doc.line(40, finalYAfterText + 100, 160, finalYAfterText + 100);
-      doc.text(t("signature"), 40, finalYAfterText + 115);
-      doc.line(180, finalYAfterText + 100, 260, finalYAfterText + 100);
-      doc.text(t("date"), 180, finalYAfterText + 115);
+      if (isRegionalAgreement) {
+        const pageHeight = doc.internal.pageSize.height;
+        let signatureY = finalYAfterText + 60;
+        if (signatureY > pageHeight - 170) {
+          doc.addPage();
+          didDrawPage({ pageNumber: doc.internal.getNumberOfPages() });
+          signatureY = 90;
+        }
 
-      doc.text("Lessor: Ocharge LLC", 350, finalYAfterText + 60);
-      doc.line(350, finalYAfterText + 100, 470, finalYAfterText + 100);
-      doc.text(t("signature"), 350, finalYAfterText + 115);
-      doc.line(490, finalYAfterText + 100, 570, finalYAfterText + 100);
-      doc.text(t("date"), 490, finalYAfterText + 115);
+        const addRegionalSignatureBlock = (x, label, signerName, signedDate) => {
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(12);
+          doc.text(label, x, signatureY);
+          doc.setFont("helvetica", "normal");
+          doc.line(x, signatureY + 40, x + 190, signatureY + 40);
+          doc.setFontSize(9);
+          doc.text(t("signature"), x, signatureY + 55);
+          doc.setFontSize(10);
+          doc.text(
+            `${t("printed_name")}: ${signerName || ""}`,
+            x,
+            signatureY + 78
+          );
+          doc.text(
+            `${t("date")}: ${formatDateForAgreement(signedDate)}`,
+            x,
+            signatureY + 98
+          );
+        };
+
+        addRegionalSignatureBlock(
+          40,
+          leftSignatureLabel,
+          form.companyOfficerSignerName,
+          form.companyOfficerSignedDate
+        );
+        addRegionalSignatureBlock(
+          350,
+          rightSignatureLabel,
+          form.regionalRepresentativeSignerName || form.companyName,
+          form.regionalRepresentativeSignedDate
+        );
+      } else {
+        doc.text(leftSignatureLabel, 40, finalYAfterText + 60);
+        doc.line(40, finalYAfterText + 100, 160, finalYAfterText + 100);
+        doc.text(t("signature"), 40, finalYAfterText + 115);
+        doc.line(180, finalYAfterText + 100, 260, finalYAfterText + 100);
+        doc.text(t("date"), 180, finalYAfterText + 115);
+
+        doc.text(rightSignatureLabel, 350, finalYAfterText + 60);
+        doc.line(350, finalYAfterText + 100, 470, finalYAfterText + 100);
+        doc.text(t("signature"), 350, finalYAfterText + 115);
+        doc.line(490, finalYAfterText + 100, 570, finalYAfterText + 100);
+        doc.text(t("date"), 490, finalYAfterText + 115);
+      }
     }
 
-    doc.save(`${form.companyName || "Lease_Agreement"}.pdf`);
     const getFilename = () => {
       const company = form.companyName || "Agreement";
       switch (agreementType) {
@@ -1032,6 +1381,8 @@ export default function ProfessionalAgreementPDF({
           return `${company}_Event_Agreement.pdf`;
         case "Genesis":
           return `${company}_Genesis_Agreement.pdf`;
+        case REGIONAL_REP_AGREEMENT:
+          return `${company}_Regional_Representative_Agreement.pdf`;
         default:
           return `${company}_Agreement.pdf`;
       }
@@ -1115,7 +1466,7 @@ export default function ProfessionalAgreementPDF({
           <FormMultiSwitch
             label={t("agreement_type")}
             name="agreementType"
-            options={["Lease", "Rev. Share", "Event", "Genesis"]}
+            options={["Lease", "Rev. Share", "Event", "Genesis", REGIONAL_REP_AGREEMENT]}
             value={agreementType}
             section=""
             onDataChange={(sec, name, val) => setAgreementType(val)}
@@ -1133,7 +1484,9 @@ export default function ProfessionalAgreementPDF({
               </h3>
               <div className="mb-3">
                 <label className="block text-sm font-semibold mb-1">
-                  {formatLabel(t("lease_agreement_version"))}
+                  {formatLabel(
+                    t(isRegionalAgreement ? "agreement_version" : "lease_agreement_version")
+                  )}
                 </label>
                 <input
                   type="text"
@@ -1143,27 +1496,50 @@ export default function ProfessionalAgreementPDF({
                   className="border w-full p-2 rounded-md focus:ring-2 focus:ring-gray-400"
                 />
               </div>
+              {isRegionalAgreement && (
+                <div className="mb-3">
+                  <label className="block text-sm font-semibold mb-1">
+                    {formatLabel(t("effective_date"))}
+                  </label>
+                  <input
+                    type="date"
+                    name="effectiveDate"
+                    value={form.effectiveDate}
+                    onChange={handleChange}
+                    className="border w-full p-2 rounded-md focus:ring-2 focus:ring-gray-400"
+                  />
+                </div>
+              )}
             </div>
 
             {/* Proprietor Info */}
             <div className="mb-6 bg-blue-50 border-l-4 border-blue-600 p-4 rounded">
               <h3 className="text-lg font-bold text-blue-700 mb-2">
-                {t("proprietor_information")}
+                {isRegionalAgreement
+                  ? formatLabel(t("regional_representative_information"))
+                  : t("proprietor_information")}
               </h3>
-              {["companyName", "contactName", "telephone", "email"].map((key) => (
-                <div key={key} className="mb-3">
-                  <label className="block text-sm font-semibold mb-1">
-                    {formatLabel(t(key))}
-                  </label>
-                  <input
-                    type="text"
-                    name={key}
-                    value={form[key]}
-                    onChange={handleChange}
-                    className="border w-full p-2 rounded-md focus:ring-2 focus:ring-blue-400"
-                  />
-                </div>
-              ))}
+              {(isRegionalAgreement
+                ? ["companyName", "telephone", "email"]
+                : ["companyName", "contactName", "telephone", "email"]
+              ).map((key) => (
+                  <div key={key} className="mb-3">
+                    <label className="block text-sm font-semibold mb-1">
+                      {formatLabel(
+                        key === "companyName" && isRegionalAgreement
+                          ? t("representative_name")
+                          : t(key)
+                      )}
+                    </label>
+                    <input
+                      type="text"
+                      name={key}
+                      value={form[key]}
+                      onChange={handleChange}
+                      className="border w-full p-2 rounded-md focus:ring-2 focus:ring-blue-400"
+                    />
+                  </div>
+                ))}
               <div className="mb-3">
                 <label className="block text-sm font-semibold mb-1">
                   {formatLabel(t("address"))}
@@ -1206,7 +1582,37 @@ export default function ProfessionalAgreementPDF({
             </div>
 
             {/* Location / Event Section */}
-            {agreementType === "Event" || agreementType === "Genesis" ? (
+            {isRegionalAgreement ? (
+              <div className="mb-6 bg-green-50 border-l-4 border-green-600 p-4 rounded">
+                <h3 className="text-lg font-bold text-green-700 mb-2">
+                  {formatLabel(t("agreement_details"))}
+                </h3>
+                <div className="mb-3">
+                  <label className="block text-sm font-semibold mb-1">
+                    {formatLabel(t("territory"))}
+                  </label>
+                  <textarea
+                    name="territory"
+                    value={form.territory}
+                    onChange={handleChange}
+                    className="border w-full p-2 rounded-md focus:ring-2 focus:ring-green-400"
+                    rows="3"
+                    placeholder="e.g., Southern California hospitality accounts"
+                  ></textarea>
+                </div>
+                <div className="mb-3">
+                  <label className="block text-sm font-semibold mb-1">
+                    {formatLabel(t("governing_law"))}
+                  </label>
+                  <input
+                    type="text"
+                    value="California"
+                    disabled
+                    className="border w-full p-2 rounded-md bg-gray-100 text-gray-600"
+                  />
+                </div>
+              </div>
+            ) : agreementType === "Event" || agreementType === "Genesis" ? (
               <div className="mb-6 bg-green-50 border-l-4 border-green-600 p-4 rounded">
                 <h3 className="text-lg font-bold text-green-700 mb-2">
                   {formatLabel(t("event_details"))}
@@ -1332,7 +1738,7 @@ export default function ProfessionalAgreementPDF({
             )}
 
             {/* Charger Rental Details Section */}
-            {agreementType !== "Rev. Share" && (
+            {agreementType !== "Rev. Share" && !isRegionalAgreement && (
               <div className="mb-6 bg-purple-50 border-l-4 border-purple-600 p-4 rounded">
                 <h3 className="text-lg font-bold text-purple-700 mb-2">
                   {formatLabel(t("charger_rental_details"))}
@@ -1357,7 +1763,113 @@ export default function ProfessionalAgreementPDF({
             )}
 
             {/* Pricing / Terms Section */}
-            {agreementType === "Event" || agreementType === "Genesis" ? (
+            {isRegionalAgreement ? (
+              <div className="mb-6 bg-yellow-50 border-l-4 border-yellow-500 p-4 rounded">
+                <h3 className="text-lg font-bold text-yellow-700 mb-2">
+                  {formatLabel(t("commission_terms"))}
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
+                  <div>
+                    <label className="block text-sm font-semibold mb-1">
+                      {formatLabel(t("new_contract_commission"))}
+                    </label>
+                    <input
+                      type="number"
+                      name="newContractCommission"
+                      value={form.newContractCommission}
+                      onChange={handleChange}
+                      className="border w-full p-2 rounded-md focus:ring-2 focus:ring-yellow-400"
+                      min="0"
+                      step="0.01"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold mb-1">
+                      {formatLabel(t("existing_contract_commission"))}
+                    </label>
+                    <input
+                      type="number"
+                      name="existingContractCommission"
+                      value={form.existingContractCommission}
+                      onChange={handleChange}
+                      className="border w-full p-2 rounded-md focus:ring-2 focus:ring-yellow-400"
+                      min="0"
+                      step="0.01"
+                    />
+                  </div>
+                </div>
+                <div className="mb-3">
+                  <label className="block text-sm font-semibold mb-1">
+                    {formatLabel(t("commission_payment_day"))}
+                  </label>
+                  <input
+                    type="number"
+                    name="commissionPaymentDay"
+                    value={form.commissionPaymentDay}
+                    onChange={handleChange}
+                    className="border w-full p-2 rounded-md focus:ring-2 focus:ring-yellow-400"
+                    min="1"
+                    max="31"
+                  />
+                </div>
+                <div className="mt-5 pt-4 border-t border-yellow-200">
+                  <h4 className="text-sm font-bold text-yellow-800 mb-3">
+                    {formatLabel(t("signature_details"))}
+                  </h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
+                    <div>
+                      <label className="block text-sm font-semibold mb-1">
+                        {formatLabel(t("company_officer_name"))}
+                      </label>
+                      <input
+                        type="text"
+                        name="companyOfficerSignerName"
+                        value={form.companyOfficerSignerName}
+                        onChange={handleChange}
+                        className="border w-full p-2 rounded-md focus:ring-2 focus:ring-yellow-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold mb-1">
+                        {formatLabel(t("company_officer_signed_date"))}
+                      </label>
+                      <input
+                        type="date"
+                        name="companyOfficerSignedDate"
+                        value={form.companyOfficerSignedDate}
+                        onChange={handleChange}
+                        className="border w-full p-2 rounded-md focus:ring-2 focus:ring-yellow-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold mb-1">
+                        {formatLabel(t("regional_representative_name"))}
+                      </label>
+                      <input
+                        type="text"
+                        name="regionalRepresentativeSignerName"
+                        value={form.regionalRepresentativeSignerName}
+                        onChange={handleChange}
+                        className="border w-full p-2 rounded-md focus:ring-2 focus:ring-yellow-400"
+                        placeholder={form.companyName}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold mb-1">
+                        {formatLabel(t("representative_signed_date"))}
+                      </label>
+                      <input
+                        type="date"
+                        name="regionalRepresentativeSignedDate"
+                        value={form.regionalRepresentativeSignedDate}
+                        onChange={handleChange}
+                        className="border w-full p-2 rounded-md focus:ring-2 focus:ring-yellow-400"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : agreementType === "Event" || agreementType === "Genesis" ? (
               <div className="mb-6 bg-yellow-50 border-l-4 border-yellow-500 p-4 rounded">
                 <h3 className="text-lg font-bold text-yellow-700 mb-2">
                   {formatLabel(t("quote_number"))}
@@ -1560,7 +2072,9 @@ export default function ProfessionalAgreementPDF({
             {/* Proprietor Info Preview */}
             <div className="mt-2 border border-blue-600 rounded-lg overflow-hidden">
               <div className="bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-700 border-b border-blue-600">
-                {t("proprietor_information")}
+                {isRegionalAgreement
+                  ? formatLabel(t("regional_representative_information"))
+                  : t("proprietor_information")}
               </div>
               <table className="w-full text-xs">
                 <tbody>
@@ -1569,7 +2083,9 @@ export default function ProfessionalAgreementPDF({
                       className="px-2 py-1 font-semibold w-1/3"
                       style={{ verticalAlign: "top" }}
                     >
-                      {formatLabel(t("company_name"))}
+                      {formatLabel(
+                        isRegionalAgreement ? t("representative_name") : t("company_name")
+                      )}
                     </td>
                     <td
                       className="px-2 py-1 border-l border-gray-300"
@@ -1589,23 +2105,32 @@ export default function ProfessionalAgreementPDF({
                       className="px-2 py-1 border-l border-gray-300"
                       style={{ verticalAlign: "top" }}
                     >
-                      {`${form.proprietorAddress} ${form.proprietorCity}, ${form.proprietorState} ${form.proprietorZip}`}
+                      {isRegionalAgreement
+                        ? formatAddress({
+                            street: form.proprietorAddress,
+                            city: form.proprietorCity,
+                            state: form.proprietorState,
+                            zip: form.proprietorZip,
+                          })
+                        : `${form.proprietorAddress} ${form.proprietorCity}, ${form.proprietorState} ${form.proprietorZip}`}
                     </td>
                   </tr>
-                  <tr>
-                    <td
-                      className="px-2 py-1 font-semibold w-1/3"
-                      style={{ verticalAlign: "top" }}
-                    >
-                      {formatLabel(t("contact_name"))}
-                    </td>
-                    <td
-                      className="px-2 py-1 border-l border-gray-300"
-                      style={{ verticalAlign: "top" }}
-                    >
-                      {form.contactName}
-                    </td>
-                  </tr>
+                  {!isRegionalAgreement && (
+                    <tr>
+                      <td
+                        className="px-2 py-1 font-semibold w-1/3"
+                        style={{ verticalAlign: "top" }}
+                      >
+                        {formatLabel(t("contact_name"))}
+                      </td>
+                      <td
+                        className="px-2 py-1 border-l border-gray-300"
+                        style={{ verticalAlign: "top" }}
+                      >
+                        {form.contactName}
+                      </td>
+                    </tr>
+                  )}
                   <tr className="bg-gray-50">
                     <td
                       className="px-2 py-1 font-semibold w-1/3"
@@ -1639,7 +2164,59 @@ export default function ProfessionalAgreementPDF({
             </div>
 
             {/* Location / Event Preview */}
-            {agreementType === "Event" || agreementType === "Genesis" ? (
+            {isRegionalAgreement ? (
+              <div className="mt-2 border border-green-600 rounded-lg overflow-hidden">
+                <div className="bg-green-50 px-3 py-1 text-sm font-semibold text-green-700 border-b border-green-600">
+                  {formatLabel(t("agreement_details"))}
+                </div>
+                <table className="w-full text-xs">
+                  <tbody>
+                    <tr>
+                      <td
+                        className="px-2 py-1 font-semibold w-1/3"
+                        style={{ verticalAlign: "top" }}
+                      >
+                        {formatLabel(t("effective_date"))}
+                      </td>
+                      <td
+                        className="px-2 py-1 border-l border-gray-300"
+                        style={{ verticalAlign: "top" }}
+                      >
+                        {formatDateForAgreement(form.effectiveDate)}
+                      </td>
+                    </tr>
+                    <tr className="bg-gray-50">
+                      <td
+                        className="px-2 py-1 font-semibold w-1/3"
+                        style={{ verticalAlign: "top" }}
+                      >
+                        {formatLabel(t("territory"))}
+                      </td>
+                      <td
+                        className="px-2 py-1 border-l border-gray-300 whitespace-pre-wrap"
+                        style={{ verticalAlign: "top" }}
+                      >
+                        {form.territory}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td
+                        className="px-2 py-1 font-semibold w-1/3"
+                        style={{ verticalAlign: "top" }}
+                      >
+                        {formatLabel(t("governing_law"))}
+                      </td>
+                      <td
+                        className="px-2 py-1 border-l border-gray-300"
+                        style={{ verticalAlign: "top" }}
+                      >
+                        California
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            ) : agreementType === "Event" || agreementType === "Genesis" ? (
               <div className="mt-2 border border-green-600 rounded-lg overflow-hidden">
                 <div className="bg-green-50 px-3 py-1 text-sm font-semibold text-green-700 border-b border-green-600">
                   {t("event_details")}
@@ -1780,7 +2357,7 @@ export default function ProfessionalAgreementPDF({
             )}
 
             {/* Charger Rental Details Preview */}
-            {agreementType !== "Rev. Share" && (
+            {agreementType !== "Rev. Share" && !isRegionalAgreement && (
               <div className="mt-2 border border-purple-600 rounded-lg overflow-hidden">
                 <div className="bg-purple-50 px-3 py-1 text-sm font-semibold text-purple-700 border-b border-purple-600">
                   {t("charger_rental_details")}
@@ -1839,7 +2416,63 @@ export default function ProfessionalAgreementPDF({
             )}
 
             {/* Pricing Preview */}
-            {agreementType === "Event" || agreementType === "Genesis" ? (
+            {isRegionalAgreement ? (
+              <div className="mt-2 border border-yellow-500 rounded-lg overflow-hidden">
+                <div className="bg-yellow-50 px-3 py-1 text-sm font-semibold text-yellow-700 border-b border-yellow-500">
+                  {formatLabel(t("commission_terms"))}
+                </div>
+                <table className="w-full text-xs">
+                  <tbody className="text-[11px]">
+                    <tr>
+                      <td
+                        className="px-2 py-1 font-semibold w-1/2"
+                        style={{ verticalAlign: "top" }}
+                      >
+                        {formatLabel(t("new_contract_commission"))}
+                      </td>
+                      <td
+                        className="px-2 py-1 border-l border-gray-300 text-right"
+                        style={{ verticalAlign: "top" }}
+                      >
+                        {form.newContractCommission
+                          ? `${form.newContractCommission}%`
+                          : ""}
+                      </td>
+                    </tr>
+                    <tr className="bg-gray-50">
+                      <td
+                        className="px-2 py-1 font-semibold w-1/2"
+                        style={{ verticalAlign: "top" }}
+                      >
+                        {formatLabel(t("existing_contract_commission"))}
+                      </td>
+                      <td
+                        className="px-2 py-1 border-l border-gray-300 text-right"
+                        style={{ verticalAlign: "top" }}
+                      >
+                        {form.existingContractCommission
+                          ? `${form.existingContractCommission}%`
+                          : ""}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td
+                        className="px-2 py-1 font-semibold w-1/2"
+                        style={{ verticalAlign: "top" }}
+                      >
+                        {formatLabel(t("commission_payment_day"))}
+                      </td>
+                      <td
+                        className="px-2 py-1 border-l border-gray-300 text-right"
+                        style={{ verticalAlign: "top" }}
+                      >
+                        {getOrdinal(form.commissionPaymentDay)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            ) : agreementType === "Event" || agreementType === "Genesis" ? (
               <div className="mt-2 border border-yellow-500 rounded-lg overflow-hidden">
                 <div className="bg-yellow-50 px-3 py-1 text-sm font-semibold text-yellow-700 border-b border-yellow-500">
                   {formatLabel(t("quote_number"))}
@@ -2243,6 +2876,8 @@ export default function ProfessionalAgreementPDF({
                 <GenesisLegalText t={t} />
               ) : agreementType === "Rev. Share" ? (
                 <RevShareLegalText t={t} />
+              ) : isRegionalAgreement ? (
+                <RegionalRepresentativeLegalText form={form} />
               ) : (
                 <LeaseLegalText t={t} />
               )}
@@ -2252,17 +2887,47 @@ export default function ProfessionalAgreementPDF({
             <div className="mt-16 grid grid-cols-2 gap-16 text-xs">
               <div>
                 <p className="font-bold">
-                  {t("Proprietor")}: {form.companyName}
+                  {isRegionalAgreement
+                    ? `${t("company_officer")}: Ocharge LLC`
+                    : `${t("Proprietor")}: ${form.companyName}`}
                 </p>
                 <div className="mt-16 border-t border-gray-400 pt-1">
                   <p>{t("signature")}</p>
                 </div>
+                {isRegionalAgreement && (
+                  <div className="mt-2 space-y-1 text-gray-700">
+                    <p>
+                      <span className="font-semibold">{t("printed_name")}:</span>{" "}
+                      {form.companyOfficerSignerName}
+                    </p>
+                    <p>
+                      <span className="font-semibold">{t("date")}:</span>{" "}
+                      {formatDateForAgreement(form.companyOfficerSignedDate)}
+                    </p>
+                  </div>
+                )}
               </div>
               <div>
-                <p className="font-bold">{t("Lessor")}: Ocharge LLC</p>
+                <p className="font-bold">
+                  {isRegionalAgreement
+                    ? `${t("regional_representative")}: ${form.companyName}`
+                    : `${t("Lessor")}: Ocharge LLC`}
+                </p>
                 <div className="mt-16 border-t border-gray-400 pt-1">
                   <p>{t("signature")}</p>
                 </div>
+                {isRegionalAgreement && (
+                  <div className="mt-2 space-y-1 text-gray-700">
+                    <p>
+                      <span className="font-semibold">{t("printed_name")}:</span>{" "}
+                      {form.regionalRepresentativeSignerName || form.companyName}
+                    </p>
+                    <p>
+                      <span className="font-semibold">{t("date")}:</span>{" "}
+                      {formatDateForAgreement(form.regionalRepresentativeSignedDate)}
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -2278,6 +2943,8 @@ export default function ProfessionalAgreementPDF({
                   <GenesisLegalText t={t} />
                 ) : agreementType === "Rev. Share" ? (
                   <RevShareLegalText t={t} />
+                ) : isRegionalAgreement ? (
+                  <RegionalRepresentativeLegalText form={form} />
                 ) : (
                   <LeaseLegalText t={t} />
                 )}
@@ -2287,28 +2954,62 @@ export default function ProfessionalAgreementPDF({
               <div className="mt-16 grid grid-cols-2 gap-12 text-xs">
                 <div>
                   <p className="font-bold">
-                    {t("Proprietor")}: {form.companyName}
+                    {isRegionalAgreement
+                      ? `${t("company_officer")}: Ocharge LLC`
+                      : `${t("Proprietor")}: ${form.companyName}`}
                   </p>
                   <div className="mt-12 border-t border-gray-400 pt-1">
                     <p>{t("signature")}</p>
                   </div>
+                  {isRegionalAgreement && (
+                    <div className="mt-2 space-y-1 text-gray-700">
+                      <p>
+                        <span className="font-semibold">{t("printed_name")}:</span>{" "}
+                        {form.companyOfficerSignerName}
+                      </p>
+                      <p>
+                        <span className="font-semibold">{t("date")}:</span>{" "}
+                        {formatDateForAgreement(form.companyOfficerSignedDate)}
+                      </p>
+                    </div>
+                  )}
                 </div>
                 <div>
-                  <p className="font-bold">{t("Lessor")}: Ocharge LLC</p>
+                  <p className="font-bold">
+                    {isRegionalAgreement
+                      ? `${t("regional_representative")}: ${form.companyName}`
+                      : `${t("Lessor")}: Ocharge LLC`}
+                  </p>
                   <div className="mt-12 border-t border-gray-400 pt-1">
                     <p>{t("signature")}</p>
                   </div>
+                  {isRegionalAgreement && (
+                    <div className="mt-2 space-y-1 text-gray-700">
+                      <p>
+                        <span className="font-semibold">{t("printed_name")}:</span>{" "}
+                        {form.regionalRepresentativeSignerName || form.companyName}
+                      </p>
+                      <p>
+                        <span className="font-semibold">{t("date")}:</span>{" "}
+                        {formatDateForAgreement(form.regionalRepresentativeSignedDate)}
+                      </p>
+                    </div>
+                  )}
                 </div>
-                <div className="self-end">
-                  <div className="mt-12 border-t border-gray-400 pt-1">
-                    <p>{t("date")}</p>
-                  </div>
-                </div>
-                <div className="self-end">
-                  <div className="mt-12 border-t border-gray-400 pt-1">
-                    <p>{t("date")}</p>
-                  </div>
-                </div>
+                {!isRegionalAgreement && (
+                  <>
+                    <div className="self-end">
+                      <div className="mt-12 border-t border-gray-400 pt-1">
+                        <p>{t("date")}</p>
+                      </div>
+                    </div>
+                    <div className="self-end">
+                      <div className="mt-12 border-t border-gray-400 pt-1">
+                        <p>{t("date")}</p>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>

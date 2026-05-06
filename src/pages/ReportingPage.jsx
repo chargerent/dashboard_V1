@@ -58,6 +58,63 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
     const [kioskLabelOverrides, setKioskLabelOverrides] = useState(null);
     const [editingLabelIndex, setEditingLabelIndex] = useState(null);
     const chartsRef = useRef(null);
+    const hasLocationSelection = userMode || selectedLocations.length > 0;
+    const hasKioskSelection = selectedKiosks.length > 0;
+    const canChooseKiosks = hasLocationSelection;
+    const canChooseDates = hasKioskSelection;
+    const hasDateRange = Boolean(startDate && endDate);
+    const hasValidDateRange = Boolean(
+        startDate &&
+        endDate &&
+        new Date(endDate).setHours(23, 59, 59, 999) >= new Date(startDate).setHours(0, 0, 0, 0)
+    );
+    const reportReady = hasKioskSelection && hasValidDateRange;
+    const reportGateMessage = !hasLocationSelection
+        ? 'Select at least one location to unlock kiosks.'
+        : !hasKioskSelection
+            ? 'Select one or more kiosks to unlock dates.'
+            : !hasDateRange
+                ? 'Select a start and end date to generate the report.'
+                : !hasValidDateRange
+                    ? 'End date must be on or after the start date.'
+                    : '';
+
+    const clearDateSelection = () => {
+        setStartDate(null);
+        setEndDate(null);
+        setFetchedRentalData(null);
+    };
+
+    const handleCountryChange = (country) => {
+        setSelectedCountry(country);
+        setSelectedLocations([]);
+        setSelectedKiosks([]);
+        clearDateSelection();
+    };
+
+    const handleLocationChange = (event) => {
+        setSelectedLocations(Array.from(event.target.selectedOptions, option => option.value));
+        setSelectedKiosks([]);
+        clearDateSelection();
+    };
+
+    const handleKioskSelectionChange = (kioskIds) => {
+        setSelectedKiosks(kioskIds);
+        clearDateSelection();
+    };
+
+    const handleStartDateChange = (date) => {
+        if (!canChooseDates) return;
+        setStartDate(date);
+        if (date && endDate && new Date(endDate) < new Date(date)) {
+            setEndDate(null);
+        }
+    };
+
+    const handleEndDateChange = (date) => {
+        if (!canChooseDates) return;
+        setEndDate(date);
+    };
 
     const resetFilters = () => {
         setSelectedCountry('');
@@ -76,12 +133,14 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
     };
 
     const setLastMonth = () => {
+        if (!canChooseDates) return;
         const now = new Date();
         setStartDate(new Date(now.getFullYear(), now.getMonth() - 1, 1));
         setEndDate(new Date(now.getFullYear(), now.getMonth(), 0));
     };
 
     const setYearToDate = () => {
+        if (!canChooseDates) return;
         setStartDate(new Date(new Date().getFullYear(), 0, 1));
         setEndDate(new Date());
     };
@@ -94,8 +153,9 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
     // The App.jsx rentalData is limited to 30 days; this allows arbitrary historical reporting.
     useEffect(() => {
         if (uploadedRentalData) return; // Uploaded file takes priority
-        if (!startDate || !endDate) {
+        if (!reportReady) {
             setFetchedRentalData(null);
+            setIsFetchingRentals(false);
             return;
         }
 
@@ -121,7 +181,7 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                 setFetchedRentalData(null);
             })
             .finally(() => setIsFetchingRentals(false));
-    }, [startDate, endDate, uploadedRentalData]);
+    }, [startDate, endDate, uploadedRentalData, reportReady]);
 
     const clientKiosks = useMemo(() => {
         if (uploadedRentalData) {
@@ -208,6 +268,12 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
         });
     }, [availableKiosksForFilter]);
 
+    useEffect(() => {
+        if (startDate || endDate) {
+            clearDateSelection();
+        }
+    }, [selectedKiosks]);
+
     const stationToLocationMap = useMemo(() => {
         const map = new Map();
         allStationsData.forEach(station => map.set(station.stationid, station.info.location));
@@ -223,7 +289,7 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
         const end = endDate ? new Date(endDate) : null;
         if (end) end.setHours(23, 59, 59, 999);
 
-        if (!start || !end) {
+        if (!reportReady || !start || !end) {
             return []; // Return empty if no date range is selected
         }
 
@@ -251,7 +317,7 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
             }
             return true; // No location or kiosk filter applied (admin/partner)
         });
-    }, [activeRentalData, selectedLocations, selectedKiosks, startDate, endDate, stationToLocationMap, userMode, clientKiosks]);
+    }, [activeRentalData, selectedLocations, selectedKiosks, startDate, endDate, stationToLocationMap, userMode, clientKiosks, reportReady]);
 
     const originalTotalRentals = filteredRentals.length;
     const adjustedTotalRentals = Math.round(originalTotalRentals * (adjustmentPercentage / 100));
@@ -435,6 +501,7 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
     }, [rentalsByKiosk, kioskOverrides, kioskLabelOverrides]);
 
     const handleExportToPdf = () => {
+        if (!reportReady) return;
         setIsExporting(true);
         const input = chartsRef.current;
 
@@ -537,7 +604,7 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
                         </button>
                         {!userMode && (
-                            <button onClick={() => onNavigateToAnalytics(filteredRentals)} className="p-2 rounded-md bg-indigo-100 text-indigo-700 hover:bg-indigo-200" title={t('station_analytics')}>
+                            <button onClick={() => reportReady && onNavigateToAnalytics(filteredRentals)} disabled={!reportReady} className="p-2 rounded-md bg-indigo-100 text-indigo-700 hover:bg-indigo-200 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed" title={t('station_analytics')}>
                                 <ChartBarIcon className="h-6 w-6" />
                             </button>
                         )}
@@ -563,7 +630,7 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                                 )}
                             </div>
                         )}
-                        <button onClick={handleExportToPdf} disabled={isExporting} className="bg-blue-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-400 flex items-center gap-2">
+                        <button onClick={handleExportToPdf} disabled={isExporting || !reportReady} className="bg-blue-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
                             {isExporting ? t('exporting') : t('export_pdf')}
                         </button>
@@ -577,7 +644,7 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                                         {clientCountries.map(country => (
                                             <button
                                                 key={country || 'all'}
-                                                onClick={() => { setSelectedCountry(country); setSelectedLocations([]); setSelectedKiosks([]); }}
+                                                onClick={() => handleCountryChange(country)}
                                                 className={`px-4 py-2 border text-sm font-medium rounded-md shadow-sm ${selectedCountry === country ? 'bg-blue-600 text-white' : 'bg-white text-gray-700 hover:bg-gray-50'}`}
                                             >
                                                 {country || t('all_countries')}
@@ -589,7 +656,7 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                             {!userMode && (
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700">{t('location')}</label>
-                                    <select multiple value={selectedLocations} onChange={e => { setSelectedLocations(Array.from(e.target.selectedOptions, option => option.value)); setSelectedKiosks([]); }} className="mt-1 block w-full h-48 border border-gray-300 rounded-md">
+                                    <select multiple value={selectedLocations} onChange={handleLocationChange} className="mt-1 block w-full h-48 border border-gray-300 rounded-md">
                                         {clientLocations.map(location => <option key={location} value={location}>{location}</option>)}
                                     </select>
                                 </div>
@@ -618,27 +685,27 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                                         <label htmlFor="reporting-show-v2" className="ml-2 text-sm text-gray-900">V2</label>
                                     </div>
                                 </div>
-                                <select multiple value={selectedKiosks} onChange={e => setSelectedKiosks(Array.from(e.target.selectedOptions, option => option.value))} className={`mt-1 block w-full ${userMode ? 'h-48' : 'h-24'} border border-gray-300 rounded-md`} disabled={!userMode && selectedLocations.length === 0}>
+                                <select multiple value={selectedKiosks} onChange={e => handleKioskSelectionChange(Array.from(e.target.selectedOptions, option => option.value))} className={`mt-1 block w-full ${userMode ? 'h-48' : 'h-24'} border border-gray-300 rounded-md disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed`} disabled={!canChooseKiosks}>
                                     {availableKiosksForFilter.map(kiosk => <option key={kiosk.stationid} value={kiosk.stationid}>{kiosk.stationid} - {kiosk.info.place}</option>)}
                                 </select>
                                 <div className="flex justify-between mt-1">
-                                    <button onClick={() => setSelectedKiosks(availableKiosksForFilter.map(k => k.stationid))} className="text-xs text-blue-600" disabled={!userMode && selectedLocations.length === 0}>{t('select_all')}</button>
-                                    <button onClick={() => setSelectedKiosks([])} className="text-xs text-blue-600" disabled={!userMode && selectedLocations.length === 0}>{t('clear_selection')}</button>
+                                    <button onClick={() => handleKioskSelectionChange(availableKiosksForFilter.map(k => k.stationid))} className="text-xs text-blue-600 disabled:text-gray-400 disabled:cursor-not-allowed" disabled={!canChooseKiosks || availableKiosksForFilter.length === 0}>{t('select_all')}</button>
+                                    <button onClick={() => handleKioskSelectionChange([])} className="text-xs text-blue-600 disabled:text-gray-400 disabled:cursor-not-allowed" disabled={!canChooseKiosks || selectedKiosks.length === 0}>{t('clear_selection')}</button>
                                 </div>
                             </div>
                         </div>
                         <div className="space-y-4">
                             <div className="flex gap-2">
-                                <button onClick={setLastMonth} className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded-md border border-gray-300">Last Month</button>
-                                <button onClick={setYearToDate} className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded-md border border-gray-300">Year to Date</button>
+                                <button onClick={setLastMonth} disabled={!canChooseDates} className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded-md border border-gray-300 disabled:text-gray-400 disabled:cursor-not-allowed disabled:hover:bg-gray-100">Last Month</button>
+                                <button onClick={setYearToDate} disabled={!canChooseDates} className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 px-3 py-1 rounded-md border border-gray-300 disabled:text-gray-400 disabled:cursor-not-allowed disabled:hover:bg-gray-100">Year to Date</button>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">{t('start_date')}</label>
-                                <DatePicker selected={startDate} onChange={(date) => setStartDate(date)} className="mt-1 block w-full border border-gray-300 rounded-md p-2" />
+                                <DatePicker selected={startDate} onChange={handleStartDateChange} disabled={!canChooseDates} className={`mt-1 block w-full border border-gray-300 rounded-md p-2 ${!canChooseDates ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : ''}`} />
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">{t('end_date')}</label>
-                                <DatePicker selected={endDate} onChange={(date) => setEndDate(date)} className="mt-1 block w-full border border-gray-300 rounded-md p-2" />
+                                <DatePicker selected={endDate} onChange={handleEndDateChange} minDate={startDate} disabled={!canChooseDates} className={`mt-1 block w-full border border-gray-300 rounded-md p-2 ${!canChooseDates ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : ''}`} />
                             </div>
                             <div className="pt-4 border-t border-gray-200">
                                 <label className="block text-sm font-medium text-gray-700">{t('report_title')}</label>
@@ -653,12 +720,14 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                             {!userMode && (
                                 <div>
                                     <label htmlFor="adjustment" className="block text-sm font-medium text-gray-700">{t('adjust_totals')} ({adjustmentPercentage}%)</label>
-                                    <input id="adjustment" type="range" min="100" max="500" value={adjustmentPercentage} onChange={e => setAdjustmentPercentage(Math.max(100, Number(e.target.value)))} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer mt-2" />
+                                    <input id="adjustment" type="range" min="100" max="500" value={adjustmentPercentage} onChange={e => setAdjustmentPercentage(Math.max(100, Number(e.target.value)))} disabled={!reportReady} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer mt-2 disabled:cursor-not-allowed" />
                                 </div>
                             )}
                             <div className="bg-gray-50 p-3 rounded-md border border-gray-200 text-center">
                                 <p className="text-sm text-gray-600">{t('total_rentals')}</p>
-                                {isFetchingRentals ? (
+                                {!reportReady ? (
+                                    <p className="text-sm text-gray-500 mt-2">{reportGateMessage}</p>
+                                ) : isFetchingRentals ? (
                                     <p className="text-sm text-gray-500 mt-2">Loading...</p>
                                 ) : userMode ? (
                                     <p className="text-2xl font-bold text-gray-700 mt-1">{originalTotalRentals}</p>
@@ -679,6 +748,12 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                     </div>
                 </div>
 
+                {!reportReady ? (
+                    <div className="bg-white p-6 rounded-lg shadow-md text-center">
+                        <h3 className="text-lg font-bold text-gray-800 mb-2">{t('rental_summary')}</h3>
+                        <p className="text-sm text-gray-500">{reportGateMessage}</p>
+                    </div>
+                ) : (
                 <div ref={chartsRef} className="bg-white p-6 rounded-lg shadow-md">
                     {/* Summary Panel */}
                     <div className={`p-4 border border-gray-200 rounded-lg bg-gray-50`}>
@@ -838,8 +913,9 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                         </div>
                     </div>
                 </div>
+                )}
 
-                <div className="bg-white p-4 rounded-lg shadow-md mt-8">
+                {reportReady && <div className="bg-white p-4 rounded-lg shadow-md mt-8">
                     <h3 className="font-semibold mb-4">{t('raw_rental_data')}</h3>
                     <div className="max-h-96 overflow-y-auto">
                         <table className="min-w-full divide-y divide-gray-200 text-sm">
@@ -863,7 +939,7 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                             </tbody>
                         </table>
                     </div>
-                </div>
+                </div>}
             </main>
         </div>
     );

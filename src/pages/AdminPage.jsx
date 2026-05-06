@@ -1,5 +1,6 @@
 // src/pages/AdminPage.jsx
 import { useState, useMemo, useEffect, useCallback } from 'react';
+import { SparklesIcon } from '@heroicons/react/24/outline';
 import ConfirmationModal from '../components/UI/ConfirmationModal.jsx';
 import LoadingSpinner from '../components/UI/LoadingSpinner.jsx';
 import ClientAdminCard from './ClientAdminCard.jsx';
@@ -363,9 +364,7 @@ function AdminPage({
 
             {canUseAiBooths && (
               <button onClick={onNavigateToAiBooths} className="p-2 rounded-md bg-cyan-100 text-cyan-800 hover:bg-cyan-200" title="AI Booths">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 19l-3.096-.813a2 2 0 01-1.414-2.449l.813-3.096L9.813 15.904zm0 0l4.243-4.243m0 0l3.182-3.182a2 2 0 10-2.828-2.828L11.228 8.833m2.828 2.828l-2.828-2.828m5.657 5.657L19 21" />
-                </svg>
+                <SparklesIcon className="h-6 w-6" />
               </button>
             )}
 

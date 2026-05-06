@@ -58,6 +58,7 @@ const DEFAULT_AI_BOOTH_RENTAL_POLICY =
 const DEFAULT_AI_BOOTH_SUPPORT_FALLBACK = "event staff or the information desk";
 const DEFAULT_AI_BOOTH_PHONE_CHARGING_ENABLED = false;
 const DEFAULT_AI_BOOTH_PAYMENT_TYPE = "apollo";
+const AI_BOOTH_MISS_PUTT_TOOL_NAME = "miss_putt";
 const AI_BOOTH_PHONE_CHARGING_TOPIC_KIND = "phoneCharging";
 const AI_BOOTH_WIFI_TOPIC_KIND = "wifi";
 const AI_BOOTH_TRANSPORTATION_TOPIC_KIND = "transportation";
@@ -72,6 +73,8 @@ const DEFAULT_AI_BOOTH_SCREEN_TOPIC_COLORS = {
 };
 const DEFAULT_AI_BOOTH_SCREEN_UI = {
   preset: "midnight",
+  visualMode: "knowledge-web",
+  golfQrMode: "rotate-ball",
   theme: {
     background: "#060606",
     backgroundAlt: "#111216",
@@ -95,16 +98,16 @@ const DEFAULT_AI_BOOTH_SCREEN_UI = {
   },
 };
 const STANDARD_AI_BOOTH_SYSTEM_PROMPT = `Role
-You are a friendly, witty, and helpful AI concierge stationed at the configured event kiosk.
+You are a friendly, witty, and helpful AI concierge for the configured event booth.
 
-The event name, venue category, basic event info, phone charging configuration, payment type, rental policy, and kiosk-specific location are provided in the event data below. Treat that event data as the source of truth.
+The event data and attached knowledge base are the source of truth for venue info, topics, schedules, hospitality, concessions, fan services, transportation, bathrooms, course details, Wi-Fi, and approved links.
 
 
 You sound human, natural, upbeat, and playful, but you never pretend to have physical abilities you do not have.
 You cannot see the environment, walk anywhere, inspect objects, or personally verify what is happening around you.
 
 
-Your name is defined in the kiosk section of the event data.
+Use the agent name configured for this booth.
 
 
 Voice and style
@@ -117,18 +120,30 @@ Voice and style
 
 
 Top priorities
-1. Give correct event and kiosk information.
+1. Give correct event and venue information.
 2. Use tools whenever a tool exists for the request.
 3. Never guess when a tool or approved event content should be used.
 4. Keep guests moving quickly.
 5. If a tool fails or data is missing, say so clearly and give the best safe fallback.
 
 
+Current client tools
+- \`show_named_directions_qr\`: use for directions to a specific named destination.
+- \`show_closest_directions_qr\`: use for the closest destination in a category such as restroom, concessions, merch, water, exit, first aid, admissions, ticketing, or fan services.
+- \`show_qr\`: use for an exact approved HTTPS link from event data or for the exact generated Wi-Fi QR payload provided in the Wi-Fi topic.
+- \`miss_putt\`: use when a guest asks an off-topic question and you need to redirect them back to event help.
+
+
+Kiosk mode
+- Never use an End conversation, end_call, hang up, or call-ending tool.
+- Never end the session because a guest taps a topic, pauses, or asks a short question.
+- Stay available for follow-up questions until the guest or kiosk app explicitly stops the conversation.
+
+
 Tool-first policy
-- If a user request matches a supported operation such as directions, nearest location, charger rental, charger availability, weather, or Wi-Fi, always use the matching tool.
+- If a user request matches a supported operation such as named directions, closest location directions, or displaying an approved link, always use the matching tool.
 - Never answer those requests from memory, approximation, or inference.
 - Use the tool every time, even for repeated requests.
-- Do not assume previous transaction state unless the kiosk system explicitly confirms that state through a tool result.
 - If a tool exists for the task, do not skip it even if the answer seems obvious.
 - First briefly acknowledge the request.
 - Then explicitly tell the guest that you are fetching the information.
@@ -149,15 +164,15 @@ Clarification rule
 
 Date and time rule
 - Never guess the current date or time.
-- Use system__time_utc if current time is needed.
+- Use event schedule data when the guest asks about planned event times.
+- If live current time is required and not provided by the conversation platform, say you cannot confirm the live time from here.
 
 
 Directions behavior
 When the guest asks where something is, such as a lounge, concession area, activation, or another venue feature:
 - First give a short spoken summary of what that location is or what it offers, if that information exists in the event data.
 - Then say exactly: Hang on while I fetch directions for you...
-- Prefer triggering \`show_named_directions_qr\` with the requested location name.
-- If your tool setup separates lookup from QR display, trigger \`get_directions\` first and then \`show_directions_qr\` with the returned coordinates.
+- Trigger \`show_named_directions_qr\` with the requested location name.
 - When directions are displayed, say: Scan the QR code for walking directions to the [NAME].
 - Do not read raw coordinates aloud.
 
@@ -165,79 +180,25 @@ When the guest asks where something is, such as a lounge, concession area, activ
 Nearest location behavior
 When the guest asks for the nearest restroom, concessions, merch, water, exit, or similar place:
 - Say exactly: Give me a sec to find the closest one for you...
-- Prefer triggering \`show_closest_directions_qr\` with the requested location type.
-- If your tool setup separates lookup from QR display, trigger \`get_closest\` first and then \`show_directions_qr\` with the returned coordinates.
+- Trigger \`show_closest_directions_qr\` with the requested location type.
 - When directions are displayed, say: Scan the QR code for walking directions to the closest [TYPE].
 - Treat plural phrasing such as \`Where are the restrooms?\`, \`Where are the bathrooms?\`, or \`Where can I find washrooms?\` as a nearest-location request unless the guest explicitly asks for all locations.
-- For those plural restroom questions, still prefer \`show_closest_directions_qr\` so the guest gets one useful QR code right away.
+- For those plural restroom questions, still use \`show_closest_directions_qr\` so the guest gets one useful QR code right away.
 - If the guest explicitly asks for all restroom locations, first say there are several around the course, then offer the nearest one with a QR code instead of reading coordinates aloud.
-
-
-Portable charger flow
-Trigger this only when the guest is asking about phone charging, charger rental, borrowing a battery, or returning one, and phone charging is enabled in the event data.
-
-
-If phone charging is disabled, say charger rental is not available at this event and offer help with event information instead.
-
-
-If the guest seems unfamiliar with the service, explain the rental policy from the event data naturally and concisely. If no rental policy is configured, say that event staff can explain the rental details onsite.
-
-
-Then ask:
-Would you like to borrow a charger now?
-
-
-If the guest says yes:
-1. Say: Let me check if we have chargers available...
-2. Trigger availability.
-
-
-If the availability result says sold out:
-- Say: We’re out here, but I can guide you to the next closest kiosk.
-- If the kiosk flow supports it, immediately offer or trigger nearby kiosk directions.
-
-
-If the availability result says chargers are available:
-- Say: We’ve got [x] available.
-- Trigger phonepad.
-- When phonepad is displayed, say: Please enter your phone number on the screen.
-
-
-After the phone number is entered:
-- Trigger number validation.
-- If validation is successful, say: You’ll get a code by text. Enter it now.
-- Trigger pinpad.
-
-
-When the PIN result is successful:
-- Say: Perfect match. Dispensing your charger...
-- Trigger dispense.
-
-
-Timeout and cancellation behavior:
-- If there is no user input after 30 seconds, or the user cancels, trigger stopTransaction.
-- If a transaction is cancelled or times out, say a short reset message such as: No problem, we can start again whenever you’re ready.
-
-
-Rental troubleshooting
-If the guest says the charger is not working:
-- Say: Give it a quick shake and check for three blue lights.
-- Then say: If it’s still not working, your phone case might be the issue. I can help you swap it.
-- If a swap or support tool exists, use it. If not, direct the guest to on-site staff.
 
 
 Wi-Fi behavior
 - Say exactly: Hold on while I grab the Wi-Fi info...
-- Trigger getWiFi.
-- When the tool returns successfully, say: Scan this QR code to connect to Wi-Fi.
-- If network name or password is returned, you may also say them briefly before or after the QR instruction.
+- Use the Wi-Fi topic in the event data or knowledge base.
+- If SSID and password are available, say them briefly.
+- Always call \`show_qr\` with the exact \`Wi-Fi QR payload\` value from the Wi-Fi topic.
+- Pass \`label\` as \`Wi-Fi\`, \`topicKey\` as \`wifi\`, and \`preheatMs\` as 450.
+- If the Wi-Fi QR payload is missing, say the Wi-Fi QR code is not configured and direct the guest to fan services.
 
 
 Weather behavior
-- Say exactly: Let me check the forecast for you...
-- Trigger getWeather.
-- When the result returns, summarize the important part first.
-- Then say: Here’s the latest forecast — it’s shown below.
+- Only answer weather from approved event data or an attached knowledge source.
+- If live weather is needed and no live weather tool is configured, say you cannot confirm the live forecast from here and direct the guest to event staff or the official event source.
 
 
 Shuttle behavior
@@ -245,9 +206,22 @@ Shuttle behavior
 - Do not invent shuttle times.
 
 
+Topic behavior
+- If the guest taps or asks about a topic, focus on that topic first.
+- Ask one concise follow-up if the topic is broad, such as what they want to know about hospitality, concessions, transportation, or the course.
+- For the Golf category, golf-related event questions are in scope when they help the guest experience.
+
+
+Approved links and QR behavior
+- Use \`show_qr\` only when the event data or knowledge base provides an exact approved HTTPS link or an exact generated Wi-Fi QR payload.
+- Pass \`url\`, a short \`label\`, and \`preheatMs\` 450.
+- Do not create, shorten, rewrite, or guess URLs.
+- Do not alter a Wi-Fi QR payload; pass it exactly as provided.
+
+
 Event-scope rule
 - You may answer questions about the configured event, the venue, the configured venue category, and phone charging when it is enabled.
-- Off-topic general knowledge questions should be redirected politely.
+- Off-topic general knowledge questions should trigger \`miss_putt\` with reason \`off_topic\`, then be redirected politely.
 - Example: I am here mainly to help with this event, the venue, and booth support.
 
 
@@ -259,9 +233,8 @@ Failure handling
 
 Safety and honesty
 - Never pretend to see lines, crowds, screens, or a person’s device.
-- Never claim a charger was dispensed unless the dispense tool confirms it.
 - Never claim directions are on screen unless the tool result confirms they are displayed.
-- Never claim Wi-Fi details or weather unless the tool returned them.
+- Never claim Wi-Fi details, weather, or schedule changes unless they are in event data, the knowledge base, or a tool result.
 
 
 Final response discipline
@@ -605,6 +578,44 @@ function cleanAiBoothText(value, maxLength = 4000) {
   return String(value || "").trim().slice(0, maxLength);
 }
 
+function escapeAiBoothWifiQrValue(value) {
+  return cleanAiBoothText(value, 512).replace(/([\\;,:"])/g, "\\$1");
+}
+
+function normalizeAiBoothWifiSecurity(value, password) {
+  const raw = cleanAiBoothText(value, 40).toUpperCase();
+  if (raw === "NOPASS" || raw === "NONE" || raw === "OPEN") {
+    return "nopass";
+  }
+  if (raw === "WEP") {
+    return "WEP";
+  }
+  return password ? "WPA" : "nopass";
+}
+
+function buildAiBoothWifiQrPayload(topic) {
+  const ssid = cleanAiBoothText(topic?.wifiSsid || topic?.wifi?.ssid, 240);
+  if (!ssid) {
+    return "";
+  }
+
+  const password = cleanAiBoothText(topic?.wifiPassword || topic?.wifi?.password, 240);
+  const security = normalizeAiBoothWifiSecurity(
+      topic?.wifiSecurity || topic?.wifi?.security,
+      password,
+  );
+  const hidden = topic?.wifiHidden === true || topic?.wifi?.hidden === true;
+
+  return [
+    "WIFI:",
+    `T:${security};`,
+    `S:${escapeAiBoothWifiQrValue(ssid)};`,
+    password ? `P:${escapeAiBoothWifiQrValue(password)};` : "",
+    `H:${hidden ? "true" : "false"};`,
+    ";",
+  ].join("");
+}
+
 function normalizeAiBoothHexColor(value, fallback) {
   const raw = cleanAiBoothText(value, 16).toLowerCase();
   if (/^#[0-9a-f]{6}$/.test(raw)) {
@@ -616,6 +627,31 @@ function normalizeAiBoothHexColor(value, fallback) {
 
 function cloneDefaultAiBoothScreenUi() {
   return JSON.parse(JSON.stringify(DEFAULT_AI_BOOTH_SCREEN_UI));
+}
+
+function normalizeAiBoothVisualMode(value, fallback = DEFAULT_AI_BOOTH_SCREEN_UI.visualMode) {
+  const raw = cleanAiBoothText(value, 60);
+  const normalized = {
+    original: "knowledge-web",
+    "golf-green": "golf-scorecard",
+    "golf-3d": "golf-scorecard",
+    golf: "golf-scorecard",
+  }[raw] || raw;
+  return ["knowledge-web", "golf-scorecard"].includes(normalized) ? normalized : fallback;
+}
+
+function normalizeAiBoothGolfQrMode(value, fallback = DEFAULT_AI_BOOTH_SCREEN_UI.golfQrMode) {
+  const raw = cleanAiBoothText(value, 60);
+  const normalized = {
+    ball: "rotate-ball",
+    rotate: "rotate-ball",
+    "printed-ball": "rotate-ball",
+    cup: "cup-putt",
+    hole: "cup-putt",
+    putt: "cup-putt",
+    "putt-cup": "cup-putt",
+  }[raw] || raw;
+  return ["rotate-ball", "cup-putt"].includes(normalized) ? normalized : fallback;
 }
 
 function normalizeAiBoothScreenUi(value) {
@@ -643,6 +679,8 @@ function normalizeAiBoothScreenUi(value) {
 
   return {
     preset: cleanAiBoothText(source.preset, 40) || defaults.preset,
+    visualMode: normalizeAiBoothVisualMode(source.visualMode || source.mode, defaults.visualMode),
+    golfQrMode: normalizeAiBoothGolfQrMode(source.golfQrMode || source.qrVisualization, defaults.golfQrMode),
     theme: {
       background: normalizeAiBoothHexColor(themeSource.background, defaults.theme.background),
       backgroundAlt: normalizeAiBoothHexColor(themeSource.backgroundAlt, defaults.theme.backgroundAlt),
@@ -1050,6 +1088,8 @@ function normalizeAiBoothTopic(topic, index) {
       checklistText: "",
       wifiSsid: "",
       wifiPassword: "",
+      wifiSecurity: "WPA",
+      wifiHidden: false,
       transportation: normalizeAiBoothTransportationDetails({}),
       fanZones: [],
       hospitalityLocations: [],
@@ -1114,6 +1154,8 @@ function normalizeAiBoothTopic(topic, index) {
     checklistText: cleanAiBoothText(topic.checklistText, 4000),
     wifiSsid: cleanAiBoothText(topic.wifiSsid || topic.wifi?.ssid, 240),
     wifiPassword: cleanAiBoothText(topic.wifiPassword || topic.wifi?.password, 240),
+    wifiSecurity: normalizeAiBoothWifiSecurity(topic.wifiSecurity || topic.wifi?.security, topic.wifiPassword || topic.wifi?.password),
+    wifiHidden: topic.wifiHidden === true || topic.wifi?.hidden === true,
     transportation: normalizeAiBoothTransportationDetails(topic.transportation),
     fanZones: normalizeAiBoothFanZones(topic.fanZones || topic.zones),
     hospitalityLocations: normalizeAiBoothHospitalityLocations(
@@ -1550,11 +1592,17 @@ function serializeMediaAssetSnapshot(docSnap) {
     downloadUrl: String(asset.downloadUrl || ""),
     createdByUid: String(asset.createdByUid || ""),
     createdByUsername: String(asset.createdByUsername || ""),
+    clientTag: String(asset.clientTag || ""),
+    locationTag: String(asset.locationTag || ""),
     active: asset.active !== false,
     createdAt: serializeFirestoreTimestamp(asset.createdAt),
     updatedAt: serializeFirestoreTimestamp(asset.updatedAt),
     targetType: String(asset.targetType || "CK48"),
   };
+}
+
+function normalizeMediaTagValue(value, maxLength = 160) {
+  return String(value || "").trim().slice(0, maxLength);
 }
 
 function chunkArray(values, size) {
@@ -2551,11 +2599,20 @@ async function mediaFinalizeUploadImpl(data, authState) {
   const contentTypeInput = String(data?.contentType || "").trim().toLowerCase();
   const sizeInput = Number(data?.size || 0);
   const requestedVisibility = String(data?.visibility || "").trim().toLowerCase();
+  const clientTag = normalizeMediaTagValue(data?.clientTag, 160);
+  const locationTag = normalizeMediaTagValue(data?.locationTag, 160);
 
   if (!assetId || !fileName || !storagePath) {
     throw new functions.https.HttpsError(
         "invalid-argument",
         "assetId, fileName, and storagePath are required",
+    );
+  }
+
+  if (!clientTag || !locationTag) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "clientTag and locationTag are required",
     );
   }
 
@@ -2613,6 +2670,8 @@ async function mediaFinalizeUploadImpl(data, authState) {
     ownerClientId: visibility === "global" ? "" : getAuthClientId(authState),
     createdByUid: authState.uid,
     createdByUsername: normalizeUsername(authState.profile?.username),
+    clientTag,
+    locationTag,
     bucketName: resolvedBucketName,
     downloadUrl: buildStorageDownloadUrl(storagePath, downloadToken, resolvedBucketName),
     active: true,
@@ -2655,6 +2714,125 @@ async function mediaArchiveAssetImpl(data, authState) {
   }, {merge: true});
 
   return {ok: true, assetId};
+}
+
+async function mediaDeleteAssetImpl(data, authState) {
+  const assetId = String(data?.assetId || "").trim();
+  if (!assetId) {
+    throw new functions.https.HttpsError("invalid-argument", "assetId required");
+  }
+
+  const assetRef = db.collection("mediaAssets").doc(assetId);
+  const assetSnap = await assetRef.get();
+  if (!assetSnap.exists) {
+    throw new functions.https.HttpsError("not-found", "Asset not found");
+  }
+
+  const asset = serializeMediaAssetSnapshot(assetSnap);
+  if (!canArchiveMediaAsset(authState, asset)) {
+    throw new functions.https.HttpsError("permission-denied", "Not allowed to delete this asset");
+  }
+
+  const assignedKioskSnapshot = await db.collection("kiosks")
+      .where("media.assetIds", "array-contains", assetId)
+      .get();
+
+  const updatedStationIds = [];
+  let batch = db.batch();
+  let writesInBatch = 0;
+  const timestamp = new Date().toISOString();
+
+  for (const docSnap of assignedKioskSnapshot.docs) {
+    const kiosk = docSnap.data() || {};
+    if (!canManageMediaForKiosk(authState, kiosk)) {
+      throw new functions.https.HttpsError(
+          "permission-denied",
+          `Not allowed to update kiosk ${kiosk.stationid || docSnap.id}`,
+      );
+    }
+
+    const existingMedia = clonePlain(kiosk.media) || {};
+    const nextAssetIds = Array.isArray(existingMedia.assetIds) ?
+      existingMedia.assetIds
+          .map((value) => String(value || "").trim())
+          .filter((value) => value && value !== assetId) :
+      [];
+    const nextPlaylist = Array.isArray(existingMedia.playlist) ?
+      existingMedia.playlist
+          .filter((item) => String(item?.assetId || "").trim() !== assetId)
+          .map((item, index) => ({
+            ...(clonePlain(item) || {}),
+            order: index + 1,
+          })) :
+      [];
+
+    const nextMedia = nextAssetIds.length > 0 ? {
+      ...existingMedia,
+      active: existingMedia.active !== false && nextPlaylist.length > 0,
+      assetIds: nextAssetIds,
+      playlist: nextPlaylist,
+      updatedAt: timestamp,
+      updatedByUid: authState.uid,
+      updatedByUsername: normalizeUsername(authState.profile?.username),
+    } : {
+      ...DEFAULT_MEDIA_OPTIONS,
+      active: false,
+      updatedAt: timestamp,
+      updatedByUid: authState.uid,
+      updatedByUsername: normalizeUsername(authState.profile?.username),
+      clearedAt: timestamp,
+    };
+
+    batch.set(docSnap.ref, {media: nextMedia}, {merge: true});
+    writesInBatch += 1;
+    updatedStationIds.push(normalizeStationId(kiosk.stationid || docSnap.id));
+
+    if (writesInBatch >= 400) {
+      await batch.commit();
+      batch = db.batch();
+      writesInBatch = 0;
+    }
+  }
+
+  if (writesInBatch > 0) {
+    await batch.commit();
+  }
+
+  if (asset.storagePath) {
+    const bucketCandidates = getStorageBucketCandidates(asset.bucketName);
+    let deletedStorageObject = false;
+
+    for (const bucketName of bucketCandidates) {
+      try {
+        await getStorageBucket(bucketName).file(asset.storagePath).delete({ignoreNotFound: true});
+        deletedStorageObject = true;
+        break;
+      } catch (error) {
+        console.error("mediaDeleteAsset.deleteStorageFailed", {
+          assetId,
+          bucket: bucketName,
+          storagePath: asset.storagePath,
+          message: error?.message || String(error),
+        });
+      }
+    }
+
+    if (!deletedStorageObject) {
+      console.warn("mediaDeleteAsset.storageObjectNotDeleted", {
+        assetId,
+        storagePath: asset.storagePath,
+      });
+    }
+  }
+
+  await assetRef.delete();
+
+  return {
+    ok: true,
+    assetId,
+    removedFromStations: updatedStationIds.length,
+    updatedStationIds,
+  };
 }
 
 async function mediaAssignPlaylistImpl(data, authState) {
@@ -3508,6 +3686,7 @@ async function getAiBoothRuntimeConfigForStation(stationid) {
       agentUpdatedAt: "",
       screenUiUpdatedAt: "",
       configVersion: "",
+      screenUi: normalizeAiBoothScreenUi(),
     };
   }
 
@@ -3523,6 +3702,15 @@ async function getAiBoothRuntimeConfigForStation(stationid) {
   const event = events[0] || null;
   const screenUiData = screenUiSnapshot.exists ? screenUiSnapshot.data() || {} : {};
   const eventId = cleanAiBoothText(event?.id || screenUiData.eventId, 160);
+  const screenUiTopics = Array.isArray(screenUiData.topics) ?
+    screenUiData.topics.map(normalizeAiBoothScreenTopic) :
+    Array.isArray(event?.topics) ?
+      event.topics.map(normalizeAiBoothScreenTopic) :
+      [];
+  const screenUi = {
+    ...normalizeAiBoothScreenUi(screenUiData.screenUi || event?.screenUi),
+    topics: screenUiTopics,
+  };
   const stationIds = Array.isArray(event?.boothStationIds) ? event.boothStationIds : [];
   const agentConfig = normalizeAiBoothAgent(event?.agent, stationIds);
   const kioskAgent = normalizeAiBoothKioskAgent(agentConfig.kioskAgents?.[stationId]);
@@ -3554,6 +3742,7 @@ async function getAiBoothRuntimeConfigForStation(stationid) {
     agentUpdatedAt,
     screenUiUpdatedAt,
     configVersion,
+    screenUi,
   };
 }
 
@@ -4141,6 +4330,136 @@ async function findElevenLabsAgentIdByName(agentName) {
   return matchingAgent?.agentId || "";
 }
 
+function normalizeElevenLabsToolSummary(tool) {
+  const toolConfig = isPlainObject(tool?.tool_config) ?
+    tool.tool_config :
+    isPlainObject(tool?.toolConfig) ?
+      tool.toolConfig :
+      tool;
+
+  return {
+    toolId: cleanAiBoothText(
+        tool?.id || tool?.tool_id || tool?.toolId || toolConfig?.id || toolConfig?.tool_id,
+        160,
+    ),
+    name: cleanAiBoothText(
+        tool?.name || tool?.tool_name || tool?.toolName || toolConfig?.name,
+        160,
+    ),
+  };
+}
+
+function getElevenLabsToolsFromPayload(payload) {
+  if (Array.isArray(payload?.tools)) {
+    return payload.tools;
+  }
+  if (Array.isArray(payload?.items)) {
+    return payload.items;
+  }
+  if (Array.isArray(payload?.data)) {
+    return payload.data;
+  }
+  return [];
+}
+
+async function findElevenLabsToolIdByName(toolName) {
+  const search = cleanAiBoothText(toolName, 120);
+  if (!search) {
+    return "";
+  }
+
+  let cursor = "";
+  for (let pageIndex = 0; pageIndex < 5; pageIndex += 1) {
+    const params = new URLSearchParams({page_size: "100"});
+    if (cursor) {
+      params.set("cursor", cursor);
+    }
+    const payload = await elevenLabsRequest(`/v1/convai/tools?${params.toString()}`);
+    const matchingTool = getElevenLabsToolsFromPayload(payload)
+        .map(normalizeElevenLabsToolSummary)
+        .find((tool) => tool.name === search);
+
+    if (matchingTool?.toolId) {
+      return matchingTool.toolId;
+    }
+
+    if (payload?.has_more !== true || !payload?.next_cursor) {
+      break;
+    }
+    cursor = cleanAiBoothText(payload.next_cursor, 240);
+  }
+
+  return "";
+}
+
+function buildElevenLabsMissPuttToolConfig() {
+  return {
+    type: "client",
+    name: AI_BOOTH_MISS_PUTT_TOOL_NAME,
+    description:
+      "Animate the golf ball missing the cup when a guest asks something outside the event scope.",
+    response_timeout_secs: 10,
+    disable_interruptions: false,
+    force_pre_tool_speech: false,
+    pre_tool_speech: "auto",
+    assignments: [],
+    tool_call_sound: null,
+    tool_call_sound_behavior: "auto",
+    parameters: {
+      type: "object",
+      required: [],
+      properties: {
+        reason: {
+          type: "string",
+          description: "Short reason for the miss animation. Use off_topic for unrelated questions.",
+        },
+        topicKey: {
+          type: "string",
+          description: "Optional booth topic key to highlight before the miss animation.",
+        },
+      },
+    },
+    expects_response: true,
+    dynamic_variables: {dynamic_variable_placeholders: {}},
+    execution_mode: "immediate",
+  };
+}
+
+async function createElevenLabsMissPuttTool() {
+  const payload = await elevenLabsRequest("/v1/convai/tools", {
+    method: "POST",
+    body: {tool_config: buildElevenLabsMissPuttToolConfig()},
+  });
+  const summary = normalizeElevenLabsToolSummary(payload?.tool || payload);
+  return summary.toolId;
+}
+
+async function ensureElevenLabsMissPuttToolId() {
+  const existingToolId = await findElevenLabsToolIdByName(AI_BOOTH_MISS_PUTT_TOOL_NAME);
+  if (existingToolId) {
+    return existingToolId;
+  }
+  return createElevenLabsMissPuttTool();
+}
+
+function mergeElevenLabsPromptToolIds(promptConfig, extraToolIds = []) {
+  const toolIds = [
+    ...(Array.isArray(promptConfig?.tool_ids) ? promptConfig.tool_ids : []),
+    ...(Array.isArray(promptConfig?.toolIds) ? promptConfig.toolIds : []),
+    ...extraToolIds,
+  ].map((toolId) => cleanAiBoothText(toolId, 160)).filter(Boolean);
+
+  return Array.from(new Set(toolIds));
+}
+
+function appendElevenLabsMissPuttInlineTool(tools) {
+  const existingTools = Array.isArray(tools) ? tools : [];
+  if (existingTools.some((tool) => getElevenLabsToolIdentifier(tool) === AI_BOOTH_MISS_PUTT_TOOL_NAME)) {
+    return existingTools;
+  }
+  return [...existingTools, buildElevenLabsMissPuttToolConfig()];
+}
+
 function buildAiBoothAgentName(event, stationId = "") {
   const eventName = cleanAiBoothText(event?.general?.eventName, 80) || "AI Booth Event";
   const stationSuffix = cleanAiBoothText(stationId, 80);
@@ -4377,12 +4696,17 @@ function buildAiBoothTopicKnowledge(topic, index) {
   const normalizedTopic = normalizeAiBoothTopic(topic, index);
 
   if (normalizedTopic.kind === AI_BOOTH_WIFI_TOPIC_KIND) {
+    const wifiQrPayload = buildAiBoothWifiQrPayload(normalizedTopic);
+
     return [
       `### ${normalizedTopic.title}`,
       formatAiBoothKnowledgeLine("Topic ID", normalizedTopic.id),
       formatAiBoothKnowledgeLine("Type", "Wi-Fi"),
       formatAiBoothKnowledgeLine("SSID", normalizedTopic.wifiSsid),
       formatAiBoothKnowledgeLine("Password", normalizedTopic.wifiPassword),
+      formatAiBoothKnowledgeLine("Security", normalizedTopic.wifiSecurity),
+      formatAiBoothKnowledgeLine("Hidden network", normalizedTopic.wifiHidden ? "Yes" : "No"),
+      formatAiBoothKnowledgeLine("Wi-Fi QR payload", wifiQrPayload),
       formatAiBoothKnowledgeBlock("Instructions", normalizedTopic.summary),
     ].join("\n\n");
   }
@@ -4525,32 +4849,8 @@ function buildAiBoothActivationKnowledge(activation, index) {
   ].join("\n\n");
 }
 
-function buildAiBoothKioskKnowledge(stationId, boothContext, kiosk) {
-  const info = getAiBoothKioskInfo(kiosk);
-  const context = normalizeAiBoothBoothContext(boothContext);
-  const locationName = context.locationName || getAiBoothKioskFallbackLocation(kiosk);
-  const place = context.place || cleanAiBoothText(info.place, 200);
-  const zone = context.zone || [info.city, info.state, info.country].filter(Boolean).join(", ");
-  const mapPosition = [context.mapX, context.mapY].filter(Boolean).join(", ");
-  const coordinates = [
-    context.latitude || cleanAiBoothCoordinateText(info.lat),
-    context.longitude || cleanAiBoothCoordinateText(info.lon),
-  ].filter(Boolean).join(", ");
-
-  return [
-    `### ${stationId}`,
-    formatAiBoothKnowledgeLine("Assistant name", context.assistantName || `Kiosk ${stationId}`),
-    formatAiBoothKnowledgeLine("Event location", locationName),
-    formatAiBoothKnowledgeLine("Place at event", place),
-    formatAiBoothKnowledgeLine("Zone", zone),
-    formatAiBoothKnowledgeLine("Coordinates", coordinates),
-    formatAiBoothKnowledgeLine("Nearby landmark", context.landmark),
-    formatAiBoothKnowledgeLine("Map position", mapPosition),
-    formatAiBoothKnowledgeBlock("Direction notes", context.directionsNotes),
-  ].join("\n\n");
-}
-
 function buildAiBoothKnowledgeBaseMarkdown(event, kiosksByStationId = new Map()) {
+  void kiosksByStationId;
   const general = event.general || {};
   const eventName = cleanAiBoothText(general.eventName, 140) || "AI Booth Event";
   const eventCategory = cleanAiBoothText(general.eventCategory, 120);
@@ -4571,19 +4871,12 @@ function buildAiBoothKnowledgeBaseMarkdown(event, kiosksByStationId = new Map())
   const activationText = activations.length > 0 ?
     activations.map(buildAiBoothActivationKnowledge).join("\n\n") :
     "No event activations have been configured.";
-  const kioskText = boothStationIds.length > 0 ?
-    boothStationIds.map((stationId) => buildAiBoothKioskKnowledge(
-        stationId,
-        event.boothContexts?.[stationId],
-        kiosksByStationId.get(stationId) || {},
-    )).join("\n\n") :
-    "No kiosk booth assignments have been configured.";
 
   return cleanAiBoothText([
     `# ${eventName} AI Booth Knowledge`,
     "",
     "This document is generated from the Firebase event configuration.",
-    "Use it as the source of truth for event facts, activations, topics, and kiosk guidance.",
+    "Use it as the source of truth for event facts, activations, topics, and booth guidance.",
     "",
     "## Venue Info",
     formatAiBoothKnowledgeLine("Event name", eventName),
@@ -4620,8 +4913,6 @@ function buildAiBoothKnowledgeBaseMarkdown(event, kiosksByStationId = new Map())
     "## Event Activations",
     activationText,
     "",
-    "## Kiosk Contexts",
-    kioskText,
   ].join("\n"), 250000);
 }
 
@@ -4646,10 +4937,15 @@ function buildAiBoothSystemPrompt(event, basePrompt = STANDARD_AI_BOOTH_SYSTEM_P
     topics.map((topic, index) => {
       const normalizedTopic = normalizeAiBoothTopic(topic, index);
       if (normalizedTopic.kind === AI_BOOTH_WIFI_TOPIC_KIND) {
+        const wifiQrPayload = buildAiBoothWifiQrPayload(normalizedTopic);
+
         return [
           `- ${normalizedTopic.title}`,
           normalizedTopic.wifiSsid ? `  SSID: ${normalizedTopic.wifiSsid}` : "",
           normalizedTopic.wifiPassword ? `  Password: ${normalizedTopic.wifiPassword}` : "",
+          normalizedTopic.wifiSecurity ? `  Security: ${normalizedTopic.wifiSecurity}` : "",
+          `  Hidden network: ${normalizedTopic.wifiHidden ? "Yes" : "No"}`,
+          wifiQrPayload ? `  Wi-Fi QR payload: ${wifiQrPayload}` : "",
           normalizedTopic.summary ? `  Instructions: ${normalizedTopic.summary}` : "",
         ].filter(Boolean).join("\n");
       }
@@ -4876,51 +5172,15 @@ function stripAiBoothGeneratedPromptContext(value) {
 
 function buildAiBoothFirstMessage(event) {
   const eventName = event?.general?.eventName || "the event";
-  return cleanAiBoothText(`Welcome to ${eventName}. How can I help you today?`, 1000);
-}
-
-function getAiBoothKioskInfo(kiosk) {
-  return isPlainObject(kiosk?.info) ? kiosk.info : {};
-}
-
-function getAiBoothKioskFallbackLocation(kiosk) {
-  const info = getAiBoothKioskInfo(kiosk);
-  return cleanAiBoothText(info.location || info.place || info.stationaddress || info.address, 240);
+  return cleanAiBoothText(`Welcome to ${eventName}. How can I help you?`, 1000);
 }
 
 function buildAiBoothKioskSystemPrompt(event, stationId, boothContext, kiosk, basePrompt) {
-  const info = getAiBoothKioskInfo(kiosk);
-  const context = normalizeAiBoothBoothContext(boothContext);
-  const assistantName = context.assistantName || `Kiosk ${stationId}`;
-  const locationName = context.locationName || context.place || getAiBoothKioskFallbackLocation(kiosk) || "Not set";
-  const place = context.place || cleanAiBoothText(info.place, 200) || "Not set";
-  const zone = context.zone || [info.city, info.state, info.country].filter(Boolean).join(", ") || "Not set";
-  const landmark = context.landmark || "Not set";
-  const coordinates = [
-    context.latitude || cleanAiBoothCoordinateText(info.lat),
-    context.longitude || cleanAiBoothCoordinateText(info.lon),
-  ].filter(Boolean).join(", ") || "Not set";
-  const mapPosition = [context.mapX, context.mapY].filter(Boolean).join(", ") || "Not set";
-  const directionsNotes = context.directionsNotes || "No booth-specific direction notes configured.";
-
-  return cleanAiBoothText(`${basePrompt}
-
-Physical kiosk context:
-- Station ID: ${stationId}
-- Kiosk type: ${AI_BOOTH_KIOSK_TYPE}
-- Assistant name: ${assistantName}
-- Event location: ${locationName}
-- Place at event: ${place}
-- Zone: ${zone}
-- Coordinates: ${coordinates}
-- Nearby landmark: ${landmark}
-- Map position: ${mapPosition}
-- Direction notes: ${directionsNotes}
-
-Location behavior:
-- Answer closest-location questions from this kiosk's physical position.
-- If exact map coordinates are not configured, use the zone, landmark, and direction notes as the source of truth.
-- Mention when directions are approximate and direct guests to event staff if a location is missing.`, 20000);
+  void event;
+  void stationId;
+  void boothContext;
+  void kiosk;
+  return cleanAiBoothText(basePrompt, 20000);
 }
 
 async function getAiBoothKiosksByStationId(stationIds) {
@@ -4989,6 +5249,124 @@ function mergeElevenLabsPromptKnowledgeBase(
   ];
 }
 
+function getElevenLabsToolIdentifier(tool) {
+  const candidates = [
+    tool?.name,
+    tool?.tool_name,
+    tool?.toolName,
+    tool?.id,
+    tool?.type,
+    tool?.config?.name,
+    tool?.tool_config?.name,
+    tool?.toolConfig?.name,
+    tool?.function?.name,
+  ];
+  return cleanAiBoothText(
+      candidates.find((candidate) => typeof candidate === "string" && candidate.trim()),
+      160,
+  ).trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function isElevenLabsEndConversationTool(tool) {
+  const identifier = getElevenLabsToolIdentifier(tool);
+  if (!identifier) {
+    return false;
+  }
+
+  return [
+    "end_call",
+    "end_conversation",
+    "end_session",
+    "hang_up",
+    "hangup",
+    "terminate_call",
+  ].includes(identifier);
+}
+
+function filterElevenLabsKioskPromptTools(tools) {
+  if (!Array.isArray(tools)) {
+    return tools;
+  }
+
+  return tools.filter((tool) => !isElevenLabsEndConversationTool(tool));
+}
+
+function filterElevenLabsKioskBuiltInTools(builtInTools) {
+  if (!isPlainObject(builtInTools)) {
+    return builtInTools;
+  }
+
+  const nextBuiltInTools = {...builtInTools};
+  [
+    "end_call",
+    "end_conversation",
+    "end_session",
+    "hang_up",
+    "hangup",
+    "terminate_call",
+  ].forEach((toolKey) => {
+    if (Object.prototype.hasOwnProperty.call(nextBuiltInTools, toolKey)) {
+      nextBuiltInTools[toolKey] = null;
+    }
+  });
+
+  return nextBuiltInTools;
+}
+
+function hasElevenLabsPromptToolIds(promptConfig) {
+  return (
+    Array.isArray(promptConfig?.tool_ids) && promptConfig.tool_ids.length > 0
+  ) || (
+    Array.isArray(promptConfig?.toolIds) && promptConfig.toolIds.length > 0
+  );
+}
+
+function applyElevenLabsKioskToolPolicy(promptConfig) {
+  const nextPromptConfig = {...promptConfig};
+
+  if (isPlainObject(nextPromptConfig.built_in_tools)) {
+    nextPromptConfig.built_in_tools = filterElevenLabsKioskBuiltInTools(
+        nextPromptConfig.built_in_tools,
+    );
+  }
+
+  if (hasElevenLabsPromptToolIds(nextPromptConfig)) {
+    delete nextPromptConfig.tools;
+    return nextPromptConfig;
+  }
+
+  if (Array.isArray(nextPromptConfig.tools)) {
+    nextPromptConfig.tools = filterElevenLabsKioskPromptTools(nextPromptConfig.tools);
+  }
+
+  return nextPromptConfig;
+}
+
+function buildElevenLabsKioskPlatformSettings(platformSettings) {
+  const source = isPlainObject(platformSettings) ? platformSettings : {};
+  const overrides = isPlainObject(source.overrides) ? source.overrides : {};
+  const conversationOverride = isPlainObject(overrides.conversation_config_override) ?
+    overrides.conversation_config_override :
+    {};
+  const agentOverride = isPlainObject(conversationOverride.agent) ?
+    conversationOverride.agent :
+    {};
+
+  return {
+    ...source,
+    overrides: {
+      ...overrides,
+      conversation_config_override: {
+        ...conversationOverride,
+        agent: {
+          ...agentOverride,
+          first_message: true,
+        },
+      },
+    },
+  };
+}
+
 async function createElevenLabsKnowledgeBaseTextDocument({name, text}) {
   const documentText = cleanAiBoothText(text, 250000);
   if (!documentText) {
@@ -5054,6 +5432,9 @@ async function upsertElevenLabsAgentCopy({
   }
 
   const copiedAgent = await elevenLabsRequest(`/v1/convai/agents/${encodeURIComponent(agentId)}`);
+  const platformSettings = isPlainObject(copiedAgent.platform_settings) ?
+    copiedAgent.platform_settings :
+    {};
   const conversationConfig = isPlainObject(copiedAgent.conversation_config) ?
     copiedAgent.conversation_config :
     {};
@@ -5063,8 +5444,17 @@ async function upsertElevenLabsAgentCopy({
   const promptConfig = isPlainObject(conversationAgent.prompt) ?
     conversationAgent.prompt :
     {};
+  const kioskPromptConfig = applyElevenLabsKioskToolPolicy(promptConfig);
+  let missPuttToolId = "";
+  try {
+    missPuttToolId = await ensureElevenLabsMissPuttToolId();
+  } catch (error) {
+    console.warn("Could not ensure ElevenLabs miss_putt tool", {
+      message: error?.message || String(error),
+    });
+  }
   const nextPromptConfig = {
-    ...promptConfig,
+    ...kioskPromptConfig,
     prompt: systemPrompt,
     knowledge_base: mergeElevenLabsPromptKnowledgeBase(
         promptConfig.knowledge_base,
@@ -5072,14 +5462,22 @@ async function upsertElevenLabsAgentCopy({
         managedKnowledgeBaseDocumentIds,
     ),
   };
-
-  delete nextPromptConfig.tools;
+  const nextToolIds = mergeElevenLabsPromptToolIds(kioskPromptConfig, [missPuttToolId]);
+  const hasPromptToolIds = hasElevenLabsPromptToolIds(kioskPromptConfig);
+  if ((hasPromptToolIds || !Array.isArray(nextPromptConfig.tools)) && nextToolIds.length > 0) {
+    nextPromptConfig.tool_ids = nextToolIds;
+    delete nextPromptConfig.toolIds;
+    delete nextPromptConfig.tools;
+  } else if (Array.isArray(nextPromptConfig.tools)) {
+    nextPromptConfig.tools = appendElevenLabsMissPuttInlineTool(nextPromptConfig.tools);
+  }
 
   try {
     await elevenLabsRequest(`/v1/convai/agents/${encodeURIComponent(agentId)}`, {
       method: "PATCH",
       body: {
         name: agentName,
+        platform_settings: buildElevenLabsKioskPlatformSettings(platformSettings),
         conversation_config: {
           ...conversationConfig,
           agent: {
@@ -6243,6 +6641,16 @@ exports.media_archiveAsset = functions.https.onCall(async (data, context) => {
 exports.media_httpArchiveAsset = handleHttpFunction(async (data, req) => {
   const authState = await assertCanManageMedia(req, data);
   return mediaArchiveAssetImpl(data, authState);
+});
+
+exports.media_deleteAsset = functions.https.onCall(async (data, context) => {
+  const authState = await assertCanManageMediaFromContext(context);
+  return mediaDeleteAssetImpl(data, authState);
+});
+
+exports.media_httpDeleteAsset = handleHttpFunction(async (data, req) => {
+  const authState = await assertCanManageMedia(req, data);
+  return mediaDeleteAssetImpl(data, authState);
 });
 
 exports.media_assignPlaylist = functions.https.onCall(async (data, context) => {

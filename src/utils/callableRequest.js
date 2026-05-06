@@ -15,6 +15,7 @@ const HTTP_FUNCTION_NAME_MAP = {
   media_createUploadUrl: 'media_httpCreateUploadUrl',
   media_finalizeUpload: 'media_httpFinalizeUpload',
   media_archiveAsset: 'media_httpArchiveAsset',
+  media_deleteAsset: 'media_httpDeleteAsset',
   media_assignPlaylist: 'media_httpAssignPlaylist',
   aiBooths_listEvents: 'aiBooths_httpListEvents',
   aiBooths_saveEvent: 'aiBooths_httpSaveEvent',
@@ -61,31 +62,78 @@ function getErrorMessage(payload, fallbackMessage) {
   return payload.error.message || payload.error.status || fallbackMessage;
 }
 
-export async function callFunctionWithAuth(functionName, data = {}) {
+export async function callFunctionWithAuth(functionName, data = {}, options = {}) {
   if (!auth.currentUser) {
     throw new Error('Not signed in');
   }
 
-  const idToken = await auth.currentUser.getIdToken(true);
-  const response = await fetch(getCallableUrl(functionName), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${idToken}`,
-    },
-    body: JSON.stringify({
-      data: {
-        ...data,
-        __authToken: idToken,
+  const {
+    timeoutMs = 0,
+    timeoutMessage = '',
+    abortController = null,
+    abortMessage = '',
+  } = options;
+
+  const controller = abortController || (typeof AbortController !== 'undefined' ? new AbortController() : null);
+  let didTimeout = false;
+  let timeoutId = null;
+  if (controller && Number(timeoutMs) > 0) {
+    timeoutId = globalThis.setTimeout(() => {
+      didTimeout = true;
+      controller.abort();
+    }, Number(timeoutMs));
+  }
+
+  let idToken = '';
+  try {
+    idToken = await auth.currentUser.getIdToken(true);
+  } catch (error) {
+    if (timeoutId) {
+      globalThis.clearTimeout(timeoutId);
+    }
+    throw error;
+  }
+  let response;
+  try {
+    response = await fetch(getCallableUrl(functionName), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${idToken}`,
       },
-    }),
-  });
+      body: JSON.stringify({
+        data: {
+          ...data,
+          __authToken: idToken,
+        },
+      }),
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+  } catch (error) {
+    if (timeoutId) {
+      globalThis.clearTimeout(timeoutId);
+    }
+
+    if (didTimeout) {
+      throw new Error(timeoutMessage || `${functionName} timed out.`);
+    }
+
+    if (controller?.signal?.aborted) {
+      throw new Error(abortMessage || 'Request canceled.');
+    }
+
+    throw error;
+  }
 
   let payload = null;
   try {
     payload = await response.json();
   } catch {
     payload = null;
+  }
+
+  if (timeoutId) {
+    globalThis.clearTimeout(timeoutId);
   }
 
   if (!response.ok || payload?.error) {
