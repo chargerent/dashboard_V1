@@ -3,6 +3,7 @@ const {onCall, onRequest, HttpsError} = require("firebase-functions/v2/https");
 const {defineSecret} = require("firebase-functions/params");
 const crypto = require("node:crypto");
 const admin = require("firebase-admin");
+const {rbcOpenApi} = require("./rbcOpenRouting/api");
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -6885,3 +6886,5 @@ exports.stationBinding_httpMoveModule = handleHttpFunction(async (data, req) => 
   const authState = await assertAdmin(req, data);
   return stationBindingMoveModuleImpl(data, authState);
 });
+
+exports.rbcOpenApi = rbcOpenApi;

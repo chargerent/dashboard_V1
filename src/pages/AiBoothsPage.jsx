@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { collection, getDocs } from 'firebase/firestore';
 import LoadingSpinner from '../components/UI/LoadingSpinner.jsx';
 import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
+import TestCourseMap from '../components/AiBooths/TestCourseMap.jsx';
 import { db } from '../firebase-config.js';
 import { callFunctionWithAuth } from '../utils/callableRequest.js';
 
@@ -5355,7 +5356,8 @@ export default function AiBoothsPage({
           {[
             { id: 'event', label: 'Event Management' },
             { id: 'agent', label: 'Agent Management' },
-            { id: 'screen', label: 'Screen UI' },
+            { id: 'screen', label: 'Booth UI' },
+            { id: 'map', label: 'Map' },
           ].map((tab) => {
             const isActive = activeWorkspaceTab === tab.id;
 
@@ -6890,6 +6892,8 @@ export default function AiBoothsPage({
             </div>
           </div>
         </section>
+        ) : activeWorkspaceTab === 'map' ? (
+        <TestCourseMap eventLabel={getEventLabel(eventDraft)} />
         ) : (
         <section className="space-y-6">
             <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-md sm:p-6">

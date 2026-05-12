@@ -1,0 +1,1455 @@
+{
+  "type": "FeatureCollection",
+  "name": "course_locations",
+  "crs": {
+    "type": "name",
+    "properties": {
+      "name": "urn:ogc:def:crs:OGC:1.3:CRS84"
+    }
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 5,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000Qؒ3�\u0002T���?\u001b��E@",
+        "location_id": "{64f28e43-1476-4555-ac48-f2e25b6bb34a}",
+        "name": "1st Tee Concessions",
+        "category": "landmark",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-07T15:58:15.941Z",
+        "updated_at": "2026-05-07T15:58:27.497Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04432381954508,
+          43.84836140274584
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 6,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000��\u001b��\u0002T�a&�\u0004��E@",
+        "location_id": "{afff967a-ca7a-47a3-8958-91cbc670634e}",
+        "name": "1st Tee Bleachers",
+        "category": "landmark",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-07T16:01:25.930Z",
+        "updated_at": "2026-05-07T16:01:37.084Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04405524912617,
+          43.84854183585845
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 7,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�'\u001d9�\u0002T�=�Ġ��E@",
+        "location_id": "{6a53bc80-9aef-4852-8db3-8f7b09be18cd}",
+        "name": "Autograph Alley",
+        "category": "landmark",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-07T16:02:48.907Z",
+        "updated_at": "2026-05-07T16:02:59.310Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04444721076214,
+          43.84828576667176
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 8,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000Gk\u0001N�\u0002T�Hb�\u001d��E@",
+        "location_id": "{0073380a-c5c7-4abb-bb8c-5567adf193d4}",
+        "name": "Merchandise Shop",
+        "category": "landmark",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-07T16:06:46.577Z",
+        "updated_at": "2026-05-07T16:06:56.497Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04420805109577,
+          43.84964343085136
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 9,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\u0016!�+�\u0002T�U`y���E@",
+        "location_id": "{620acf5f-cf09-4e03-b96d-fecf43629d9b}",
+        "name": "Double Decker Hospitality",
+        "category": "landmark",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-07T16:17:02.989Z",
+        "updated_at": "2026-05-07T16:17:13.827Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04352844239142,
+          43.85043102194383
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 10,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000��&��\u0002T�%��\u0013��E@",
+        "location_id": "{dbf60675-1bd2-40b7-946b-032a43c95599}",
+        "name": "Clubhouse",
+        "category": "landmark",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-07T16:20:09.977Z",
+        "updated_at": "2026-05-07T16:20:15.025Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04324344451985,
+          43.85058830524057
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 11,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000~\u0014�_z\u0003T��\u0016z\u0012R�E@",
+        "location_id": "{a855ac92-77d4-479a-bbcd-a0df37ac8406}",
+        "name": "RBC Avion",
+        "category": "landmark",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-07T16:58:21.919Z",
+        "updated_at": "2026-05-07T16:58:32.909Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05434416241948,
+          43.85406714402523
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 12,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�(\u0015X�\u0003T��O����E@",
+        "location_id": "{3c247ec8-b6cb-48c4-bc4a-7a3be8a859a1}",
+        "name": "13 Green",
+        "category": "hole_green",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 13,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T05:08:06.421Z",
+        "updated_at": "2026-05-11T05:08:06.421Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.0610561567909,
+          43.85635276851818
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 13,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�m\r��\u0003T���?l>�E@",
+        "location_id": "{2fdff22e-1fec-4743-b653-4b5b47f583d7}",
+        "name": "13 Tee",
+        "category": "hole_tee",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 13,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T05:08:56.436Z",
+        "updated_at": "2026-05-11T05:08:56.436Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05564667045091,
+          43.853467494103185
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 14,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000��\u0002͛\u0003T��VG\nX�E@",
+        "location_id": "{6d5727b3-6343-4eec-aa8b-ad5ee908cc01}",
+        "name": "5 Green",
+        "category": "hole_green",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 5,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T05:09:30.269Z",
+        "updated_at": "2026-05-11T05:09:30.269Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.0563843276791,
+          43.85424927218807
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 15,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�����\u0003T�˨����E@",
+        "location_id": "{878252e2-3c94-45b0-897e-396edfc264d9}",
+        "name": "5 Tee",
+        "category": "hole_tee",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 5,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T05:09:59.851Z",
+        "updated_at": "2026-05-11T05:09:59.851Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05991614107461,
+          43.85708615400798
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 16,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�_\u001d>�\u0003T�\u0011\u0010\u0001���E@",
+        "location_id": "{fcf66e2b-f78b-4318-aebc-5247d709be18}",
+        "name": "4 Green",
+        "category": "hole_green",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 4,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T05:10:36.434Z",
+        "updated_at": "2026-05-11T05:10:36.434Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05940201633983,
+          43.857875943678785
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 20,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\rq�\u0015�\u0003T��5���E@",
+        "location_id": "{e408761b-fb38-4eb4-bda1-bcd55b1f7cb1}",
+        "name": "3 Green",
+        "category": "hole_green",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 3,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T05:12:16.632Z",
+        "updated_at": "2026-05-11T05:12:16.632Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05804964475483,
+          43.85732792746721
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 21,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000<D\u0019��\u0003T�uN6h��E@",
+        "location_id": "{e0de569d-b440-4113-83ed-e5a9217d5551}",
+        "name": "15 Tee",
+        "category": "hole_tee",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 15,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T05:13:16.331Z",
+        "updated_at": "2026-05-11T05:13:16.331Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.06022908656536,
+          43.85789206172641
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 22,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�j?Xh\u0003T�\u001cF\u0004���E@",
+        "location_id": "{3b1a3720-4106-406e-bfc4-0b9c4b692365}",
+        "name": "16 Green",
+        "category": "hole_green",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 16,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T05:14:39.462Z",
+        "updated_at": "2026-05-11T05:14:39.462Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05324369614699,
+          43.85573220452008
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 23,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000���>g\u0003T�\u00031�.��E@",
+        "location_id": "{339e4fbf-bc71-4409-9ec4-d96d0272df7d}",
+        "name": "2 Green",
+        "category": "hole_green",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 2,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T05:15:17.727Z",
+        "updated_at": "2026-05-11T05:15:17.727Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05317663639897,
+          43.85547430589397
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 24,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000��`-w\u0003T���)\u0001N�E@",
+        "location_id": "{5756d37b-badb-4220-9a91-2f5cf0b0f96c}",
+        "name": "12 Green",
+        "category": "hole_green",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 12,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T05:26:22.485Z",
+        "updated_at": "2026-05-11T05:26:22.485Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05414900274522,
+          43.85394300982945
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 25,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\u0013i!\tp\u0003T�B>�\u0012p�E@",
+        "location_id": "{4af3f804-a9ac-4735-963c-643dcbdfb6b9}",
+        "name": "17 Tee",
+        "category": "hole_tee",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 17,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T05:31:16.659Z",
+        "updated_at": "2026-05-11T05:31:16.659Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05371311438311,
+          43.85498268354833
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 26,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�KL�\u001b\u0003T��M�G\u0016�E@",
+        "location_id": "{a5f4477b-7cb4-4a5e-84d7-6511d4993a6b}",
+        "name": "17 Green",
+        "category": "hole_green",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 17,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T05:31:35.877Z",
+        "updated_at": "2026-05-11T05:31:35.877Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04856069041053,
+          43.85224241917197
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 27,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�ox]\u001e\u0003T�r6;r'�E@",
+        "location_id": "{7433dca1-9013-464f-9613-6f004185e152}",
+        "name": "2 Tee",
+        "category": "hole_tee",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 2,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T05:32:14.825Z",
+        "updated_at": "2026-05-11T05:32:14.825Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04872833978057,
+          43.852766302978935
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 32,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000��!��\u0002T�W�T���E@",
+        "location_id": "{20613eae-0d7c-49ca-9416-3191d86d7f73}",
+        "name": "1 Tee",
+        "category": "hole_tee",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 1,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T06:10:05.070Z",
+        "updated_at": "2026-05-11T06:10:05.070Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04418686192574,
+          43.84847275386772
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 34,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u000076 �n\u0003T�4��\r��E@",
+        "location_id": "{1d58757d-724c-4a96-91bb-ed7c89c870df}",
+        "name": "3 Tee",
+        "category": "hole_tee",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 3,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T06:13:01.603Z",
+        "updated_at": "2026-05-11T06:13:01.603Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05362585206682,
+          43.85556195796781
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 35,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000���k�\u0003T�����]�E@",
+        "location_id": "{00f29e0a-aaa2-4463-abb3-fa75a99c9f22}",
+        "name": "6 Tee",
+        "category": "hole_tee",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 6,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T06:14:59.619Z",
+        "updated_at": "2026-05-11T06:14:59.619Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05489631914294,
+          43.854429553970455
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 36,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000/f^\u001f�\u0003T��\u000bc1��E@",
+        "location_id": "{b1f16f97-18ad-489b-aec1-47dafbdfc692}",
+        "name": "6 Green",
+        "category": "hole_green",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 6,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T06:15:52.452Z",
+        "updated_at": "2026-05-11T06:15:52.452Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05719742029827,
+          43.85666482292375
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 37,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�\u0005?�\u0018\u0003T�ӏ��\u000f�E@",
+        "location_id": "{1f135c28-175c-4e5e-806a-d885032b9348}",
+        "name": "1 Green",
+        "category": "hole_green",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 1,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T06:18:17.919Z",
+        "updated_at": "2026-05-11T06:18:17.919Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04837900309197,
+          43.85205003086562
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 38,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�~\r�\u001a\u0003T�~\u0015\u0010���E@",
+        "location_id": "{ae824166-4ab4-4732-af75-57fc5a1da576}",
+        "name": "10 Green",
+        "category": "hole_green",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 10,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T06:19:19.069Z",
+        "updated_at": "2026-05-11T06:19:19.069Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04851628606711,
+          43.85039366040563
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 39,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000%\u001e�\u0016�\u0002T��m\"���E@",
+        "location_id": "{67d44406-29c1-45ea-8743-b898619a5b7c}",
+        "name": "10 Tee",
+        "category": "hole_tee",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 10,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T06:19:54.001Z",
+        "updated_at": "2026-05-11T06:19:54.001Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04468312311708,
+          43.84819366150963
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 40,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\u000f��X�\u0002T�������E@",
+        "location_id": "{6659035a-d492-411d-9473-cbc4a7b0386d}",
+        "name": "9 Green",
+        "category": "hole_green",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 9,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T06:22:09.566Z",
+        "updated_at": "2026-05-11T06:22:09.566Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04445471952589,
+          43.85005983596552
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 41,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\u001c���?\u0003T�j8��\n�E@",
+        "location_id": "{db89e5b5-754d-4c96-bda9-08dd9dcb9b9e}",
+        "name": "11 Green",
+        "category": "hole_green",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 11,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T06:22:59.850Z",
+        "updated_at": "2026-05-11T06:22:59.850Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.0507651917182,
+          43.851897470755674
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 42,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000���| \u0003T��?t���E@",
+        "location_id": "{3aede57c-5def-4854-b5ef-7b85f5cd3a49}",
+        "name": "11 Tee",
+        "category": "hole_tee",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 11,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T06:23:33.534Z",
+        "updated_at": "2026-05-11T06:23:33.534Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.0488578769639,
+          43.8513124530435
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 43,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000H@��\u001a\u0003T�1gv@\"�E@",
+        "location_id": "{f2e8a924-54e6-4133-baf4-e77e01eb4fc2}",
+        "name": "18 Tee",
+        "category": "hole_tee",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 18,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T06:24:19.984Z",
+        "updated_at": "2026-05-11T06:24:19.984Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04849855345776,
+          43.85260778218652
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 44,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u00004@�c�\u0003T�89�v��E@",
+        "location_id": "{8538b2fb-1e40-4fe6-b3e9-a4b50a078f7f}",
+        "name": "4 Tee",
+        "category": "hole_tee",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 4,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T06:26:32.134Z",
+        "updated_at": "2026-05-11T06:26:32.134Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.0578240307521,
+          43.85658155811183
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 45,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000��w\u0000\u0016\u0003T�ϛ��\u0016�E@",
+        "location_id": "{c37a79fe-36c4-42d7-872f-972075eff445}",
+        "name": "9 Tee",
+        "category": "hole_tee",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 9,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T06:27:50.217Z",
+        "updated_at": "2026-05-11T06:27:50.217Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04821788518805,
+          43.85226247674256
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 46,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000Ś\u0014�u\u0003T����\u0005w�E@",
+        "location_id": "{5756349d-97af-4d31-8f10-4a07968136bf}",
+        "name": "7 Green",
+        "category": "hole_green",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 7,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T06:47:30.889Z",
+        "updated_at": "2026-05-11T06:47:30.889Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05405809414067,
+          43.85519474955794
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 47,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�����\u0003T��ؗ��E@",
+        "location_id": "{d7d49fc2-96f0-445b-9454-dcbcfcbd92ad}",
+        "name": "7 Tee",
+        "category": "hole_tee",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 7,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T06:47:53.056Z",
+        "updated_at": "2026-05-11T07:00:53.729Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05638089589343,
+          43.85631961740849
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 48,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�D8�\u0003T���\"<Z�E@",
+        "location_id": "{16d2bcdb-caaa-4afc-a312-f3315422f0cb}",
+        "name": "The Fair Way",
+        "category": "fan_hub",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": "The Keg, Dobel",
+        "hole_number": null,
+        "near_hole": 5,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T06:52:02.604Z",
+        "updated_at": "2026-05-11T06:52:02.604Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05535607810008,
+          43.85431625072985
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 49,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000p�ZUE\u0003T��\u0004�~\u0011�E@",
+        "location_id": "{ef2cea92-194b-425a-8417-b51bfa745fa6}",
+        "name": "12 Tee",
+        "category": "hole_tee",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 12,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T06:56:16.287Z",
+        "updated_at": "2026-05-11T06:56:16.287Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05110677602875,
+          43.85209641466806
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 51,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000����\u0003T��AIp��E@",
+        "location_id": "{db05c5e9-fb0e-4e0d-ba48-fa9dd8100fee}",
+        "name": "14 Green",
+        "category": "hole_green",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 14,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-11T07:08:16.905Z",
+        "updated_at": "2026-05-11T07:08:16.905Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.06046149971283,
+          43.85755733086547
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 52,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�����\u0003T�s\u0016�z��E@",
+        "location_id": "{b06c2912-33a5-47e6-ad71-cc4c2132d8a8}",
+        "name": "14 Tee",
+        "category": "hole_tee",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 14,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": null,
+        "last_verified": null,
+        "created_at": "2026-05-12T02:15:35.881Z",
+        "updated_at": "2026-05-12T02:15:35.881Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.06127589820497,
+          43.85609373268098
+        ]
+      }
+    }
+  ]
+}
