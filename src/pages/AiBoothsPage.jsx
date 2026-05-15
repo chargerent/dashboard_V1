@@ -553,6 +553,11 @@ const SCREEN_UI_VISUAL_MODES = Object.freeze([
     label: 'Golf UI',
     description: 'A golf scorecard and ball scene where QR codes appear printed on the ball.',
   },
+  {
+    id: 'southwest-heart',
+    label: 'Southwest Heart',
+    description: 'A blue Southwest-inspired heart visual that pulses while the AI is active and flips for QR codes.',
+  },
 ]);
 const SCREEN_UI_GOLF_QR_MODES = Object.freeze([
   {
@@ -798,6 +803,9 @@ function normalizeScreenUiVisualMode(value, fallback = DEFAULT_SCREEN_UI.visualM
     'golf-green': 'golf-scorecard',
     'golf-3d': 'golf-scorecard',
     golf: 'golf-scorecard',
+    southwest: 'southwest-heart',
+    'southwest-airlines': 'southwest-heart',
+    heart: 'southwest-heart',
   }[raw] || raw;
   return SCREEN_UI_VISUAL_MODES.some((mode) => mode.id === normalized) ? normalized : fallback;
 }
@@ -6576,7 +6584,7 @@ export default function AiBoothsPage({
                 <h2 className="mt-2 text-2xl font-semibold text-slate-900">Knowledge base view</h2>
               </div>
 
-              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+              <div className="mt-5 grid gap-3 sm:grid-cols-3">
                 {SCREEN_UI_VISUAL_MODES.map((mode) => {
                   const isSelected = activeScreenUi.visualMode === mode.id;
                   const isGolfMode = mode.id === 'golf-scorecard';

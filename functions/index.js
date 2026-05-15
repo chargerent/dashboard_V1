@@ -646,8 +646,11 @@ function normalizeAiBoothVisualMode(value, fallback = DEFAULT_AI_BOOTH_SCREEN_UI
     "golf-green": "golf-scorecard",
     "golf-3d": "golf-scorecard",
     golf: "golf-scorecard",
+    southwest: "southwest-heart",
+    "southwest-airlines": "southwest-heart",
+    heart: "southwest-heart",
   }[raw] || raw;
-  return ["knowledge-web", "golf-scorecard"].includes(normalized) ? normalized : fallback;
+  return ["knowledge-web", "golf-scorecard", "southwest-heart"].includes(normalized) ? normalized : fallback;
 }
 
 function normalizeAiBoothGolfQrMode(value, fallback = DEFAULT_AI_BOOTH_SCREEN_UI.golfQrMode) {
