@@ -18,6 +18,7 @@ import CommandStatusToast from '../components/UI/CommandStatusToast';
 import RentalDetailView from '../components/Dashboard/RentalDetailView';
 import { CheckCircleIcon, CpuChipIcon, ExclamationTriangleIcon, QrCodeIcon, SparklesIcon } from '@heroicons/react/24/outline';
 import useKioskCommandFlow from '../hooks/useKioskCommandFlow';
+import { VERSION as DASHBOARD_VERSION } from '../version';
 
 const EMPTY_RENTALS = Object.freeze([]);
 const COUNTRY_ORDER = { CA: 1, FR: 2, US: 3 };
@@ -507,6 +508,9 @@ return (
                     <div className="flex items-center gap-2">
                         <button onClick={() => setLanguage('en')} className={`px-2 py-1 text-sm font-bold rounded-md ${language === 'en' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}>EN</button>
                         <button onClick={() => setLanguage('fr')} className={`px-2 py-1 text-sm font-bold rounded-md ${language === 'fr' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}>FR</button>
+                        <span className="ml-2 rounded-md bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-600">
+                            Dashboard v{DASHBOARD_VERSION}
+                        </span>
                     </div>
                     {/* Action buttons on the right */}
                     <div className="flex items-center gap-4">
