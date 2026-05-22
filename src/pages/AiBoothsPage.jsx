@@ -1,5 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { collection, getDocs } from 'firebase/firestore';
+import {
+  ArrowPathIcon,
+  ArrowTopRightOnSquareIcon,
+  CheckCircleIcon,
+  ClipboardDocumentIcon,
+  DocumentTextIcon,
+  ExclamationTriangleIcon,
+  EyeIcon,
+  TrophyIcon,
+  TrashIcon,
+  XCircleIcon,
+} from '@heroicons/react/24/outline';
 import LoadingSpinner from '../components/UI/LoadingSpinner.jsx';
 import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
 import TestCourseMap from '../components/AiBooths/TestCourseMap.jsx';
@@ -9,6 +21,37 @@ import { callFunctionWithAuth } from '../utils/callableRequest.js';
 const DEFAULT_RENTAL_POLICY = 'You can borrow a portable charger using your phone number. It is complimentary for the day, but there is a fee if it is not returned today. You can return it at any kiosk.';
 const DEFAULT_SUPPORT_FALLBACK = 'event staff or the information desk';
 const WIFI_SECURITY_OPTIONS = Object.freeze(['WPA', 'WEP', 'nopass']);
+const DEPLOYMENT_TYPE_EVENT = 'event';
+const DEPLOYMENT_TYPE_INSTALL = 'install';
+const AIA_INSTALL_ID = 'aia-airport';
+const USE_AI_BOOTH_WORKFLOW_NAV = true;
+const AI_BOOTH_WORKFLOW_TABS = Object.freeze([
+  {
+    id: 'setup',
+    label: 'Setup',
+    description: 'Venue details, topics, and booth assignment',
+  },
+  {
+    id: 'screen',
+    label: 'Screen UI',
+    description: 'Visual template and kiosk preview',
+  },
+  {
+    id: 'agent',
+    label: 'Agent & Knowledge',
+    description: 'Voice prompt, tools, and ElevenLabs sync',
+  },
+  {
+    id: 'data',
+    label: 'Intake',
+    description: 'Partner uploads and review queue',
+  },
+  {
+    id: 'map',
+    label: 'Map/Test',
+    description: 'Routing and course-map checks',
+  },
+]);
 
 const DEFAULT_GENERAL = Object.freeze({
   eventName: '',
@@ -216,6 +259,14 @@ const DEFAULT_BOOTH_CONTEXT = Object.freeze({
   mapX: '',
   mapY: '',
 });
+const DEFAULT_GOLF_CONFIG = Object.freeze({
+  provider: 'slash-golf',
+  orgId: '1',
+  year: '',
+  tournamentName: '',
+  tournId: '',
+  tour: 'pga',
+});
 
 const AI_BOOTH_TYPE = 'CA36';
 const AI_BOOTH_HEARTBEAT_STALE_MS = 75 * 1000;
@@ -231,6 +282,11 @@ const COURSE_TOPIC_KIND = 'course';
 const SCHEDULE_TOPIC_KIND = 'schedule';
 const GOLF_CATEGORY = 'Golf';
 const RBC_CANADIAN_OPEN_EVENT_NAME = 'RBC CANADIAN OPEN';
+const EVENT_INTAKE_PUBLIC_URL = 'https://obailix.com/intake';
+const INSTALL_INTAKE_PUBLIC_URL = 'https://obailix.com/intake/install';
+const EVENT_INTAKE_CODE_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+const DEFAULT_EVENT_INTAKE_MAX_FILES = 8;
+const DEFAULT_EVENT_INTAKE_MAX_FILE_SIZE_MB = 20;
 const RBC_MOCK_EVENT_INFO_MARKER = 'Mock test data for the 2026 RBC Canadian Open';
 const RBC_MOCK_BOOTH_PLACES = Object.freeze([
   {
@@ -558,6 +614,11 @@ const SCREEN_UI_VISUAL_MODES = Object.freeze([
     label: 'Southwest Heart',
     description: 'A blue Southwest-inspired heart visual that pulses while the AI is active and flips for QR codes.',
   },
+  {
+    id: 'airport-departure',
+    label: 'Airport Board',
+    description: 'A polished departures-board visual with terminal rows, ambient runway motion, and boarding-pass QR moments.',
+  },
 ]);
 const SCREEN_UI_GOLF_QR_MODES = Object.freeze([
   {
@@ -806,6 +867,10 @@ function normalizeScreenUiVisualMode(value, fallback = DEFAULT_SCREEN_UI.visualM
     southwest: 'southwest-heart',
     'southwest-airlines': 'southwest-heart',
     heart: 'southwest-heart',
+    airport: 'airport-departure',
+    departures: 'airport-departure',
+    'departure-board': 'airport-departure',
+    terminal: 'airport-departure',
   }[raw] || raw;
   return SCREEN_UI_VISUAL_MODES.some((mode) => mode.id === normalized) ? normalized : fallback;
 }
@@ -980,12 +1045,24 @@ function createDefaultBoothContext() {
   return { ...DEFAULT_BOOTH_CONTEXT };
 }
 
+function createDefaultGolfConfig() {
+  return { ...DEFAULT_GOLF_CONFIG };
+}
+
 function createLocalId(prefix = 'local') {
   if (globalThis.crypto?.randomUUID) {
     return `${prefix}-${globalThis.crypto.randomUUID()}`;
   }
 
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function pickCoordinateValue(...values) {
+  return values.find((value) => (
+    value !== null &&
+    value !== undefined &&
+    String(value).trim() !== ''
+  )) ?? '';
 }
 
 function createDefaultTransportationDetails() {
@@ -1040,8 +1117,8 @@ function normalizeTransportationLocation(location, index = 0) {
   return {
     id: String(source.id || `transportation-location-${index + 1}`).trim(),
     location: String(source.location || source.pickup || source.area || source.place || ''),
-    latitude: String(source.latitude || source.lat || ''),
-    longitude: String(source.longitude || source.lng || source.lon || ''),
+    latitude: String(pickCoordinateValue(source.latitude, source.lat)),
+    longitude: String(pickCoordinateValue(source.longitude, source.lng, source.lon)),
     hours: String(source.hours || source.openHours || ''),
     startTime: String(source.startTime || source.from || source.start || ''),
     endTime: String(source.endTime || source.to || source.end || ''),
@@ -1122,8 +1199,8 @@ function normalizeFanZone(zone, index = 0) {
   return {
     id: String(source.id || createLocalId('fan-zone')).trim(),
     name: name || `Fan Zone ${index + 1}`,
-    latitude: String(source.latitude || source.lat || ''),
-    longitude: String(source.longitude || source.lng || source.lon || ''),
+    latitude: String(pickCoordinateValue(source.latitude, source.lat)),
+    longitude: String(pickCoordinateValue(source.longitude, source.lng, source.lon)),
     openHours: String(source.openHours || source.hours || ''),
     details: String(source.details || source.description || source.notes || ''),
     activations: Array.isArray(source.activations)
@@ -1213,8 +1290,8 @@ function normalizeHospitalityLocation(location, index = 0) {
     name: name || `Hospitality Location ${index + 1}`,
     venueType,
     location: String(source.location || source.place || template.location || ''),
-    latitude: String(source.latitude || source.lat || template.latitude || ''),
-    longitude: String(source.longitude || source.lng || source.lon || template.longitude || ''),
+    latitude: String(pickCoordinateValue(source.latitude, source.lat, template.latitude)),
+    longitude: String(pickCoordinateValue(source.longitude, source.lng, source.lon, template.longitude)),
     amenities: String(source.amenities || source.includes || template.amenities || ''),
     accessNotes: String(source.accessNotes || source.access || source.credentials || template.accessNotes || ''),
     details: String(source.details || source.description || source.notes || template.details || ''),
@@ -1242,8 +1319,8 @@ function normalizeBathroomLocation(location, index = 0) {
   return {
     id: String(source.id || createLocalId('bathroom-location')).trim(),
     place: place || `Bathroom ${index + 1}`,
-    latitude: String(source.latitude || source.lat || ''),
-    longitude: String(source.longitude || source.lng || source.lon || ''),
+    latitude: String(pickCoordinateValue(source.latitude, source.lat)),
+    longitude: String(pickCoordinateValue(source.longitude, source.lng, source.lon)),
   };
 }
 
@@ -1279,8 +1356,8 @@ function normalizeFanService(service, index = 0) {
     id: String(source.id || createLocalId('fan-service')).trim(),
     name: name || `Service ${index + 1}`,
     location: String(source.location || source.place || ''),
-    latitude: String(source.latitude || source.lat || ''),
-    longitude: String(source.longitude || source.lng || source.lon || ''),
+    latitude: String(pickCoordinateValue(source.latitude, source.lat)),
+    longitude: String(pickCoordinateValue(source.longitude, source.lng, source.lon)),
   };
 }
 
@@ -1311,10 +1388,34 @@ function normalizeCourseHole(hole, index = 0) {
   return {
     id: String(source.id || `hole-${index + 1}`).trim(),
     holeNumber: Number.isFinite(holeNumber) ? holeNumber : index + 1,
-    teeLatitude: String(source.teeLatitude || source.teeLat || source.tee?.latitude || source.tee?.lat || ''),
-    teeLongitude: String(source.teeLongitude || source.teeLng || source.teeLon || source.tee?.longitude || source.tee?.lng || source.tee?.lon || ''),
-    greenLatitude: String(source.greenLatitude || source.greenLat || source.green?.latitude || source.green?.lat || ''),
-    greenLongitude: String(source.greenLongitude || source.greenLng || source.greenLon || source.green?.longitude || source.green?.lng || source.green?.lon || ''),
+    teeLatitude: String(pickCoordinateValue(
+      source.teeLatitude,
+      source.teeLat,
+      source.tee?.latitude,
+      source.tee?.lat
+    )),
+    teeLongitude: String(pickCoordinateValue(
+      source.teeLongitude,
+      source.teeLng,
+      source.teeLon,
+      source.tee?.longitude,
+      source.tee?.lng,
+      source.tee?.lon
+    )),
+    greenLatitude: String(pickCoordinateValue(
+      source.greenLatitude,
+      source.greenLat,
+      source.green?.latitude,
+      source.green?.lat
+    )),
+    greenLongitude: String(pickCoordinateValue(
+      source.greenLongitude,
+      source.greenLng,
+      source.greenLon,
+      source.green?.longitude,
+      source.green?.lng,
+      source.green?.lon
+    )),
   };
 }
 
@@ -1615,6 +1716,71 @@ function createPresetTopicDraft(preset, index = 0) {
   };
 }
 
+function normalizeEventIntakeCode(value) {
+  return String(value || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9-]/g, '')
+    .slice(0, 32);
+}
+
+function maskEventIntakeCode(value) {
+  const code = normalizeEventIntakeCode(value).replace(/-/g, '');
+
+  if (code.length <= 4) {
+    return code;
+  }
+
+  return `${code.slice(0, 2)}...${code.slice(-2)}`;
+}
+
+function generateEventIntakeCode() {
+  const bytes = new Uint8Array(8);
+  const cryptoSource = typeof window !== 'undefined' ? window.crypto : null;
+
+  if (cryptoSource?.getRandomValues) {
+    cryptoSource.getRandomValues(bytes);
+  } else {
+    for (let index = 0; index < bytes.length; index += 1) {
+      bytes[index] = Math.floor(Math.random() * 256);
+    }
+  }
+
+  const rawCode = Array.from(bytes, (byte) => (
+    EVENT_INTAKE_CODE_ALPHABET[byte % EVENT_INTAKE_CODE_ALPHABET.length]
+  )).join('');
+
+  return rawCode;
+}
+
+function createDefaultIntakeSettings(overrides = {}) {
+  const sharedCode = normalizeEventIntakeCode(overrides.sharedCode || overrides.accessCode);
+  const enabled = typeof overrides.enabled === 'boolean' ? overrides.enabled : Boolean(sharedCode);
+
+  return {
+    enabled,
+    sharedCode,
+    accessCodeConfigured: Boolean(sharedCode || overrides.accessCodeConfigured),
+    accessCodeHint: String(overrides.accessCodeHint || maskEventIntakeCode(sharedCode)),
+    instructions: String(overrides.instructions || ''),
+    closesAt: String(overrides.closesAt || ''),
+    allowEditsAfterSubmit: overrides.allowEditsAfterSubmit !== false,
+    maxFiles: Number.isFinite(Number(overrides.maxFiles))
+      ? Math.max(1, Math.min(20, Number(overrides.maxFiles)))
+      : DEFAULT_EVENT_INTAKE_MAX_FILES,
+    maxFileSizeMb: Number.isFinite(Number(overrides.maxFileSizeMb))
+      ? Math.max(1, Math.min(100, Number(overrides.maxFileSizeMb)))
+      : DEFAULT_EVENT_INTAKE_MAX_FILE_SIZE_MB,
+    updatedAt: normalizeTimestampValue(overrides.updatedAt),
+    updatedBy: overrides.updatedBy || null,
+  };
+}
+
+function normalizeIntakeSettings(intake) {
+  const source = intake && typeof intake === 'object' ? intake : {};
+  return createDefaultIntakeSettings(source);
+}
+
 function getTopicTemplateKey(value) {
   return String(value || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
@@ -1643,10 +1809,15 @@ function createMissingTemplateTopics(currentTopics, category) {
   return topicsToAdd;
 }
 
-function createEmptyEventDraft() {
+function createEmptyEventDraft(options = {}) {
+  const shouldCreateIntakeCode = options.withIntakeCode === true;
+  const sharedCode = shouldCreateIntakeCode ? generateEventIntakeCode() : '';
+
   return {
     id: '',
+    deploymentType: options.deploymentType || DEPLOYMENT_TYPE_EVENT,
     general: createDefaultGeneral(),
+    golf: createDefaultGolfConfig(),
     agent: createDefaultAgent(),
     boothContexts: {},
     boothStationIds: [],
@@ -1654,11 +1825,175 @@ function createEmptyEventDraft() {
     screenUiByStationId: {},
     topics: [],
     activations: [],
+    intake: createDefaultIntakeSettings({
+      enabled: shouldCreateIntakeCode,
+      sharedCode,
+    }),
     createdAt: '',
     updatedAt: '',
     createdBy: null,
     updatedBy: null,
   };
+}
+
+function createAiaAirportTopic(index, overrides) {
+  return {
+    ...createTopicDraft(index),
+    id: createLocalId('aia-topic'),
+    ...overrides,
+  };
+}
+
+function createAiaAirportPermanentInstallDraft(currentDraft = createEmptyEventDraft({ deploymentType: DEPLOYMENT_TYPE_INSTALL })) {
+  const boothStationIds = Array.isArray(currentDraft.boothStationIds) ? currentDraft.boothStationIds : [];
+  const screenUi = normalizeScreenUi({
+    ...createDefaultScreenUi(),
+    visualMode: 'airport-departure',
+    features: {
+      ...createDefaultScreenUi().features,
+      qrDisplay: true,
+      keyboardShortcuts: true,
+      demoTalk: true,
+    },
+  });
+
+  return normalizeEvent({
+    ...createEmptyEventDraft({ withIntakeCode: true, deploymentType: DEPLOYMENT_TYPE_INSTALL }),
+    id: currentDraft.id || AIA_INSTALL_ID,
+    deploymentType: DEPLOYMENT_TYPE_INSTALL,
+    general: {
+      ...createDefaultGeneral(),
+      eventName: 'Aurelia International Airport',
+      eventCategory: 'Airport',
+      eventInfo: 'A fictional modern international airport on the Cote d Azur in the South of France, used for AI Concierge and QR wayfinding demos. AIA runs 24/7 across Terminals 1, 2, and 3 with domestic, regional, long-haul international, low-cost, charter, and seasonal operations.',
+      address: '1 Promenade des Ailes',
+      city: 'Aurelia-sur-Mer',
+      zipCode: '83500',
+      country: 'France',
+      open24Hours: true,
+      rentalPolicy: DEFAULT_RENTAL_POLICY,
+      supportFallback: 'the nearest airport information desk',
+    },
+    agent: {
+      ...createDefaultAgent(),
+      ...(currentDraft.agent || {}),
+      name: 'AIA Airport Concierge',
+      firstMessage: 'Bienvenue a l aeroport international Aurelia. Ou souhaitez-vous aller?',
+      systemPrompt: `Role
+You are AIA Airport Concierge, a friendly airport wayfinding and traveler support assistant for Aurelia International Airport.
+
+Default language
+- Speak French by default.
+- If the traveler clearly speaks or requests another language, switch to that language when supported.
+- Keep French responses concise, natural, and practical for a busy airport.
+
+Use the configured permanent-location data and attached knowledge base as the source of truth for terminals, check-in, security, passport control, gates, baggage, ground transportation, parking, services, accessibility, Wi-Fi, and airport FAQs.
+
+Keep replies short and practical. Help travelers move quickly. Ask one concise clarification question when a terminal, airline, gate, or destination is ambiguous.
+
+Do not invent live flight status, queue lengths, staffing levels, weather, or emergency updates. If live data is missing, say you cannot verify it from here and direct the traveler to airport staff or official airport displays.
+
+Use approved tools for QR codes and directions whenever available. When no tool is available, give the best text guidance from the airport knowledge base.`,
+      kioskAgents: currentDraft.agent?.kioskAgents || {},
+    },
+    boothStationIds,
+    boothContexts: boothStationIds.reduce((contexts, stationId) => ({
+      ...contexts,
+      [stationId]: {
+        ...createDefaultBoothContext(),
+        ...(currentDraft.boothContexts?.[stationId] || {}),
+        assistantName: 'AIA Airport Concierge',
+        locationName: 'AIA Welcome Desk',
+        place: 'Hall central du Terminal 1',
+        zone: 'Departs',
+        landmark: 'Bureau d information pres des escalators centraux',
+        directionsNotes: 'Use AIA-WELCOME-01 in Terminal 1 Central Hall as the default QR map origin. Airport QR routes use https://obailix.com/events/aia-airport/maps/terminal. Respond in French by default.',
+      },
+    }), {}),
+    screenUi,
+    screenUiByStationId: normalizeScreenUiByStationId(
+      currentDraft.screenUiByStationId,
+      boothStationIds,
+      screenUi
+    ),
+    intake: createDefaultIntakeSettings({
+      ...(currentDraft.intake || {}),
+      enabled: true,
+      sharedCode: currentDraft.intake?.sharedCode || generateEventIntakeCode(),
+      instructions: 'Submit periodic airport data updates for terminals, airline counters, gates, amenities, parking, transportation, accessibility, policies, FAQs, and temporary notices. Approved submissions can be folded into the live airport concierge knowledge base.',
+      allowEditsAfterSubmit: true,
+    }),
+    topics: [
+      createAiaAirportTopic(0, {
+        title: 'Aeroport',
+        summary: 'AIA is a fictional 24/7 international airport in Aurelia-sur-Mer on the Cote d Azur, with T1 domestic/regional, T2 international/long-haul, and T3 low-cost/charter operations.',
+        notes: 'Terminals: T1, T2, T3. Travelers should arrive 2 hours before domestic departures, 2.5 hours before regional international departures, and 3 hours before long-haul international departures. Add 30 minutes for accessibility support, children, pets, or oversized baggage.',
+      }),
+      createAiaAirportTopic(1, {
+        title: 'Wi-Fi',
+        kind: WIFI_TOPIC_KIND,
+        summary: 'Guest Wi-Fi is available throughout Aurelia International Airport terminals and public concourses.',
+        notes: 'Network: Aurelia. Password: gratis. Wi-Fi QR payload: WIFI:T:WPA;S:Aurelia;P:gratis;H:false;; Always call show_qr with this exact payload and label Wi-Fi when travelers ask to connect.',
+        wifiSsid: 'Aurelia',
+        wifiPassword: 'gratis',
+        wifiSecurity: 'WPA',
+        wifiHidden: false,
+      }),
+      createAiaAirportTopic(2, {
+        title: 'Vols',
+        summary: 'Sample carriers include Aurelia Air, Northstar Regional, CoastLink, GlobalSky, EuroVista, Atlantic Wings, JetNova, SunBridge, and AeroBudget.',
+        notes: 'Aurelia Air uses T1 zones A/B and gates A1-A12. GlobalSky uses T2 zones E/F and gates C1-C12 or D1-D8. JetNova uses T3 zones J/K and gates E1-E10. Use airport displays for live status.',
+      }),
+      createAiaAirportTopic(3, {
+        title: 'Enregistrement',
+        summary: 'Check-in is available through airline apps, websites, self-service kiosks, airline counters, and eligible premium counters.',
+        notes: 'T1 Level 2 zones A-D serve domestic and short-haul regional check-in. T2 Level 3 zones E-H serve international and long-haul check-in. T3 Level 2 zones J-M serve low-cost, charter, and seasonal check-in. Liquids should be 100 ml or less in a clear resealable bag unless exempt.',
+      }),
+      createAiaAirportTopic(4, {
+        title: 'Portes',
+        summary: 'The airport demo map includes 158 locations across entrances, information desks, check-in, security, gates, baggage, transport, shops, restaurants, lounges, restrooms, and services.',
+        notes: 'Use terminal, level, zone, and gate names when answering directions. Known gate groups include A1-A12, B1-B12, C1-C22, D1-D16, E1-E14, and F1-F8. For mapped QR directions, use the AIA terminal map and AIA-WELCOME-01 as the default origin. If a traveler asks for a gate such as C10 or D8, identify the terminal/gate zone first, then offer concise step-by-step guidance.',
+      }),
+      createAiaAirportTopic(5, {
+        title: 'Transport',
+        kind: TRANSPORTATION_TOPIC_KIND,
+        summary: 'Ground transport includes taxis, rideshare, shuttle, rental cars, public transit, and multiple parking products.',
+        transportation: {
+          shuttle: {
+            locations: [{
+              ...createDefaultTransportationLocation(),
+              location: 'Inter-terminal shuttle stops',
+              hours: '24/7',
+              frequency: 'Every 5 to 10 minutes',
+              details: 'Use the terminal shuttle to move between T1, T2, and T3.',
+            }],
+          },
+          rideShare: {
+            locations: [{
+              ...createDefaultTransportationLocation(),
+              location: 'Rideshare pickup zones',
+              hours: '24/7',
+              details: 'Follow app-based pickup signs from arrivals level ground transport.',
+            }],
+          },
+          parking: {
+            locations: [{
+              ...createDefaultTransportationLocation(),
+              location: 'Short-term, long-term, economy, and premium parking',
+              hours: '24/7',
+              details: 'Use short-term for pickups, long-term for trips, economy for lower-cost extended parking, and premium where available.',
+            }],
+          },
+        },
+      }),
+      createAiaAirportTopic(6, {
+        title: 'Services',
+        summary: 'AIA includes information desks, baggage services, family rooms, prayer/quiet rooms, medical support, lost and found, accessible routes, elevators, and assistance points.',
+        notes: 'Accessibility routes are available for all locations in the demo data. Direct travelers needing assistance to the nearest information desk or their airline counter. Lost baggage should go to airline baggage service; lost property inside the terminal goes to airport lost and found.',
+      }),
+    ],
+    activations: [],
+  });
 }
 
 function createMockRbcTopic(index, overrides) {
@@ -2032,8 +2367,13 @@ function createMockRbcBoothContext(index = 0, existingContext = {}) {
     assistantName: source.assistantName || 'RBC Open Concierge',
     locationName: source.locationName || mockPlace.place,
     place: source.place || mockPlace.place,
-    latitude: source.latitude || mockPlace.latitude,
-    longitude: source.longitude || mockPlace.longitude,
+    latitude: pickCoordinateValue(source.latitude, source.lat, mockPlace.latitude),
+    longitude: pickCoordinateValue(
+      source.longitude,
+      source.lng,
+      source.lon,
+      mockPlace.longitude
+    ),
     zone: source.zone || mockPlace.zone,
     landmark: source.landmark || mockPlace.landmark,
     directionsNotes: source.directionsNotes || 'Use the configured booth place as the walking-directions origin.',
@@ -2055,6 +2395,18 @@ function isRbcCanadianOpenMockDraft(event) {
 }
 
 function createBoothContextForEvent(event, stationIndex = 0) {
+  if (event?.deploymentType === DEPLOYMENT_TYPE_INSTALL && getEventLabel(event) === 'Aurelia International Airport') {
+    return {
+      ...createDefaultBoothContext(),
+      assistantName: 'AIA Airport Concierge',
+      locationName: stationIndex === 0 ? 'Terminal 1 Information Desk' : 'Airport Information Point',
+      place: stationIndex === 0 ? 'Terminal 1 Central Hall' : 'Airport concourse',
+      zone: 'Passenger services',
+      landmark: 'Information desk',
+      directionsNotes: 'Use the assigned terminal information point as the default origin for directions.',
+    };
+  }
+
   if (isRbcCanadianOpenMockDraft(event)) {
     return createMockRbcBoothContext(stationIndex);
   }
@@ -2092,6 +2444,12 @@ function createMockRbcCanadianOpenDraft(currentDraft = createEmptyEventDraft()) 
       rentalPolicy: DEFAULT_RENTAL_POLICY,
       supportFallback: 'the RBC Canadian Open fan services team',
     },
+    golf: {
+      ...createDefaultGolfConfig(),
+      year: '2026',
+      tournamentName: 'RBC Canadian Open',
+      tour: 'pga',
+    },
     agent: {
       ...createDefaultAgent(),
       ...(currentDraft.agent || {}),
@@ -2108,6 +2466,7 @@ function createMockRbcCanadianOpenDraft(currentDraft = createEmptyEventDraft()) 
       boothStationIds,
       screenUi
     ),
+    intake: normalizeIntakeSettings(currentDraft.intake),
     topics: createMockRbcCanadianOpenTopics(),
   });
 }
@@ -2313,8 +2672,8 @@ function normalizeBoothContext(context) {
     assistantName: String(source.assistantName || ''),
     locationName: String(source.locationName || ''),
     place: String(source.place || ''),
-    latitude: String(source.latitude ?? source.lat ?? ''),
-    longitude: String(source.longitude ?? source.lon ?? ''),
+    latitude: String(pickCoordinateValue(source.latitude, source.lat)),
+    longitude: String(pickCoordinateValue(source.longitude, source.lng, source.lon)),
     zone: String(source.zone || ''),
     landmark: String(source.landmark || ''),
     directionsNotes: String(source.directionsNotes || ''),
@@ -2380,6 +2739,25 @@ function normalizePaymentTypeValue(value) {
   const normalizedValue = String(value || '').trim().toLowerCase();
 
   return normalizedValue === 'stripe' ? 'stripe' : 'apollo';
+}
+
+function getEventStartYear(general = {}) {
+  const startYear = String(general?.startDate || '').trim().slice(0, 4);
+  return /^\d{4}$/.test(startYear) ? startYear : '';
+}
+
+function normalizeGolfConfig(value, general = {}) {
+  const source = value && typeof value === 'object' ? value : {};
+  const defaultGolf = createDefaultGolfConfig();
+
+  return {
+    provider: String(source.provider || defaultGolf.provider),
+    orgId: String(source.orgId || defaultGolf.orgId),
+    year: String(source.year || source.seasonYear || getEventStartYear(general) || defaultGolf.year),
+    tournamentName: String(source.tournamentName || source.name || ''),
+    tournId: String(source.tournId || source.tournamentId || source.id || ''),
+    tour: String(source.tour || defaultGolf.tour),
+  };
 }
 
 function normalizeDailyHoursEntry(value) {
@@ -2482,6 +2860,9 @@ function normalizeEvent(event) {
 
   return {
     id: String(event?.id || '').trim(),
+    deploymentType: String(event?.deploymentType || DEPLOYMENT_TYPE_EVENT).trim() === DEPLOYMENT_TYPE_INSTALL
+      ? DEPLOYMENT_TYPE_INSTALL
+      : DEPLOYMENT_TYPE_EVENT,
     general: {
       ...createDefaultGeneral(),
       eventName: String(generalSource.eventName || event?.name || ''),
@@ -2505,6 +2886,7 @@ function normalizeEvent(event) {
       rentalPolicy: String(generalSource.rentalPolicy || DEFAULT_RENTAL_POLICY),
       supportFallback: String(generalSource.supportFallback || DEFAULT_SUPPORT_FALLBACK),
     },
+    golf: normalizeGolfConfig(event?.golf, generalSource),
     agent: normalizeAgent(event?.agent),
     boothStationIds,
     boothContexts: normalizeBoothContexts(event?.boothContexts, boothStationIds),
@@ -2516,6 +2898,7 @@ function normalizeEvent(event) {
     ),
     topics: Array.isArray(event?.topics) ? event.topics.map(normalizeTopic) : [],
     activations: Array.isArray(event?.activations) ? event.activations.map(normalizeActivation) : [],
+    intake: normalizeIntakeSettings(event?.intake),
     createdAt: normalizeTimestampValue(event?.createdAt),
     updatedAt: normalizeTimestampValue(event?.updatedAt),
     createdBy: event?.createdBy || null,
@@ -2538,6 +2921,45 @@ function sortEvents(events) {
 
     return getEventLabel(left).localeCompare(getEventLabel(right));
   });
+}
+
+function formatUploadSize(bytes) {
+  const size = Number(bytes || 0);
+  if (size < 1024 * 1024) {
+    return `${Math.max(1, Math.round(size / 1024))} KB`;
+  }
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatIntakeStatusLabel(value) {
+  return String(value || 'draft')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function formatDataTimestamp(value) {
+  const timestamp = Date.parse(value || '');
+  if (!Number.isFinite(timestamp)) {
+    return 'Not available';
+  }
+  return new Date(timestamp).toLocaleString();
+}
+
+function getIntakeStatusBadgeClasses(status) {
+  switch (status) {
+    case 'approved':
+      return 'bg-emerald-50 text-emerald-700 ring-emerald-200';
+    case 'needs_changes':
+      return 'bg-amber-50 text-amber-700 ring-amber-200';
+    case 'rejected':
+      return 'bg-rose-50 text-rose-700 ring-rose-200';
+    case 'under_review':
+      return 'bg-blue-50 text-blue-700 ring-blue-200';
+    case 'submitted':
+      return 'bg-violet-50 text-violet-700 ring-violet-200';
+    default:
+      return 'bg-slate-50 text-slate-600 ring-slate-200';
+  }
 }
 
 function shortenLabel(value, maxLength = 12) {
@@ -2719,11 +3141,15 @@ function getStationScreenUi(event, stationId) {
   return normalizeScreenUi((stationId && screenUiByStationId[stationId]) || event?.screenUi);
 }
 
-function buildScreenUiPreviewUrl({ eventId = '', stationId = '', agentId = '' } = {}) {
+function buildScreenUiPreviewUrl({ eventId = '', installId = '', stationId = '', agentId = '' } = {}) {
   const url = new URL(SCREEN_UI_PREVIEW_BASE_URL, window.location.origin);
 
   if (eventId) {
     url.searchParams.set('eventId', eventId);
+  }
+
+  if (installId) {
+    url.searchParams.set('installId', installId);
   }
 
   if (stationId) {
@@ -2774,6 +3200,15 @@ async function loadEventsFromFirestore() {
   })));
 }
 
+async function loadInstallsFromFirestore() {
+  const snapshot = await getDocs(collection(db, 'aiBoothInstalls'));
+  return sortEvents(snapshot.docs.map((docSnap) => normalizeEvent({
+    id: docSnap.id,
+    deploymentType: DEPLOYMENT_TYPE_INSTALL,
+    ...docSnap.data(),
+  })));
+}
+
 function GeneralField({ label, type = 'text', value, onChange, placeholder, className = '' }) {
   const fieldValue = value ?? '';
 
@@ -2791,6 +3226,7 @@ function GeneralField({ label, type = 'text', value, onChange, placeholder, clas
       ) : (
         <input
           type={type}
+          step={type === 'number' ? 'any' : undefined}
           value={fieldValue}
           onChange={onChange}
           placeholder={placeholder}
@@ -2896,12 +3332,14 @@ function TransportationSectionEditor({
                 )}
                 <GeneralField
                   label="Latitude"
+                  type="number"
                   value={location.latitude}
                   onChange={(event) => onLocationFieldChange(location.id, 'latitude', event.target.value)}
                   placeholder="43.6532"
                 />
                 <GeneralField
                   label="Longitude"
+                  type="number"
                   value={location.longitude}
                   onChange={(event) => onLocationFieldChange(location.id, 'longitude', event.target.value)}
                   placeholder="-79.3832"
@@ -2967,12 +3405,14 @@ function FanZoneEditor({
         />
         <GeneralField
           label="Latitude"
+          type="number"
           value={normalizedZone.latitude}
           onChange={(event) => onFieldChange('latitude', event.target.value)}
           placeholder="43.6414"
         />
         <GeneralField
           label="Longitude"
+          type="number"
           value={normalizedZone.longitude}
           onChange={(event) => onFieldChange('longitude', event.target.value)}
           placeholder="-79.3894"
@@ -3202,12 +3642,14 @@ function HospitalityLocationEditor({
         />
         <GeneralField
           label="Latitude"
+          type="number"
           value={normalizedLocation.latitude}
           onChange={(event) => onFieldChange('latitude', event.target.value)}
           placeholder="43.6414"
         />
         <GeneralField
           label="Longitude"
+          type="number"
           value={normalizedLocation.longitude}
           onChange={(event) => onFieldChange('longitude', event.target.value)}
           placeholder="-79.3894"
@@ -3290,12 +3732,14 @@ function BathroomLocationEditor({ location, onFieldChange, onDelete }) {
         />
         <GeneralField
           label="Latitude"
+          type="number"
           value={normalizedLocation.latitude}
           onChange={(event) => onFieldChange('latitude', event.target.value)}
           placeholder="43.6414"
         />
         <GeneralField
           label="Longitude"
+          type="number"
           value={normalizedLocation.longitude}
           onChange={(event) => onFieldChange('longitude', event.target.value)}
           placeholder="-79.3894"
@@ -3335,12 +3779,14 @@ function FanServiceEditor({ service, onFieldChange, onDelete }) {
         />
         <GeneralField
           label="Latitude"
+          type="number"
           value={normalizedService.latitude}
           onChange={(event) => onFieldChange('latitude', event.target.value)}
           placeholder="43.6414"
         />
         <GeneralField
           label="Longitude"
+          type="number"
           value={normalizedService.longitude}
           onChange={(event) => onFieldChange('longitude', event.target.value)}
           placeholder="-79.3894"
@@ -3359,24 +3805,28 @@ function CourseHoleEditor({ hole, onFieldChange }) {
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         <GeneralField
           label="Tee Latitude"
+          type="number"
           value={normalizedHole.teeLatitude}
           onChange={(event) => onFieldChange('teeLatitude', event.target.value)}
           placeholder="43.6414"
         />
         <GeneralField
           label="Tee Longitude"
+          type="number"
           value={normalizedHole.teeLongitude}
           onChange={(event) => onFieldChange('teeLongitude', event.target.value)}
           placeholder="-79.3894"
         />
         <GeneralField
           label="Green Latitude"
+          type="number"
           value={normalizedHole.greenLatitude}
           onChange={(event) => onFieldChange('greenLatitude', event.target.value)}
           placeholder="43.6421"
         />
         <GeneralField
           label="Green Longitude"
+          type="number"
           value={normalizedHole.greenLongitude}
           onChange={(event) => onFieldChange('greenLongitude', event.target.value)}
           placeholder="-79.3901"
@@ -3777,6 +4227,241 @@ function ElevenLabsAgentPicker({
   );
 }
 
+function DataManagementStatCard({ label, value }) {
+  return (
+    <div className="rounded-md bg-gray-50 p-4">
+      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">{label}</p>
+      <p className="mt-3 text-3xl font-semibold text-gray-900">{value}</p>
+    </div>
+  );
+}
+
+function IntakeStatusActionButton({
+  label,
+  status,
+  icon: Icon,
+  submission,
+  saving,
+  onUpdate,
+}) {
+  const isActive = submission.status === status;
+
+  return (
+    <button
+      type="button"
+      onClick={() => onUpdate(submission.id, { status })}
+      disabled={saving || isActive}
+      className={`inline-flex items-center gap-2 rounded-md border px-3 py-2 text-xs font-semibold shadow-sm transition disabled:cursor-not-allowed ${
+        isActive
+          ? 'border-slate-200 bg-slate-100 text-slate-500'
+          : 'border-gray-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50'
+      }`}
+      title={label}
+    >
+      <Icon className="h-4 w-4" aria-hidden="true" />
+      {label}
+    </button>
+  );
+}
+
+function DataManagementSubmissionCard({
+  submission,
+  saving,
+  deleting,
+  onOpenFile,
+  onUpdateSubmission,
+  onDeleteSubmission,
+}) {
+  const contactDetails = [
+    submission.participantName,
+    submission.email,
+    submission.phone,
+  ].filter(Boolean).join(' · ');
+  const title = submission.organization || submission.participantName || 'Unnamed submission';
+  const files = Array.isArray(submission.files) ? submission.files : [];
+  const links = Array.isArray(submission.links) ? submission.links : [];
+
+  return (
+    <article className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="break-words text-lg font-semibold text-slate-900">{title}</h3>
+            <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ${getIntakeStatusBadgeClasses(submission.status)}`}>
+              {formatIntakeStatusLabel(submission.status)}
+            </span>
+          </div>
+          {contactDetails && (
+            <p className="mt-2 break-words text-sm font-medium text-slate-600">{contactDetails}</p>
+          )}
+          <div className="mt-3 grid gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 sm:grid-cols-2 lg:grid-cols-3">
+            <span>Submitted {formatDataTimestamp(submission.submittedAt || submission.createdAt)}</span>
+            <span>Updated {formatDataTimestamp(submission.updatedAt)}</span>
+            <span>{files.length} PDF{files.length === 1 ? '' : 's'}</span>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <IntakeStatusActionButton
+            label="Review"
+            status="under_review"
+            icon={EyeIcon}
+            submission={submission}
+            saving={saving}
+            onUpdate={onUpdateSubmission}
+          />
+          <IntakeStatusActionButton
+            label="Changes"
+            status="needs_changes"
+            icon={ExclamationTriangleIcon}
+            submission={submission}
+            saving={saving}
+            onUpdate={onUpdateSubmission}
+          />
+          <IntakeStatusActionButton
+            label="Approve"
+            status="approved"
+            icon={CheckCircleIcon}
+            submission={submission}
+            saving={saving}
+            onUpdate={onUpdateSubmission}
+          />
+          <IntakeStatusActionButton
+            label="Reject"
+            status="rejected"
+            icon={XCircleIcon}
+            submission={submission}
+            saving={saving}
+            onUpdate={onUpdateSubmission}
+          />
+          <button
+            type="button"
+            onClick={() => onDeleteSubmission(submission)}
+            disabled={saving || deleting}
+            className="inline-flex items-center gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700 shadow-sm transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:text-rose-300"
+            title="Delete submission"
+          >
+            <TrashIcon className="h-4 w-4" aria-hidden="true" />
+            Delete
+          </button>
+        </div>
+      </div>
+
+      {submission.notes && (
+        <div className="mt-5 rounded-md bg-slate-50 p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Client Notes</p>
+          <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{submission.notes}</p>
+        </div>
+      )}
+
+      {links.length > 0 && (
+        <div className="mt-5">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Submitted Links</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {links.map((link, index) => {
+              const label = link.label || link.url;
+              if (!link.url) {
+                return (
+                  <span
+                    key={`${label}-${index}`}
+                    className="inline-flex max-w-full items-center rounded-md border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm"
+                  >
+                    <span className="truncate">{label}</span>
+                  </span>
+                );
+              }
+
+              return (
+                <a
+                  key={`${link.url}-${index}`}
+                  href={link.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex max-w-full items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-blue-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50"
+                >
+                  <ArrowTopRightOnSquareIcon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span className="truncate">{label}</span>
+                </a>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="mt-5">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Uploaded PDFs</p>
+        {files.length === 0 ? (
+          <p className="mt-3 rounded-md bg-slate-50 px-4 py-3 text-sm font-medium text-slate-600">
+            No PDFs were included with this submission.
+          </p>
+        ) : (
+          <div className="mt-3 divide-y divide-gray-100 rounded-md border border-gray-200">
+            {files.map((file) => {
+              const textReady = file.extractionStatus === 'ready' && file.extractedTextPath;
+
+              return (
+                <div key={file.id} className="grid gap-3 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+                  <div className="min-w-0">
+                    <div className="flex min-w-0 items-start gap-3">
+                      <DocumentTextIcon className="mt-0.5 h-5 w-5 shrink-0 text-slate-500" aria-hidden="true" />
+                      <div className="min-w-0">
+                        <p className="break-words text-sm font-semibold text-slate-900">{file.fileName || 'Uploaded PDF'}</p>
+                        <p className="mt-1 text-xs font-medium text-slate-500">
+                          {formatUploadSize(file.size)}
+                          {' · '}
+                          Text extraction: {formatIntakeStatusLabel(file.extractionStatus || 'pending')}
+                        </p>
+                        {file.extractionError && (
+                          <p className="mt-2 text-xs font-semibold text-rose-700">{file.extractionError}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onOpenFile(submission.id, file.id, false)}
+                      className="inline-flex items-center gap-2 rounded-md bg-slate-900 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-700"
+                    >
+                      <ArrowTopRightOnSquareIcon className="h-4 w-4" aria-hidden="true" />
+                      Open PDF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onOpenFile(submission.id, file.id, true)}
+                      disabled={!textReady}
+                      className="inline-flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-blue-200 hover:bg-blue-50 disabled:cursor-not-allowed disabled:text-slate-400"
+                    >
+                      <DocumentTextIcon className="h-4 w-4" aria-hidden="true" />
+                      Text
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <label className="mt-5 block">
+        <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Admin Notes</span>
+        <textarea
+          defaultValue={submission.adminNotes || ''}
+          onBlur={(event) => {
+            const nextValue = event.target.value;
+            if (nextValue !== (submission.adminNotes || '')) {
+              onUpdateSubmission(submission.id, { adminNotes: nextValue });
+            }
+          }}
+          rows={3}
+          className={`${FIELD_CLASSES} resize-y`}
+          placeholder="Internal screening notes, follow-up requests, or agent readiness notes."
+        />
+      </label>
+    </article>
+  );
+}
+
 export default function AiBoothsPage({
   onNavigateToDashboard,
   onNavigateToAdmin,
@@ -3789,7 +4474,10 @@ export default function AiBoothsPage({
   const [loadError, setLoadError] = useState('');
   const [status, setStatus] = useState(null);
   const [events, setEvents] = useState([]);
+  const [installs, setInstalls] = useState([]);
   const [selectedEventId, setSelectedEventId] = useState('');
+  const [selectedInstallId, setSelectedInstallId] = useState('');
+  const [activeDeploymentType, setActiveDeploymentType] = useState(DEPLOYMENT_TYPE_EVENT);
   const [eventDraft, setEventDraft] = useState(createEmptyEventDraft);
   const [activeWorkspaceTab, setActiveWorkspaceTab] = useState('event');
   const [activeTabId, setActiveTabId] = useState('general');
@@ -3801,6 +4489,18 @@ export default function AiBoothsPage({
   const [elevenLabsAgents, setElevenLabsAgents] = useState([]);
   const [elevenLabsAgentsLoading, setElevenLabsAgentsLoading] = useState(false);
   const [elevenLabsAgentsError, setElevenLabsAgentsError] = useState('');
+  const [golfLookupState, setGolfLookupState] = useState({
+    loading: false,
+    error: '',
+    tournaments: [],
+  });
+  const [dataManagementState, setDataManagementState] = useState({
+    loading: false,
+    saving: false,
+    deleting: false,
+    error: '',
+    submissions: [],
+  });
   const [healthNowMs, setHealthNowMs] = useState(() => Date.now());
   const topicLongPressTimerRef = useRef(null);
   const topicLongPressTriggeredRef = useRef(false);
@@ -3827,19 +4527,29 @@ export default function AiBoothsPage({
   useEffect(() => {
     let isCancelled = false;
 
-    function applyLoadedEvents(nextEvents) {
+    function applyLoadedEvents(nextEvents, nextInstalls = []) {
       setEvents(nextEvents);
+      setInstalls(nextInstalls);
 
       if (nextEvents.length > 0) {
+        setActiveDeploymentType(DEPLOYMENT_TYPE_EVENT);
         setSelectedEventId(nextEvents[0].id);
+        setSelectedInstallId('');
         setEventDraft(cloneEvent(nextEvents[0]));
-      } else {
+      } else if (nextInstalls.length > 0) {
+        setActiveDeploymentType(DEPLOYMENT_TYPE_INSTALL);
         setSelectedEventId('');
-        setEventDraft(createEmptyEventDraft());
+        setSelectedInstallId(nextInstalls[0].id);
+        setEventDraft(cloneEvent(nextInstalls[0]));
+      } else {
+        setActiveDeploymentType(DEPLOYMENT_TYPE_EVENT);
+        setSelectedEventId('');
+        setSelectedInstallId('');
+        setEventDraft(createAiaAirportPermanentInstallDraft());
       }
 
       setActiveTabId('general');
-      setSelectedScreenUiStationId(nextEvents[0]?.boothStationIds?.[0] || '');
+      setSelectedScreenUiStationId((nextEvents[0] || nextInstalls[0])?.boothStationIds?.[0] || '');
       setDirty(false);
     }
 
@@ -3849,10 +4559,13 @@ export default function AiBoothsPage({
 
       if (shouldPreferFirestoreEventLoad()) {
         try {
-          const nextEvents = await loadEventsFromFirestore();
+          const [nextEvents, nextInstalls] = await Promise.all([
+            loadEventsFromFirestore(),
+            loadInstallsFromFirestore(),
+          ]);
           if (isCancelled) return;
 
-          applyLoadedEvents(nextEvents);
+          applyLoadedEvents(nextEvents, nextInstalls);
           setLoading(false);
           return;
         } catch (fallbackError) {
@@ -3863,20 +4576,35 @@ export default function AiBoothsPage({
       }
 
       try {
-        const response = await callFunctionWithAuth('aiBooths_listEvents');
+        const [eventsResponse, installsResponse] = await Promise.all([
+          callFunctionWithAuth('aiBooths_listEvents'),
+          callFunctionWithAuth('aiBooths_listInstalls').catch((error) => {
+            if (isFunctionEndpointUnavailable(error)) {
+              return { installs: [] };
+            }
+            throw error;
+          }),
+        ]);
         if (isCancelled) return;
 
-        const nextEvents = sortEvents((response?.events || []).map(normalizeEvent));
-        applyLoadedEvents(nextEvents);
+        const nextEvents = sortEvents((eventsResponse?.events || []).map(normalizeEvent));
+        const nextInstalls = sortEvents((installsResponse?.installs || []).map((install) => normalizeEvent({
+          ...install,
+          deploymentType: DEPLOYMENT_TYPE_INSTALL,
+        })));
+        applyLoadedEvents(nextEvents, nextInstalls);
       } catch (error) {
         if (isCancelled) return;
 
         if (isFunctionEndpointUnavailable(error)) {
           try {
-            const nextEvents = await loadEventsFromFirestore();
+            const [nextEvents, nextInstalls] = await Promise.all([
+              loadEventsFromFirestore(),
+              loadInstallsFromFirestore(),
+            ]);
             if (isCancelled) return;
 
-            applyLoadedEvents(nextEvents);
+            applyLoadedEvents(nextEvents, nextInstalls);
             return;
           } catch (fallbackError) {
             console.error(fallbackError);
@@ -3885,8 +4613,10 @@ export default function AiBoothsPage({
 
         console.error(error);
         setEvents([]);
+        setInstalls([]);
         setSelectedEventId('');
-        setEventDraft(createEmptyEventDraft());
+        setSelectedInstallId('');
+        setEventDraft(createAiaAirportPermanentInstallDraft());
         setLoadError(error?.message || 'Failed to load AI booth events.');
       } finally {
         if (!isCancelled) {
@@ -3978,6 +4708,20 @@ export default function AiBoothsPage({
     });
   }, [availableBoothMap, eventDraft.boothStationIds]);
 
+  const isInstallDeployment = activeDeploymentType === DEPLOYMENT_TYPE_INSTALL ||
+    eventDraft.deploymentType === DEPLOYMENT_TYPE_INSTALL;
+  const currentDeploymentType = isInstallDeployment ? DEPLOYMENT_TYPE_INSTALL : DEPLOYMENT_TYPE_EVENT;
+  const selectedDeploymentId = isInstallDeployment ? selectedInstallId : selectedEventId;
+  const currentDeploymentCollection = isInstallDeployment ? installs : events;
+  const currentDeploymentLabel = isInstallDeployment ? 'permanent install' : 'event';
+  const currentDeploymentTitle = isInstallDeployment ? 'Permanent Install' : 'Event';
+  const currentIntakeUrl = isInstallDeployment
+    ? `${INSTALL_INTAKE_PUBLIC_URL}${selectedDeploymentId ? `/${encodeURIComponent(selectedDeploymentId)}` : ''}`
+    : EVENT_INTAKE_PUBLIC_URL;
+  const activeWorkflowTabId = activeWorkspaceTab === 'event' || activeWorkspaceTab === 'install'
+    ? 'setup'
+    : activeWorkspaceTab;
+
   const activeTopic = useMemo(() => {
     return eventDraft.topics.find((topic) => topic.id === activeTabId) || null;
   }, [activeTabId, eventDraft.topics]);
@@ -3990,13 +4734,37 @@ export default function AiBoothsPage({
   ), [activeScreenUiStationId, eventDraft]);
 
   const eventLastUpdated = eventDraft.updatedAt || eventDraft.createdAt;
+  const eventIntake = normalizeIntakeSettings(eventDraft.intake);
+  const eventIntakeCode = eventIntake.sharedCode;
+  const canCopyEventIntakeCode = Boolean(selectedDeploymentId && eventIntakeCode && !dirty);
+  const dataManagementEventId = selectedDeploymentId;
+  const dataSubmissions = dataManagementState.submissions;
+  const dataSubmissionStats = useMemo(() => {
+    const pdfCount = dataSubmissions.reduce((sum, submission) => (
+      sum + (Array.isArray(submission.files) ? submission.files.length : 0)
+    ), 0);
+    const submittedCount = dataSubmissions.filter((submission) => (
+      submission.status === 'submitted'
+    )).length;
+    const approvedCount = dataSubmissions.filter((submission) => (
+      submission.status === 'approved'
+    )).length;
+
+    return {
+      submissions: dataSubmissions.length,
+      pdfs: pdfCount,
+      submitted: submittedCount,
+      approved: approvedCount,
+    };
+  }, [dataSubmissions]);
   const syncedKioskAgentCount = eventDraft.boothStationIds.filter((stationId) => (
     eventDraft.agent?.kioskAgents?.[stationId]?.syncStatus === 'synced'
   )).length;
   const previewStationId = activeScreenUiStationId;
   const previewAgentId = eventDraft.agent?.kioskAgents?.[previewStationId]?.agentId || eventDraft.agent?.agentId || '';
   const screenUiPreviewUrl = buildScreenUiPreviewUrl({
-    eventId: selectedEventId || eventDraft.id,
+    eventId: isInstallDeployment ? '' : (selectedEventId || eventDraft.id),
+    installId: isInstallDeployment ? (selectedInstallId || eventDraft.id) : '',
     stationId: previewStationId,
     agentId: previewAgentId,
   });
@@ -4014,9 +4782,64 @@ export default function AiBoothsPage({
     postScreenUiToPreview();
   }, [activeWorkspaceTab, activeScreenUi, eventDraft.topics, screenUiPreviewOrigin]);
 
+  useEffect(() => {
+    if (activeWorkspaceTab !== 'data') {
+      return;
+    }
+
+    loadDataManagementSubmissions();
+  }, [activeWorkspaceTab, dataManagementEventId, currentDeploymentType]);
+
   const handleNavigateToProvision = () => {
     onNavigateToProvisionPage?.();
   };
+
+  function switchDeploymentMode(nextDeploymentType) {
+    const nextWorkspaceTab = nextDeploymentType === DEPLOYMENT_TYPE_INSTALL ? 'install' : 'event';
+
+    if (currentDeploymentType === nextDeploymentType) {
+      if (activeWorkspaceTab === 'event' || activeWorkspaceTab === 'install') {
+        setActiveWorkspaceTab(nextWorkspaceTab);
+      }
+      return;
+    }
+
+    if (!confirmDiscardChanges()) {
+      return;
+    }
+
+    const shouldStayInCurrentWorkflow = activeWorkspaceTab !== 'event' && activeWorkspaceTab !== 'install';
+    const workspaceTab = shouldStayInCurrentWorkflow ? activeWorkspaceTab : nextWorkspaceTab;
+
+    if (nextDeploymentType === DEPLOYMENT_TYPE_INSTALL) {
+      const nextInstall = installs.find((item) => item.id === selectedInstallId) || installs[0] || null;
+      if (nextInstall) {
+        handleOpenInstall(nextInstall, { workspaceTab });
+      } else {
+        openNewInstallDraft();
+        if (shouldStayInCurrentWorkflow) {
+          setActiveWorkspaceTab(workspaceTab);
+        }
+      }
+      return;
+    }
+
+    const nextEvent = events.find((item) => item.id === selectedEventId) || events[0] || null;
+    if (nextEvent) {
+      handleOpenEvent(nextEvent, { workspaceTab });
+    } else {
+      openNewEventDraft();
+      if (shouldStayInCurrentWorkflow) {
+        setActiveWorkspaceTab(workspaceTab);
+      }
+    }
+  }
+
+  function selectWorkflowTab(nextWorkflowTabId) {
+    setActiveWorkspaceTab(nextWorkflowTabId === 'setup'
+      ? (isInstallDeployment ? 'install' : 'event')
+      : nextWorkflowTabId);
+  }
 
   async function loadElevenLabsAgents({ isCancelled = () => false, showStatus = true } = {}) {
     setElevenLabsAgentsLoading(true);
@@ -4056,19 +4879,300 @@ export default function AiBoothsPage({
     }
   }
 
+  async function loadDataManagementSubmissions({ showStatus = false } = {}) {
+    const eventId = dataManagementEventId;
+    if (!eventId) {
+      setDataManagementState({
+        loading: false,
+        saving: false,
+        deleting: false,
+        error: '',
+        submissions: [],
+      });
+      return;
+    }
+
+    setDataManagementState((current) => ({
+      ...current,
+      loading: true,
+      error: '',
+    }));
+
+    try {
+      const response = await callFunctionWithAuth('aiBooths_listIntakeSubmissions', {
+        eventId: currentDeploymentType === DEPLOYMENT_TYPE_EVENT ? eventId : '',
+        targetId: eventId,
+        targetType: currentDeploymentType,
+      });
+      const submissions = Array.isArray(response?.submissions) ? response.submissions : [];
+      setDataManagementState((current) => ({
+        ...current,
+        loading: false,
+        deleting: false,
+        error: '',
+        submissions,
+      }));
+      if (showStatus) {
+        setStatus({ state: 'success', message: `Loaded ${submissions.length} intake submissions.` });
+      }
+    } catch (error) {
+      console.error(error);
+      const message = isFunctionEndpointUnavailable(error)
+        ? 'Data management endpoint is unavailable. Deploy the updated AI booth functions.'
+        : (error?.message || 'Failed to load intake submissions.');
+      setDataManagementState((current) => ({
+        ...current,
+        loading: false,
+        error: message,
+      }));
+      if (showStatus) {
+        setStatus({ state: 'error', message });
+      }
+    }
+  }
+
+  async function handleOpenIntakeFile(submissionId, fileId, text = false) {
+    try {
+      const response = await callFunctionWithAuth('aiBooths_createIntakeFileReadUrl', {
+        submissionId,
+        fileId,
+        text,
+      });
+      if (response?.url) {
+        window.open(response.url, '_blank', 'noopener,noreferrer');
+      }
+    } catch (error) {
+      console.error(error);
+      setStatus({
+        state: 'error',
+        message: error?.message || 'Unable to open intake file.',
+      });
+    }
+  }
+
+  async function handleUpdateIntakeSubmission(submissionId, patch) {
+    setDataManagementState((current) => ({ ...current, saving: true }));
+    try {
+      const response = await callFunctionWithAuth('aiBooths_updateIntakeSubmission', {
+        submissionId,
+        ...patch,
+      });
+      const updatedSubmission = response?.submission;
+      if (updatedSubmission?.id) {
+        setDataManagementState((current) => ({
+          ...current,
+          saving: false,
+          error: '',
+          submissions: current.submissions.map((submission) => (
+            submission.id === updatedSubmission.id ? updatedSubmission : submission
+          )),
+        }));
+      } else {
+        setDataManagementState((current) => ({ ...current, saving: false, error: '' }));
+      }
+      setStatus({ state: 'success', message: 'Submission review updated.' });
+    } catch (error) {
+      console.error(error);
+      const message = error?.message || 'Unable to update intake submission.';
+      setDataManagementState((current) => ({ ...current, saving: false, error: message }));
+      setStatus({ state: 'error', message });
+    }
+  }
+
+  async function handleDeleteIntakeSubmission(submission) {
+    const submissionId = submission?.id;
+    const label = submission?.organization || submission?.participantName || 'this submission';
+    if (!submissionId) {
+      return;
+    }
+
+    if (!window.confirm(`Delete ${label}? This will remove the submission and its uploaded PDFs.`)) {
+      return;
+    }
+
+    setDataManagementState((current) => ({ ...current, deleting: true, error: '' }));
+    try {
+      await callFunctionWithAuth('aiBooths_deleteIntakeSubmission', {
+        submissionId,
+      });
+      setDataManagementState((current) => ({
+        ...current,
+        deleting: false,
+        error: '',
+        submissions: current.submissions.filter((item) => item.id !== submissionId),
+      }));
+      setStatus({ state: 'success', message: 'Intake submission deleted.' });
+    } catch (error) {
+      console.error(error);
+      const message = error?.message || 'Unable to delete intake submission.';
+      setDataManagementState((current) => ({ ...current, deleting: false, error: message }));
+      setStatus({ state: 'error', message });
+    }
+  }
+
   function markDirty() {
     setDirty(true);
   }
 
-  function handleOpenEvent(nextEvent) {
+  function updateGolfField(field, value) {
+    setEventDraft((current) => ({
+      ...current,
+      golf: normalizeGolfConfig({
+        ...(current.golf || {}),
+        [field]: value,
+      }, current.general),
+    }));
+    markDirty();
+  }
+
+  function getGolfLookupYear() {
+    const draftYear = String(eventDraft.golf?.year || '').trim();
+    if (draftYear) {
+      return draftYear;
+    }
+
+    return getEventStartYear(eventDraft.general) || String(new Date().getFullYear());
+  }
+
+  async function handleLoadSlashGolfEvents() {
+    const year = getGolfLookupYear();
+    const orgId = String(eventDraft.golf?.orgId || DEFAULT_GOLF_CONFIG.orgId).trim();
+    setGolfLookupState((current) => ({
+      ...current,
+      loading: true,
+      error: '',
+    }));
+
+    try {
+      const response = await callFunctionWithAuth('aiBooths_listSlashGolfTournaments', {
+        year,
+        orgId,
+      });
+      const tournaments = Array.isArray(response?.tournaments) ? response.tournaments : [];
+      setGolfLookupState({
+        loading: false,
+        error: '',
+        tournaments,
+      });
+      setStatus({
+        state: 'success',
+        message: `Loaded ${tournaments.length} Slash Golf events for ${year}.`,
+      });
+    } catch (error) {
+      console.error(error);
+      const message = error?.message || 'Unable to load Slash Golf events.';
+      setGolfLookupState({
+        loading: false,
+        error: message,
+        tournaments: [],
+      });
+      setStatus({ state: 'error', message });
+    }
+  }
+
+  function handleSelectSlashGolfTournament(tournId) {
+    const selectedTournament = golfLookupState.tournaments.find((tournament) => (
+      String(tournament.tournId || '') === String(tournId || '')
+    ));
+
+    setEventDraft((current) => ({
+      ...current,
+      golf: normalizeGolfConfig({
+        ...(current.golf || {}),
+        provider: 'slash-golf',
+        tournId,
+        tournamentName: selectedTournament?.name || current.golf?.tournamentName || '',
+        year: selectedTournament?.year || current.golf?.year || getGolfLookupYear(),
+        tour: selectedTournament?.tour || current.golf?.tour || DEFAULT_GOLF_CONFIG.tour,
+        orgId: selectedTournament?.orgId || current.golf?.orgId || DEFAULT_GOLF_CONFIG.orgId,
+      }, current.general),
+    }));
+    markDirty();
+  }
+
+  function handleOpenEvent(nextEvent, { workspaceTab = 'event' } = {}) {
+    setActiveDeploymentType(nextEvent?.deploymentType === DEPLOYMENT_TYPE_INSTALL ? DEPLOYMENT_TYPE_INSTALL : DEPLOYMENT_TYPE_EVENT);
     setSelectedEventId(nextEvent?.id || '');
+    setSelectedInstallId('');
     setEventDraft(nextEvent ? cloneEvent(nextEvent) : createEmptyEventDraft());
     setSelectedScreenUiStationId(nextEvent?.boothStationIds?.[0] || '');
+    setDataManagementState({
+      loading: false,
+      saving: false,
+      deleting: false,
+      error: '',
+      submissions: [],
+    });
+    setGolfLookupState({ loading: false, error: '', tournaments: [] });
     setScreenUiPreviewExpanded(false);
-    setActiveWorkspaceTab('event');
+    setActiveWorkspaceTab(workspaceTab);
     setActiveTabId('general');
     setDirty(false);
     setLoadError('');
+  }
+
+  function openNewEventDraft() {
+    const nextDraft = createEmptyEventDraft({ withIntakeCode: true });
+
+    setActiveDeploymentType(DEPLOYMENT_TYPE_EVENT);
+    setSelectedEventId('');
+    setSelectedInstallId('');
+    setEventDraft(nextDraft);
+    setSelectedScreenUiStationId('');
+    setGolfLookupState({ loading: false, error: '', tournaments: [] });
+    setScreenUiPreviewExpanded(false);
+    setActiveWorkspaceTab('event');
+    setActiveTabId('general');
+    setDirty(true);
+    setLoadError('');
+    setStatus({
+      state: 'success',
+      message: `New event started. Shared intake code ${nextDraft.intake.sharedCode} will be saved with the event.`,
+    });
+  }
+
+  function handleOpenInstall(nextInstall, { workspaceTab = 'install' } = {}) {
+    setActiveDeploymentType(DEPLOYMENT_TYPE_INSTALL);
+    setSelectedEventId('');
+    setSelectedInstallId(nextInstall?.id || '');
+    setEventDraft(nextInstall ? cloneEvent({
+      ...nextInstall,
+      deploymentType: DEPLOYMENT_TYPE_INSTALL,
+    }) : createAiaAirportPermanentInstallDraft());
+    setSelectedScreenUiStationId(nextInstall?.boothStationIds?.[0] || '');
+    setDataManagementState({
+      loading: false,
+      saving: false,
+      deleting: false,
+      error: '',
+      submissions: [],
+    });
+    setGolfLookupState({ loading: false, error: '', tournaments: [] });
+    setScreenUiPreviewExpanded(false);
+    setActiveWorkspaceTab(workspaceTab);
+    setActiveTabId('general');
+    setDirty(false);
+    setLoadError('');
+  }
+
+  function openNewInstallDraft() {
+    const nextDraft = createAiaAirportPermanentInstallDraft();
+
+    setActiveDeploymentType(DEPLOYMENT_TYPE_INSTALL);
+    setSelectedEventId('');
+    setSelectedInstallId('');
+    setEventDraft(nextDraft);
+    setSelectedScreenUiStationId('');
+    setGolfLookupState({ loading: false, error: '', tournaments: [] });
+    setScreenUiPreviewExpanded(false);
+    setActiveWorkspaceTab('install');
+    setActiveTabId('general');
+    setDirty(true);
+    setLoadError('');
+    setStatus({
+      state: 'success',
+      message: `New permanent install started. Shared intake code ${nextDraft.intake.sharedCode} will be saved with the install.`,
+    });
   }
 
   function confirmDiscardChanges() {
@@ -4076,7 +5180,7 @@ export default function AiBoothsPage({
       return true;
     }
 
-    return window.confirm('You have unsaved changes. Continue without saving this event?');
+    return window.confirm(`You have unsaved changes. Continue without saving this ${currentDeploymentLabel}?`);
   }
 
   function handleSelectEvent(event) {
@@ -4087,13 +5191,31 @@ export default function AiBoothsPage({
     }
 
     if (!nextEventId) {
-      handleOpenEvent(null);
+      openNewEventDraft();
       return;
     }
 
     const matchingEvent = events.find((item) => item.id === nextEventId);
     if (matchingEvent) {
-      handleOpenEvent(matchingEvent);
+      handleOpenEvent(matchingEvent, { workspaceTab: activeWorkspaceTab });
+    }
+  }
+
+  function handleSelectInstall(event) {
+    const nextInstallId = String(event.target.value || '').trim();
+
+    if (!confirmDiscardChanges()) {
+      return;
+    }
+
+    if (!nextInstallId) {
+      openNewInstallDraft();
+      return;
+    }
+
+    const matchingInstall = installs.find((item) => item.id === nextInstallId);
+    if (matchingInstall) {
+      handleOpenInstall(matchingInstall, { workspaceTab: activeWorkspaceTab });
     }
   }
 
@@ -4102,7 +5224,66 @@ export default function AiBoothsPage({
       return;
     }
 
-    handleOpenEvent(null);
+    openNewEventDraft();
+  }
+
+  function handleCreateNewInstall() {
+    if (!confirmDiscardChanges()) {
+      return;
+    }
+
+    openNewInstallDraft();
+  }
+
+  function handleFillAiaAirportData() {
+    setActiveDeploymentType(DEPLOYMENT_TYPE_INSTALL);
+    setSelectedEventId('');
+    setSelectedInstallId(AIA_INSTALL_ID);
+    setEventDraft((current) => createAiaAirportPermanentInstallDraft({
+      ...current,
+      id: AIA_INSTALL_ID,
+      deploymentType: DEPLOYMENT_TYPE_INSTALL,
+    }));
+    setSelectedScreenUiStationId('');
+    setActiveWorkspaceTab('install');
+    setActiveTabId('general');
+    setDirty(true);
+    setStatus({ state: 'success', message: 'Loaded AIA Airport as the first permanent install draft.' });
+  }
+
+  function handleRegenerateIntakeCode() {
+    const sharedCode = generateEventIntakeCode();
+
+    setEventDraft((current) => ({
+      ...current,
+      intake: createDefaultIntakeSettings({
+        ...(current.intake || {}),
+        enabled: true,
+        sharedCode,
+        accessCodeHint: maskEventIntakeCode(sharedCode),
+        accessCodeConfigured: true,
+      }),
+    }));
+    markDirty();
+    setStatus({
+      state: 'success',
+      message: `Shared intake code regenerated. Save the ${currentDeploymentLabel} to publish ${sharedCode}.`,
+    });
+  }
+
+  async function copyIntakeText(text, successMessage) {
+    if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) {
+      setStatus({ state: 'error', message: 'Clipboard is unavailable in this browser.' });
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setStatus({ state: 'success', message: successMessage });
+    } catch (error) {
+      console.error(error);
+      setStatus({ state: 'error', message: 'Unable to copy to the clipboard.' });
+    }
   }
 
   function handleFillMockGolfData() {
@@ -4975,6 +6156,9 @@ export default function AiBoothsPage({
         title: topic.title,
       })),
       eventName: eventDraft.general?.eventName || '',
+      installId: isInstallDeployment ? (selectedInstallId || eventDraft.id) : '',
+      eventId: isInstallDeployment ? '' : (selectedEventId || eventDraft.id),
+      deploymentType: currentDeploymentType,
       stationId: activeScreenUiStationId,
       ...extraPayload,
     }, screenUiPreviewOrigin);
@@ -5105,7 +6289,7 @@ export default function AiBoothsPage({
   }
 
   function handleDeleteTopic(topicId) {
-    if (!window.confirm('Remove this topic from the event?')) {
+    if (!window.confirm(`Remove this topic from the ${currentDeploymentLabel}?`)) {
       return;
     }
 
@@ -5167,44 +6351,71 @@ export default function AiBoothsPage({
     markDirty();
   }
 
-  async function saveEventDraft({ sendingMessage = 'Saving AI booth event...', successMessage = 'AI booth event saved.' } = {}) {
+  async function saveEventDraft({ sendingMessage, successMessage } = {}) {
     const trimmedEventName = String(eventDraft.general.eventName || '').trim();
+    const savingInstall = currentDeploymentType === DEPLOYMENT_TYPE_INSTALL;
+    const label = savingInstall ? 'install' : 'event';
 
     if (!trimmedEventName) {
-      setActiveWorkspaceTab('event');
+      setActiveWorkspaceTab(savingInstall ? 'install' : 'event');
       setActiveTabId('general');
-      setStatus({ state: 'error', message: 'Event name is required before saving.' });
+      setStatus({ state: 'error', message: `${savingInstall ? 'Location' : 'Event'} name is required before saving.` });
       return null;
     }
 
-    setStatus({ state: 'sending', message: sendingMessage });
+    setStatus({ state: 'sending', message: sendingMessage || `Saving AI booth ${label}...` });
 
     try {
-      const response = await callFunctionWithAuth('aiBooths_saveEvent', {
-        eventId: selectedEventId || eventDraft.id,
-        event: eventDraft,
-      });
+      const payload = savingInstall
+        ? {
+            installId: selectedInstallId || eventDraft.id || AIA_INSTALL_ID,
+            install: {
+              ...eventDraft,
+              deploymentType: DEPLOYMENT_TYPE_INSTALL,
+            },
+          }
+        : {
+            eventId: selectedEventId || eventDraft.id,
+            event: {
+              ...eventDraft,
+              deploymentType: DEPLOYMENT_TYPE_EVENT,
+            },
+          };
+      const response = await callFunctionWithAuth(savingInstall ? 'aiBooths_saveInstall' : 'aiBooths_saveEvent', payload);
 
-      const savedEvent = normalizeEvent(response?.event || {});
-      setEvents((current) => sortEvents([savedEvent, ...current.filter((item) => item.id !== savedEvent.id)]));
-      setSelectedEventId(savedEvent.id);
+      const savedEvent = normalizeEvent({
+        ...(response?.install || response?.event || {}),
+        deploymentType: savingInstall ? DEPLOYMENT_TYPE_INSTALL : DEPLOYMENT_TYPE_EVENT,
+      });
+      if (savingInstall) {
+        setInstalls((current) => sortEvents([savedEvent, ...current.filter((item) => item.id !== savedEvent.id)]));
+        setSelectedInstallId(savedEvent.id);
+        setSelectedEventId('');
+        setActiveDeploymentType(DEPLOYMENT_TYPE_INSTALL);
+      } else {
+        setEvents((current) => sortEvents([savedEvent, ...current.filter((item) => item.id !== savedEvent.id)]));
+        setSelectedEventId(savedEvent.id);
+        setSelectedInstallId('');
+        setActiveDeploymentType(DEPLOYMENT_TYPE_EVENT);
+      }
       setEventDraft(cloneEvent(savedEvent));
       setDirty(false);
-      if (successMessage) {
-        setStatus({ state: 'success', message: successMessage });
+      const finalSuccessMessage = successMessage === undefined ? `AI booth ${label} saved.` : successMessage;
+      if (finalSuccessMessage) {
+        setStatus({ state: 'success', message: finalSuccessMessage });
       }
       return savedEvent;
     } catch (error) {
       console.error(error);
       if (isFunctionEndpointUnavailable(error)) {
         setStatus({
-          state: 'error',
-          message: 'AI booth save endpoint is unavailable. Deploy the AI booth functions, then try saving again.',
-        });
+            state: 'error',
+            message: 'AI booth save endpoint is unavailable. Deploy the AI booth functions, then try saving again.',
+          });
         return null;
       }
 
-      setStatus({ state: 'error', message: error?.message || 'Failed to save AI booth event.' });
+      setStatus({ state: 'error', message: error?.message || `Failed to save AI booth ${label}.` });
       return null;
     }
   }
@@ -5215,9 +6426,11 @@ export default function AiBoothsPage({
 
   async function handlePublishAgent() {
     const templateAgentId = String(eventDraft.agent?.templateAgentId || '').trim();
+    const publishingInstall = currentDeploymentType === DEPLOYMENT_TYPE_INSTALL;
+    const label = publishingInstall ? 'install' : 'event';
 
     if (eventDraft.boothStationIds.length === 0) {
-      setStatus({ state: 'error', message: 'Assign at least one CA36 booth before creating kiosk agents.' });
+      setStatus({ state: 'error', message: `Assign at least one CA36 booth before creating ${label} kiosk agents.` });
       return;
     }
 
@@ -5227,11 +6440,11 @@ export default function AiBoothsPage({
     }
 
     let eventForPublish = eventDraft;
-    let eventId = selectedEventId || eventDraft.id;
+    let eventId = selectedDeploymentId || eventDraft.id;
 
     if (!eventId || dirty) {
       const savedEvent = await saveEventDraft({
-        sendingMessage: 'Saving event before syncing kiosk agents...',
+        sendingMessage: `Saving ${label} before syncing kiosk agents...`,
         successMessage: '',
       });
 
@@ -5244,7 +6457,7 @@ export default function AiBoothsPage({
     }
 
     if (!eventId) {
-      setStatus({ state: 'error', message: 'Unable to create kiosk agents because the event was not saved.' });
+      setStatus({ state: 'error', message: `Unable to create kiosk agents because the ${label} was not saved.` });
       return;
     }
 
@@ -5254,16 +6467,31 @@ export default function AiBoothsPage({
     });
 
     try {
-      const response = await callFunctionWithAuth('aiBooths_publishAgent', { eventId });
-      const savedEvent = normalizeEvent(response?.event || {});
+      const response = await callFunctionWithAuth(
+        publishingInstall ? 'aiBooths_publishInstall' : 'aiBooths_publishAgent',
+        publishingInstall ? { installId: eventId } : { eventId }
+      );
+      const savedEvent = normalizeEvent({
+        ...(response?.install || response?.event || {}),
+        deploymentType: publishingInstall ? DEPLOYMENT_TYPE_INSTALL : DEPLOYMENT_TYPE_EVENT,
+      });
       const syncedCount = Number(response?.syncedCount || 0);
       const failedCount = Number(response?.failedCount || 0);
       const firstAgentError = (Array.isArray(response?.results) ? response.results : [])
         .map((result) => String(result?.error || '').trim())
         .find(Boolean);
 
-      setEvents((current) => sortEvents([savedEvent, ...current.filter((item) => item.id !== savedEvent.id)]));
-      setSelectedEventId(savedEvent.id);
+      if (publishingInstall) {
+        setInstalls((current) => sortEvents([savedEvent, ...current.filter((item) => item.id !== savedEvent.id)]));
+        setSelectedInstallId(savedEvent.id);
+        setSelectedEventId('');
+        setActiveDeploymentType(DEPLOYMENT_TYPE_INSTALL);
+      } else {
+        setEvents((current) => sortEvents([savedEvent, ...current.filter((item) => item.id !== savedEvent.id)]));
+        setSelectedEventId(savedEvent.id);
+        setSelectedInstallId('');
+        setActiveDeploymentType(DEPLOYMENT_TYPE_EVENT);
+      }
       setEventDraft(cloneEvent(savedEvent));
       setDirty(false);
 
@@ -5282,6 +6510,136 @@ export default function AiBoothsPage({
       console.error(error);
       setStatus({ state: 'error', message: error?.message || 'Failed to create kiosk agents.' });
     }
+  }
+
+  function renderLiveGolfDataPanel() {
+    const golfConfig = normalizeGolfConfig(eventDraft.golf, eventDraft.general);
+    const selectedTournamentLabel = golfConfig.tournamentName || golfConfig.tournId || 'Not assigned';
+
+    return (
+      <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-md sm:p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.28em] text-sky-600">
+              <TrophyIcon className="h-4 w-4" aria-hidden="true" />
+              Live Golf Feed
+            </p>
+            <h2 className="mt-2 text-2xl font-semibold text-slate-900">Slash event assignment</h2>
+            <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-slate-600">
+              Select the live tournament for this saved event. The concierge uses this assignment for leaderboard, player location, and player stats tools.
+            </p>
+          </div>
+          <div className="rounded-md bg-slate-50 px-4 py-3 text-sm">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Assigned tournament</p>
+            <p className="mt-2 max-w-xs break-words font-semibold text-slate-900">{selectedTournamentLabel}</p>
+            {golfConfig.tournId ? (
+              <p className="mt-1 font-mono text-xs text-slate-500">tournId: {golfConfig.tournId}</p>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Season year</span>
+            <input
+              className={FIELD_CLASSES}
+              onChange={(event) => updateGolfField('year', event.target.value)}
+              placeholder="2026"
+              value={golfConfig.year || getGolfLookupYear()}
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Provider</span>
+            <input
+              className={FIELD_CLASSES}
+              onChange={(event) => updateGolfField('provider', event.target.value)}
+              value={golfConfig.provider}
+            />
+          </label>
+          <label className="block lg:col-span-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Slash schedule</span>
+            <select
+              className={FIELD_CLASSES}
+              disabled={golfLookupState.loading || golfLookupState.tournaments.length === 0}
+              onChange={(event) => handleSelectSlashGolfTournament(event.target.value)}
+              value={golfConfig.tournId}
+            >
+              <option value="">
+                {golfLookupState.tournaments.length ? 'Select a tournament' : 'Load events to select'}
+              </option>
+              {golfLookupState.tournaments.map((tournament) => (
+                <option key={tournament.tournId} value={tournament.tournId}>
+                  {[tournament.name, tournament.startDate || tournament.weekNumber ? `${tournament.startDate || `Week ${tournament.weekNumber}`}` : '', tournament.tournId]
+                    .filter(Boolean)
+                    .join(' | ')}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Tournament name</span>
+            <input
+              className={FIELD_CLASSES}
+              onChange={(event) => updateGolfField('tournamentName', event.target.value)}
+              placeholder="PGA Championship"
+              value={golfConfig.tournamentName}
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Slash tournId</span>
+            <input
+              className={FIELD_CLASSES}
+              onChange={(event) => updateGolfField('tournId', event.target.value)}
+              placeholder="Loaded from Slash schedule"
+              value={golfConfig.tournId}
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Tour</span>
+            <input
+              className={FIELD_CLASSES}
+              onChange={(event) => updateGolfField('tour', event.target.value)}
+              placeholder="pga"
+              value={golfConfig.tour}
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Slash orgId</span>
+            <input
+              className={FIELD_CLASSES}
+              onChange={(event) => updateGolfField('orgId', event.target.value)}
+              placeholder="1"
+              value={golfConfig.orgId}
+            />
+          </label>
+        </div>
+
+        {golfLookupState.error ? (
+          <div className="mt-4 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+            {golfLookupState.error}
+          </div>
+        ) : null}
+
+        <div className="mt-5 flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={handleLoadSlashGolfEvents}
+            disabled={golfLookupState.loading}
+            className="inline-flex items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+          >
+            <ArrowPathIcon className={`h-4 w-4 ${golfLookupState.loading ? 'animate-spin' : ''}`} aria-hidden="true" />
+            {golfLookupState.loading ? 'Loading events' : 'Load Slash events'}
+          </button>
+          <button
+            type="button"
+            onClick={handleSaveEvent}
+            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
+          >
+            Save {currentDeploymentTitle}
+          </button>
+        </div>
+      </div>
+    );
   }
 
   const screenUiPreviewScale = screenUiPreviewExpanded ? SCREEN_UI_PREVIEW_EXPANDED_SCALE : SCREEN_UI_PREVIEW_SCALE;
@@ -5360,9 +6718,89 @@ export default function AiBoothsPage({
           </div>
         )}
 
+        {USE_AI_BOOTH_WORKFLOW_NAV ? (
+        <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.28em] text-sky-600">AI Booth Workspace</p>
+              <h2 className="mt-2 text-2xl font-semibold text-slate-950">
+                {isInstallDeployment ? 'Permanent install setup' : 'Event setup'}
+              </h2>
+              <p className="mt-2 max-w-2xl text-sm font-medium text-slate-600">
+                Pick the deployment type first, then move through setup, screen UI, agent sync, intake, and map testing for that same booth experience.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-3 sm:items-end">
+              <div className="inline-flex rounded-md border border-slate-200 bg-slate-100 p-1">
+                {[
+                  { id: DEPLOYMENT_TYPE_EVENT, label: 'Events' },
+                  { id: DEPLOYMENT_TYPE_INSTALL, label: 'Permanent Installs' },
+                ].map((option) => {
+                  const isActive = currentDeploymentType === option.id;
+
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      aria-pressed={isActive}
+                      onClick={() => switchDeploymentMode(option.id)}
+                      className={`rounded-md px-4 py-2 text-sm font-semibold transition ${
+                        isActive
+                          ? 'bg-white text-slate-950 shadow-sm'
+                          : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
+                      }`}
+                    >
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                type="button"
+                onClick={handleNavigateToProvision}
+                className="inline-flex items-center justify-center rounded-md border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
+              >
+                Provision New AI Booth
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-5 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+            {AI_BOOTH_WORKFLOW_TABS.map((tab) => {
+              const isActive = activeWorkflowTabId === tab.id;
+
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  aria-pressed={isActive}
+                  onClick={() => selectWorkflowTab(tab.id)}
+                  className={`rounded-md border p-3 text-left transition ${
+                    isActive
+                      ? 'border-violet-300 bg-violet-50 text-violet-950 shadow-sm'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-violet-200 hover:bg-violet-50/60'
+                  }`}
+                >
+                  <span className="block text-sm font-bold">{tab.label}</span>
+                  <span className={`mt-1 block text-xs font-medium leading-5 ${
+                    isActive ? 'text-violet-800' : 'text-slate-500'
+                  }`}
+                  >
+                    {tab.description}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+        ) : (
         <nav className="flex flex-wrap items-end gap-1 border-b border-violet-200">
           {[
             { id: 'event', label: 'Event Management' },
+            { id: 'install', label: 'Permanent Installs' },
+            { id: 'data', label: 'Data Management' },
             { id: 'agent', label: 'Agent Management' },
             { id: 'screen', label: 'Booth UI' },
             { id: 'map', label: 'Map' },
@@ -5373,7 +6811,17 @@ export default function AiBoothsPage({
               <button
                 key={tab.id}
                 type="button"
-                onClick={() => setActiveWorkspaceTab(tab.id)}
+                onClick={() => {
+                  if (tab.id === 'event') {
+                    switchDeploymentMode(DEPLOYMENT_TYPE_EVENT);
+                    return;
+                  }
+                  if (tab.id === 'install') {
+                    switchDeploymentMode(DEPLOYMENT_TYPE_INSTALL);
+                    return;
+                  }
+                  setActiveWorkspaceTab(tab.id);
+                }}
                 className={`rounded-t-lg border px-5 py-3 text-sm font-bold shadow-sm transition ${
                   isActive
                     ? '-mb-px border-violet-300 border-b-violet-100 bg-violet-100 text-violet-950'
@@ -5385,52 +6833,55 @@ export default function AiBoothsPage({
             );
           })}
         </nav>
+        )}
 
-        {activeWorkspaceTab === 'event' ? (
+        {activeWorkspaceTab === 'event' || activeWorkspaceTab === 'install' ? (
         <>
         <section className="bg-white p-6 rounded-lg shadow-md">
           <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.75fr)]">
             <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto_auto_auto] md:items-end">
               <label className="block">
-                <span className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-700">Saved Events</span>
-                <select
-                  value={selectedEventId}
-                  onChange={handleSelectEvent}
-                  className="mt-2 w-full rounded-md border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                >
-                  <option value="" className="text-slate-900">
-                    New unsaved event
-                  </option>
-                  {events.map((event) => (
-                    <option key={event.id} value={event.id} className="text-slate-900">
-                      {getEventLabel(event)}
+	                <span className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-700">
+                    {isInstallDeployment ? 'Saved Permanent Installs' : 'Saved Events'}
+                  </span>
+	                <select
+	                  value={selectedDeploymentId}
+	                  onChange={isInstallDeployment ? handleSelectInstall : handleSelectEvent}
+	                  className="mt-2 w-full rounded-md border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+	                >
+	                  <option value="" className="text-slate-900">
+	                    {isInstallDeployment ? 'New unsaved install' : 'New unsaved event'}
+	                  </option>
+	                  {currentDeploymentCollection.map((event) => (
+	                    <option key={event.id} value={event.id} className="text-slate-900">
+	                      {getEventLabel(event)}
                     </option>
                   ))}
                 </select>
               </label>
 
-              <button
-                type="button"
-                onClick={handleCreateNewEvent}
-                className="rounded-md bg-gray-200 px-5 py-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-300"
-              >
-                New Event
-              </button>
+	              <button
+	                type="button"
+	                onClick={isInstallDeployment ? handleCreateNewInstall : handleCreateNewEvent}
+	                className="rounded-md bg-gray-200 px-5 py-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-300"
+	              >
+	                {isInstallDeployment ? 'New Install' : 'New Event'}
+	              </button>
 
-              <button
-                type="button"
-                onClick={handleFillMockGolfData}
-                className="rounded-md bg-emerald-100 px-5 py-3 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-200"
-              >
-                Fill Mock Golf Data
-              </button>
+	              <button
+	                type="button"
+	                onClick={isInstallDeployment ? handleFillAiaAirportData : handleFillMockGolfData}
+	                className="rounded-md bg-emerald-100 px-5 py-3 text-sm font-semibold text-emerald-800 transition hover:bg-emerald-200"
+	              >
+	                {isInstallDeployment ? 'Load AIA Airport' : 'Fill Mock Golf Data'}
+	              </button>
 
               <button
                 type="button"
                 onClick={handleSaveEvent}
                 className="rounded-md bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
               >
-                Save Event
+	                {isInstallDeployment ? 'Save Install' : 'Save Event'}
               </button>
             </div>
 
@@ -5439,13 +6890,13 @@ export default function AiBoothsPage({
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">Status</p>
                 <p className="mt-3 text-lg font-semibold text-gray-900">{dirty ? 'Unsaved changes' : 'Saved draft'}</p>
                 <p className="mt-1 text-xs text-gray-500">
-                  {dirty ? 'Save to publish the latest booth assignments and tabs.' : 'Everything on screen matches the stored event.'}
+	                  {dirty ? 'Save to publish the latest booth assignments and tabs.' : `Everything on screen matches the stored ${currentDeploymentLabel}.`}
                 </p>
               </div>
               <div className="rounded-md bg-gray-50 p-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">Booths</p>
                 <p className="mt-3 text-3xl font-semibold text-gray-900">{eventDraft.boothStationIds.length}</p>
-                <p className="mt-1 text-xs text-gray-500">Assigned event booths</p>
+	                <p className="mt-1 text-xs text-gray-500">{isInstallDeployment ? 'Assigned install booths' : 'Assigned event booths'}</p>
               </div>
               <div className="rounded-md bg-gray-50 p-4">
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500">Last Saved</p>
@@ -5456,13 +6907,13 @@ export default function AiBoothsPage({
               </div>
             </div>
           </div>
-        </section>
+	        </section>
 
-        <section className="space-y-6">
-          <div className="flex flex-col gap-6">
-            <div className="order-2 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-md">
-              <div className="flex flex-col gap-4 border-b border-gray-200 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex flex-wrap gap-2">
+		        <section className="space-y-6">
+		          <div className="flex flex-col gap-6">
+		            <div className="order-3 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-md">
+	              <div className="flex flex-col gap-4 border-b border-gray-200 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+	                <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
                     onClick={() => setActiveTabId('general')}
@@ -5547,12 +6998,12 @@ export default function AiBoothsPage({
 
                     <div className="grid gap-5 md:grid-cols-2">
                       <div className="grid gap-5 md:col-span-2 md:grid-cols-[minmax(0,1fr)_minmax(220px,260px)]">
-                        <GeneralField
-                          label="Event Name"
-                          value={eventDraft.general.eventName}
-                          onChange={(event) => updateGeneralField('eventName', event.target.value)}
-                          placeholder="CES 2027"
-                        />
+	                        <GeneralField
+	                          label={isInstallDeployment ? 'Location Name' : 'Event Name'}
+	                          value={eventDraft.general.eventName}
+	                          onChange={(event) => updateGeneralField('eventName', event.target.value)}
+	                          placeholder={isInstallDeployment ? 'Aurelia International Airport' : 'CES 2027'}
+	                        />
                         <CountrySwitch
                           value={eventDraft.general.country}
                           onChange={(value) => updateGeneralField('country', value)}
@@ -5563,8 +7014,8 @@ export default function AiBoothsPage({
                         onCategoryChange={handleCategoryChange}
                         className="md:col-span-2"
                       />
-                      <GeneralField
-                        label="General Event Info"
+	                      <GeneralField
+	                        label={isInstallDeployment ? 'Permanent Location Info' : 'General Event Info'}
                         type="textarea"
                         value={eventDraft.general.eventInfo}
                         onChange={(event) => updateGeneralField('eventInfo', event.target.value)}
@@ -6323,11 +7774,13 @@ export default function AiBoothsPage({
               </div>
             </div>
 
-            <div className="order-1 rounded-lg border border-gray-200 bg-white p-5 shadow-md sm:p-6">
+	            <div className="order-2 rounded-lg border border-gray-200 bg-white p-5 shadow-md sm:p-6">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.28em] text-sky-600">Booth Assignment</p>
-                  <h2 className="mt-2 text-2xl font-semibold text-slate-900">Assign booths to this event</h2>
+	                  <h2 className="mt-2 text-2xl font-semibold text-slate-900">
+                      Assign booths to this {isInstallDeployment ? 'permanent install' : 'event'}
+                    </h2>
                   <p className="mt-2 text-sm text-slate-600">
                     Available AI booths.
                   </p>
@@ -6362,7 +7815,7 @@ export default function AiBoothsPage({
                       </button>
                     </>
                   ) : (
-                    <p>All available AI booths are already assigned to this event.</p>
+	                    <p>All available AI booths are already assigned to this {currentDeploymentLabel}.</p>
                   )}
                 </div>
               ) : (
@@ -6481,7 +7934,7 @@ export default function AiBoothsPage({
                           </p>
                           <div className="mt-4 grid gap-3 sm:grid-cols-2">
                             <GeneralField
-                              label="Place at event"
+	                              label={isInstallDeployment ? 'Place in location' : 'Place at event'}
                               value={boothContext.place}
                               onChange={(event) => updateBoothContextField(booth.stationid, 'place', event.target.value)}
                               placeholder="Main gate / Fan services"
@@ -6512,24 +7965,231 @@ export default function AiBoothsPage({
             </div>
           </div>
         </section>
-        </>
-        ) : activeWorkspaceTab === 'screen' ? (
-        <section className="grid gap-6 xl:grid-cols-[minmax(0,0.92fr)_minmax(420px,1.08fr)]">
+	        </>
+	        ) : activeWorkspaceTab === 'data' ? (
+	        <section className="space-y-6">
+	          <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-md sm:p-6">
+	            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+	              <div>
+	                <p className="text-xs font-semibold uppercase tracking-[0.28em] text-sky-600">Intake Review</p>
+	                <h2 className="mt-2 text-2xl font-semibold text-slate-900">Data management</h2>
+	                <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-slate-600">
+		                  Review intake submissions, open uploaded PDFs, and approve the client data that should move into the AI concierge knowledge flow.
+	                </p>
+	              </div>
+	              <button
+	                type="button"
+	                onClick={() => loadDataManagementSubmissions({ showStatus: true })}
+	                disabled={!dataManagementEventId || dataManagementState.loading}
+	                className="inline-flex items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+	              >
+	                <ArrowPathIcon className={`h-4 w-4 ${dataManagementState.loading ? 'animate-spin' : ''}`} aria-hidden="true" />
+	                Refresh
+	              </button>
+	            </div>
+
+	            <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+	              <label className="block min-w-0">
+		                <span className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-700">
+                      {isInstallDeployment ? 'Saved Permanent Installs' : 'Saved Events'}
+                    </span>
+		                <select
+		                  value={selectedDeploymentId}
+		                  onChange={isInstallDeployment ? handleSelectInstall : handleSelectEvent}
+	                  className="mt-2 w-full min-w-0 truncate rounded-md border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+	                >
+	                  <option value="" className="text-slate-900">
+		                    {isInstallDeployment ? 'Select a saved install' : 'Select a saved event'}
+		                  </option>
+		                  {currentDeploymentCollection.map((event) => (
+	                    <option key={event.id} value={event.id} className="text-slate-900">
+	                      {getEventLabel(event)}
+	                    </option>
+	                  ))}
+	                </select>
+	              </label>
+	              <div className="rounded-md bg-gray-50 px-4 py-3">
+		                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-gray-500">Current {currentDeploymentTitle}</p>
+	                <p className="mt-2 break-words text-sm font-semibold text-gray-900">
+		                  {dataManagementEventId ? getEventLabel(eventDraft) : `No saved ${currentDeploymentLabel} selected`}
+	                </p>
+	              </div>
+	            </div>
+		          </div>
+
+		          {!isInstallDeployment ? renderLiveGolfDataPanel() : null}
+
+		          <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-md sm:p-6">
+		            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+		              <div>
+			                <p className="text-xs font-semibold uppercase tracking-[0.28em] text-sky-600">{currentDeploymentTitle} Intake</p>
+			                <h2 className="mt-2 text-2xl font-semibold text-slate-900">Shared intake code</h2>
+		                <p className="mt-2 max-w-2xl text-sm text-slate-600">
+			                  Give client contacts this code with the public intake page. Each person gets their own submission after entering it.
+		                </p>
+		              </div>
+		              <label className="flex items-center gap-3 rounded-md bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700">
+		                <input
+		                  type="checkbox"
+		                  checked={eventIntake.enabled}
+		                  onChange={(event) => {
+		                    setEventDraft((current) => ({
+		                      ...current,
+		                      intake: createDefaultIntakeSettings({
+		                        ...(current.intake || {}),
+		                        enabled: event.target.checked,
+		                      }),
+		                    }));
+		                    markDirty();
+		                  }}
+		                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+		                />
+		                Intake enabled
+		              </label>
+		            </div>
+
+		            <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_auto] lg:items-end">
+		              <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
+		                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Shared Code</p>
+		                <div className="mt-2 flex min-w-0 items-center gap-2">
+		                  <p className="min-w-0 break-all font-mono text-2xl font-bold tracking-normal text-slate-950">
+		                    {eventIntakeCode || 'Not generated'}
+		                  </p>
+		                  <button
+		                    type="button"
+		                    disabled={!canCopyEventIntakeCode}
+		                    onClick={() => copyIntakeText(eventIntakeCode, 'Copied shared intake code.')}
+		                    className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+		                    aria-label="Copy shared intake code"
+		                    title={canCopyEventIntakeCode ? 'Copy shared intake code' : `Save the ${currentDeploymentLabel} before copying`}
+		                  >
+		                    <ClipboardDocumentIcon className="h-5 w-5" aria-hidden="true" />
+		                  </button>
+		                </div>
+		                <p className="mt-1 text-xs text-slate-500">
+		                  {canCopyEventIntakeCode
+		                    ? 'Saved and ready to share.'
+		                    : eventIntake.accessCodeConfigured
+		                      ? `Save the ${currentDeploymentLabel} to activate copying.`
+		                      : 'Generate a code before opening intake.'}
+		                </p>
+		              </div>
+
+		              <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
+		                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Public Intake URL</p>
+		                <p className="mt-2 break-all font-mono text-sm font-semibold text-slate-900">
+			                  {currentIntakeUrl}
+		                </p>
+		                <p className="mt-1 text-xs text-slate-500">
+			                  {isInstallDeployment ? 'This install-specific URL opens the permanent-location intake flow.' : 'The same URL works across events; the shared code selects the event.'}
+		                </p>
+		              </div>
+
+		              <div className="flex flex-wrap gap-3 lg:justify-end">
+		                <button
+		                  type="button"
+		                  disabled={!canCopyEventIntakeCode}
+		                  onClick={() => copyIntakeText(
+			                    `${currentIntakeUrl}\nCode: ${eventIntakeCode}`,
+		                    'Copied intake URL and code.'
+		                  )}
+		                  className="rounded-md bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
+		                >
+		                  Copy Invite
+		                </button>
+		                <button
+		                  type="button"
+		                  onClick={handleRegenerateIntakeCode}
+		                  className="rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
+		                >
+		                  Regenerate Code
+		                </button>
+		                <button
+		                  type="button"
+		                  onClick={handleSaveEvent}
+		                  className="rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700"
+		                >
+			                  Save {currentDeploymentTitle}
+		                </button>
+		              </div>
+		            </div>
+		          </div>
+
+	          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+	            <DataManagementStatCard label="Submissions" value={dataSubmissionStats.submissions} />
+	            <DataManagementStatCard label="PDFs" value={dataSubmissionStats.pdfs} />
+	            <DataManagementStatCard label="Submitted" value={dataSubmissionStats.submitted} />
+	            <DataManagementStatCard label="Approved" value={dataSubmissionStats.approved} />
+	          </div>
+
+	          {dataManagementState.error && (
+	            <div className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+	              {dataManagementState.error}
+	            </div>
+	          )}
+
+	          {dataManagementState.saving && (
+	            <div className="rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-700">
+	              Saving review update...
+	            </div>
+	          )}
+
+	          {dataManagementState.deleting && (
+	            <div className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
+	              Deleting submission...
+	            </div>
+	          )}
+
+	          {!dataManagementEventId ? (
+	            <div className="rounded-lg border border-dashed border-gray-300 bg-white p-8 text-center shadow-sm">
+		              <p className="text-sm font-semibold text-slate-700">Select a saved {currentDeploymentLabel} to view intake submissions.</p>
+	            </div>
+	          ) : dataManagementState.loading && dataSubmissions.length === 0 ? (
+	            <div className="rounded-lg border border-gray-200 bg-white p-8 shadow-sm">
+	              <div className="flex items-center justify-center gap-3 text-sm font-semibold text-slate-600">
+	                <ArrowPathIcon className="h-5 w-5 animate-spin" aria-hidden="true" />
+	                Loading intake submissions...
+	              </div>
+	            </div>
+	          ) : dataSubmissions.length === 0 ? (
+	            <div className="rounded-lg border border-dashed border-gray-300 bg-white p-8 text-center shadow-sm">
+		              <p className="text-sm font-semibold text-slate-700">No intake submissions have been uploaded for this {currentDeploymentLabel} yet.</p>
+	            </div>
+	          ) : (
+	            <div className="space-y-4">
+	              {dataSubmissions.map((submission) => (
+	                <DataManagementSubmissionCard
+	                  key={submission.id}
+	                  submission={submission}
+	                  saving={dataManagementState.saving}
+	                  deleting={dataManagementState.deleting}
+	                  onOpenFile={handleOpenIntakeFile}
+	                  onUpdateSubmission={handleUpdateIntakeSubmission}
+	                  onDeleteSubmission={handleDeleteIntakeSubmission}
+	                />
+	              ))}
+	            </div>
+	          )}
+	        </section>
+	        ) : activeWorkspaceTab === 'screen' ? (
+	        <section className="grid gap-6 xl:grid-cols-[minmax(0,0.92fr)_minmax(420px,1.08fr)]">
           <div className="space-y-6">
             <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-md sm:p-6">
               <div className="grid gap-4">
                 <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(180px,0.55fr)] md:items-end">
                   <label className="block min-w-0">
-                    <span className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-700">Saved Events</span>
-                    <select
-                      value={selectedEventId}
-                      onChange={handleSelectEvent}
+	                    <span className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-700">
+                        {isInstallDeployment ? 'Saved Permanent Installs' : 'Saved Events'}
+                      </span>
+	                    <select
+	                      value={selectedDeploymentId}
+	                      onChange={isInstallDeployment ? handleSelectInstall : handleSelectEvent}
                       className="mt-2 w-full min-w-0 truncate rounded-md border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-900 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
                     >
                       <option value="" className="text-slate-900">
-                        New unsaved event
-                      </option>
-                      {events.map((event) => (
+	                        {isInstallDeployment ? 'New unsaved install' : 'New unsaved event'}
+	                      </option>
+	                      {currentDeploymentCollection.map((event) => (
                         <option key={event.id} value={event.id} className="text-slate-900">
                           {getEventLabel(event)}
                         </option>
@@ -6561,10 +8221,10 @@ export default function AiBoothsPage({
                 <div className="flex flex-wrap gap-3">
                   <button
                     type="button"
-                    onClick={handleCreateNewEvent}
+	                    onClick={isInstallDeployment ? handleCreateNewInstall : handleCreateNewEvent}
                     className="rounded-md bg-gray-200 px-5 py-3 text-sm font-semibold text-gray-700 transition hover:bg-gray-300"
                   >
-                    New Event
+	                    {isInstallDeployment ? 'New Install' : 'New Event'}
                   </button>
 
                   <button
@@ -6584,7 +8244,7 @@ export default function AiBoothsPage({
                 <h2 className="mt-2 text-2xl font-semibold text-slate-900">Knowledge base view</h2>
               </div>
 
-              <div className="mt-5 grid gap-3 sm:grid-cols-3">
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                 {SCREEN_UI_VISUAL_MODES.map((mode) => {
                   const isSelected = activeScreenUi.visualMode === mode.id;
                   const isGolfMode = mode.id === 'golf-scorecard';
@@ -6790,7 +8450,7 @@ export default function AiBoothsPage({
                   <p className="text-xs font-semibold uppercase tracking-[0.28em] text-sky-600">Live Preview</p>
                   <h2 className="mt-2 text-2xl font-semibold text-slate-900">AI booth screen</h2>
                   <p className="mt-2 max-w-xl break-words text-sm leading-5 text-slate-600">
-                    {selectedEventId || eventDraft.id ? getEventLabel(eventDraft) : 'Save the event to publish this screen UI to Firebase.'}
+	                    {selectedDeploymentId || eventDraft.id ? getEventLabel(eventDraft) : `Save the ${currentDeploymentLabel} to publish this screen UI to Firebase.`}
                   </p>
                   <p className="mt-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                     Portrait preview {SCREEN_UI_PREVIEW_WIDTH} x {SCREEN_UI_PREVIEW_HEIGHT}
@@ -6910,7 +8570,7 @@ export default function AiBoothsPage({
                   <p className="text-xs font-semibold uppercase tracking-[0.28em] text-sky-600">ElevenLabs Kiosk Agents</p>
                   <h2 className="mt-2 text-2xl font-semibold text-slate-900">Agent setup</h2>
                   <p className="mt-2 text-sm font-medium text-slate-700">
-                    {syncedKioskAgentCount} / {eventDraft.boothStationIds.length} kiosk agents synced
+	                    {syncedKioskAgentCount} / {eventDraft.boothStationIds.length} {currentDeploymentLabel} kiosk agents synced
                   </p>
                 </div>
                 <button
@@ -6935,7 +8595,7 @@ export default function AiBoothsPage({
                   label="Agent Name Prefix"
                   value={eventDraft.agent?.name || ''}
                   onChange={(event) => updateAgentField('name', event.target.value)}
-                  placeholder="CES 2027"
+	                  placeholder={isInstallDeployment ? 'AIA Airport Concierge' : 'CES 2027'}
                 />
               </div>
 
@@ -6945,7 +8605,7 @@ export default function AiBoothsPage({
                   type="textarea"
                   value={eventDraft.agent?.firstMessage || ''}
                   onChange={(event) => updateAgentField('firstMessage', event.target.value)}
-                  placeholder="Welcome to the event. How can I help you?"
+	                  placeholder={isInstallDeployment ? 'Welcome to the airport. Where can I help you get to?' : 'Welcome to the event. How can I help you?'}
                 />
                 <GeneralField
                   label="System Prompt"

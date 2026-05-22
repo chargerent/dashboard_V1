@@ -9,6 +9,7 @@ export default [
     ignores: [
       "dist/**",
       "tmp/**",
+      ".codex-tmp/**",
       "src/utils/validators.js",
       "src/ajv-validators.js",
     ],

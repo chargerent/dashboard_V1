@@ -14,6 +14,21 @@ import { isNewSchemaKiosk } from '../utils/helpers';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, PointElement, LineElement, Title, Tooltip, Legend, ArcElement, ChartDataLabels);
 
+const EXCLUDED_REPORT_RENTAL_STATUSES = new Set([
+    'purchased',
+    'purchase-pending',
+    'purchased-pending',
+]);
+
+const isExcludedReportRentalStatus = (status) => EXCLUDED_REPORT_RENTAL_STATUSES.has(String(status || '').toLowerCase());
+
+const EXCLUDED_REPORT_RETURN_TYPES = new Set([
+    'vend-reset',
+]);
+
+const isExcludedReportReturnType = (returnType) => EXCLUDED_REPORT_RETURN_TYPES.has(String(returnType || '').toLowerCase());
+
+
 // Adjusts bar at index by delta (±1). The bar immediately to the right compensates.
 // The last bar is read-only — it absorbs all compensation automatically.
 function adjustChartValue(dataArray, index, delta) {
@@ -294,7 +309,8 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
         }
 
         return activeRentalData.filter(rental => {
-            if (rental.status === 'purchased') return false;
+            if (isExcludedReportRentalStatus(rental.status)) return false;
+            if (isExcludedReportReturnType(rental.returnType)) return false;
 
             const rentalDate = new Date(rental.rentalTime);
 
@@ -434,11 +450,13 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
     }, [filteredRentals]);
 
     const averageRentalPeriod = useMemo(() => {
-        const returnedRentals = filteredRentals.filter(r => r.rentalPeriod > 0);
-        if (returnedRentals.length === 0) return '0m';
+        const rentalPeriods = filteredRentals
+            .map(r => Number(r.rentalPeriod))
+            .filter(period => period > 0);
+        if (rentalPeriods.length === 0) return '0m';
 
-        const totalPeriodMs = returnedRentals.reduce((sum, r) => sum + r.rentalPeriod, 0);
-        const avgMs = totalPeriodMs / returnedRentals.length;
+        const totalPeriodMs = rentalPeriods.reduce((sum, period) => sum + period, 0);
+        const avgMs = totalPeriodMs / rentalPeriods.length;
 
         const totalSeconds = Math.floor(avgMs / 1000);
         const days = Math.floor(totalSeconds / 86400);

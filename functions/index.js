@@ -8,6 +8,8 @@ const {rbcOpenApi} = require("./rbcOpenRouting/api");
 admin.initializeApp();
 const db = admin.firestore();
 const ELEVENLABS_API_KEY = defineSecret("ELEVENLABS_API_KEY");
+const EVENT_INTAKE_SECRET = defineSecret("EVENT_INTAKE_SECRET");
+const SLASH_GOLF_RAPIDAPI_KEY = defineSecret("SLASH_GOLF_RAPIDAPI_KEY");
 const STORAGE_BUCKET = "node-red-alerts.firebasestorage.app";
 const STORAGE_BUCKET_CANDIDATES = Array.from(new Set([
   STORAGE_BUCKET,
@@ -19,6 +21,19 @@ const AUTH_MAPPING_DOMAIN = "auth.charge.rent";
 const STATION_SEQUENCE_START = 8000;
 const AI_BOOTH_STATION_SEQUENCE_START = 9000;
 const AI_BOOTH_KIOSK_TYPE = "CA36";
+const DEFAULT_AI_BOOTH_INTAKE_MAX_FILES = 8;
+const DEFAULT_AI_BOOTH_INTAKE_MAX_FILE_SIZE_MB = 20;
+const AI_BOOTH_EVENTS_COLLECTION = "aiBoothEvents";
+const AI_BOOTH_INSTALLS_COLLECTION = "aiBoothInstalls";
+const EVENT_INTAKE_SUBMISSIONS_COLLECTION = "eventIntakeSubmissions";
+const EVENT_INTAKE_STATUSES = new Set([
+  "draft",
+  "submitted",
+  "under_review",
+  "needs_changes",
+  "approved",
+  "rejected",
+]);
 const STATION_RESERVATIONS_COLLECTION = "stationIdReservations";
 const DEFAULT_KIOSK_POWER_THRESHOLD = 80;
 const MAX_MEDIA_UPLOAD_BYTES = 250 * 1024 * 1024;
@@ -69,6 +84,10 @@ const AI_BOOTH_BATHROOMS_TOPIC_KIND = "bathrooms";
 const AI_BOOTH_FAN_SERVICES_TOPIC_KIND = "fanServices";
 const AI_BOOTH_COURSE_TOPIC_KIND = "course";
 const AI_BOOTH_SCHEDULE_TOPIC_KIND = "schedule";
+const DEFAULT_SLASH_GOLF_API_BASE_URL = "https://live-golf-data.p.rapidapi.com";
+const DEFAULT_SLASH_GOLF_API_HOST = "live-golf-data.p.rapidapi.com";
+const DEFAULT_SLASH_GOLF_ORG_ID = "1";
+const DEFAULT_SLASH_GOLF_TOUR = "pga";
 const DEFAULT_AI_BOOTH_SCREEN_TOPIC_COLORS = {
   eventInfo: "#38bdf8",
 };
@@ -588,6 +607,40 @@ function cleanAiBoothText(value, maxLength = 4000) {
   return String(value || "").trim().slice(0, maxLength);
 }
 
+function normalizeAiBoothIntakeCode(value) {
+  return cleanAiBoothText(value, 32)
+      .toUpperCase()
+      .replace(/[^A-Z0-9-]/g, "");
+}
+
+function maskAiBoothIntakeCode(value) {
+  const code = normalizeAiBoothIntakeCode(value).replace(/-/g, "");
+
+  if (code.length <= 4) {
+    return code;
+  }
+
+  return `${code.slice(0, 2)}...${code.slice(-2)}`;
+}
+
+function getEventIntakeSecret() {
+  return String(
+      process.env.EVENT_INTAKE_SECRET ||
+      process.env.DEMO_SESSION_SECRET ||
+      "obailix-local-intake-secret",
+  );
+}
+
+function hashAiBoothIntakeValue(kind, value, eventId = "") {
+  return crypto
+      .createHash("sha256")
+      .update(
+          `${getEventIntakeSecret()}:${kind}:${eventId}:` +
+          normalizeAiBoothIntakeCode(value),
+      )
+      .digest("hex");
+}
+
 function escapeAiBoothWifiQrValue(value) {
   return cleanAiBoothText(value, 512).replace(/([\\;,:"])/g, "\\$1");
 }
@@ -649,8 +702,13 @@ function normalizeAiBoothVisualMode(value, fallback = DEFAULT_AI_BOOTH_SCREEN_UI
     southwest: "southwest-heart",
     "southwest-airlines": "southwest-heart",
     heart: "southwest-heart",
+    airport: "airport-departure",
+    departures: "airport-departure",
+    "airport-board": "airport-departure",
+    "departure-board": "airport-departure",
+    terminal: "airport-departure",
   }[raw] || raw;
-  return ["knowledge-web", "golf-scorecard", "southwest-heart"].includes(normalized) ? normalized : fallback;
+  return ["knowledge-web", "golf-scorecard", "southwest-heart", "airport-departure"].includes(normalized) ? normalized : fallback;
 }
 
 function normalizeAiBoothGolfQrMode(value, fallback = DEFAULT_AI_BOOTH_SCREEN_UI.golfQrMode) {
@@ -817,8 +875,14 @@ function normalizeAiBoothTransportationLocation(location, index) {
         source.location || source.pickup || source.area || source.place,
         500,
     ),
-    latitude: cleanAiBoothText(source.latitude || source.lat, 80),
-    longitude: cleanAiBoothText(source.longitude || source.lng || source.lon, 80),
+    latitude: cleanAiBoothText(
+        pickAiBoothCoordinateValue(source.latitude, source.lat),
+        80,
+    ),
+    longitude: cleanAiBoothText(
+        pickAiBoothCoordinateValue(source.longitude, source.lng, source.lon),
+        80,
+    ),
     hours: cleanAiBoothText(source.hours || source.openHours, 240),
     startTime: cleanAiBoothText(source.startTime || source.from || source.start, 120),
     endTime: cleanAiBoothText(source.endTime || source.to || source.end, 120),
@@ -867,8 +931,12 @@ function normalizeAiBoothFanZone(zone, index) {
   return {
     id: cleanAiBoothText(source.id, 160) || `fan-zone-${index + 1}`,
     name: name || `Fan Zone ${index + 1}`,
-    latitude: cleanAiBoothCoordinateText(source.latitude || source.lat),
-    longitude: cleanAiBoothCoordinateText(source.longitude || source.lng || source.lon),
+    latitude: cleanAiBoothCoordinateText(
+        pickAiBoothCoordinateValue(source.latitude, source.lat),
+    ),
+    longitude: cleanAiBoothCoordinateText(
+        pickAiBoothCoordinateValue(source.longitude, source.lng, source.lon),
+    ),
     openHours: cleanAiBoothText(source.openHours || source.hours, 240),
     details: cleanAiBoothText(source.details || source.description || source.notes, 6000),
     activations,
@@ -918,8 +986,12 @@ function normalizeAiBoothHospitalityLocation(location, index) {
     name: name || `Hospitality Location ${index + 1}`,
     venueType: cleanAiBoothText(source.venueType || source.category, 80),
     location: cleanAiBoothText(source.location || source.place, 300),
-    latitude: cleanAiBoothCoordinateText(source.latitude || source.lat),
-    longitude: cleanAiBoothCoordinateText(source.longitude || source.lng || source.lon),
+    latitude: cleanAiBoothCoordinateText(
+        pickAiBoothCoordinateValue(source.latitude, source.lat),
+    ),
+    longitude: cleanAiBoothCoordinateText(
+        pickAiBoothCoordinateValue(source.longitude, source.lng, source.lon),
+    ),
     amenities: cleanAiBoothText(source.amenities || source.includes, 4000),
     accessNotes: cleanAiBoothText(
         source.accessNotes || source.access || source.credentials,
@@ -943,8 +1015,12 @@ function normalizeAiBoothBathroomLocation(location, index) {
   return {
     id: cleanAiBoothText(source.id, 160) || `bathroom-location-${index + 1}`,
     place: place || `Bathroom ${index + 1}`,
-    latitude: cleanAiBoothCoordinateText(source.latitude || source.lat),
-    longitude: cleanAiBoothCoordinateText(source.longitude || source.lng || source.lon),
+    latitude: cleanAiBoothCoordinateText(
+        pickAiBoothCoordinateValue(source.latitude, source.lat),
+    ),
+    longitude: cleanAiBoothCoordinateText(
+        pickAiBoothCoordinateValue(source.longitude, source.lng, source.lon),
+    ),
   };
 }
 
@@ -976,8 +1052,12 @@ function normalizeAiBoothFanService(service, index) {
     id: cleanAiBoothText(source.id, 160) || `fan-service-${index + 1}`,
     name: name || `Service ${index + 1}`,
     location: cleanAiBoothText(source.location || source.place, 300),
-    latitude: cleanAiBoothCoordinateText(source.latitude || source.lat),
-    longitude: cleanAiBoothCoordinateText(source.longitude || source.lng || source.lon),
+    latitude: cleanAiBoothCoordinateText(
+        pickAiBoothCoordinateValue(source.latitude, source.lat),
+    ),
+    longitude: cleanAiBoothCoordinateText(
+        pickAiBoothCoordinateValue(source.longitude, source.lng, source.lon),
+    ),
   };
 }
 
@@ -1005,26 +1085,40 @@ function normalizeAiBoothCourseHole(hole, index) {
     id: cleanAiBoothText(source.id, 160) || `hole-${index + 1}`,
     holeNumber: Number.isFinite(holeNumber) ? holeNumber : index + 1,
     teeLatitude: cleanAiBoothCoordinateText(
-        source.teeLatitude || source.teeLat || source.tee?.latitude || source.tee?.lat,
+        pickAiBoothCoordinateValue(
+            source.teeLatitude,
+            source.teeLat,
+            source.tee?.latitude,
+            source.tee?.lat,
+        ),
     ),
     teeLongitude: cleanAiBoothCoordinateText(
-        source.teeLongitude ||
-        source.teeLng ||
-        source.teeLon ||
-        source.tee?.longitude ||
-        source.tee?.lng ||
-        source.tee?.lon,
+        pickAiBoothCoordinateValue(
+            source.teeLongitude,
+            source.teeLng,
+            source.teeLon,
+            source.tee?.longitude,
+            source.tee?.lng,
+            source.tee?.lon,
+        ),
     ),
     greenLatitude: cleanAiBoothCoordinateText(
-        source.greenLatitude || source.greenLat || source.green?.latitude || source.green?.lat,
+        pickAiBoothCoordinateValue(
+            source.greenLatitude,
+            source.greenLat,
+            source.green?.latitude,
+            source.green?.lat,
+        ),
     ),
     greenLongitude: cleanAiBoothCoordinateText(
-        source.greenLongitude ||
-        source.greenLng ||
-        source.greenLon ||
-        source.green?.longitude ||
-        source.green?.lng ||
-        source.green?.lon,
+        pickAiBoothCoordinateValue(
+            source.greenLongitude,
+            source.greenLng,
+            source.greenLon,
+            source.green?.longitude,
+            source.green?.lng,
+            source.green?.lon,
+        ),
     ),
   };
 }
@@ -1259,8 +1353,12 @@ function normalizeAiBoothBoothContext(context) {
     assistantName: cleanAiBoothText(source.assistantName, 120),
     locationName: cleanAiBoothText(source.locationName, 200),
     place: cleanAiBoothText(source.place, 200),
-    latitude: cleanAiBoothCoordinateText(source.latitude ?? source.lat),
-    longitude: cleanAiBoothCoordinateText(source.longitude ?? source.lon),
+    latitude: cleanAiBoothCoordinateText(
+        pickAiBoothCoordinateValue(source.latitude, source.lat),
+    ),
+    longitude: cleanAiBoothCoordinateText(
+        pickAiBoothCoordinateValue(source.longitude, source.lng, source.lon),
+    ),
     zone: cleanAiBoothText(source.zone, 160),
     landmark: cleanAiBoothText(source.landmark, 240),
     directionsNotes: cleanAiBoothText(source.directionsNotes, 2000),
@@ -1307,6 +1405,33 @@ function cleanAiBoothCoordinateText(value) {
   return String(value).trim().slice(0, 40);
 }
 
+function pickAiBoothCoordinateValue(...values) {
+  return values.find((value) => (
+    value !== null &&
+    value !== undefined &&
+    String(value).trim() !== ""
+  ));
+}
+
+function getAiBoothEventStartYear(general = {}) {
+  const startYear = cleanAiBoothText(general?.startDate, 32).slice(0, 4);
+  return /^\d{4}$/.test(startYear) ? startYear : "";
+}
+
+function normalizeAiBoothGolfConfig(value, general = {}) {
+  const source = isPlainObject(value) ? value : {};
+
+  return {
+    provider: cleanAiBoothText(source.provider, 80) || "slash-golf",
+    orgId: cleanAiBoothText(source.orgId, 24) || DEFAULT_SLASH_GOLF_ORG_ID,
+    year: cleanAiBoothText(source.year || source.seasonYear, 12) ||
+      getAiBoothEventStartYear(general),
+    tournamentName: cleanAiBoothText(source.tournamentName || source.name, 180),
+    tournId: cleanAiBoothText(source.tournId || source.tournamentId || source.id, 80),
+    tour: cleanAiBoothText(source.tour, 40) || DEFAULT_SLASH_GOLF_TOUR,
+  };
+}
+
 function normalizeAiBoothKnowledgeBase(value) {
   const source = isPlainObject(value) ? value : {};
   const previousDocumentIds = Array.isArray(source.previousDocumentIds) ?
@@ -1342,6 +1467,180 @@ function normalizeAiBoothAgent(agent, boothStationIds = []) {
     lastSyncedBy: isPlainObject(source.lastSyncedBy) ? source.lastSyncedBy : null,
     knowledgeBase: normalizeAiBoothKnowledgeBase(source.knowledgeBase),
     kioskAgents: normalizeAiBoothKioskAgents(source.kioskAgents, boothStationIds),
+  };
+}
+
+function normalizeAiBoothIntakeSettings(value, existing, eventId, actor) {
+  const source = isPlainObject(value) ? value : {};
+  const existingSource = isPlainObject(existing) ? existing : {};
+  const submittedCode = normalizeAiBoothIntakeCode(
+      source.sharedCode || source.accessCode,
+  );
+  const existingCode = normalizeAiBoothIntakeCode(
+      existingSource.sharedCode || existingSource.accessCode,
+  );
+  const sharedCode = submittedCode || existingCode;
+  const existingHash = cleanAiBoothText(existingSource.accessCodeHash, 160);
+  const accessCodeHint = cleanAiBoothText(
+      source.accessCodeHint || maskAiBoothIntakeCode(sharedCode),
+      80,
+  ) || cleanAiBoothText(existingSource.accessCodeHint, 80);
+  const maxFiles = Number.isFinite(Number(source.maxFiles)) ?
+    Math.max(1, Math.min(20, Number(source.maxFiles))) :
+    Number(existingSource.maxFiles || DEFAULT_AI_BOOTH_INTAKE_MAX_FILES);
+  const maxFileSizeMb = Number.isFinite(Number(source.maxFileSizeMb)) ?
+    Math.max(1, Math.min(100, Number(source.maxFileSizeMb))) :
+    Number(
+        existingSource.maxFileSizeMb ||
+        DEFAULT_AI_BOOTH_INTAKE_MAX_FILE_SIZE_MB,
+    );
+  const patch = {
+    enabled: typeof source.enabled === "boolean" ?
+      source.enabled :
+      existingSource.enabled === true || Boolean(sharedCode),
+    sharedCode,
+    accessCodeHint,
+    instructions: cleanAiBoothText(
+        source.instructions || existingSource.instructions,
+        1800,
+    ),
+    closesAt: cleanAiBoothText(source.closesAt || existingSource.closesAt, 80),
+    allowEditsAfterSubmit: typeof source.allowEditsAfterSubmit === "boolean" ?
+      source.allowEditsAfterSubmit :
+      existingSource.allowEditsAfterSubmit !== false,
+    maxFiles,
+    maxFileSizeMb,
+    updatedBy: cleanAiBoothText(actor?.uid || actor?.username, 128),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  if (submittedCode) {
+    patch.accessCodeHash = hashAiBoothIntakeValue(
+        "access-code",
+        submittedCode,
+        eventId,
+    );
+  } else if (existingHash) {
+    patch.accessCodeHash = existingHash;
+  } else if (sharedCode) {
+    patch.accessCodeHash = hashAiBoothIntakeValue(
+        "access-code",
+        sharedCode,
+        eventId,
+    );
+  }
+
+  return patch;
+}
+
+function serializeAiBoothIntakeSettings(value) {
+  const source = isPlainObject(value) ? value : {};
+  const sharedCode = normalizeAiBoothIntakeCode(
+      source.sharedCode || source.accessCode,
+  );
+
+  return {
+    enabled: source.enabled === true,
+    sharedCode,
+    accessCodeConfigured: Boolean(source.accessCodeHash || sharedCode),
+    accessCodeHint: cleanAiBoothText(
+        source.accessCodeHint || maskAiBoothIntakeCode(sharedCode),
+        80,
+    ),
+    instructions: cleanAiBoothText(source.instructions, 1800),
+    closesAt: cleanAiBoothText(source.closesAt, 80),
+    allowEditsAfterSubmit: source.allowEditsAfterSubmit !== false,
+    maxFiles: Number.isFinite(Number(source.maxFiles)) ?
+      Number(source.maxFiles) :
+      DEFAULT_AI_BOOTH_INTAKE_MAX_FILES,
+    maxFileSizeMb: Number.isFinite(Number(source.maxFileSizeMb)) ?
+      Number(source.maxFileSizeMb) :
+      DEFAULT_AI_BOOTH_INTAKE_MAX_FILE_SIZE_MB,
+    updatedAt: serializeTimestamp(source.updatedAt),
+    updatedBy: source.updatedBy || null,
+  };
+}
+
+function normalizeAiBoothIntakeStatus(value, fallback = "draft") {
+  const status = cleanAiBoothText(value, 80).toLowerCase();
+  return EVENT_INTAKE_STATUSES.has(status) ? status : fallback;
+}
+
+function serializeAiBoothIntakeFile(file) {
+  const source = isPlainObject(file) ? file : {};
+
+  return {
+    id: cleanAiBoothText(source.id, 160),
+    fileName: cleanAiBoothText(source.fileName, 240),
+    contentType: cleanAiBoothText(source.contentType || "application/pdf", 80),
+    size: Number.isFinite(Number(source.size)) ? Number(source.size) : 0,
+    storagePath: cleanAiBoothText(source.storagePath, 1000),
+    extractedTextPath: cleanAiBoothText(source.extractedTextPath, 1000),
+    extractedTextPreview: cleanAiBoothText(source.extractedTextPreview, 1200),
+    extractedTextBytes: Number.isFinite(Number(source.extractedTextBytes)) ?
+      Number(source.extractedTextBytes) :
+      0,
+    extractionStatus: cleanAiBoothText(source.extractionStatus || "pending", 80),
+    extractionError: cleanAiBoothText(source.extractionError, 1000),
+    uploadedAt: serializeTimestamp(source.uploadedAt),
+  };
+}
+
+function normalizeAiBoothIntakeLinks(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+      .map((link) => ({
+        label: cleanAiBoothText(link?.label, 160),
+        url: cleanAiBoothText(link?.url, 1000),
+      }))
+      .filter((link) => link.label || link.url)
+      .slice(0, 20);
+}
+
+function canEditAiBoothIntakeSubmission(data) {
+  const status = normalizeAiBoothIntakeStatus(data?.status);
+  if (status === "under_review" || status === "approved" || status === "rejected") {
+    return false;
+  }
+  return data?.allowEditsAfterSubmit !== false || status !== "submitted";
+}
+
+function serializeAiBoothIntakeSubmission(snapshot) {
+  const data = typeof snapshot?.data === "function" ? snapshot.data() : snapshot || {};
+  const files = Array.isArray(data.files) ?
+    data.files.map(serializeAiBoothIntakeFile).filter((file) => file.id) :
+    [];
+
+  return {
+    id: cleanAiBoothText(snapshot?.id || data.id, 160),
+    eventId: cleanAiBoothText(data.eventId, 160),
+    targetType: normalizeAiBoothDeploymentType(data.targetType || (data.installId ? "install" : "event")),
+    targetId: cleanAiBoothText(data.targetId || data.installId || data.eventId, 160),
+    targetTitle: cleanAiBoothText(data.targetTitle || data.eventTitle, 240),
+    eventTitle: cleanAiBoothText(data.eventTitle, 240),
+    participantName: cleanAiBoothText(data.participantName, 160),
+    organization: cleanAiBoothText(data.organization, 200),
+    email: cleanAiBoothText(data.email, 200),
+    phone: cleanAiBoothText(data.phone, 80),
+    role: cleanAiBoothText(data.role, 160),
+    category: cleanAiBoothText(data.category, 160),
+    notes: cleanAiBoothText(data.notes, 6000),
+    links: normalizeAiBoothIntakeLinks(data.links),
+    status: normalizeAiBoothIntakeStatus(data.status),
+    canEdit: canEditAiBoothIntakeSubmission(data),
+    allowEditsAfterSubmit: data.allowEditsAfterSubmit !== false,
+    files,
+    fileCount: files.length,
+    adminNotes: cleanAiBoothText(data.adminNotes, 4000),
+    screeningSummary: cleanAiBoothText(data.screeningSummary, 6000),
+    createdAt: serializeTimestamp(data.createdAt),
+    updatedAt: serializeTimestamp(data.updatedAt),
+    submittedAt: serializeTimestamp(data.submittedAt),
+    reviewedAt: serializeTimestamp(data.reviewedAt),
+    reviewedBy: cleanAiBoothText(data.reviewedBy, 200),
   };
 }
 
@@ -1406,6 +1705,8 @@ function serializeAiBoothEvent(snapshot) {
     activations: Array.isArray(data.activations) ?
       data.activations.map((activation, index) => normalizeAiBoothActivation(activation, index)) :
       [],
+    golf: normalizeAiBoothGolfConfig(data.golf, general),
+    intake: serializeAiBoothIntakeSettings(data.intake),
     agent: normalizeAiBoothAgent(data.agent, boothStationIds),
     createdAt: serializeTimestamp(data.createdAt),
     updatedAt: serializeTimestamp(data.updatedAt),
@@ -3703,8 +4004,11 @@ async function getAiBoothRuntimeConfigForStation(stationid) {
     };
   }
 
-  const [eventSnapshot, screenUiSnapshot] = await Promise.all([
-    db.collection("aiBoothEvents")
+  const [eventSnapshot, installSnapshot, screenUiSnapshot] = await Promise.all([
+    db.collection(AI_BOOTH_EVENTS_COLLECTION)
+        .where("boothStationIds", "array-contains", stationId)
+        .get(),
+    db.collection(AI_BOOTH_INSTALLS_COLLECTION)
         .where("boothStationIds", "array-contains", stationId)
         .get(),
     db.collection("aiBoothScreenUi").doc(stationId).get(),
@@ -3712,9 +4016,21 @@ async function getAiBoothRuntimeConfigForStation(stationid) {
   const events = eventSnapshot.docs
       .map((docSnapshot) => serializeAiBoothEvent(docSnapshot))
       .sort(compareAiBoothEvents);
-  const event = events[0] || null;
+  const installs = installSnapshot.docs
+      .map((docSnapshot) => serializeAiBoothEvent(docSnapshot))
+      .sort(compareAiBoothEvents);
   const screenUiData = screenUiSnapshot.exists ? screenUiSnapshot.data() || {} : {};
-  const eventId = cleanAiBoothText(event?.id || screenUiData.eventId, 160);
+  const screenUiDeploymentType = cleanAiBoothText(screenUiData.deploymentType, 40);
+  const screenUiDeploymentId = cleanAiBoothText(screenUiData.deploymentId || screenUiData.installId || screenUiData.eventId, 160);
+  const screenUiMatchedEvent = events.find((item) => item.id === screenUiDeploymentId);
+  const screenUiMatchedInstall = installs.find((item) => item.id === screenUiDeploymentId);
+  const event = screenUiDeploymentType === "install" ?
+    (screenUiMatchedInstall || installs[0] || events[0] || null) :
+    (screenUiMatchedEvent || events[0] || screenUiMatchedInstall || installs[0] || null);
+  const deploymentType = event && installs.some((item) => item.id === event.id) ? "install" : "event";
+  const deploymentId = cleanAiBoothText(event?.id || screenUiDeploymentId, 160);
+  const eventId = deploymentType === "event" ? deploymentId : "";
+  const installId = deploymentType === "install" ? deploymentId : "";
   const screenUiTopics = Array.isArray(screenUiData.topics) ?
     screenUiData.topics.map(normalizeAiBoothScreenTopic) :
     Array.isArray(event?.topics) ?
@@ -3734,7 +4050,8 @@ async function getAiBoothRuntimeConfigForStation(stationid) {
   const eventUpdatedAt = event?.updatedAt || event?.createdAt || "";
   const configVersion = [
     stationId,
-    eventId,
+    deploymentType,
+    deploymentId,
     eventUpdatedAt,
     agentId,
     agentUpdatedAt,
@@ -3745,7 +4062,11 @@ async function getAiBoothRuntimeConfigForStation(stationid) {
     stationId,
     stationid: stationId,
     eventId,
+    installId,
+    deploymentType,
+    deploymentId,
     eventName: cleanAiBoothText(event?.general?.eventName, 140),
+    installName: deploymentType === "install" ? cleanAiBoothText(event?.general?.eventName, 140) : "",
     agentId,
     agentName: kioskAgent.name || agentConfig.name,
     agentSyncStatus: kioskAgent.syncStatus || agentConfig.syncStatus,
@@ -3823,19 +4144,21 @@ async function aiBoothsGetDeviceConfigImpl(data) {
 
 function buildAiBoothDeviceRuntimeChecks({
   reportedEventId,
+  reportedDeploymentId,
   reportedAgentId,
   reportedConfigVersion,
   serverReady,
   pageLoaded,
   runtimeConfig,
 }) {
-  const expectedEventId = cleanAiBoothText(runtimeConfig?.eventId, 160);
+  const expectedDeploymentId = cleanAiBoothText(runtimeConfig?.deploymentId || runtimeConfig?.eventId || runtimeConfig?.installId, 160);
+  const reportedTargetId = cleanAiBoothText(reportedDeploymentId || reportedEventId, 160);
   const expectedAgentId = cleanAiBoothText(runtimeConfig?.agentId, 160);
   const expectedConfigVersion = cleanAiBoothText(runtimeConfig?.configVersion, 1000);
 
   return {
-    eventAssigned: Boolean(expectedEventId),
-    eventMatches: Boolean(expectedEventId && reportedEventId === expectedEventId),
+    eventAssigned: Boolean(expectedDeploymentId),
+    eventMatches: Boolean(expectedDeploymentId && reportedTargetId === expectedDeploymentId),
     agentSynced: Boolean(expectedAgentId && runtimeConfig?.agentSyncStatus === "synced"),
     agentMatches: Boolean(expectedAgentId && reportedAgentId === expectedAgentId),
     configCurrent: Boolean(expectedConfigVersion && reportedConfigVersion === expectedConfigVersion),
@@ -3882,6 +4205,7 @@ async function aiBoothsDeviceHeartbeatImpl(data) {
 
   const stationId = normalizeStationId(kiosk.stationid || data?.stationId || data?.stationid);
   const reportedEventId = cleanAiBoothText(data?.eventId, 160);
+  const reportedDeploymentId = cleanAiBoothText(data?.deploymentId || data?.installId, 160);
   const reportedAgentId = cleanAiBoothText(data?.agentId, 160);
   const reportedConfigVersion = cleanAiBoothText(data?.configVersion, 1000);
   const mode = cleanAiBoothText(data?.mode, 40) || (stationId ? "runtime" : "registration");
@@ -3894,6 +4218,7 @@ async function aiBoothsDeviceHeartbeatImpl(data) {
   const checks = stationId ?
     buildAiBoothDeviceRuntimeChecks({
       reportedEventId,
+      reportedDeploymentId,
       reportedAgentId,
       reportedConfigVersion,
       serverReady,
@@ -3926,7 +4251,10 @@ async function aiBoothsDeviceHeartbeatImpl(data) {
       kioskMode: data?.kioskMode === true,
       fullscreen: data?.fullscreen === true,
       reportedEventId,
+      reportedDeploymentId,
       expectedEventId: cleanAiBoothText(runtimeConfig?.eventId, 160),
+      expectedDeploymentId: cleanAiBoothText(runtimeConfig?.deploymentId || runtimeConfig?.eventId || runtimeConfig?.installId, 160),
+      deploymentType: cleanAiBoothText(runtimeConfig?.deploymentType, 40),
       reportedAgentId,
       expectedAgentId: cleanAiBoothText(runtimeConfig?.agentId, 160),
       reportedConfigVersion,
@@ -3951,7 +4279,7 @@ async function aiBoothsDeviceHeartbeatImpl(data) {
 }
 
 async function aiBoothsListEventsImpl() {
-  const snapshot = await db.collection("aiBoothEvents").get();
+  const snapshot = await db.collection(AI_BOOTH_EVENTS_COLLECTION).get();
   const events = snapshot.docs
       .map((docSnapshot) => serializeAiBoothEvent(docSnapshot))
       .sort(compareAiBoothEvents);
@@ -3959,7 +4287,449 @@ async function aiBoothsListEventsImpl() {
   return {events};
 }
 
-function buildAiBoothEventKioskInfoUpdate(eventId, general, boothContext, actor) {
+async function aiBoothsListInstallsImpl() {
+  const snapshot = await db.collection(AI_BOOTH_INSTALLS_COLLECTION).get();
+  const installs = snapshot.docs
+      .map((docSnapshot) => ({
+        ...serializeAiBoothEvent(docSnapshot),
+        deploymentType: "install",
+      }))
+      .sort(compareAiBoothEvents);
+
+  return {installs};
+}
+
+function getSlashGolfRapidApiKey() {
+  let secretValue = "";
+  try {
+    secretValue = typeof SLASH_GOLF_RAPIDAPI_KEY.value === "function" ?
+      SLASH_GOLF_RAPIDAPI_KEY.value() :
+      "";
+  } catch {
+    secretValue = "";
+  }
+
+  const apiKey = cleanAiBoothText(
+      secretValue ||
+      process.env.SLASH_GOLF_RAPIDAPI_KEY ||
+      process.env.SLASH_GOLF_API_KEY ||
+      process.env.RAPIDAPI_KEY,
+      400,
+  );
+
+  if (!apiKey) {
+    throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Slash Golf RapidAPI key is not configured",
+    );
+  }
+
+  return apiKey;
+}
+
+function firstSlashGolfText(source, keys) {
+  for (const key of keys) {
+    const value = source?.[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+    if (Number.isFinite(value)) {
+      return String(value);
+    }
+  }
+  return "";
+}
+
+function firstSlashGolfValue(source, keys) {
+  for (const key of keys) {
+    const value = source?.[key];
+    if (value !== undefined && value !== null && value !== "") {
+      return value;
+    }
+  }
+  return null;
+}
+
+function getSlashGolfArrayPayload(payload, keys) {
+  for (const key of keys) {
+    const value = payload?.[key];
+    if (Array.isArray(value)) {
+      return value;
+    }
+  }
+  return [];
+}
+
+function findSlashGolfScheduleRows(payload, depth = 0) {
+  if (!payload || depth > 3) {
+    return [];
+  }
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+
+  const directRows = getSlashGolfArrayPayload(payload, [
+    "schedule",
+    "schedules",
+    "events",
+    "tournaments",
+    "results",
+    "data",
+  ]);
+  if (directRows.length > 0) {
+    return directRows;
+  }
+
+  if (isPlainObject(payload)) {
+    for (const value of Object.values(payload)) {
+      const nestedRows = findSlashGolfScheduleRows(value, depth + 1);
+      if (nestedRows.length > 0) {
+        return nestedRows;
+      }
+    }
+  }
+
+  return [];
+}
+
+function parseSlashGolfDateMillis(value) {
+  if (Number.isFinite(value)) {
+    return Number(value);
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    if (/^\d+$/.test(trimmed)) return Number.parseInt(trimmed, 10);
+    const parsed = Date.parse(trimmed);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  if (!isPlainObject(value)) {
+    return null;
+  }
+  if (value.$date !== undefined) {
+    return parseSlashGolfDateMillis(value.$date);
+  }
+  if (value.$numberLong !== undefined) {
+    return parseSlashGolfDateMillis(value.$numberLong);
+  }
+  return null;
+}
+
+function formatSlashGolfIsoDate(value) {
+  const millis = parseSlashGolfDateMillis(value);
+  if (!Number.isFinite(millis)) {
+    return cleanAiBoothText(value, 40);
+  }
+  const date = new Date(millis);
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString().slice(0, 10);
+}
+
+function normalizeSlashGolfTournament(row = {}, fallbackYear = "", orgId = DEFAULT_SLASH_GOLF_ORG_ID) {
+  const date = isPlainObject(row.date) ? row.date : {};
+  const tournId = firstSlashGolfText(row, ["tournId", "tournamentId", "id"]);
+  const name = firstSlashGolfText(row, ["name", "tournamentName", "eventName"]);
+  const startDate = formatSlashGolfIsoDate(
+      firstSlashGolfValue(date, ["startDate", "start", "firstRoundDate", "startMs"]) ||
+      firstSlashGolfValue(row, ["startDate", "start", "firstRoundDate", "startMs", "date"]),
+  );
+  const endDate = formatSlashGolfIsoDate(
+      firstSlashGolfValue(date, ["endDate", "end", "finalRoundDate", "endMs"]) ||
+      firstSlashGolfValue(row, ["endDate", "end", "finalRoundDate", "endMs"]),
+  );
+
+  return {
+    provider: "slash-golf",
+    orgId,
+    tournId,
+    year: firstSlashGolfText(row, ["year", "seasonYear"]) || fallbackYear,
+    name,
+    startDate,
+    endDate,
+    weekNumber: firstSlashGolfValue(date, ["weekNumber"]) ?? firstSlashGolfValue(row, ["weekNumber"]),
+    tour: firstSlashGolfText(row, ["tour"]) || DEFAULT_SLASH_GOLF_TOUR,
+    course:
+      firstSlashGolfText(row, ["course", "courseName"]) ||
+      firstSlashGolfText(row?.courses?.[0], ["course", "courseName", "name"]),
+    city: firstSlashGolfText(row, ["city"]),
+    state: firstSlashGolfText(row, ["state", "province"]),
+    country: firstSlashGolfText(row, ["country"]),
+  };
+}
+
+async function aiBoothsListSlashGolfTournamentsImpl(data = {}) {
+  const apiKey = getSlashGolfRapidApiKey();
+  const year = cleanAiBoothText(data?.year, 12) || String(new Date().getFullYear());
+  const orgId = cleanAiBoothText(data?.orgId, 24) || DEFAULT_SLASH_GOLF_ORG_ID;
+  const search = cleanAiBoothText(data?.search, 120).toLowerCase();
+  const apiBaseUrl = cleanAiBoothText(process.env.SLASH_GOLF_API_BASE_URL, 240) ||
+    DEFAULT_SLASH_GOLF_API_BASE_URL;
+  const apiHost = cleanAiBoothText(process.env.SLASH_GOLF_API_HOST, 160) ||
+    DEFAULT_SLASH_GOLF_API_HOST;
+  const url = new URL("/schedule", apiBaseUrl);
+  url.searchParams.set("orgId", orgId);
+  url.searchParams.set("year", year);
+
+  const response = await fetch(url, {
+    headers: {
+      "Content-Type": "application/json",
+      "x-rapidapi-host": apiHost,
+      "x-rapidapi-key": apiKey,
+    },
+  });
+  const responseText = await response.text();
+  let payload = {};
+  if (responseText) {
+    try {
+      payload = JSON.parse(responseText);
+    } catch {
+      payload = {message: responseText};
+    }
+  }
+
+  if (!response.ok) {
+    throw new functions.https.HttpsError(
+        "internal",
+        payload?.message || `Slash Golf schedule request failed (${response.status})`,
+    );
+  }
+
+  const tournaments = findSlashGolfScheduleRows(payload)
+      .map((row) => normalizeSlashGolfTournament(row, year, orgId))
+      .filter((row) => row.tournId && row.name)
+      .filter((row) => !search || row.name.toLowerCase().includes(search));
+
+  return {
+    ok: true,
+    provider: "slash-golf",
+    year,
+    orgId,
+    count: tournaments.length,
+    tournaments,
+  };
+}
+
+function intakeSubmissionSortTime(submission) {
+  return Date.parse(
+      submission.updatedAt ||
+      submission.submittedAt ||
+      submission.createdAt ||
+      "",
+  ) || 0;
+}
+
+async function _assertAiBoothEventExists(eventId) {
+  const normalizedEventId = cleanAiBoothText(eventId, 160)
+      .replace(/[^a-zA-Z0-9_-]/g, "");
+  if (!normalizedEventId) {
+    throw new functions.https.HttpsError("invalid-argument", "eventId is required");
+  }
+
+  const eventSnapshot = await db.collection(AI_BOOTH_EVENTS_COLLECTION)
+      .doc(normalizedEventId)
+      .get();
+  if (!eventSnapshot.exists) {
+    throw new functions.https.HttpsError("not-found", "AI booth event not found");
+  }
+
+  return normalizedEventId;
+}
+
+function normalizeAiBoothDeploymentType(value) {
+  return cleanAiBoothText(value, 40).toLowerCase() === "install" ? "install" : "event";
+}
+
+function getAiBoothDeploymentCollection(targetType) {
+  return normalizeAiBoothDeploymentType(targetType) === "install" ?
+    AI_BOOTH_INSTALLS_COLLECTION :
+    AI_BOOTH_EVENTS_COLLECTION;
+}
+
+async function assertAiBoothDeploymentExists(targetId, targetType = "event") {
+  const normalizedTargetId = cleanAiBoothText(targetId, 160)
+      .replace(/[^a-zA-Z0-9_-]/g, "");
+  const normalizedTargetType = normalizeAiBoothDeploymentType(targetType);
+  if (!normalizedTargetId) {
+    throw new functions.https.HttpsError("invalid-argument", "targetId is required");
+  }
+
+  const snapshot = await db.collection(getAiBoothDeploymentCollection(normalizedTargetType))
+      .doc(normalizedTargetId)
+      .get();
+  if (!snapshot.exists) {
+    throw new functions.https.HttpsError("not-found", "AI booth deployment not found");
+  }
+
+  return {
+    targetId: normalizedTargetId,
+    targetType: normalizedTargetType,
+    snapshot,
+  };
+}
+
+async function aiBoothsListIntakeSubmissionsImpl(data) {
+  const targetType = normalizeAiBoothDeploymentType(data?.targetType);
+  const targetIdInput = data?.targetId || data?.installId || data?.eventId;
+  const {targetId} = await assertAiBoothDeploymentExists(targetIdInput, targetType);
+  const snapshot = await db.collection(EVENT_INTAKE_SUBMISSIONS_COLLECTION)
+      .where(targetType === "install" ? "targetId" : "eventId", "==", targetId)
+      .limit(500)
+      .get();
+  const submissions = snapshot.docs
+      .map((docSnapshot) => serializeAiBoothIntakeSubmission(docSnapshot))
+      .filter((submission) => targetType !== "install" || submission.targetType === "install")
+      .sort((left, right) => (
+        intakeSubmissionSortTime(right) - intakeSubmissionSortTime(left)
+      ));
+
+  return {eventId: targetType === "event" ? targetId : "", targetId, targetType, submissions};
+}
+
+async function getAiBoothIntakeSubmissionSnapshot(submissionId) {
+  const normalizedSubmissionId = cleanAiBoothText(submissionId, 160)
+      .replace(/[^a-zA-Z0-9_-]/g, "");
+  if (!normalizedSubmissionId) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "submissionId is required",
+    );
+  }
+
+  const submissionRef = db.collection(EVENT_INTAKE_SUBMISSIONS_COLLECTION)
+      .doc(normalizedSubmissionId);
+  const submissionSnapshot = await submissionRef.get();
+  if (!submissionSnapshot.exists) {
+    throw new functions.https.HttpsError("not-found", "Intake submission not found");
+  }
+
+  return {submissionRef, submissionSnapshot};
+}
+
+async function aiBoothsUpdateIntakeSubmissionImpl(data, authState) {
+  const {submissionRef, submissionSnapshot} =
+    await getAiBoothIntakeSubmissionSnapshot(data?.submissionId);
+  const existing = submissionSnapshot.data() || {};
+  await assertAiBoothDeploymentExists(
+      existing.targetId || existing.installId || existing.eventId,
+      existing.targetType || (existing.installId ? "install" : "event"),
+  );
+  const requestedStatus = data?.status === undefined ?
+    normalizeAiBoothIntakeStatus(existing.status) :
+    normalizeAiBoothIntakeStatus(data.status, "");
+  if (!requestedStatus) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Submission status is invalid",
+    );
+  }
+
+  const actor = cleanAiBoothText(
+      authState?.profile?.email ||
+      authState?.profile?.username ||
+      authState?.uid,
+      200,
+  );
+  const patch = {
+    status: requestedStatus,
+    adminNotes: data?.adminNotes === undefined ?
+      cleanAiBoothText(existing.adminNotes, 4000) :
+      cleanAiBoothText(data.adminNotes, 4000),
+    screeningSummary: data?.screeningSummary === undefined ?
+      cleanAiBoothText(existing.screeningSummary, 6000) :
+      cleanAiBoothText(data.screeningSummary, 6000),
+    reviewedAt: admin.firestore.FieldValue.serverTimestamp(),
+    reviewedBy: actor,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  if (requestedStatus === "approved") {
+    patch.approvedAt = admin.firestore.FieldValue.serverTimestamp();
+  }
+
+  await submissionRef.set(patch, {merge: true});
+  const savedSnapshot = await submissionRef.get();
+  return {submission: serializeAiBoothIntakeSubmission(savedSnapshot)};
+}
+
+async function deleteAiBoothIntakeSubmissionFiles(files) {
+  const bucket = getStorageBucket();
+  const paths = Array.from(new Set(
+      (Array.isArray(files) ? files : [])
+          .flatMap((file) => [
+            cleanAiBoothText(file?.storagePath, 1000),
+            cleanAiBoothText(file?.extractedTextPath, 1000),
+          ])
+          .filter(Boolean),
+  ));
+
+  await Promise.all(paths.map((storagePath) => (
+    bucket.file(storagePath).delete({ignoreNotFound: true})
+  )));
+}
+
+async function aiBoothsDeleteIntakeSubmissionImpl(data) {
+  const {submissionRef, submissionSnapshot} =
+    await getAiBoothIntakeSubmissionSnapshot(data?.submissionId);
+  const existing = submissionSnapshot.data() || {};
+  await assertAiBoothDeploymentExists(
+      existing.targetId || existing.installId || existing.eventId,
+      existing.targetType || (existing.installId ? "install" : "event"),
+  );
+  await deleteAiBoothIntakeSubmissionFiles(existing.files);
+  await submissionRef.delete();
+
+  return {
+    deleted: true,
+    submissionId: submissionSnapshot.id,
+  };
+}
+
+function responseDispositionFileName(fileName) {
+  return cleanAiBoothText(fileName || "upload.pdf", 240)
+      .replace(/["\\\r\n]/g, "_");
+}
+
+async function aiBoothsCreateIntakeFileReadUrlImpl(data) {
+  const {submissionSnapshot} =
+    await getAiBoothIntakeSubmissionSnapshot(data?.submissionId);
+  const submission = submissionSnapshot.data() || {};
+  await assertAiBoothDeploymentExists(
+      submission.targetId || submission.installId || submission.eventId,
+      submission.targetType || (submission.installId ? "install" : "event"),
+  );
+  const fileId = cleanAiBoothText(data?.fileId, 160);
+  const text = data?.text === true;
+  const files = Array.isArray(submission.files) ? submission.files : [];
+  const file = files.find((item) => cleanAiBoothText(item?.id, 160) === fileId);
+  if (!file) {
+    throw new functions.https.HttpsError("not-found", "Uploaded PDF was not found");
+  }
+
+  const storagePath = cleanAiBoothText(
+      text ? file.extractedTextPath : file.storagePath,
+      1000,
+  );
+  if (!storagePath) {
+    throw new functions.https.HttpsError(
+        "not-found",
+        text ? "Extracted text is not available" : "Uploaded PDF is not available",
+    );
+  }
+
+  const [url] = await getStorageBucket().file(storagePath).getSignedUrl({
+    version: "v4",
+    action: "read",
+    expires: Date.now() + 15 * 60 * 1000,
+    responseDisposition: `inline; filename="${responseDispositionFileName(
+        text ? `${file.fileName || "upload.pdf"}.txt` : file.fileName,
+    )}"`,
+    responseType: text ? "text/plain; charset=utf-8" : "application/pdf",
+  });
+
+  return {url, expiresInSeconds: 15 * 60};
+}
+
+function buildAiBoothEventKioskInfoUpdate(eventId, general, boothContext, actor, deploymentType = "event") {
+  const normalizedDeploymentType = normalizeAiBoothDeploymentType(deploymentType);
   const eventName = cleanAiBoothText(general?.eventName, 140);
   const context = normalizeAiBoothBoothContext(boothContext);
   const place = cleanAiBoothText(context.place || context.locationName || general?.place, 200);
@@ -3967,8 +4737,21 @@ function buildAiBoothEventKioskInfoUpdate(eventId, general, boothContext, actor)
   const city = cleanAiBoothText(general?.city, 120);
   const zipCode = cleanAiBoothText(general?.zipCode || general?.zip, 32);
   const country = normalizeCountry(general?.country);
-  const latitude = parseAiBoothCoordinate(context.latitude || general?.latitude || general?.lat, -90, 90);
-  const longitude = parseAiBoothCoordinate(context.longitude || general?.longitude || general?.lon, -180, 180);
+  const latitude = parseAiBoothCoordinate(
+      pickAiBoothCoordinateValue(context.latitude, general?.latitude, general?.lat),
+      -90,
+      90,
+  );
+  const longitude = parseAiBoothCoordinate(
+      pickAiBoothCoordinateValue(
+          context.longitude,
+          general?.longitude,
+          general?.lng,
+          general?.lon,
+      ),
+      -180,
+      180,
+  );
   const timestamp = admin.firestore.FieldValue.serverTimestamp();
 
   return {
@@ -3981,10 +4764,16 @@ function buildAiBoothEventKioskInfoUpdate(eventId, general, boothContext, actor)
     "info.country": country,
     "info.lat": latitude,
     "info.lon": longitude,
-    "info.locationtype": "EVENT",
+    "info.locationtype": normalizedDeploymentType === "install" ? "PERMANENT_INSTALL" : "EVENT",
+    ...(normalizedDeploymentType === "install" ? {
+      "ui.defaultlanguage": "FRENCH",
+    } : {}),
     aiBoothEvent: {
       eventId,
       eventName,
+      installId: normalizedDeploymentType === "install" ? eventId : "",
+      deploymentType: normalizedDeploymentType,
+      deploymentId: eventId,
       assignedAt: timestamp,
       assignedBy: actor,
     },
@@ -3995,6 +4784,7 @@ function buildAiBoothEventKioskInfoUpdate(eventId, general, boothContext, actor)
 
 async function syncAiBoothEventKioskInfo({
   eventId,
+  deploymentType = "event",
   general,
   boothContexts,
   boothStationIds,
@@ -4035,6 +4825,7 @@ async function syncAiBoothEventKioskInfo({
           general,
           boothContexts?.[stationId],
           actor,
+          deploymentType,
       );
       batch.update(docSnap.ref, updates);
       writes += 1;
@@ -4059,16 +4850,23 @@ async function syncAiBoothEventKioskInfo({
   };
 }
 
-async function aiBoothsSaveEventImpl(data, authState) {
-  const eventInput = isPlainObject(data?.event) ? data.event : null;
+async function aiBoothsSaveEventImpl(data, authState, options = {}) {
+  const deploymentType = normalizeAiBoothDeploymentType(options.deploymentType);
+  const collectionName = options.collectionName || getAiBoothDeploymentCollection(deploymentType);
+  const inputKey = options.inputKey || "event";
+  const idKey = options.idKey || "eventId";
+  const entityLabel = options.entityLabel || (deploymentType === "install" ? "install" : "event");
+  const eventInput = isPlainObject(data?.[inputKey]) ?
+    data[inputKey] :
+    isPlainObject(data?.event) ? data.event : null;
   if (!eventInput) {
-    throw new functions.https.HttpsError("invalid-argument", "event is required");
+    throw new functions.https.HttpsError("invalid-argument", `${entityLabel} is required`);
   }
 
   const generalInput = isPlainObject(eventInput.general) ? eventInput.general : {};
   const eventName = cleanAiBoothText(generalInput.eventName, 140);
   if (!eventName) {
-    throw new functions.https.HttpsError("invalid-argument", "event name is required");
+    throw new functions.https.HttpsError("invalid-argument", `${entityLabel} name is required`);
   }
 
   const actor = {
@@ -4095,9 +4893,29 @@ async function aiBoothsSaveEventImpl(data, authState) {
       boothStationIds,
       screenUi,
   );
+  const golf = normalizeAiBoothGolfConfig(eventInput.golf, generalInput);
   const agent = normalizeAiBoothAgent(eventInput.agent, boothStationIds);
+  const requestedId = cleanAiBoothText(data?.[idKey] || data?.eventId || eventInput.id, 160)
+      .replace(/[^a-zA-Z0-9_-]/g, "");
+  const eventRef = requestedId ?
+    db.collection(collectionName).doc(requestedId) :
+    db.collection(collectionName).doc();
+  const existingSnapshot = await eventRef.get();
+  const existingData = existingSnapshot.exists ? existingSnapshot.data() || {} : {};
+  const previousBoothStationIds = Array.isArray(existingData.boothStationIds) ?
+    existingData.boothStationIds
+        .map((value) => cleanAiBoothText(value, 80))
+        .filter(Boolean) :
+    [];
+  const intake = normalizeAiBoothIntakeSettings(
+      eventInput.intake,
+      existingData.intake,
+      eventRef.id,
+      actor,
+  );
 
   const cleanEvent = {
+    deploymentType,
     general: {
       eventName,
       eventCategory: cleanAiBoothText(generalInput.eventCategory, 120),
@@ -4131,25 +4949,15 @@ async function aiBoothsSaveEventImpl(data, authState) {
     screenUiByStationId,
     topics,
     activations,
+    golf,
     agent,
+    intake,
     boothCount: boothStationIds.length,
     topicCount: topics.length,
     activationCount: activations.length,
     updatedBy: actor,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   };
-
-  const requestedId = cleanAiBoothText(data?.eventId || eventInput.id, 160)
-      .replace(/[^a-zA-Z0-9_-]/g, "");
-  const eventRef = requestedId ?
-    db.collection("aiBoothEvents").doc(requestedId) :
-    db.collection("aiBoothEvents").doc();
-  const existingSnapshot = await eventRef.get();
-  const previousBoothStationIds = existingSnapshot.exists && Array.isArray(existingSnapshot.data()?.boothStationIds) ?
-    existingSnapshot.data().boothStationIds
-        .map((value) => cleanAiBoothText(value, 80))
-        .filter(Boolean) :
-    [];
 
   if (!existingSnapshot.exists) {
     cleanEvent.createdBy = actor;
@@ -4174,6 +4982,9 @@ async function aiBoothsSaveEventImpl(data, authState) {
   boothStationIds.forEach((stationId) => {
     screenUiBatch.set(screenUiCollection.doc(stationId), {
       eventId: eventRef.id,
+      installId: deploymentType === "install" ? eventRef.id : "",
+      deploymentType,
+      deploymentId: eventRef.id,
       stationId,
       boothStationIds: [stationId],
       screenUi: screenUiByStationId[stationId] || screenUi,
@@ -4182,7 +4993,16 @@ async function aiBoothsSaveEventImpl(data, authState) {
     }, {merge: true});
   });
   staleSnapshots.forEach((stationSnapshot) => {
-    if (stationSnapshot.exists && stationSnapshot.data()?.eventId === eventRef.id) {
+    const stationData = stationSnapshot.exists ? stationSnapshot.data() || {} : {};
+    if (
+      stationSnapshot.exists &&
+      (
+        stationData.deploymentId === eventRef.id ||
+        stationData.eventId === eventRef.id ||
+        stationData.installId === eventRef.id
+      ) &&
+      normalizeAiBoothDeploymentType(stationData.deploymentType || (stationData.installId ? "install" : "event")) === deploymentType
+    ) {
       screenUiBatch.delete(stationSnapshot.ref);
     }
   });
@@ -4190,11 +5010,20 @@ async function aiBoothsSaveEventImpl(data, authState) {
 
   const kioskSync = await syncAiBoothEventKioskInfo({
     eventId: eventRef.id,
+    deploymentType,
     general: {
       ...cleanEvent.general,
       place: cleanAiBoothText(generalInput.place, 200),
-      latitude: cleanAiBoothCoordinateText(generalInput.latitude ?? generalInput.lat),
-      longitude: cleanAiBoothCoordinateText(generalInput.longitude ?? generalInput.lon),
+      latitude: cleanAiBoothCoordinateText(
+          pickAiBoothCoordinateValue(generalInput.latitude, generalInput.lat),
+      ),
+      longitude: cleanAiBoothCoordinateText(
+          pickAiBoothCoordinateValue(
+              generalInput.longitude,
+              generalInput.lng,
+              generalInput.lon,
+          ),
+      ),
     },
     boothContexts,
     boothStationIds,
@@ -4205,8 +5034,19 @@ async function aiBoothsSaveEventImpl(data, authState) {
   return {
     ok: true,
     event: serializeAiBoothEvent(savedSnapshot),
+    install: deploymentType === "install" ? serializeAiBoothEvent(savedSnapshot) : undefined,
     kioskSync,
   };
+}
+
+async function aiBoothsSaveInstallImpl(data, authState) {
+  return aiBoothsSaveEventImpl(data, authState, {
+    deploymentType: "install",
+    collectionName: AI_BOOTH_INSTALLS_COLLECTION,
+    inputKey: "install",
+    idKey: "installId",
+    entityLabel: "install",
+  });
 }
 
 function getElevenLabsApiKey() {
@@ -4512,10 +5352,6 @@ function buildAiBoothTransportationLocationKnowledge(location, index) {
       location,
       index,
   );
-  const coordinates = [
-    normalizedLocation.latitude,
-    normalizedLocation.longitude,
-  ].filter(Boolean).join(", ");
   const timeWindow = [
     normalizedLocation.startTime,
     normalizedLocation.endTime,
@@ -4527,7 +5363,6 @@ function buildAiBoothTransportationLocationKnowledge(location, index) {
   return [
     `##### ${heading}`,
     formatAiBoothKnowledgeLine("Location", normalizedLocation.location),
-    formatAiBoothKnowledgeLine("Coordinates", coordinates),
     formatAiBoothKnowledgeLine("Hours", hours),
     formatAiBoothKnowledgeLine("Frequency", normalizedLocation.frequency),
     [
@@ -4566,9 +5401,6 @@ function buildAiBoothFanZoneActivationKnowledge(activation, index) {
 
 function buildAiBoothFanZoneKnowledge(zone, index) {
   const normalizedZone = normalizeAiBoothFanZone(zone, index);
-  const coordinates = [normalizedZone.latitude, normalizedZone.longitude]
-      .filter(Boolean)
-      .join(", ");
   const activations = normalizedZone.activations.length > 0 ?
     normalizedZone.activations.map(buildAiBoothFanZoneActivationKnowledge).join("\n\n") :
     "No activations configured.";
@@ -4576,7 +5408,6 @@ function buildAiBoothFanZoneKnowledge(zone, index) {
   return [
     `#### ${normalizedZone.name}`,
     formatAiBoothKnowledgeLine("Fan Zone ID", normalizedZone.id),
-    formatAiBoothKnowledgeLine("Coordinates", coordinates),
     formatAiBoothKnowledgeLine("Open Hours", normalizedZone.openHours),
     formatAiBoothKnowledgeBlock("Details", normalizedZone.details),
     `#### Activations\n${activations}`,
@@ -4601,9 +5432,6 @@ function buildAiBoothHospitalityClientKnowledge(client, index) {
 
 function buildAiBoothHospitalityLocationKnowledge(location, index) {
   const normalizedLocation = normalizeAiBoothHospitalityLocation(location, index);
-  const coordinates = [normalizedLocation.latitude, normalizedLocation.longitude]
-      .filter(Boolean)
-      .join(", ");
   const clients = normalizedLocation.clients.length > 0 ?
     normalizedLocation.clients.map(buildAiBoothHospitalityClientKnowledge).join("\n\n") :
     "No clients assigned.";
@@ -4613,7 +5441,6 @@ function buildAiBoothHospitalityLocationKnowledge(location, index) {
     formatAiBoothKnowledgeLine("Location ID", normalizedLocation.id),
     formatAiBoothKnowledgeLine("Venue type", normalizedLocation.venueType),
     formatAiBoothKnowledgeLine("Location", normalizedLocation.location),
-    formatAiBoothKnowledgeLine("Coordinates", coordinates),
     formatAiBoothKnowledgeBlock("Amenities", normalizedLocation.amenities),
     formatAiBoothKnowledgeBlock("Access notes", normalizedLocation.accessNotes),
     formatAiBoothKnowledgeBlock("Details", normalizedLocation.details),
@@ -4623,44 +5450,28 @@ function buildAiBoothHospitalityLocationKnowledge(location, index) {
 
 function buildAiBoothBathroomLocationKnowledge(location, index) {
   const normalizedLocation = normalizeAiBoothBathroomLocation(location, index);
-  const coordinates = [normalizedLocation.latitude, normalizedLocation.longitude]
-      .filter(Boolean)
-      .join(", ");
 
   return [
     `#### ${normalizedLocation.place}`,
     formatAiBoothKnowledgeLine("Location ID", normalizedLocation.id),
-    formatAiBoothKnowledgeLine("Coordinates", coordinates),
   ].join("\n\n");
 }
 
 function buildAiBoothFanServiceKnowledge(service, index) {
   const normalizedService = normalizeAiBoothFanService(service, index);
-  const coordinates = [normalizedService.latitude, normalizedService.longitude]
-      .filter(Boolean)
-      .join(", ");
 
   return [
     `#### ${normalizedService.name}`,
     formatAiBoothKnowledgeLine("Service ID", normalizedService.id),
     formatAiBoothKnowledgeLine("Location", normalizedService.location),
-    formatAiBoothKnowledgeLine("Coordinates", coordinates),
   ].join("\n\n");
 }
 
 function buildAiBoothCourseHoleKnowledge(hole, index) {
   const normalizedHole = normalizeAiBoothCourseHole(hole, index);
-  const teeCoordinates = [normalizedHole.teeLatitude, normalizedHole.teeLongitude]
-      .filter(Boolean)
-      .join(", ");
-  const greenCoordinates = [normalizedHole.greenLatitude, normalizedHole.greenLongitude]
-      .filter(Boolean)
-      .join(", ");
 
   return [
     `#### Hole ${normalizedHole.holeNumber}`,
-    formatAiBoothKnowledgeLine("Tee coordinates", teeCoordinates),
-    formatAiBoothKnowledgeLine("Green coordinates", greenCoordinates),
   ].join("\n\n");
 }
 
@@ -4862,10 +5673,130 @@ function buildAiBoothActivationKnowledge(activation, index) {
   ].join("\n\n");
 }
 
-function buildAiBoothKnowledgeBaseMarkdown(event, kiosksByStationId = new Map()) {
+async function readAiBoothStorageText(storagePath) {
+  const normalizedPath = cleanAiBoothText(storagePath, 1000);
+  if (!normalizedPath) {
+    return "";
+  }
+
+  try {
+    const [buffer] = await getStorageBucket().file(normalizedPath).download();
+    return cleanAiBoothText(buffer.toString("utf8"), 80000);
+  } catch (error) {
+    console.warn("[AI Booths] Unable to read intake extracted text", normalizedPath, error);
+    return "";
+  }
+}
+
+function formatAiBoothApprovedIntakeLinks(links) {
+  const normalizedLinks = normalizeAiBoothIntakeLinks(links);
+  if (normalizedLinks.length === 0) {
+    return "";
+  }
+
+  return normalizedLinks
+      .map((link) => (
+        link.url ? `${link.label || "Link"} (${link.url})` : link.label
+      ))
+      .join("; ");
+}
+
+async function buildApprovedAiBoothIntakeSubmissionKnowledge(submission) {
+  const title = submission.organization ||
+    submission.participantName ||
+    "Event Participant";
+  const fileSections = [];
+  const files = Array.isArray(submission.files) ? submission.files : [];
+  const approvedLinks = formatAiBoothApprovedIntakeLinks(submission.links);
+
+  for (const file of files) {
+    const extractedText = await readAiBoothStorageText(file.extractedTextPath) ||
+      cleanAiBoothText(file.extractedTextPreview, 80000);
+    if (!extractedText) {
+      continue;
+    }
+
+    fileSections.push([
+      `### Source PDF: ${file.fileName || "Uploaded PDF"}`,
+      extractedText,
+    ].join("\n"));
+  }
+
+  const header = [
+    `## ${title}`,
+    submission.participantName ?
+      formatAiBoothKnowledgeLine("Contact", submission.participantName) :
+      "",
+    submission.role ? formatAiBoothKnowledgeLine("Role", submission.role) : "",
+    submission.category ?
+      formatAiBoothKnowledgeLine("Category", submission.category) :
+      "",
+    submission.email ? formatAiBoothKnowledgeLine("Email", submission.email) : "",
+    approvedLinks ? formatAiBoothKnowledgeLine("Approved links", approvedLinks) : "",
+    submission.notes ?
+      formatAiBoothKnowledgeBlock("Submitted notes", submission.notes) :
+      "",
+  ].filter(Boolean);
+
+  return header.concat(fileSections).join("\n\n").trim();
+}
+
+async function buildApprovedAiBoothIntakeKnowledge(targetId, targetType = "event") {
+  const normalizedTargetId = cleanAiBoothText(targetId, 160)
+      .replace(/[^a-zA-Z0-9_-]/g, "");
+  const normalizedTargetType = normalizeAiBoothDeploymentType(targetType);
+  if (!normalizedTargetId) {
+    return {
+      documentCount: 0,
+      combinedText: "",
+    };
+  }
+
+  const snapshot = await db.collection(EVENT_INTAKE_SUBMISSIONS_COLLECTION)
+      .where(normalizedTargetType === "install" ? "targetId" : "eventId", "==", normalizedTargetId)
+      .limit(500)
+      .get();
+  const approvedSubmissions = snapshot.docs
+      .map((docSnapshot) => serializeAiBoothIntakeSubmission(docSnapshot))
+      .filter((submission) => normalizedTargetType !== "install" || submission.targetType === "install")
+      .filter((submission) => submission.status === "approved");
+  const documents = [];
+
+  for (const submission of approvedSubmissions) {
+    const content = await buildApprovedAiBoothIntakeSubmissionKnowledge(
+        submission,
+    );
+    if (content) {
+      documents.push({
+        id: submission.id,
+        title: submission.organization ||
+          submission.participantName ||
+          "Event Participant",
+        content,
+      });
+    }
+  }
+
+  return {
+    documentCount: documents.length,
+    combinedText: documents
+        .map((document) => document.content)
+        .join("\n\n")
+        .trim(),
+  };
+}
+
+function buildAiBoothKnowledgeBaseMarkdown(
+    event,
+    kiosksByStationId = new Map(),
+    approvedIntakeKnowledge = null,
+) {
   void kiosksByStationId;
   const general = event.general || {};
-  const eventName = cleanAiBoothText(general.eventName, 140) || "AI Booth Event";
+  const deploymentType = normalizeAiBoothDeploymentType(event.deploymentType);
+  const deploymentLabel = deploymentType === "install" ? "permanent location" : "event";
+  const eventName = cleanAiBoothText(general.eventName, 140) ||
+    (deploymentType === "install" ? "AI Booth Install" : "AI Booth Event");
   const eventCategory = cleanAiBoothText(general.eventCategory, 120);
   const eventInfo = cleanAiBoothText(general.eventInfo || general.basicEventInfo, 8000);
   const phoneChargingEnabled = general.phoneChargingEnabled === true;
@@ -4875,6 +5806,8 @@ function buildAiBoothKnowledgeBaseMarkdown(event, kiosksByStationId = new Map())
       .join(", ");
   const weatherLocation = [general.city, general.country].filter(Boolean).join(", ") ||
     address;
+  const golf = normalizeAiBoothGolfConfig(event.golf, general);
+  const hasLiveGolfConfig = Boolean(golf.tournId || golf.tournamentName || golf.year);
   const boothStationIds = Array.isArray(event.boothStationIds) ? event.boothStationIds : [];
   const topics = Array.isArray(event.topics) ? event.topics : [];
   const activations = Array.isArray(event.activations) ? event.activations : [];
@@ -4884,21 +5817,38 @@ function buildAiBoothKnowledgeBaseMarkdown(event, kiosksByStationId = new Map())
   const activationText = activations.length > 0 ?
     activations.map(buildAiBoothActivationKnowledge).join("\n\n") :
     "No event activations have been configured.";
+  const intakeText = cleanAiBoothText(
+      approvedIntakeKnowledge?.combinedText,
+      100000,
+  ) || "No approved participant intake submissions have been added.";
+  const intakeCount = Number(approvedIntakeKnowledge?.documentCount || 0);
 
   return cleanAiBoothText([
     `# ${eventName} AI Booth Knowledge`,
     "",
-    "This document is generated from the Firebase event configuration.",
-    "Use it as the source of truth for event facts, activations, topics, and booth guidance.",
+    `This document is generated from the Firebase ${deploymentLabel} configuration.`,
+    `Use it as the source of truth for ${deploymentLabel} facts, activations, topics, and booth guidance.`,
     "",
     "## Venue Info",
-    formatAiBoothKnowledgeLine("Event name", eventName),
+    formatAiBoothKnowledgeLine(deploymentType === "install" ? "Location name" : "Event name", eventName),
     formatAiBoothKnowledgeLine("Category", eventCategory),
     formatAiBoothKnowledgeBlock("General event info", eventInfo),
     formatAiBoothKnowledgeLine("Address", address),
     formatAiBoothKnowledgeLine("Weather lookup location", weatherLocation),
     formatAiBoothKnowledgeLine("Start date", general.startDate),
     formatAiBoothKnowledgeLine("End date", general.endDate),
+    "",
+    "## Live Golf Feed",
+    hasLiveGolfConfig ?
+      [
+        formatAiBoothKnowledgeLine("Provider", golf.provider),
+        formatAiBoothKnowledgeLine("Tournament", golf.tournamentName),
+        formatAiBoothKnowledgeLine("Slash tournId", golf.tournId),
+        formatAiBoothKnowledgeLine("Season year", golf.year),
+        formatAiBoothKnowledgeLine("Tour", golf.tour),
+        formatAiBoothKnowledgeLine("Slash orgId", golf.orgId),
+      ].filter(Boolean).join("\n") :
+      "No live golf feed has been assigned.",
     "",
     "## Opening Hours",
     formatAiBoothSchedule(general),
@@ -4910,7 +5860,7 @@ function buildAiBoothKnowledgeBaseMarkdown(event, kiosksByStationId = new Map())
         "Rental policy",
         phoneChargingEnabled ?
           general.rentalPolicy || DEFAULT_AI_BOOTH_RENTAL_POLICY :
-          "Phone charging is disabled for this event.",
+          `Phone charging is disabled for this ${deploymentLabel}.`,
     ),
     formatAiBoothKnowledgeLine(
         "Guest support fallback",
@@ -4923,258 +5873,37 @@ function buildAiBoothKnowledgeBaseMarkdown(event, kiosksByStationId = new Map())
     "## Topics",
     topicText,
     "",
-    "## Event Activations",
+    deploymentType === "install" ? "## Temporary Notices / Activations" : "## Event Activations",
     activationText,
+    "",
+    deploymentType === "install" ? "## Approved Client Maintenance Intake" : "## Approved Participant Intake",
+    formatAiBoothKnowledgeLine("Approved submission count", String(intakeCount)),
+    "",
+    intakeText,
     "",
   ].join("\n"), 250000);
 }
 
 function buildAiBoothSystemPrompt(event, basePrompt = STANDARD_AI_BOOTH_SYSTEM_PROMPT) {
-  const general = event.general || {};
-  const eventName = cleanAiBoothText(general.eventName, 140) || "Not set";
-  const eventCategory = cleanAiBoothText(general.eventCategory, 120) || "Not set";
-  const eventInfo = cleanAiBoothText(general.eventInfo || general.basicEventInfo, 8000) || "Not set";
-  const phoneChargingEnabled = general.phoneChargingEnabled === true;
-  const paymentType = normalizeAiBoothPaymentType(general.paymentType);
-  const rentalPolicy = cleanAiBoothText(general.rentalPolicy, 2000) ||
-    DEFAULT_AI_BOOTH_RENTAL_POLICY;
-  const supportFallback = cleanAiBoothText(general.supportFallback, 240) ||
-    DEFAULT_AI_BOOTH_SUPPORT_FALLBACK;
-  const address = [general.address, general.city, general.zipCode, general.country]
-      .filter(Boolean)
-      .join(", ") || "Not set";
-  const weatherLocation = [general.city, general.country].filter(Boolean).join(", ") ||
-    address;
-  const topics = Array.isArray(event.topics) ? event.topics : [];
-  const topicLines = topics.length > 0 ?
-    topics.map((topic, index) => {
-      const normalizedTopic = normalizeAiBoothTopic(topic, index);
-      if (normalizedTopic.kind === AI_BOOTH_WIFI_TOPIC_KIND) {
-        const wifiQrPayload = buildAiBoothWifiQrPayload(normalizedTopic);
-
-        return [
-          `- ${normalizedTopic.title}`,
-          normalizedTopic.wifiSsid ? `  SSID: ${normalizedTopic.wifiSsid}` : "",
-          normalizedTopic.wifiPassword ? `  Password: ${normalizedTopic.wifiPassword}` : "",
-          normalizedTopic.wifiSecurity ? `  Security: ${normalizedTopic.wifiSecurity}` : "",
-          `  Hidden network: ${normalizedTopic.wifiHidden ? "Yes" : "No"}`,
-          wifiQrPayload ? `  Wi-Fi QR payload: ${wifiQrPayload}` : "",
-          normalizedTopic.summary ? `  Instructions: ${normalizedTopic.summary}` : "",
-        ].filter(Boolean).join("\n");
-      }
-
-      if (normalizedTopic.kind === AI_BOOTH_TRANSPORTATION_TOPIC_KIND) {
-        const transportationSections = [
-          ["Shuttle", normalizedTopic.transportation.shuttle],
-          ["Ride Share", normalizedTopic.transportation.rideShare],
-          ["Parking", normalizedTopic.transportation.parking],
-        ].map(([label, section]) => {
-          const locations = section.locations.map((location, locationIndex) => {
-            const coordinates = [
-              location.latitude,
-              location.longitude,
-            ].filter(Boolean).join(", ");
-            const timeWindow = [
-              location.startTime,
-              location.endTime,
-            ].filter(Boolean).join(" - ");
-            const hours = timeWindow || location.hours;
-
-            return [
-              `    Location ${locationIndex + 1}: ${location.location || "Unnamed"}`,
-              coordinates ? `      Coordinates: ${coordinates}` : "",
-              hours ? `      Hours: ${hours}` : "",
-              location.frequency ? `      Frequency: ${location.frequency}` : "",
-              location.details ? `      Details: ${location.details}` : "",
-            ].filter(Boolean).join("\n");
-          }).join("\n");
-
-          return [
-            `  ${label}:`,
-            locations || "    No locations configured.",
-          ].join("\n");
-        }).join("\n");
-
-        return [
-          `- ${normalizedTopic.title}`,
-          normalizedTopic.summary ? `  Summary: ${normalizedTopic.summary}` : "",
-          transportationSections,
-        ].filter(Boolean).join("\n");
-      }
-
-      if (normalizedTopic.kind === AI_BOOTH_CONCESSIONS_TOPIC_KIND) {
-        const fanZoneLines = normalizedTopic.fanZones.map((zone) => {
-          const activationNames = zone.activations
-              .map((activation) => activation.name)
-              .filter(Boolean)
-              .join(", ");
-
-          return [
-            `  Fan zone: ${zone.name}`,
-            zone.openHours ? `    Open hours: ${zone.openHours}` : "",
-            zone.latitude || zone.longitude ?
-              `    Coordinates: ${[zone.latitude, zone.longitude].filter(Boolean).join(", ")}` :
-              "",
-            zone.details ? `    Details: ${zone.details}` : "",
-            activationNames ? `    Activations: ${activationNames}` : "",
-          ].filter(Boolean).join("\n");
-        }).join("\n");
-
-        return [
-          `- ${normalizedTopic.title}`,
-          normalizedTopic.summary ? `  Summary: ${normalizedTopic.summary}` : "",
-          normalizedTopic.notes ? `  Details: ${normalizedTopic.notes}` : "",
-          fanZoneLines,
-        ].filter(Boolean).join("\n");
-      }
-
-      if (normalizedTopic.kind === AI_BOOTH_HOSPITALITY_TOPIC_KIND) {
-        const hospitalityLines = normalizedTopic.hospitalityLocations.map((location) => {
-          const coordinates = [
-            location.latitude,
-            location.longitude,
-          ].filter(Boolean).join(", ");
-          const clients = location.clients
-              .map((client) => client.clientName)
-              .filter(Boolean)
-              .join(", ");
-
-          return [
-            `  Hospitality: ${location.name}`,
-            location.venueType ? `    Venue type: ${location.venueType}` : "",
-            location.location ? `    Location: ${location.location}` : "",
-            coordinates ? `    Coordinates: ${coordinates}` : "",
-            location.amenities ? `    Amenities: ${location.amenities}` : "",
-            location.accessNotes ? `    Access notes: ${location.accessNotes}` : "",
-            clients ? `    Assigned clients: ${clients}` : "",
-          ].filter(Boolean).join("\n");
-        }).join("\n");
-
-        return [
-          `- ${normalizedTopic.title}`,
-          normalizedTopic.summary ? `  Summary: ${normalizedTopic.summary}` : "",
-          normalizedTopic.notes ? `  Notes: ${normalizedTopic.notes}` : "",
-          hospitalityLines,
-        ].filter(Boolean).join("\n");
-      }
-
-      if (normalizedTopic.kind === AI_BOOTH_BATHROOMS_TOPIC_KIND) {
-        const bathroomLines = normalizedTopic.bathroomLocations.map((location) => [
-          `  Location: ${location.place}`,
-          location.latitude || location.longitude ?
-            `    Coordinates: ${[location.latitude, location.longitude].filter(Boolean).join(", ")}` :
-            "",
-        ].filter(Boolean).join("\n")).join("\n");
-
-        return [
-          `- ${normalizedTopic.title}`,
-          normalizedTopic.summary ? `  Summary: ${normalizedTopic.summary}` : "",
-          bathroomLines,
-        ].filter(Boolean).join("\n");
-      }
-
-      if (normalizedTopic.kind === AI_BOOTH_FAN_SERVICES_TOPIC_KIND) {
-        const serviceLines = normalizedTopic.fanServices.map((service) => [
-          `  Service: ${service.name}`,
-          service.location ? `    Location: ${service.location}` : "",
-          service.latitude || service.longitude ?
-            `    Coordinates: ${[service.latitude, service.longitude].filter(Boolean).join(", ")}` :
-            "",
-        ].filter(Boolean).join("\n")).join("\n");
-
-        return [
-          `- ${normalizedTopic.title}`,
-          normalizedTopic.summary ? `  Summary: ${normalizedTopic.summary}` : "",
-          serviceLines,
-        ].filter(Boolean).join("\n");
-      }
-
-      if (normalizedTopic.kind === AI_BOOTH_COURSE_TOPIC_KIND) {
-        const holeLines = normalizedTopic.courseHoles.map((hole) => [
-          `  Hole ${hole.holeNumber}:`,
-          hole.teeLatitude || hole.teeLongitude ?
-            `    Tee: ${[hole.teeLatitude, hole.teeLongitude].filter(Boolean).join(", ")}` :
-            "",
-          hole.greenLatitude || hole.greenLongitude ?
-            `    Green: ${[hole.greenLatitude, hole.greenLongitude].filter(Boolean).join(", ")}` :
-            "",
-        ].filter(Boolean).join("\n")).join("\n");
-
-        return [
-          `- ${normalizedTopic.title}`,
-          normalizedTopic.summary ? `  Summary: ${normalizedTopic.summary}` : "",
-          holeLines,
-        ].filter(Boolean).join("\n");
-      }
-
-      if (normalizedTopic.kind === AI_BOOTH_SCHEDULE_TOPIC_KIND) {
-        const scheduleLines = normalizedTopic.scheduleDays.map((day) => {
-          const itemLines = day.events.map((scheduleEvent) => [
-            `    - ${scheduleEvent.title}`,
-            scheduleEvent.category ? `      Category: ${scheduleEvent.category}` : "",
-            scheduleEvent.startTime || scheduleEvent.endTime ?
-              `      Time: ${[scheduleEvent.startTime, scheduleEvent.endTime].filter(Boolean).join(" - ")}` :
-              "",
-            scheduleEvent.location ? `      Location: ${scheduleEvent.location}` : "",
-            scheduleEvent.audience ? `      Audience: ${scheduleEvent.audience}` : "",
-            scheduleEvent.needsReview ? "      Needs review before publishing." : "",
-          ].filter(Boolean).join("\n")).join("\n");
-
-          return [
-            `  ${day.dayLabel}:`,
-            day.date ? `    Date: ${day.date}` : "",
-            day.publicStatus ? `    Status: ${day.publicStatus}` : "",
-            day.theme ? `    Theme: ${day.theme}` : "",
-            day.gatesOpen || day.gatesClose ?
-              `    Gates: ${[day.gatesOpen, day.gatesClose].filter(Boolean).join(" - ")}` :
-              "",
-            itemLines,
-          ].filter(Boolean).join("\n");
-        }).join("\n");
-
-        return [
-          `- ${normalizedTopic.title}`,
-          normalizedTopic.summary ? `  Summary: ${normalizedTopic.summary}` : "",
-          normalizedTopic.notes ? `  Notes: ${normalizedTopic.notes}` : "",
-          scheduleLines,
-        ].filter(Boolean).join("\n");
-      }
-
-      return [
-        `- ${normalizedTopic.title}`,
-        normalizedTopic.summary ? `  Summary: ${normalizedTopic.summary}` : "",
-        normalizedTopic.notes ? `  Notes: ${normalizedTopic.notes}` : "",
-        normalizedTopic.checklistText ? `  Checklist:\n${normalizedTopic.checklistText}` : "",
-      ].filter(Boolean).join("\n");
-    }).join("\n") :
-    "- No extra topics configured.";
+  const deploymentType = normalizeAiBoothDeploymentType(event.deploymentType);
+  const deploymentLabel = deploymentType === "install" ? "permanent location" : "event";
 
   return cleanAiBoothText(`${basePrompt || STANDARD_AI_BOOTH_SYSTEM_PROMPT}
 
-Event data:
-- Event name: ${eventName}
-- Category: ${eventCategory}
-- General event info: ${eventInfo}
-- Phone charging: ${phoneChargingEnabled ? "Enabled" : "Disabled"}
-- Payment type: ${phoneChargingEnabled ? paymentType : "Not active"}
-- Rental policy: ${phoneChargingEnabled ? rentalPolicy : "Phone charging is disabled for this event."}
-- Guest support fallback: ${supportFallback}
-- Address: ${address}
-- Weather lookup location: ${weatherLocation || "Not set"}
-- Dates: ${general.startDate || "unset"} to ${general.endDate || "unset"}
-- Assigned booths: ${(event.boothStationIds || []).join(", ") || "Not set"}
-- Detailed event knowledge is attached through the ElevenLabs knowledge base. Use it for topics, activations, schedules, and guest-facing details.
-
-Opening hours:
-${formatAiBoothSchedule(general)}
-
-Topics:
-  ${topicLines}`, 20000);
+Knowledge source
+- The attached knowledge base is generated from Firebase and is the only source of truth for ${deploymentLabel} facts.
+- Use the knowledge base for venue details, topics, schedules, activations, services, Wi-Fi, approved links, QR payloads, and booth guidance.
+- Do not rely on hardcoded facts in this prompt for guest-facing answers.`, 20000);
 }
 
 function stripAiBoothGeneratedPromptContext(value) {
   const text = cleanAiBoothText(value, 20000);
-  const markers = ["\n\nEvent data:\n", "\n\nPhysical kiosk context:\n"];
+  const markers = [
+    "\n\nKnowledge source\n",
+    "\n\nDeployment data:\n",
+    "\n\nEvent data:\n",
+    "\n\nPhysical kiosk context:\n",
+  ];
   const markerIndexes = markers
       .map((marker) => text.indexOf(marker))
       .filter((index) => index >= 0);
@@ -5509,19 +6238,26 @@ async function upsertElevenLabsAgentCopy({
   return agentId;
 }
 
-async function aiBoothsPublishAgentImpl(data, authState) {
-  const eventId = cleanAiBoothText(data?.eventId, 160).replace(/[^a-zA-Z0-9_-]/g, "");
+async function aiBoothsPublishAgentImpl(data, authState, options = {}) {
+  const deploymentType = normalizeAiBoothDeploymentType(options.deploymentType || data?.targetType);
+  const idKey = options.idKey || (deploymentType === "install" ? "installId" : "eventId");
+  const collectionName = options.collectionName || getAiBoothDeploymentCollection(deploymentType);
+  const entityLabel = options.entityLabel || (deploymentType === "install" ? "install" : "event");
+  const eventId = cleanAiBoothText(data?.[idKey] || data?.targetId || data?.eventId, 160).replace(/[^a-zA-Z0-9_-]/g, "");
   if (!eventId) {
-    throw new functions.https.HttpsError("invalid-argument", "eventId is required");
+    throw new functions.https.HttpsError("invalid-argument", `${idKey} is required`);
   }
 
-  const eventRef = db.collection("aiBoothEvents").doc(eventId);
+  const eventRef = db.collection(collectionName).doc(eventId);
   const eventSnapshot = await eventRef.get();
   if (!eventSnapshot.exists) {
-    throw new functions.https.HttpsError("not-found", "AI booth event not found");
+    throw new functions.https.HttpsError("not-found", `AI booth ${entityLabel} not found`);
   }
 
-  const event = serializeAiBoothEvent(eventSnapshot);
+  const event = {
+    ...serializeAiBoothEvent(eventSnapshot),
+    deploymentType,
+  };
   const stationIds = Array.isArray(event.boothStationIds) ? event.boothStationIds : [];
   if (stationIds.length === 0) {
     throw new functions.https.HttpsError("invalid-argument", "Assign at least one booth before creating agents");
@@ -5545,14 +6281,19 @@ async function aiBoothsPublishAgentImpl(data, authState) {
       agentBaseSystemPrompt,
   );
   const kioskMap = await getAiBoothKiosksByStationId(stationIds);
+  const approvedIntakeKnowledge = await buildApprovedAiBoothIntakeKnowledge(eventId, deploymentType);
   const previousKnowledgeBase = normalizeAiBoothKnowledgeBase(agentConfig.knowledgeBase);
   const managedKnowledgeBaseDocumentIds = Array.from(new Set([
     previousKnowledgeBase.documentId,
     ...previousKnowledgeBase.previousDocumentIds,
   ].filter(Boolean)));
   const knowledgeBaseDocument = await createElevenLabsKnowledgeBaseTextDocument({
-    name: `${agentNamePrefix} Event Knowledge`,
-    text: buildAiBoothKnowledgeBaseMarkdown(event, kioskMap),
+    name: `${agentNamePrefix} ${deploymentType === "install" ? "Install" : "Event"} Knowledge`,
+    text: buildAiBoothKnowledgeBaseMarkdown(
+        event,
+        kioskMap,
+        approvedIntakeKnowledge,
+    ),
   });
   const knowledgeBaseEntry = {
     type: knowledgeBaseDocument.type || "text",
@@ -5631,6 +6372,7 @@ async function aiBoothsPublishAgentImpl(data, authState) {
       .slice(0, 10);
 
   await eventRef.set({
+    deploymentType,
     agent: {
       ...agentConfig,
       templateAgentId,
@@ -5666,7 +6408,17 @@ async function aiBoothsPublishAgentImpl(data, authState) {
     knowledgeBaseDocument,
     results,
     event: serializeAiBoothEvent(savedSnapshot),
+    install: deploymentType === "install" ? serializeAiBoothEvent(savedSnapshot) : undefined,
   };
+}
+
+async function aiBoothsPublishInstallImpl(data, authState) {
+  return aiBoothsPublishAgentImpl(data, authState, {
+    deploymentType: "install",
+    collectionName: AI_BOOTH_INSTALLS_COLLECTION,
+    idKey: "installId",
+    entityLabel: "install",
+  });
 }
 
 async function listUsersImpl() {
@@ -6686,14 +7438,96 @@ exports.aiBooths_httpListEvents = handleHttpFunction(async (data, req) => {
   return aiBoothsListEventsImpl(data);
 });
 
-exports.aiBooths_saveEvent = functions.https.onCall(async (data, context) => {
+exports.aiBooths_listInstalls = functions.https.onCall(async (data, context) => {
+  await assertCanManageAiBoothsFromContext(context);
+  return aiBoothsListInstallsImpl(data);
+});
+
+exports.aiBooths_httpListInstalls = handleHttpFunction(async (data, req) => {
+  await assertCanManageAiBooths(req, data);
+  return aiBoothsListInstallsImpl(data);
+});
+
+exports.aiBooths_listSlashGolfTournaments = functions.runWith({
+  secrets: [SLASH_GOLF_RAPIDAPI_KEY],
+}).https.onCall(async (data, context) => {
+  await assertCanManageAiBoothsFromContext(context);
+  return aiBoothsListSlashGolfTournamentsImpl(data);
+});
+
+exports.aiBooths_httpListSlashGolfTournaments = handleHttpFunction(async (data, req) => {
+  await assertCanManageAiBooths(req, data);
+  return aiBoothsListSlashGolfTournamentsImpl(data);
+}, {
+  secrets: [SLASH_GOLF_RAPIDAPI_KEY],
+});
+
+exports.aiBooths_listIntakeSubmissions = functions.https.onCall(async (data, context) => {
+  await assertCanManageAiBoothsFromContext(context);
+  return aiBoothsListIntakeSubmissionsImpl(data);
+});
+
+exports.aiBooths_httpListIntakeSubmissions = handleHttpFunction(async (data, req) => {
+  await assertCanManageAiBooths(req, data);
+  return aiBoothsListIntakeSubmissionsImpl(data);
+});
+
+exports.aiBooths_updateIntakeSubmission = functions.https.onCall(async (data, context) => {
+  const authState = await assertCanManageAiBoothsFromContext(context);
+  return aiBoothsUpdateIntakeSubmissionImpl(data, authState);
+});
+
+exports.aiBooths_httpUpdateIntakeSubmission = handleHttpFunction(async (data, req) => {
+  const authState = await assertCanManageAiBooths(req, data);
+  return aiBoothsUpdateIntakeSubmissionImpl(data, authState);
+});
+
+exports.aiBooths_deleteIntakeSubmission = functions.https.onCall(async (data, context) => {
+  await assertCanManageAiBoothsFromContext(context);
+  return aiBoothsDeleteIntakeSubmissionImpl(data);
+});
+
+exports.aiBooths_httpDeleteIntakeSubmission = handleHttpFunction(async (data, req) => {
+  await assertCanManageAiBooths(req, data);
+  return aiBoothsDeleteIntakeSubmissionImpl(data);
+});
+
+exports.aiBooths_createIntakeFileReadUrl = functions.https.onCall(async (data, context) => {
+  await assertCanManageAiBoothsFromContext(context);
+  return aiBoothsCreateIntakeFileReadUrlImpl(data);
+});
+
+exports.aiBooths_httpCreateIntakeFileReadUrl = handleHttpFunction(async (data, req) => {
+  await assertCanManageAiBooths(req, data);
+  return aiBoothsCreateIntakeFileReadUrlImpl(data);
+});
+
+exports.aiBooths_saveEvent = functions.runWith({
+  secrets: [EVENT_INTAKE_SECRET],
+}).https.onCall(async (data, context) => {
   const authState = await assertCanManageAiBoothsFromContext(context);
   return aiBoothsSaveEventImpl(data, authState);
+});
+
+exports.aiBooths_saveInstall = functions.runWith({
+  secrets: [EVENT_INTAKE_SECRET],
+}).https.onCall(async (data, context) => {
+  const authState = await assertCanManageAiBoothsFromContext(context);
+  return aiBoothsSaveInstallImpl(data, authState);
 });
 
 exports.aiBooths_httpSaveEvent = handleHttpFunction(async (data, req) => {
   const authState = await assertCanManageAiBooths(req, data);
   return aiBoothsSaveEventImpl(data, authState);
+}, {
+  secrets: [EVENT_INTAKE_SECRET],
+});
+
+exports.aiBooths_httpSaveInstall = handleHttpFunction(async (data, req) => {
+  const authState = await assertCanManageAiBooths(req, data);
+  return aiBoothsSaveInstallImpl(data, authState);
+}, {
+  secrets: [EVENT_INTAKE_SECRET],
 });
 
 exports.aiBooths_httpRegisterPendingKiosk = handleHttpFunction(async (data) => (
@@ -6743,9 +7577,23 @@ exports.aiBooths_publishAgent = functions.runWith({
   return aiBoothsPublishAgentImpl(data, authState);
 });
 
+exports.aiBooths_publishInstall = functions.runWith({
+  secrets: [ELEVENLABS_API_KEY],
+}).https.onCall(async (data, context) => {
+  const authState = await assertCanManageAiBoothsFromContext(context);
+  return aiBoothsPublishInstallImpl(data, authState);
+});
+
 exports.aiBooths_httpPublishAgent = handleHttpFunction(async (data, req) => {
   const authState = await assertCanManageAiBooths(req, data);
   return aiBoothsPublishAgentImpl(data, authState);
+}, {
+  secrets: [ELEVENLABS_API_KEY],
+});
+
+exports.aiBooths_httpPublishInstall = handleHttpFunction(async (data, req) => {
+  const authState = await assertCanManageAiBooths(req, data);
+  return aiBoothsPublishInstallImpl(data, authState);
 }, {
   secrets: [ELEVENLABS_API_KEY],
 });

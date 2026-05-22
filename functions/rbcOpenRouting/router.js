@@ -7,7 +7,7 @@ const EARTH_RADIUS_M = 6371008.8;
 const DEFAULT_BOOTH_ID = "CA9000";
 const DEFAULT_PUBLIC_BASE_URL = "https://chargerent.ca/rbc-open-2026";
 const GRAPH_COORD_PRECISION = 7;
-const NEARBY_NODE_CONNECT_METERS = 6;
+const NEARBY_NODE_CONNECT_METERS = 15;
 const WALKING_METERS_PER_MINUTE = 80;
 
 function loadJson(filePath) {
@@ -22,6 +22,10 @@ function toSlug(value) {
     .replace(/&/g, " and ")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+function toCompactSlug(value) {
+  return toSlug(value).replace(/-/g, "");
 }
 
 function normalizeCategory(value) {
@@ -451,12 +455,17 @@ function buildIndexes(locations, booths) {
 }
 
 function findByAlias(aliasMap, byIdMap, query) {
-  const direct = aliasMap.get(toSlug(query));
+  const querySlug = toSlug(query);
+  const direct = aliasMap.get(querySlug);
   if (direct) return byIdMap.get(direct);
-  const needle = toSlug(query);
+
+  const needle = querySlug;
   if (!needle) return null;
+  const compactNeedle = toCompactSlug(query);
   for (const [alias, id] of aliasMap.entries()) {
     if (alias.includes(needle) || needle.includes(alias)) return byIdMap.get(id);
+    const compactAlias = alias.replace(/-/g, "");
+    if (compactAlias.includes(compactNeedle) || compactNeedle.includes(compactAlias)) return byIdMap.get(id);
   }
   return null;
 }
@@ -603,7 +612,7 @@ function createRoutingService(options = {}) {
       try {
         const result = directions(from.id, candidate.name);
         if (!best || result.distanceMeters < best.distanceMeters) best = result;
-      } catch (error) {
+      } catch {
         // Keep evaluating other candidates if one point cannot route.
       }
     }

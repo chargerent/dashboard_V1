@@ -122,74 +122,37 @@
     {
       "type": "Feature",
       "properties": {
-        "fid": 8,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000Gk\u0001N�\u0002T�Hb�\u001d��E@",
-        "location_id": "{0073380a-c5c7-4abb-bb8c-5567adf193d4}",
-        "name": "Merchandise Shop",
-        "category": "landmark",
-        "status": "verify",
-        "zone": null,
-        "subzone": null,
-        "search_aliases": null,
-        "hole_number": null,
-        "near_hole": null,
-        "facility_type": null,
-        "unit_count": null,
-        "accessible": 1,
-        "visible_to_guests": 1,
-        "priority": 3,
-        "arrival_notes": null,
-        "qr_slug": null,
-        "google_maps_url": null,
-        "apple_maps_url": null,
-        "photo": null,
-        "notes": null,
-        "last_verified": null,
-        "created_at": "2026-05-07T16:06:46.577Z",
-        "updated_at": "2026-05-07T16:06:56.497Z"
-      },
-      "geometry": {
-        "type": "Point",
-        "coordinates": [
-          -80.04420805109577,
-          43.84964343085136
-        ]
-      }
-    },
-    {
-      "type": "Feature",
-      "properties": {
         "fid": 9,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\u0016!�+�\u0002T�U`y���E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u00007Ou��\u0002T�w\u0010;S��E@",
         "location_id": "{620acf5f-cf09-4e03-b96d-fecf43629d9b}",
-        "name": "Double Decker Hospitality",
-        "category": "landmark",
+        "name": "Doubledecker",
+        "category": "hospitality",
         "status": "verify",
-        "zone": null,
-        "subzone": null,
-        "search_aliases": null,
+        "zone": "Hospitality",
+        "subzone": "Doubledecker",
+        "search_aliases": "Doubledecker, Hospitality, VIP",
         "hole_number": null,
         "near_hole": null,
-        "facility_type": null,
+        "facility_type": "hospitality",
         "unit_count": null,
         "accessible": 1,
         "visible_to_guests": 1,
         "priority": 3,
         "arrival_notes": null,
-        "qr_slug": null,
+        "qr_slug": "doubledecker",
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Hospitality.",
         "last_verified": null,
         "created_at": "2026-05-07T16:17:02.989Z",
-        "updated_at": "2026-05-07T16:17:13.827Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.04352844239142,
-          43.85043102194383
+          -80.04381,
+          43.85084
         ]
       }
     },
@@ -197,36 +160,36 @@
       "type": "Feature",
       "properties": {
         "fid": 10,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000��&��\u0002T�%��\u0013��E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�n\u0012��\u0002T��=����E@",
         "location_id": "{dbf60675-1bd2-40b7-946b-032a43c95599}",
         "name": "Clubhouse",
-        "category": "landmark",
+        "category": "hospitality",
         "status": "verify",
-        "zone": null,
-        "subzone": null,
-        "search_aliases": null,
+        "zone": "Hospitality",
+        "subzone": "Clubhouse",
+        "search_aliases": "Clubhouse, Hospitality, VIP",
         "hole_number": null,
         "near_hole": null,
-        "facility_type": null,
+        "facility_type": "hospitality",
         "unit_count": null,
         "accessible": 1,
         "visible_to_guests": 1,
         "priority": 3,
         "arrival_notes": null,
-        "qr_slug": null,
+        "qr_slug": "clubhouse",
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Hospitality.",
         "last_verified": null,
         "created_at": "2026-05-07T16:20:09.977Z",
-        "updated_at": "2026-05-07T16:20:15.025Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.04324344451985,
-          43.85058830524057
+          -80.043,
+          43.85034
         ]
       }
     },
@@ -234,36 +197,36 @@
       "type": "Feature",
       "properties": {
         "fid": 11,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000~\u0014�_z\u0003T��\u0016z\u0012R�E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000LqU�w\u0003T�S?o*R�E@",
         "location_id": "{a855ac92-77d4-479a-bbcd-a0df37ac8406}",
         "name": "RBC Avion",
-        "category": "landmark",
+        "category": "hospitality",
         "status": "verify",
-        "zone": null,
-        "subzone": null,
-        "search_aliases": null,
+        "zone": "Hospitality",
+        "subzone": "RBC Avion",
+        "search_aliases": "RBC Avion, Hospitality, VIP",
         "hole_number": null,
         "near_hole": null,
-        "facility_type": null,
+        "facility_type": "hospitality",
         "unit_count": null,
         "accessible": 1,
         "visible_to_guests": 1,
         "priority": 3,
         "arrival_notes": null,
-        "qr_slug": null,
+        "qr_slug": "rbc-avion",
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Hospitality.",
         "last_verified": null,
         "created_at": "2026-05-07T16:58:21.919Z",
-        "updated_at": "2026-05-07T16:58:32.909Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.05434416241948,
-          43.85406714402523
+          -80.05419,
+          43.85407
         ]
       }
     },
@@ -271,7 +234,7 @@
       "type": "Feature",
       "properties": {
         "fid": 12,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�(\u0015X�\u0003T��O����E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\u000e\u0010���\u0003T�}����E@",
         "location_id": "{3c247ec8-b6cb-48c4-bc4a-7a3be8a859a1}",
         "name": "13 Green",
         "category": "hole_green",
@@ -291,16 +254,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T05:08:06.421Z",
-        "updated_at": "2026-05-11T05:08:06.421Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.0610561567909,
-          43.85635276851818
+          -80.06078,
+          43.85617
         ]
       }
     },
@@ -308,7 +271,7 @@
       "type": "Feature",
       "properties": {
         "fid": 13,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�m\r��\u0003T���?l>�E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�ُ\u0014�\u0003T�\u001a�[ A�E@",
         "location_id": "{2fdff22e-1fec-4743-b653-4b5b47f583d7}",
         "name": "13 Tee",
         "category": "hole_tee",
@@ -328,16 +291,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T05:08:56.436Z",
-        "updated_at": "2026-05-11T05:08:56.436Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.05564667045091,
-          43.853467494103185
+          -80.05573,
+          43.85355
         ]
       }
     },
@@ -345,7 +308,7 @@
       "type": "Feature",
       "properties": {
         "fid": 14,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000��\u0002͛\u0003T��VG\nX�E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000/\u0017�\u0003T���N�`�E@",
         "location_id": "{6d5727b3-6343-4eec-aa8b-ad5ee908cc01}",
         "name": "5 Green",
         "category": "hole_green",
@@ -365,16 +328,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T05:09:30.269Z",
-        "updated_at": "2026-05-11T05:09:30.269Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.0563843276791,
-          43.85424927218807
+          -80.05619,
+          43.85452
         ]
       }
     },
@@ -382,7 +345,7 @@
       "type": "Feature",
       "properties": {
         "fid": 15,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�����\u0003T�˨����E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\u0007�\u0019Q�\u0003T�v\u001ai���E@",
         "location_id": "{878252e2-3c94-45b0-897e-396edfc264d9}",
         "name": "5 Tee",
         "category": "hole_tee",
@@ -402,16 +365,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T05:09:59.851Z",
-        "updated_at": "2026-05-11T05:09:59.851Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.05991614107461,
-          43.85708615400798
+          -80.0602,
+          43.85732
         ]
       }
     },
@@ -419,7 +382,7 @@
       "type": "Feature",
       "properties": {
         "fid": 16,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�_\u001d>�\u0003T�\u0011\u0010\u0001���E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�x#��\u0003T��\r2���E@",
         "location_id": "{fcf66e2b-f78b-4318-aebc-5247d709be18}",
         "name": "4 Green",
         "category": "hole_green",
@@ -439,16 +402,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T05:10:36.434Z",
-        "updated_at": "2026-05-11T05:10:36.434Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.05940201633983,
-          43.857875943678785
+          -80.05914,
+          43.85769
         ]
       }
     },
@@ -456,7 +419,7 @@
       "type": "Feature",
       "properties": {
         "fid": 20,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\rq�\u0015�\u0003T��5���E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�+ٱ\u0003T�\u000b�����E@",
         "location_id": "{e408761b-fb38-4eb4-bda1-bcd55b1f7cb1}",
         "name": "3 Green",
         "category": "hole_green",
@@ -476,16 +439,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T05:12:16.632Z",
-        "updated_at": "2026-05-11T05:12:16.632Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.05804964475483,
-          43.85732792746721
+          -80.05773,
+          43.85729
         ]
       }
     },
@@ -493,7 +456,7 @@
       "type": "Feature",
       "properties": {
         "fid": 21,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000<D\u0019��\u0003T�uN6h��E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000��ڧ�\u0003T�\u0012�r.��E@",
         "location_id": "{e0de569d-b440-4113-83ed-e5a9217d5551}",
         "name": "15 Tee",
         "category": "hole_tee",
@@ -513,16 +476,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T05:13:16.331Z",
-        "updated_at": "2026-05-11T05:13:16.331Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.06022908656536,
-          43.85789206172641
+          -80.06077,
+          43.85758
         ]
       }
     },
@@ -530,7 +493,7 @@
       "type": "Feature",
       "properties": {
         "fid": 22,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�j?Xh\u0003T�\u001cF\u0004���E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\f�u\u001ai\u0003T��R�!��E@",
         "location_id": "{3b1a3720-4106-406e-bfc4-0b9c4b692365}",
         "name": "16 Green",
         "category": "hole_green",
@@ -550,16 +513,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T05:14:39.462Z",
-        "updated_at": "2026-05-11T05:14:39.462Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.05324369614699,
-          43.85573220452008
+          -80.05329,
+          43.8559
         ]
       }
     },
@@ -567,7 +530,7 @@
       "type": "Feature",
       "properties": {
         "fid": 23,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000���>g\u0003T�\u00031�.��E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�s\f�^\u0003T���1 {�E@",
         "location_id": "{339e4fbf-bc71-4409-9ec4-d96d0272df7d}",
         "name": "2 Green",
         "category": "hole_green",
@@ -587,16 +550,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T05:15:17.727Z",
-        "updated_at": "2026-05-11T05:15:17.727Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.05317663639897,
-          43.85547430589397
+          -80.05266,
+          43.85532
         ]
       }
     },
@@ -604,7 +567,7 @@
       "type": "Feature",
       "properties": {
         "fid": 24,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000��`-w\u0003T���)\u0001N�E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000%z\u0019�r\u0003T�\u0005n��S�E@",
         "location_id": "{5756d37b-badb-4220-9a91-2f5cf0b0f96c}",
         "name": "12 Green",
         "category": "hole_green",
@@ -624,16 +587,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T05:26:22.485Z",
-        "updated_at": "2026-05-11T05:26:22.485Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.05414900274522,
-          43.85394300982945
+          -80.05388,
+          43.85412
         ]
       }
     },
@@ -641,7 +604,7 @@
       "type": "Feature",
       "properties": {
         "fid": 25,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\u0013i!\tp\u0003T�B>�\u0012p�E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000:�}�k\u0003T�\u0005��ek�E@",
         "location_id": "{4af3f804-a9ac-4735-963c-643dcbdfb6b9}",
         "name": "17 Tee",
         "category": "hole_tee",
@@ -661,16 +624,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T05:31:16.659Z",
-        "updated_at": "2026-05-11T05:31:16.659Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.05371311438311,
-          43.85498268354833
+          -80.05346,
+          43.85484
         ]
       }
     },
@@ -678,7 +641,7 @@
       "type": "Feature",
       "properties": {
         "fid": 26,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�KL�\u001b\u0003T��M�G\u0016�E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�m��\u001f\u0003T���k�\u0012�E@",
         "location_id": "{a5f4477b-7cb4-4a5e-84d7-6511d4993a6b}",
         "name": "17 Green",
         "category": "hole_green",
@@ -698,16 +661,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T05:31:35.877Z",
-        "updated_at": "2026-05-11T05:31:35.877Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.04856069041053,
-          43.85224241917197
+          -80.04881,
+          43.85214
         ]
       }
     },
@@ -715,7 +678,7 @@
       "type": "Feature",
       "properties": {
         "fid": 27,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�ox]\u001e\u0003T�r6;r'�E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000̗\u0017`\u001f\u0003T�S��.�E@",
         "location_id": "{7433dca1-9013-464f-9613-6f004185e152}",
         "name": "2 Tee",
         "category": "hole_tee",
@@ -735,16 +698,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T05:32:14.825Z",
-        "updated_at": "2026-05-11T05:32:14.825Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.04872833978057,
-          43.852766302978935
+          -80.04879,
+          43.85299
         ]
       }
     },
@@ -752,7 +715,7 @@
       "type": "Feature",
       "properties": {
         "fid": 32,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000��!��\u0002T�W�T���E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000���\u001a�\u0002T�\r�-���E@",
         "location_id": "{20613eae-0d7c-49ca-9416-3191d86d7f73}",
         "name": "1 Tee",
         "category": "hole_tee",
@@ -772,16 +735,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Updated from provided coordinates: 43.84865, -80.04444. Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T06:10:05.070Z",
-        "updated_at": "2026-05-11T06:10:05.070Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.04418686192574,
-          43.84847275386772
+          -80.04444,
+          43.84865
         ]
       }
     },
@@ -789,7 +752,7 @@
       "type": "Feature",
       "properties": {
         "fid": 34,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u000076 �n\u0003T�4��\r��E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000��C�l\u0003T�S�\u0007Z��E@",
         "location_id": "{1d58757d-724c-4a96-91bb-ed7c89c870df}",
         "name": "3 Tee",
         "category": "hole_tee",
@@ -809,16 +772,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T06:13:01.603Z",
-        "updated_at": "2026-05-11T06:13:01.603Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.05362585206682,
-          43.85556195796781
+          -80.0535,
+          43.85551
         ]
       }
     },
@@ -826,7 +789,7 @@
       "type": "Feature",
       "properties": {
         "fid": 35,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000���k�\u0003T�����]�E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\f\u0007B��\u0003T�(a��_�E@",
         "location_id": "{00f29e0a-aaa2-4463-abb3-fa75a99c9f22}",
         "name": "6 Tee",
         "category": "hole_tee",
@@ -846,16 +809,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T06:14:59.619Z",
-        "updated_at": "2026-05-11T06:14:59.619Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.05489631914294,
-          43.854429553970455
+          -80.05473,
+          43.85449
         ]
       }
     },
@@ -863,7 +826,7 @@
       "type": "Feature",
       "properties": {
         "fid": 36,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000/f^\u001f�\u0003T��\u000bc1��E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�\u001d���\u0003T�ı.n��E@",
         "location_id": "{b1f16f97-18ad-489b-aec1-47dafbdfc692}",
         "name": "6 Green",
         "category": "hole_green",
@@ -883,16 +846,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T06:15:52.452Z",
-        "updated_at": "2026-05-11T06:15:52.452Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.05719742029827,
-          43.85666482292375
+          -80.05741,
+          43.85655
         ]
       }
     },
@@ -900,7 +863,7 @@
       "type": "Feature",
       "properties": {
         "fid": 37,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�\u0005?�\u0018\u0003T�ӏ��\u000f�E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�5�!\u001a\u0003T��X��\u0005�E@",
         "location_id": "{1f135c28-175c-4e5e-806a-d885032b9348}",
         "name": "1 Green",
         "category": "hole_green",
@@ -920,16 +883,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Updated from provided coordinates: 43.85174, -80.04847. Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T06:18:17.919Z",
-        "updated_at": "2026-05-11T06:18:17.919Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.04837900309197,
-          43.85205003086562
+          -80.04847,
+          43.85174
         ]
       }
     },
@@ -937,7 +900,7 @@
       "type": "Feature",
       "properties": {
         "fid": 38,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�~\r�\u001a\u0003T�~\u0015\u0010���E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000��s�\u0015\u0003T�>�\r\u0015��E@",
         "location_id": "{ae824166-4ab4-4732-af75-57fc5a1da576}",
         "name": "10 Green",
         "category": "hole_green",
@@ -957,16 +920,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T06:19:19.069Z",
-        "updated_at": "2026-05-11T06:19:19.069Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.04851628606711,
-          43.85039366040563
+          -80.0482,
+          43.85068
         ]
       }
     },
@@ -974,7 +937,7 @@
       "type": "Feature",
       "properties": {
         "fid": 39,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000%\u001e�\u0016�\u0002T��m\"���E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000M��~�\u0002T�1�*\u0018��E@",
         "location_id": "{67d44406-29c1-45ea-8743-b898619a5b7c}",
         "name": "10 Tee",
         "category": "hole_tee",
@@ -994,16 +957,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T06:19:54.001Z",
-        "updated_at": "2026-05-11T06:19:54.001Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.04468312311708,
-          43.84819366150963
+          -80.04483,
+          43.8483
         ]
       }
     },
@@ -1011,7 +974,7 @@
       "type": "Feature",
       "properties": {
         "fid": 40,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\u000f��X�\u0002T�������E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u00004K\u0002��\u0002T���a���E@",
         "location_id": "{6659035a-d492-411d-9473-cbc4a7b0386d}",
         "name": "9 Green",
         "category": "hole_green",
@@ -1031,16 +994,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T06:22:09.566Z",
-        "updated_at": "2026-05-11T06:22:09.566Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.04445471952589,
-          43.85005983596552
+          -80.04424,
+          43.8503
         ]
       }
     },
@@ -1048,7 +1011,7 @@
       "type": "Feature",
       "properties": {
         "fid": 41,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\u001c���?\u0003T�j8��\n�E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000��K�;\u0003T�Ll>�\r�E@",
         "location_id": "{db89e5b5-754d-4c96-bda9-08dd9dcb9b9e}",
         "name": "11 Green",
         "category": "hole_green",
@@ -1068,16 +1031,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T06:22:59.850Z",
-        "updated_at": "2026-05-11T06:22:59.850Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.0507651917182,
-          43.851897470755674
+          -80.05051,
+          43.85198
         ]
       }
     },
@@ -1085,7 +1048,7 @@
       "type": "Feature",
       "properties": {
         "fid": 42,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000���| \u0003T��?t���E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�L��\u001a\u0003T�M2r\u0016��E@",
         "location_id": "{3aede57c-5def-4854-b5ef-7b85f5cd3a49}",
         "name": "11 Tee",
         "category": "hole_tee",
@@ -1105,16 +1068,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T06:23:33.534Z",
-        "updated_at": "2026-05-11T06:23:33.534Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.0488578769639,
-          43.8513124530435
+          -80.04852,
+          43.85126
         ]
       }
     },
@@ -1122,7 +1085,7 @@
       "type": "Feature",
       "properties": {
         "fid": 43,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000H@��\u001a\u0003T�1gv@\"�E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�'�>\u001d\u0003T�����(�E@",
         "location_id": "{f2e8a924-54e6-4133-baf4-e77e01eb4fc2}",
         "name": "18 Tee",
         "category": "hole_tee",
@@ -1142,16 +1105,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T06:24:19.984Z",
-        "updated_at": "2026-05-11T06:24:19.984Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.04849855345776,
-          43.85260778218652
+          -80.04866,
+          43.85281
         ]
       }
     },
@@ -1159,7 +1122,7 @@
       "type": "Feature",
       "properties": {
         "fid": 44,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u00004@�c�\u0003T�89�v��E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\u0000R�8�\u0003T�o��\\��E@",
         "location_id": "{8538b2fb-1e40-4fe6-b3e9-a4b50a078f7f}",
         "name": "4 Tee",
         "category": "hole_tee",
@@ -1179,16 +1142,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T06:26:32.134Z",
-        "updated_at": "2026-05-11T06:26:32.134Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.0578240307521,
-          43.85658155811183
+          -80.05818,
+          43.85667
         ]
       }
     },
@@ -1196,7 +1159,7 @@
       "type": "Feature",
       "properties": {
         "fid": 45,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000��w\u0000\u0016\u0003T�ϛ��\u0016�E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000i:;\u0019\u001c\u0003T�̴�++�E@",
         "location_id": "{c37a79fe-36c4-42d7-872f-972075eff445}",
         "name": "9 Tee",
         "category": "hole_tee",
@@ -1216,16 +1179,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T06:27:50.217Z",
-        "updated_at": "2026-05-11T06:27:50.217Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.04821788518805,
-          43.85226247674256
+          -80.04859,
+          43.85288
         ]
       }
     },
@@ -1233,7 +1196,7 @@
       "type": "Feature",
       "properties": {
         "fid": 46,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000Ś\u0014�u\u0003T����\u0005w�E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000V�zNz\u0003T�=\nףp�E@",
         "location_id": "{5756349d-97af-4d31-8f10-4a07968136bf}",
         "name": "7 Green",
         "category": "hole_green",
@@ -1253,16 +1216,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T06:47:30.889Z",
-        "updated_at": "2026-05-11T06:47:30.889Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.05405809414067,
-          43.85519474955794
+          -80.05434,
+          43.855
         ]
       }
     },
@@ -1270,7 +1233,7 @@
       "type": "Feature",
       "properties": {
         "fid": 47,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�����\u0003T��ؗ��E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000/\u0017�\u0003T��t���E@",
         "location_id": "{d7d49fc2-96f0-445b-9454-dcbcfcbd92ad}",
         "name": "7 Tee",
         "category": "hole_tee",
@@ -1290,16 +1253,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T06:47:53.056Z",
-        "updated_at": "2026-05-11T07:00:53.729Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.05638089589343,
-          43.85631961740849
+          -80.05619,
+          43.85632
         ]
       }
     },
@@ -1344,7 +1307,7 @@
       "type": "Feature",
       "properties": {
         "fid": 49,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000p�ZUE\u0003T��\u0004�~\u0011�E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\bUj�@\u0003T��+H3\u0016�E@",
         "location_id": "{ef2cea92-194b-425a-8417-b51bfa745fa6}",
         "name": "12 Tee",
         "category": "hole_tee",
@@ -1364,16 +1327,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T06:56:16.287Z",
-        "updated_at": "2026-05-11T06:56:16.287Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.05110677602875,
-          43.85209641466806
+          -80.05084,
+          43.85224
         ]
       }
     },
@@ -1381,7 +1344,7 @@
       "type": "Feature",
       "properties": {
         "fid": 51,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000����\u0003T��AIp��E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�\u001d��\u0003T�K\u001f����E@",
         "location_id": "{db05c5e9-fb0e-4e0d-ba48-fa9dd8100fee}",
         "name": "14 Green",
         "category": "hole_green",
@@ -1401,16 +1364,16 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-11T07:08:16.905Z",
-        "updated_at": "2026-05-11T07:08:16.905Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.06046149971283,
-          43.85755733086547
+          -80.06059,
+          43.85738
         ]
       }
     },
@@ -1418,7 +1381,7 @@
       "type": "Feature",
       "properties": {
         "fid": 52,
-        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�����\u0003T�s\u0016�z��E@",
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u00009(a��\u0003T�=~oӟ�E@",
         "location_id": "{b06c2912-33a5-47e6-ad71-cc4c2132d8a8}",
         "name": "14 Tee",
         "category": "hole_tee",
@@ -1438,16 +1401,1533 @@
         "google_maps_url": null,
         "apple_maps_url": null,
         "photo": null,
-        "notes": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
         "last_verified": null,
         "created_at": "2026-05-12T02:15:35.881Z",
-        "updated_at": "2026-05-12T02:15:35.881Z"
+        "updated_at": "2026-05-19T08:18:40.738136Z"
       },
       "geometry": {
         "type": "Point",
         "coordinates": [
-          -80.06127589820497,
-          43.85609373268098
+          -80.06138,
+          43.85644
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 53,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�[Z\r�\u0003T�o���T�E@",
+        "location_id": "{2d305062-4d9d-4508-a7ad-a02175c59e68}",
+        "name": "The Keg",
+        "category": "activation",
+        "status": "verify",
+        "zone": "Activations",
+        "subzone": "The Keg",
+        "search_aliases": "The Keg, Activation, Sponsor activation",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "sponsor_activation",
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": "Use The Fair Way food and beverage zone entrance.",
+        "qr_slug": "the-keg",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Added from provided coordinates: 43.85415, -80.05524. Coordinates source: RBC Open coordinates.xlsx. Source tab: Activations.",
+        "last_verified": null,
+        "created_at": "2026-05-17T13:38:33.073Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05524,
+          43.85415
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 54,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�6�X�\u0003T�Zd;�O�E@",
+        "location_id": "{1bf2974a-f60c-41ab-a5a9-fcf1b817b5f4}",
+        "name": "Copper Rose",
+        "category": "activation",
+        "status": "verify",
+        "zone": "The Fair Way",
+        "subzone": "Copper Rose",
+        "search_aliases": "Copper Rose, Copper Rose Vodka, vodka, activation, sponsor, The Fair Way",
+        "hole_number": null,
+        "near_hole": 5,
+        "facility_type": "sponsor_activation",
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": "Use The Fair Way activation zone entrance.",
+        "qr_slug": "copper-rose",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Copper Rose Vodka is an ultra-premium vodka crafted with the finest ingredients and distilled 12 times for a silky, smooth finish. Added from provided coordinates: 43.854, -80.05538.",
+        "last_verified": null,
+        "created_at": "2026-05-17T13:48:43.327Z",
+        "updated_at": "2026-05-17T13:48:43.327Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05538,
+          43.854
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 55,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000rm�\u0018�\u0003T������E@",
+        "location_id": "{c807ad03-aec7-41c8-9fb2-b72a40ee34ed}",
+        "name": "Merch",
+        "category": "merchandise",
+        "status": "verify",
+        "zone": "Merchandise",
+        "subzone": "Merch",
+        "search_aliases": "Merch, Merchandise, Merchandise Shop, retail, shop, apparel, souvenirs",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "retail",
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": "Use the merchandise shop entrance.",
+        "qr_slug": "merch",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Added from provided coordinates: 43.85562, -80.06098.",
+        "last_verified": null,
+        "created_at": "2026-05-17T13:50:52.748Z",
+        "updated_at": "2026-05-17T13:50:52.748Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.06098,
+          43.85562
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 56,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u00007l[��\u0002T�?W[���E@",
+        "location_id": "{e41acb16-0796-4b15-8342-64faa3e22968}",
+        "name": "Merch 2",
+        "category": "merchandise",
+        "status": "verify",
+        "zone": "Merchandise",
+        "subzone": "Merch 2",
+        "search_aliases": "Merch 2, Second Merch, Merch, Merchandise, Merchandise Shop, retail, shop, apparel, souvenirs",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "retail",
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": "Use the merchandise shop entrance.",
+        "qr_slug": "merch-2",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Second merchandise location. Added from provided coordinates: 43.8496, -80.04453.",
+        "last_verified": null,
+        "created_at": "2026-05-17T14:05:43.342Z",
+        "updated_at": "2026-05-17T14:05:43.342Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04453,
+          43.8496
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 57,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000w�T��\u0002T�Mg'���E@",
+        "location_id": "{7b15b1a3-8eb1-4f46-b5c3-b65f749740a1}",
+        "name": "Concessions @ 1",
+        "category": "food_drinks",
+        "status": "verify",
+        "zone": "Hole 1",
+        "subzone": "Concessions @ 1",
+        "search_aliases": "Concessions @ 1, Concessions, Concession, Food & Drinks, Food and Drinks, Concession 1, Concessions 1, Hole 1 concessions",
+        "hole_number": null,
+        "near_hole": 1,
+        "facility_type": "concession",
+        "unit_count": null,
+        "accessible": 1,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": "Use the concession area by Hole 1.",
+        "qr_slug": "concession-1",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Added from provided coordinates: 43.84874, -80.04471. Coordinates source: RBC Open coordinates.xlsx. Source tab: Food and drinks.",
+        "last_verified": null,
+        "created_at": "2026-05-17T14:05:43.342Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04471,
+          43.84874
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 58,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\u0005Q�\u0001H\u0003T��:\u0001M��E@",
+        "location_id": "{723830dc-b17b-43f0-b943-83c94d65b4aa}",
+        "name": "8 Tee",
+        "category": "hole_tee",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 8,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
+        "last_verified": null,
+        "created_at": "2026-05-19T07:29:30.337Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05127,
+          43.8556
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 59,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\t���\u0011\u0003T��\u001b|a2�E@",
+        "location_id": "{8fe24e9f-f95f-43ec-bbbe-ae25a9876d44}",
+        "name": "8 Green",
+        "category": "hole_green",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 8,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
+        "last_verified": null,
+        "created_at": "2026-05-19T07:29:30.337Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04796,
+          43.8531
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 60,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�ѩ+�\u0003T�\u0012\u0014?���E@",
+        "location_id": "{48a788a9-4f5c-4dbb-8a07-bca21b6bfc00}",
+        "name": "15 Green",
+        "category": "hole_green",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 15,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
+        "last_verified": null,
+        "created_at": "2026-05-19T07:29:30.338Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05659,
+          43.8583
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 61,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\u000b^�\u0015�\u0003T�\u0004\u0004s���E@",
+        "location_id": "{a04d1fca-1e57-4020-8f82-3fc673605ce2}",
+        "name": "16 Tee",
+        "category": "hole_tee",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 16,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
+        "last_verified": null,
+        "created_at": "2026-05-19T07:29:30.338Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05689,
+          43.85916
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 62,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000����\u0002T��C����E@",
+        "location_id": "{cb68ac79-336c-4a5a-b579-387403436488}",
+        "name": "18 Green",
+        "category": "hole_green",
+        "status": "verify",
+        "zone": null,
+        "subzone": null,
+        "search_aliases": null,
+        "hole_number": 18,
+        "near_hole": null,
+        "facility_type": null,
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": null,
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open golf course hole coordinates.xlsx. Coordinates source: RBC Open coordinates.xlsx.",
+        "last_verified": null,
+        "created_at": "2026-05-19T07:29:30.338Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04272,
+          43.85095
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 63,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000YiR\n�\u0003T�v7Ou��E@",
+        "location_id": "{bacc7024-b890-41d2-84d5-6b58dc393808}",
+        "name": "Concessions @ 4",
+        "category": "food_drinks",
+        "status": "verify",
+        "zone": "Hole 4",
+        "subzone": "Concessions @ 4",
+        "search_aliases": "Concessions @ 4, Concessions, Concession, Food & Drinks, Food and Drinks, Concession 4, Concessions 4, Hole 4 concessions",
+        "hole_number": null,
+        "near_hole": 4,
+        "facility_type": "concession",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "concessions-4",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Food and drinks.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05823,
+          43.85768
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 64,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\u000e\u0010���\u0003T�S�\u0007Z��E@",
+        "location_id": "{5381bb39-75cc-4d46-be9b-5d8a81119918}",
+        "name": "Concessions @ 13",
+        "category": "food_drinks",
+        "status": "verify",
+        "zone": "Hole 13",
+        "subzone": "Concessions @ 13",
+        "search_aliases": "Concessions @ 13, Concessions, Concession, Food & Drinks, Food and Drinks, Concession 13, Concessions 13, Hole 13 concessions",
+        "hole_number": null,
+        "near_hole": 13,
+        "facility_type": "concession",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "concessions-13",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Food and drinks.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.06078,
+          43.85551
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 65,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000%��1 \u0003T�\fY��9�E@",
+        "location_id": "{3ebee0ab-9206-43c8-aba3-75725a06bebf}",
+        "name": "Concessions @ 2/8",
+        "category": "food_drinks",
+        "status": "verify",
+        "zone": "Hole 2",
+        "subzone": "Concessions @ 2/8",
+        "search_aliases": "Concessions @ 2/8, Concessions, Concession, Food & Drinks, Food and Drinks, Concession 2, Concessions 2, Hole 2 concessions",
+        "hole_number": null,
+        "near_hole": 2,
+        "facility_type": "concession",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "concessions-2-8",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Food and drinks.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04884,
+          43.85333
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 66,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000@0G��\u0003T�o*Ral�E@",
+        "location_id": "{0947f939-523e-4ec8-9a65-19f509e77f1a}",
+        "name": "Lot 4",
+        "category": "parking",
+        "status": "verify",
+        "zone": "Parking",
+        "subzone": "Lot 4",
+        "search_aliases": "Lot 4, Parking 4, Parking Lot 4, Parking Lot",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "parking",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "lot-4",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Parking.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.06052,
+          43.85487
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 67,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\u001a\u0017\u000e�d\u0003T�\u001b�D���E@",
+        "location_id": "{d4320b9d-8cff-46d9-860b-17d8c0cf4b84}",
+        "name": "Lot 2",
+        "category": "parking",
+        "status": "verify",
+        "zone": "Parking",
+        "subzone": "Lot 2",
+        "search_aliases": "Lot 2, Parking 2, Parking Lot 2, Parking Lot",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "parking",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "lot-2",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Parking.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05301,
+          43.85031
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 68,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�9]\u0016\u0013\u0003T�\\�tYL�E@",
+        "location_id": "{efa02523-0e20-4ef9-ad6e-906359b3d906}",
+        "name": "Lot 5",
+        "category": "parking",
+        "status": "verify",
+        "zone": "Parking",
+        "subzone": "Lot 5",
+        "search_aliases": "Lot 5, Parking 5, Parking Lot 5, Parking Lot",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "parking",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "lot-5",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Parking.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04804,
+          43.84608
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 69,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�\u0016e6�\u0002T��(�\r��E@",
+        "location_id": "{6cd75ae6-c5a3-4c5c-878c-c082c065df0e}",
+        "name": "Lot 1",
+        "category": "parking",
+        "status": "verify",
+        "zone": "Parking",
+        "subzone": "Lot 1",
+        "search_aliases": "Lot 1, Parking 1, Parking Lot 1, Parking Lot",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "parking",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "lot-1",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Parking.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04347,
+          43.84955
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 70,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000��\u000b��\u0002T��҇.��E@",
+        "location_id": "{8fd3e481-ae6d-4307-ac71-056f437ff4c2}",
+        "name": "Lot 3",
+        "category": "parking",
+        "status": "verify",
+        "zone": "Parking",
+        "subzone": "Lot 3",
+        "search_aliases": "Lot 3, Parking 3, Parking Lot 3, Parking Lot",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "parking",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "lot-3",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Parking.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04002,
+          43.84107
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 71,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�r\u0011߉\u0003T�̴�++�E@",
+        "location_id": "{74af0077-81a3-487e-9e8c-7ed558ab3131}",
+        "name": "Shuttles",
+        "category": "transportation",
+        "status": "verify",
+        "zone": "Transportation",
+        "subzone": "Shuttles",
+        "search_aliases": "Shuttles, Shuttle, Shuttle pickup, Shuttle dropoff, Transportation",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "shuttle",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "shuttles",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Transportation.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05529,
+          43.85288
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 72,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000oG8-x\u0003T��e\u0014�-�E@",
+        "location_id": "{896bcb71-29ac-46fd-bf1f-8db12bce7be2}",
+        "name": "Admissions",
+        "category": "entrance",
+        "status": "verify",
+        "zone": "Venue",
+        "subzone": "Admissions",
+        "search_aliases": "Admissions, Entrance, Gate",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "admissions",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "admissions",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Venue.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05421,
+          43.85296
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 73,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�+H3\u0016\u0003T��C4���E@",
+        "location_id": "{303fc32c-364b-46f2-9c48-c96f9a22aff0}",
+        "name": "Volunteer Centre",
+        "category": "staff",
+        "status": "verify",
+        "zone": "Venue",
+        "subzone": "Volunteer Centre",
+        "search_aliases": "Volunteer Centre, Volunteer, Staff",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "volunteer",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "volunteer-centre",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Venue.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04823,
+          43.84777
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 74,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000A}˜.\u0003T�����x�E@",
+        "location_id": "{5a0129ad-28c1-41c7-9bc7-ab6c8d6a993b}",
+        "name": "VIP Admissions",
+        "category": "entrance",
+        "status": "verify",
+        "zone": "Venue",
+        "subzone": "VIP Admissions",
+        "search_aliases": "VIP Admissions, Entrance, Admissions, Gate",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "admissions",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "vip-admissions",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Venue.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04972,
+          43.85525
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 75,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�yS�\n\u0003T�1%��e�E@",
+        "location_id": "{7bd26f3a-ddb0-4aad-b939-3f7eb56b1241}",
+        "name": "South Admissions",
+        "category": "entrance",
+        "status": "verify",
+        "zone": "Venue",
+        "subzone": "South Admissions",
+        "search_aliases": "South Admissions, Entrance, Admissions, Gate",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "admissions",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "south-admissions",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Venue.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04752,
+          43.84686
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 76,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u00003��y\u0003T�\u001a���)�E@",
+        "location_id": "{e1b7c046-42ab-49a9-a6e5-6019ff207144}",
+        "name": "Bag Check",
+        "category": "landmark",
+        "status": "verify",
+        "zone": "Venue",
+        "subzone": "Bag Check",
+        "search_aliases": "Bag Check, Venue",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "bag_check",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "bag-check",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Venue.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05432,
+          43.85283
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 77,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000a���|\u0003T�Z\r�{,�E@",
+        "location_id": "{44de92ef-a064-4914-a972-f453b17cb2ae}",
+        "name": "Tickets /will call",
+        "category": "ticketing",
+        "status": "verify",
+        "zone": "Venue",
+        "subzone": "Tickets /will call",
+        "search_aliases": "Tickets /will call, Tickets, Will Call, Ticketing",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "ticketing",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "tickets-will-call",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Venue.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05449,
+          43.85292
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 78,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�\b���\u0003T�E���V�E@",
+        "location_id": "{3be9e5e0-03a7-413b-b4c4-181527569af2}",
+        "name": "Turkish Airlines",
+        "category": "activation",
+        "status": "verify",
+        "zone": "Activations",
+        "subzone": "Turkish Airlines",
+        "search_aliases": "Turkish Airlines, Activation, Sponsor activation",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "sponsor_activation",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "turkish-airlines",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Activations.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05583,
+          43.85421
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 79,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000:@0G�\u0003T�~:\u001e3P�E@",
+        "location_id": "{771d72a3-f7e1-4487-bb5e-5d890e8a704f}",
+        "name": "Waste Management",
+        "category": "activation",
+        "status": "verify",
+        "zone": "Activations",
+        "subzone": "Waste Management",
+        "search_aliases": "Waste Management, Activation, Sponsor activation",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "sponsor_activation",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "waste-management",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Activations.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05562,
+          43.85401
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 80,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�j��\u0003T��\u000b��N�E@",
+        "location_id": "{7ba9a11a-8160-4e47-b763-599ce359718d}",
+        "name": "Sleeman",
+        "category": "activation",
+        "status": "verify",
+        "zone": "Activations",
+        "subzone": "Sleeman",
+        "search_aliases": "Sleeman, Activation, Sponsor activation",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "sponsor_activation",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "sleeman",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Activations.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05558,
+          43.85396
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 81,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000�(yu�\u0003T���KqU�E@",
+        "location_id": "{18e2ad1d-7220-40fe-9506-fd82bb8af8b3}",
+        "name": "Matt & Steve",
+        "category": "activation",
+        "status": "verify",
+        "zone": "Activations",
+        "subzone": "Matt & Steve",
+        "search_aliases": "Matt & Steve, Activation, Sponsor activation",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "sponsor_activation",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "matt-steve",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Activations.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05557,
+          43.85417
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 82,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000+��ݓ\u0003T��r.�U�E@",
+        "location_id": "{4abd6af3-0059-4e6b-9542-83344d231dc1}",
+        "name": "Stalk & Barrel",
+        "category": "activation",
+        "status": "verify",
+        "zone": "Activations",
+        "subzone": "Stalk & Barrel",
+        "search_aliases": "Stalk & Barrel, Activation, Sponsor activation",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "sponsor_activation",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "stalk-barrel",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Activations.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.0559,
+          43.85418
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 83,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\u001b�D��\u0002T��\u001eh\u0005��E@",
+        "location_id": "{65c18260-2f52-4879-9741-4faf26db81f7}",
+        "name": "Audi",
+        "category": "activation",
+        "status": "verify",
+        "zone": "Activations",
+        "subzone": "Audi",
+        "search_aliases": "Audi, Activation, Sponsor activation",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "sponsor_activation",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "audi",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Activations.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04437,
+          43.84784
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 84,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000��9̗\u0003T��|гY�E@",
+        "location_id": "{1b1143da-64f6-4d75-8b94-c984c80f623d}",
+        "name": "ScoreBet",
+        "category": "activation",
+        "status": "verify",
+        "zone": "Activations",
+        "subzone": "ScoreBet",
+        "search_aliases": "ScoreBet, Activation, Sponsor activation",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "sponsor_activation",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "scorebet",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Activations.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05614,
+          43.8543
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 85,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000!�rh�\u0003T���4�R�E@",
+        "location_id": "{00c15582-5275-4c66-9b07-6c637464055a}",
+        "name": "50/50",
+        "category": "activation",
+        "status": "verify",
+        "zone": "Activations",
+        "subzone": "50/50",
+        "search_aliases": "50/50, Activation, Sponsor activation",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "sponsor_activation",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "50-50",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Activations.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05575,
+          43.85409
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 86,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\u001d��\u000b�\u0003T�E/�Xn�E@",
+        "location_id": "{b98f0c26-7206-49bc-ab8b-c5a8c5a27a56}",
+        "name": "Sleeman clubhouse",
+        "category": "hospitality",
+        "status": "verify",
+        "zone": "Hospitality",
+        "subzone": "Sleeman clubhouse",
+        "search_aliases": "Sleeman clubhouse, Hospitality, VIP",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "hospitality",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "sleeman-clubhouse",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Hospitality.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05762,
+          43.85493
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 87,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000S�!�u\u0003T��\rO���E@",
+        "location_id": "{49b9c454-d372-4645-98c0-0b0e51297192}",
+        "name": "Osprey Club",
+        "category": "hospitality",
+        "status": "verify",
+        "zone": "Hospitality",
+        "subzone": "Osprey Club",
+        "search_aliases": "Osprey Club, Hospitality, VIP",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "hospitality",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "osprey-club",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Hospitality.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.05405,
+          43.8561
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 88,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\u0000�M��\u0003T��|����E@",
+        "location_id": "{3680e331-7191-4235-9002-1bd98a14a08b}",
+        "name": "Heritage Sky box",
+        "category": "hospitality",
+        "status": "verify",
+        "zone": "Hospitality",
+        "subzone": "Heritage Sky box",
+        "search_aliases": "Heritage Sky box, Hospitality, VIP",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "hospitality",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "heritage-sky-box",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Hospitality.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.06034,
+          43.85748
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 89,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000$�\u0016��\u0003T���u���E@",
+        "location_id": "{d08bac63-d463-4395-8a30-a04c12d19693}",
+        "name": "Trophy Club",
+        "category": "hospitality",
+        "status": "verify",
+        "zone": "Hospitality",
+        "subzone": "Trophy Club",
+        "search_aliases": "Trophy Club, Hospitality, VIP",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "hospitality",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "trophy-club",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Hospitality.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.06108,
+          43.85635
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 90,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\u0019s�\u0012�\u0003T�}\u0005iƢ�E@",
+        "location_id": "{47b1be89-f82b-4dd5-b79e-2e6e7a5897d1}",
+        "name": "Lodges @ the Rink",
+        "category": "hospitality",
+        "status": "verify",
+        "zone": "Hospitality",
+        "subzone": "Lodges @ the Rink",
+        "search_aliases": "Lodges @ the Rink, Hospitality, VIP",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "hospitality",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "lodges-the-rink",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Hospitality.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.06165,
+          43.85653
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 91,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000���Z�\u0002T���Q\u000f��E@",
+        "location_id": "{33e51e92-3e70-4587-9b03-eaa7544e14b2}",
+        "name": "SKS Deck",
+        "category": "hospitality",
+        "status": "verify",
+        "zone": "Hospitality",
+        "subzone": "SKS Deck",
+        "search_aliases": "SKS Deck, Hospitality, VIP",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "hospitality",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "sks-deck",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Hospitality.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04415,
+          43.85013
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 92,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000\u0017HP�\u0018\u0003T�7�ُ\u0014�E@",
+        "location_id": "{ba1458d4-5ab1-4bd1-8c89-d4500bc4d294}",
+        "name": "Lodges @ 17G",
+        "category": "hospitality",
+        "status": "verify",
+        "zone": "Hole 17",
+        "subzone": "Lodges @ 17G",
+        "search_aliases": "Lodges @ 17G, Hospitality, VIP",
+        "hole_number": null,
+        "near_hole": 17,
+        "facility_type": "hospitality",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "lodges-17g",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Hospitality.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.0484,
+          43.85219
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "fid": 93,
+        "geom": "GP\u0000\u0001�\u0010\u0000\u0000\u0001\u0001\u0000\u0000\u0000��\u001a�\u0010\u0003T���d�`�E@",
+        "location_id": "{31b982bb-f21c-465e-98a8-9940dc1b4269}",
+        "name": "Heathlands Clubhouse",
+        "category": "hospitality",
+        "status": "verify",
+        "zone": "Hospitality",
+        "subzone": "Heathlands Clubhouse",
+        "search_aliases": "Heathlands Clubhouse, Hospitality, VIP",
+        "hole_number": null,
+        "near_hole": null,
+        "facility_type": "hospitality",
+        "unit_count": null,
+        "accessible": null,
+        "visible_to_guests": 1,
+        "priority": 3,
+        "arrival_notes": null,
+        "qr_slug": "heathlands-clubhouse",
+        "google_maps_url": null,
+        "apple_maps_url": null,
+        "photo": null,
+        "notes": "Coordinates source: RBC Open coordinates.xlsx. Source tab: Hospitality.",
+        "last_verified": null,
+        "created_at": "2026-05-19T08:18:40.738136Z",
+        "updated_at": "2026-05-19T08:18:40.738136Z"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -80.04791,
+          43.8467
         ]
       }
     }

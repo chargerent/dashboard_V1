@@ -51,7 +51,20 @@ const DEFAULT_MARKETING_OPTIONS = {
     buttonUrl: 'https://www.rogers.com/support/apps',
 };
 const DEFAULT_ANALYTICS_OPTIONS = { active: false };
+const PRICING_NUMERIC_FIELDS = ['taxrate', 'buyprice', 'dailyprice', 'authamount', 'initialperiod', 'overdue'];
 const isPlainObject = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
+const normalizePricingOnline = (value) => {
+    if (value == null || value === '') {
+        return true;
+    }
+
+    if (typeof value === 'string') {
+        const normalizedValue = value.trim().toLowerCase();
+        return normalizedValue !== 'false' && normalizedValue !== '0';
+    }
+
+    return value !== false && value !== 0;
+};
 const mergeMarketingLocaleValues = (value, defaults) => {
     if (typeof value === 'string') {
         return { ...defaults, english: value };
@@ -78,6 +91,19 @@ const getInitialHardware = (kiosk) => ({
     ...(kiosk?.hardware || {}),
     power: getKioskPowerThreshold(kiosk),
 });
+const getInitialPricing = (kiosk) => {
+    const pricing = { ...(kiosk?.pricing || {}) };
+
+    PRICING_NUMERIC_FIELDS.forEach(field => {
+        if (pricing[field] !== undefined && pricing[field] !== '') {
+            pricing[field] = Number(pricing[field]);
+        }
+    });
+
+    pricing.online = normalizePricingOnline(pricing.online);
+
+    return pricing;
+};
 const isV2Kiosk = (kiosk) => isNewSchemaKiosk(kiosk) || isNewBoundKioskStation(kiosk?.stationid);
 const getInitialInfo = (kiosk) => normalizeKioskInfoForSchema({
     autoGeocode: true,
@@ -173,7 +199,7 @@ function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVe
         marketingoptions: initialMarketingOptions,
         analyticsoptions: initialAnalyticsOptions,
         hardware: getInitialHardware(kiosk),
-        pricing: kiosk.pricing || {},
+        pricing: getInitialPricing(kiosk),
         ui: kiosk.ui || {}
     });
     const [originalData, setOriginalData] = useState({
@@ -183,22 +209,14 @@ function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVe
         marketingoptions: initialMarketingOptions,
         analyticsoptions: initialAnalyticsOptions,
         hardware: getInitialHardware(kiosk),
-        pricing: kiosk.pricing || {},
+        pricing: getInitialPricing(kiosk),
         ui: kiosk.ui || {}
     });
 
     useEffect(() => { // This effect resets the form state whenever the kiosk prop changes.
         const initialInfo = getInitialInfo(kiosk);
-        const initialPricing = { ...kiosk.pricing };
-        const numericPricingFields = ['taxrate', 'buyprice', 'dailyprice', 'authamount', 'initialperiod', 'overdue'];
+        const initialPricing = getInitialPricing(kiosk);
         const numericInfoFields = ['accountpercent', 'reppercent'];
-        
-        // Ensure numeric fields are numbers from the start
-        numericPricingFields.forEach(field => {
-            if (initialPricing[field] !== undefined && initialPricing[field] !== '') {
-                initialPricing[field] = Number(initialPricing[field]);
-            }
-        });
 
         numericInfoFields.forEach(field => {
             if (initialInfo[field] !== undefined && initialInfo[field] !== '') {
@@ -234,8 +252,7 @@ function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVe
         
         // For pricing section, convert specific fields to numbers.
         if (section === 'pricing') {
-            const numericPricingFields = ['taxrate', 'buyprice', 'dailyprice', 'authamount', 'initialperiod', 'overdue'];
-            if (numericPricingFields.includes(path)) {
+            if (PRICING_NUMERIC_FIELDS.includes(path)) {
                 processedValue = value === '' ? '' : Number(value);
             }
         } else if (section === 'info') {
@@ -494,7 +511,7 @@ function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVe
                         ]}
                     />
                     <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-4">
-                        <FormToggle label="Online" name="online" checked={formData.pricing?.online} section="pricing" onDataChange={onDataChange} />
+                        <FormToggle label="Online" name="online" checked={formData.pricing?.online !== false} section="pricing" onDataChange={onDataChange} />
                     </div>
                     <div className="mt-4">
                         <label className="block text-sm font-medium text-gray-700 mb-2">UIDs</label>
