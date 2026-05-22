@@ -52,6 +52,7 @@ const DEFAULT_MARKETING_OPTIONS = {
 };
 const DEFAULT_ANALYTICS_OPTIONS = { active: false };
 const PRICING_NUMERIC_FIELDS = ['taxrate', 'buyprice', 'dailyprice', 'authamount', 'initialperiod', 'overdue'];
+const PRICING_UID_FIELD_COUNT = 9;
 const isPlainObject = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
 const normalizePricingOnline = (value) => {
     if (value == null || value === '') {
@@ -64,6 +65,15 @@ const normalizePricingOnline = (value) => {
     }
 
     return value !== false && value !== 0;
+};
+const normalizePricingUids = (value) => {
+    const source = Array.isArray(value) || isPlainObject(value) ? value : {};
+    const numericKeys = Object.keys(source)
+        .map((key) => Number(key))
+        .filter((key) => Number.isInteger(key) && key >= 0);
+    const length = Math.max(PRICING_UID_FIELD_COUNT, ...numericKeys.map((key) => key + 1));
+
+    return Array.from({ length }, (_, index) => source[index] ?? '');
 };
 const mergeMarketingLocaleValues = (value, defaults) => {
     if (typeof value === 'string') {
@@ -101,6 +111,9 @@ const getInitialPricing = (kiosk) => {
     });
 
     pricing.online = normalizePricingOnline(pricing.online);
+    if (pricing.uids != null) {
+        pricing.uids = normalizePricingUids(pricing.uids);
+    }
 
     return pricing;
 };
@@ -273,7 +286,13 @@ function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVe
             const keys = path.split('.');
             let current = newFormData[section];
             for (let i = 0; i < keys.length - 1; i++) {
-                current = current[keys[i]] = current[keys[i]] || {};
+                const key = keys[i];
+                if (section === 'pricing' && key === 'uids') {
+                    current[key] = normalizePricingUids(current[key]);
+                } else if (!current[key] || typeof current[key] !== 'object') {
+                    current[key] = {};
+                }
+                current = current[key];
             }
             current[keys[keys.length - 1]] = processedValue;
 
@@ -516,7 +535,7 @@ function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVe
                     <div className="mt-4">
                         <label className="block text-sm font-medium text-gray-700 mb-2">UIDs</label>
                         <div className="grid grid-cols-3 gap-2">
-                            {Array.from({ length: 9 }).map((_, index) => (
+                            {Array.from({ length: PRICING_UID_FIELD_COUNT }).map((_, index) => (
                                 <FormInput
                                     key={`uid-${index}`}
                                     name={`uids.${index}`}
