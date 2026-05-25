@@ -182,6 +182,44 @@ const FIREBASE_SAVE_ACTIONS = {
   uichange: 'ui',
 };
 
+const COMMAND_SOCKET_OPEN_TIMEOUT_MS = 3000;
+
+function waitForOpenWebSocket(socket, timeoutMs = COMMAND_SOCKET_OPEN_TIMEOUT_MS) {
+  if (!socket) return Promise.resolve(null);
+  if (socket.readyState === WebSocket.OPEN) return Promise.resolve(socket);
+  if (socket.readyState !== WebSocket.CONNECTING) return Promise.resolve(null);
+
+  return new Promise((resolve) => {
+    let settled = false;
+    let timer = null;
+
+    const cleanup = () => {
+      socket.removeEventListener('open', handleOpen);
+      socket.removeEventListener('close', handleClose);
+      socket.removeEventListener('error', handleClose);
+      if (timer) clearTimeout(timer);
+    };
+
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(value);
+    };
+
+    const handleOpen = () => finish(socket);
+    const handleClose = () => finish(null);
+
+    timer = setTimeout(() => {
+      finish(socket.readyState === WebSocket.OPEN ? socket : null);
+    }, timeoutMs);
+
+    socket.addEventListener('open', handleOpen);
+    socket.addEventListener('close', handleClose);
+    socket.addEventListener('error', handleClose);
+  });
+}
+
 function buildClientInfoFromProfile(profile, uid) {
   if (!profile) return null;
 
@@ -944,7 +982,11 @@ function App() {
       return;
     }
 
-    if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+    const commandSocket = ws.current?.readyState === WebSocket.OPEN
+      ? ws.current
+      : await waitForOpenWebSocket(ws.current);
+
+    if (commandSocket && commandSocket.readyState === WebSocket.OPEN) {
       const timerequested = Date.now();
       const requestId = createCommandRequestId(action, stationid, moduleid);
       const baseData = {
@@ -1021,7 +1063,7 @@ function App() {
         data: commandData
       };
 
-      ws.current.send(JSON.stringify(message));
+      commandSocket.send(JSON.stringify(message));
       console.log('[WS Send]', message);
       if (action.startsWith('eject') || action === 'rent' || action === 'vend') {
         debugEjectUi('Sent eject-style command', commandData);
@@ -1043,14 +1085,20 @@ function App() {
     if (!token || !clientInfo) return;
 
     let isCleaningUp = false;
+    let reconnectTimer = null;
 
     const connect = () => {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
       if (ws.current && (ws.current.readyState === WebSocket.OPEN || ws.current.readyState === WebSocket.CONNECTING)) {
         return;
       }
-      ws.current = new WebSocket(`wss://chargerentstations.com/ws/commands?token=${token}`);
+      const socket = new WebSocket(`wss://chargerentstations.com/ws/commands?token=${token}`);
+      ws.current = socket;
 
-      ws.current.onmessage = (event) => {
+      socket.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
           console.log('[WS Receive]', data);
@@ -1289,13 +1337,16 @@ function App() {
         }
       };
 
-      ws.current.onerror = (err) => {
+      socket.onerror = (err) => {
         console.error("WebSocket error:", err);
-        ws.current.close();
+        socket.close();
       };
-      ws.current.onclose = () => {
+      socket.onclose = () => {
+        if (ws.current === socket) {
+          ws.current = null;
+        }
         if (!isCleaningUp) {
-          setTimeout(connect, 1000);
+          reconnectTimer = setTimeout(connect, 1000);
         }
       };
     };
@@ -1304,10 +1355,15 @@ function App() {
 
     return () => {
       isCleaningUp = true;
-      if (ws.current) {
-        if (ws.current.readyState === WebSocket.OPEN) {
-          ws.current.close();
-        }
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+      }
+      const socket = ws.current;
+      if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+        socket.close();
+      }
+      if (ws.current === socket) {
+        ws.current = null;
       }
     };
   }, [token, clientInfo, t, clearEjectCommandState, debugEjectUi, flashFailedEjectSlot]);
