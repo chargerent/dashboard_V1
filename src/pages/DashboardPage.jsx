@@ -503,17 +503,20 @@ return (
 
             {showWarning && <TimeoutWarningModal onStay={handleStay} onLogout={onLogout} />}
             <header className="bg-white shadow-sm">
-                <div className="max-w-screen-2xl mx-auto py-4 px-4 sm:px-4 lg:px-6 flex justify-between items-center">
-                    {/* Language buttons on the left */}
-                    <div className="flex items-center gap-2">
-                        <button onClick={() => setLanguage('en')} className={`px-2 py-1 text-sm font-bold rounded-md ${language === 'en' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}>EN</button>
-                        <button onClick={() => setLanguage('fr')} className={`px-2 py-1 text-sm font-bold rounded-md ${language === 'fr' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}>FR</button>
-                        <span className="ml-2 rounded-md bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-600">
+                <div className="max-w-screen-2xl mx-auto py-3 px-3 sm:px-4 lg:px-6">
+                    <div className="flex items-center justify-between gap-3 border-b border-gray-100 pb-3">
+                        <div className="flex items-center gap-2">
+                            <button onClick={() => setLanguage('en')} className={`px-2 py-1 text-sm font-bold rounded-md ${language === 'en' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}>EN</button>
+                            <button onClick={() => setLanguage('fr')} className={`px-2 py-1 text-sm font-bold rounded-md ${language === 'fr' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}>FR</button>
+                        </div>
+                        <span className="rounded-md bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-600 whitespace-nowrap">
                             Dashboard v{DASHBOARD_VERSION}
                         </span>
+                        <button onClick={onLogout} className="p-2 rounded-md bg-red-500 text-white hover:bg-red-600" title={t('logout')}>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+                        </button>
                     </div>
-                    {/* Action buttons on the right */}
-                    <div className="flex items-center gap-4">
+                    <div className="mt-3 flex flex-wrap items-center justify-end gap-2 sm:gap-4">
                     {hasStatusAccess && (
                         <button
                             onClick={() => setShowInitialStatus(true)}
@@ -543,7 +546,7 @@ return (
                         </>
                     )}
                     {hasReportingAccess && (
-                        <button onClick={onNavigateToReporting} className="p-2 rounded-md bg-indigo-100 text-indigo-700 hover:bg-indigo-200" title={t('reporting_page_title')}>
+                        <button onClick={onNavigateToReporting} className="hidden sm:inline-flex items-center justify-center p-2 rounded-md bg-indigo-100 text-indigo-700 hover:bg-indigo-200" title={t('reporting_page_title')}>
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                             </svg>
@@ -560,18 +563,15 @@ return (
 	                        </button>
 	                    )}
 	                    {canOpenAdminTools && (
-	                        <button onClick={onNavigateToAiBooths} className="p-2 rounded-md bg-cyan-100 text-cyan-800 hover:bg-cyan-200" title="AI Booths">
+	                        <button onClick={onNavigateToAiBooths} className="hidden sm:inline-flex items-center justify-center p-2 rounded-md bg-cyan-100 text-cyan-800 hover:bg-cyan-200" title="AI Booths">
 	                            <SparklesIcon className="h-6 w-6" />
-	                        </button>
+		                        </button>
 	                    )}
-	                    {canOpenAdminTools && (
-	                        <button onClick={onNavigateToAdmin} className="p-2 rounded-md bg-orange-100 text-orange-700 hover:bg-orange-200" title={t('admin_tools')}>
-	                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
-	                        </button>
-                    )}
-                    <button onClick={onLogout} className="p-2 rounded-md bg-red-500 text-white hover:bg-red-600" title={t('logout')}>
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-                    </button>
+		                    {canOpenAdminTools && (
+		                        <button onClick={onNavigateToAdmin} className="p-2 rounded-md bg-orange-100 text-orange-700 hover:bg-orange-200" title={t('admin_tools')}>
+		                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+		                        </button>
+	                    )}
                     </div>
                 </div>
             </header>

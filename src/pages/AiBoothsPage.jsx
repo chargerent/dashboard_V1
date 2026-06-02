@@ -43,8 +43,8 @@ const AI_BOOTH_WORKFLOW_TABS = Object.freeze([
   },
   {
     id: 'data',
-    label: 'Intake',
-    description: 'Partner uploads and review queue',
+    label: 'Data Management',
+    description: 'Live feed, partner uploads, and review queue',
   },
   {
     id: 'map',
@@ -5056,11 +5056,11 @@ export default function AiBoothsPage({
       });
       setStatus({
         state: 'success',
-        message: `Loaded ${tournaments.length} Slash Golf events for ${year}.`,
+        message: `Loaded ${tournaments.length} golf events for ${year}.`,
       });
     } catch (error) {
       console.error(error);
-      const message = error?.message || 'Unable to load Slash Golf events.';
+      const message = error?.message || 'Unable to load golf events.';
       setGolfLookupState({
         loading: false,
         error: message,
@@ -6524,16 +6524,16 @@ export default function AiBoothsPage({
               <TrophyIcon className="h-4 w-4" aria-hidden="true" />
               Live Golf Feed
             </p>
-            <h2 className="mt-2 text-2xl font-semibold text-slate-900">Slash event assignment</h2>
+            <h2 className="mt-2 text-2xl font-semibold text-slate-900">Live tournament assignment</h2>
             <p className="mt-2 max-w-2xl text-sm font-medium leading-6 text-slate-600">
-              Select the live tournament for this saved event. The concierge uses this assignment for leaderboard, player location, and player stats tools.
+              Select the live tournament for this saved {currentDeploymentLabel}. The concierge uses this assignment for leaderboard, player location, and player stats tools.
             </p>
           </div>
           <div className="rounded-md bg-slate-50 px-4 py-3 text-sm">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Assigned tournament</p>
             <p className="mt-2 max-w-xs break-words font-semibold text-slate-900">{selectedTournamentLabel}</p>
             {golfConfig.tournId ? (
-              <p className="mt-1 font-mono text-xs text-slate-500">tournId: {golfConfig.tournId}</p>
+              <p className="mt-1 font-mono text-xs text-slate-500">Tournament ID: {golfConfig.tournId}</p>
             ) : null}
           </div>
         </div>
@@ -6548,16 +6548,20 @@ export default function AiBoothsPage({
               value={golfConfig.year || getGolfLookupYear()}
             />
           </label>
-          <label className="block">
-            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Provider</span>
-            <input
-              className={FIELD_CLASSES}
-              onChange={(event) => updateGolfField('provider', event.target.value)}
-              value={golfConfig.provider}
-            />
-          </label>
+          <div className="block">
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Event lookup</span>
+            <button
+              type="button"
+              onClick={handleLoadSlashGolfEvents}
+              disabled={golfLookupState.loading}
+              className="mt-2 inline-flex min-h-[46px] w-full items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              <ArrowPathIcon className={`h-4 w-4 ${golfLookupState.loading ? 'animate-spin' : ''}`} aria-hidden="true" />
+              {golfLookupState.loading ? 'Loading events' : 'Load events'}
+            </button>
+          </div>
           <label className="block lg:col-span-2">
-            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Slash schedule</span>
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Tournament schedule</span>
             <select
               className={FIELD_CLASSES}
               disabled={golfLookupState.loading || golfLookupState.tournaments.length === 0}
@@ -6586,11 +6590,11 @@ export default function AiBoothsPage({
             />
           </label>
           <label className="block">
-            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Slash tournId</span>
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Tournament ID</span>
             <input
               className={FIELD_CLASSES}
               onChange={(event) => updateGolfField('tournId', event.target.value)}
-              placeholder="Loaded from Slash schedule"
+              placeholder="Loaded from tournament schedule"
               value={golfConfig.tournId}
             />
           </label>
@@ -6604,7 +6608,7 @@ export default function AiBoothsPage({
             />
           </label>
           <label className="block">
-            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Slash orgId</span>
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Tour org ID</span>
             <input
               className={FIELD_CLASSES}
               onChange={(event) => updateGolfField('orgId', event.target.value)}
@@ -6621,15 +6625,6 @@ export default function AiBoothsPage({
         ) : null}
 
         <div className="mt-5 flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={handleLoadSlashGolfEvents}
-            disabled={golfLookupState.loading}
-            className="inline-flex items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-          >
-            <ArrowPathIcon className={`h-4 w-4 ${golfLookupState.loading ? 'animate-spin' : ''}`} aria-hidden="true" />
-            {golfLookupState.loading ? 'Loading events' : 'Load Slash events'}
-          </button>
           <button
             type="button"
             onClick={handleSaveEvent}
@@ -6727,7 +6722,7 @@ export default function AiBoothsPage({
                 {isInstallDeployment ? 'Permanent install setup' : 'Event setup'}
               </h2>
               <p className="mt-2 max-w-2xl text-sm font-medium text-slate-600">
-                Pick the deployment type first, then move through setup, screen UI, agent sync, intake, and map testing for that same booth experience.
+                Pick the deployment type first, then move through setup, screen UI, agent sync, data management, and map testing for that same booth experience.
               </p>
             </div>
 
@@ -8017,7 +8012,7 @@ export default function AiBoothsPage({
 	            </div>
 		          </div>
 
-		          {!isInstallDeployment ? renderLiveGolfDataPanel() : null}
+		          {renderLiveGolfDataPanel()}
 
 		          <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-md sm:p-6">
 		            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">

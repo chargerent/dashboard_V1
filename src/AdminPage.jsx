@@ -34,6 +34,7 @@ const commandsList = [
   "connectivity",
   "reboot",
   "reload",
+  "audio",
   "disable",
   "client edit",
 ];

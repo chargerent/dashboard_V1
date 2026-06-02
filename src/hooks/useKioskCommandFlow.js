@@ -1,5 +1,26 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { getKioskPowerThreshold, isNewSchemaKiosk } from '../utils/helpers';
+import { logKioskInteraction } from '../utils/kioskInteractionDebug';
+
+const summarizeCommandDetails = (details) => {
+  if (!details) return null;
+
+  return {
+    stationid: details.stationid,
+    moduleid: details.moduleid,
+    slotid: details.slotid,
+    action: details.action,
+    provisionid: details.provisionid,
+    uiVersion: details.uiVersion,
+    chargerid: details.chargerid,
+    volume: details.volume,
+    muted: details.muted,
+    hasKioskPayload: Boolean(details.kiosk),
+    hasCheckbox: Boolean(details.checkbox),
+    hasLockReason: Boolean(details.lockReason),
+    confirmationText: details.confirmationText,
+  };
+};
 
 export default function useKioskCommandFlow({
   allStationsData,
@@ -11,12 +32,30 @@ export default function useKioskCommandFlow({
   const [commandDetails, setCommandDetails] = useState(null);
   const [commandModalOpen, setCommandModalOpen] = useState(false);
 
+  useEffect(() => {
+    logKioskInteraction('command-modal-state', {
+      isOpen: commandModalOpen,
+      details: summarizeCommandDetails(commandDetails),
+    });
+  }, [commandDetails, commandModalOpen]);
+
   const handleSlotClick = useCallback((stationid, moduleid, slotid) => {
     const confirmationText = `${t('eject_confirmation')} ${slotid}?`;
     const targetKiosk = allStationsData.find((kiosk) => kiosk.stationid === stationid);
     const targetModule = targetKiosk?.modules?.find((module) => module.id === moduleid);
     const targetSlot = targetModule?.slots?.find((slot) => slot.position === slotid);
     const chargerid = Number(targetSlot?.sn || 0);
+
+    logKioskInteraction('slot-eject-handler-received', {
+      stationid,
+      moduleid,
+      slotid,
+      foundKiosk: Boolean(targetKiosk),
+      foundModule: Boolean(targetModule),
+      foundSlot: Boolean(targetSlot),
+      chargerid: chargerid > 0 ? chargerid : null,
+      confirmationText,
+    });
 
     setCommandDetails({
       stationid,
@@ -43,11 +82,28 @@ export default function useKioskCommandFlow({
       }
     }
 
+    logKioskInteraction('slot-lock-handler-received', {
+      stationid,
+      moduleid,
+      slotid,
+      action,
+      isCurrentlyLocked,
+      foundKiosk: Boolean(targetKiosk),
+      lockReason,
+      confirmationText,
+    });
+
     setCommandDetails({ stationid, moduleid, slotid, action, confirmationText, lockReason });
     setCommandModalOpen(true);
   }, [allStationsData, t]);
 
   const handleSendCommand = useCallback((confirmationResult = null) => {
+    logKioskInteraction('command-modal-confirmed', {
+      details: summarizeCommandDetails(commandDetails),
+      confirmationResultType: typeof confirmationResult,
+      confirmationResult: typeof confirmationResult === 'string' ? confirmationResult : confirmationResult || null,
+    });
+
     setCommandModalOpen(false);
 
     if (!commandDetails) {
@@ -66,6 +122,7 @@ export default function useKioskCommandFlow({
       }
 
       const slotsToEject = [];
+      const ejectStartedAt = Date.now();
       const powerThreshold = getKioskPowerThreshold(targetKiosk);
       const trackSlotForEject = (trackedModuleId, trackedSlotId, trackedChargerId = null) => {
         const normalizedSlotId = Number(trackedSlotId);
@@ -78,6 +135,7 @@ export default function useKioskCommandFlow({
           stationid,
           moduleid: trackedModuleId,
           slotid: normalizedSlotId,
+          startedAt: ejectStartedAt,
           ...(Number.isFinite(normalizedChargerId) && normalizedChargerId > 0
             ? { chargerid: normalizedChargerId }
             : {}),
@@ -168,6 +226,7 @@ export default function useKioskCommandFlow({
       ...((commandDetails.action === 'lock slot' || commandDetails.action === 'unlock slot' || commandDetails.action === 'eject specific' || commandDetails.action === 'rent' || commandDetails.action === 'vend') && { slotid: commandDetails.slotid, info: lockReason }),
       ...((commandDetails.action === 'eject specific' || commandDetails.action === 'vend') && commandDetails.chargerid ? { chargerid: commandDetails.chargerid } : {}),
       ...((commandDetails.action === 'eject count' || commandDetails.action === 'reboot module') && { slotid: commandDetails.slotid }),
+      ...(commandDetails.action === 'set volume' && { volume: commandDetails.volume, muted: commandDetails.muted === true }),
       ...extraConfirmationDetails,
     };
 
@@ -221,6 +280,16 @@ export default function useKioskCommandFlow({
     const targetKiosk = allStationsData.find((kiosk) => kiosk.stationid === stationid);
     const commandDetailsPayload = { stationid, action, moduleid, provisionid, uiVersion, ...details };
 
+    logKioskInteraction('general-command-handler-received', {
+      stationid,
+      action,
+      moduleid,
+      provisionid,
+      uiVersion,
+      foundKiosk: Boolean(targetKiosk),
+      details,
+    });
+
     if (action === 'disable' && targetKiosk?.disabled) {
       action = 'enable';
     }
@@ -253,6 +322,8 @@ export default function useKioskCommandFlow({
     } else if (action === 'refund') {
       onCommand(stationid, 'refund', null, null, null, details);
       return;
+    } else if (action === 'set volume') {
+      confirmationText = `${t('set_volume_confirmation')} ${details?.volume ?? 0}%?`;
     } else if (action === 'rent') {
       confirmationText = t('rent_confirmation');
     } else if (action === 'eject count') {

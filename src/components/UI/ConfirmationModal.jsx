@@ -1,6 +1,7 @@
 // src/components/UI/ConfirmationModal.jsx
 
 import { useState, useEffect } from 'react';
+import { logKioskInteraction } from '../../utils/kioskInteractionDebug';
 
 function ConfirmationModal({ isOpen, onClose, onConfirm, details, t }) {
     const [reason, setReason] = useState('');
@@ -13,7 +14,25 @@ function ConfirmationModal({ isOpen, onClose, onConfirm, details, t }) {
         }
     }, [details, isOpen]);
 
+    useEffect(() => {
+        logKioskInteraction('confirmation-modal-render-state', {
+            isOpen,
+            stationid: details?.stationid,
+            moduleid: details?.moduleid,
+            slotid: details?.slotid,
+            action: details?.action,
+            hasConfirmationText: Boolean(details?.confirmationText),
+        });
+    }, [details, isOpen]);
+
     const handleConfirm = () => {
+        logKioskInteraction('confirmation-modal-confirm-click', {
+            action: details?.action,
+            stationid: details?.stationid,
+            moduleid: details?.moduleid,
+            slotid: details?.slotid,
+        });
+
         if (details?.action === 'lock slot') {
             onConfirm(reason);
             return;

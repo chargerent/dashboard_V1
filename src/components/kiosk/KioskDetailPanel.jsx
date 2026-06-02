@@ -1,8 +1,9 @@
 // src/components/kiosk/KioskDetailPanel.jsx
 
-import React, { useMemo, useCallback } from 'react';
+import React, { useMemo, useCallback, useEffect } from 'react';
 import KioskControlPanel from './KioskControlPanel';
 import { getKioskPowerThreshold, isKioskOnline, isModuleOnline, isNewSchemaKiosk } from '../../utils/helpers';
+import { installKioskInteractionDebugCapture, logKioskInteraction } from '../../utils/kioskInteractionDebug';
 
 // --- Sub-component for the charger status code ---
 const StatusIndicator = ({ status }) => {
@@ -52,6 +53,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     const canUpdateModules = clientInfo.commands.updates && isV2Kiosk;
     const showInlineModuleIds = ['CT3', 'CT4', 'CT8', 'CT12', 'CK48'].includes(kiosk.hardware?.type);
     const chargeReadyThreshold = getKioskPowerThreshold(kiosk);
+    useEffect(() => installKioskInteractionDebugCapture(), []);
     const ck48PrimaryAsset = useMemo(() => {
         if (kiosk?.media?.active !== true) {
             return null;
@@ -125,13 +127,21 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
     }, []);
     const handleModuleUpdate = useCallback((moduleId) => {
+        logKioskInteraction('module-update-click-handler', {
+            stationId: kiosk.stationid,
+            moduleId,
+        });
         onCommand(kiosk.stationid, 'update module', moduleId);
     }, [kiosk.stationid, onCommand]);
     const handleNavigateToCharger = useCallback((event, chargerSn) => {
         event.stopPropagation();
+        logKioskInteraction('charger-link-click-handler', {
+            stationId,
+            chargerSn,
+        }, event);
         if (!chargerSn || !onNavigateToChargers) return;
         onNavigateToChargers(String(chargerSn));
-    }, [onNavigateToChargers]);
+    }, [onNavigateToChargers, stationId]);
     const compactHeaderModules = useMemo(() => (
         Array.isArray(kiosk.modules)
             ? kiosk.modules.map((module, index) => {
@@ -260,8 +270,20 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
             <div className="flex items-center gap-1 mt-1 pt-1 border-t border-gray-200">
                 {canEjectModule && (
                     <button
+                        type="button"
                         title={t('eject_all_from_module')}
-                        onClick={(e) => { e.stopPropagation(); onCommand(stationId, 'eject module', module.id); }}
+                        data-kiosk-action="eject module"
+                        data-kiosk-stationid={stationId}
+                        data-kiosk-moduleid={module.id}
+                        data-kiosk-disabled-reason={!canEjectModule ? 'permission' : ''}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            logKioskInteraction('module-eject-click-handler', {
+                                stationId,
+                                moduleId: module.id,
+                            }, e);
+                            onCommand(stationId, 'eject module', module.id);
+                        }}
                         className="p-1 flex-1 text-gray-500 hover:bg-gray-100 rounded flex justify-center items-center"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -271,8 +293,21 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                 )}
                 {canRebootModule && (
                     <button
+                        type="button"
                         title={t('reboot_module')}
-                        onClick={(e) => { e.stopPropagation(); onCommand(stationId, 'reboot module', module.id); }}
+                        data-kiosk-action="reboot module"
+                        data-kiosk-stationid={stationId}
+                        data-kiosk-moduleid={module.id}
+                        data-kiosk-disabled-reason={!isOnline ? 'offline' : ''}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            logKioskInteraction('module-reboot-click-handler', {
+                                stationId,
+                                moduleId: module.id,
+                                isOnline,
+                            }, e);
+                            onCommand(stationId, 'reboot module', module.id);
+                        }}
                         disabled={!isOnline}
                         className="p-1 flex-1 text-gray-500 hover:bg-gray-100 rounded flex justify-center items-center disabled:cursor-not-allowed disabled:text-gray-300 disabled:hover:bg-transparent"
                     >
@@ -289,13 +324,38 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         const canEject = clientInfo.commands.eject;
         const canLock = clientInfo.commands.lock;
         const hasCharger = (slot.sstat && slot.sstat !== '0C') || slot.isSstatError;
+        const ejectDisabledReason = !canEject ? 'permission' : !isOnline ? 'offline' : !hasCharger ? 'empty' : '';
+        const lockDisabledReason = !isOnline ? 'offline' : '';
 
         return (
-            <div className={`relative flex items-stretch p-0.5 rounded-md border transition-all duration-300 text-left ${style.className} ${style.glow ? 'slot-glow' : ''}`}>
+            <div
+                className={`relative flex items-stretch p-0.5 rounded-md border transition-all duration-300 text-left ${style.className} ${style.glow ? 'slot-glow' : ''}`}
+                data-kiosk-slot-debug="true"
+                data-kiosk-stationid={stationId}
+                data-kiosk-moduleid={module.id}
+                data-kiosk-slotid={slot.position}
+            >
                 {/* Eject Button */}
                 <div className="flex-grow flex items-center justify-start p-0.5 rounded-l-md overflow-hidden">
                     <button
-                        onClick={() => onSlotClick(stationId, module.id, slot.position)}
+                        type="button"
+                        data-kiosk-action="slot eject"
+                        data-kiosk-stationid={stationId}
+                        data-kiosk-moduleid={module.id}
+                        data-kiosk-slotid={slot.position}
+                        data-kiosk-disabled-reason={ejectDisabledReason}
+                        onClick={(event) => {
+                            logKioskInteraction('slot-eject-click-handler', {
+                                stationId,
+                                moduleId: module.id,
+                                slotid: slot.position,
+                                canEject,
+                                isOnline,
+                                hasCharger,
+                                disabledReason: ejectDisabledReason,
+                            }, event);
+                            onSlotClick(stationId, module.id, slot.position);
+                        }}
                         disabled={!canEject || !isOnline || !hasCharger}
                         className="flex min-w-0 flex-grow items-center justify-start disabled:cursor-not-allowed"
                     >
@@ -311,6 +371,10 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                     {hasCharger && (
                         <button
                             type="button"
+                            data-kiosk-action="charger link"
+                            data-kiosk-stationid={stationId}
+                            data-kiosk-moduleid={module.id}
+                            data-kiosk-slotid={slot.position}
                             onClick={(event) => handleNavigateToCharger(event, slot.sn)}
                             className="ml-2 shrink-0 text-[10px] font-mono leading-tight text-sky-700 underline decoration-sky-300 underline-offset-2 hover:text-sky-900"
                             title={`${t('chargers_page_title')}: ${slot.sn}`}
@@ -324,7 +388,23 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                 {canLock && (
                     <div className="flex flex-shrink-0 items-center border-l border-gray-300/50">
                         <button
-                            onClick={() => onLockSlot(stationId, module.id, slot.position, slot.isLocked)}
+                            type="button"
+                            data-kiosk-action={slot.isLocked ? 'unlock slot' : 'lock slot'}
+                            data-kiosk-stationid={stationId}
+                            data-kiosk-moduleid={module.id}
+                            data-kiosk-slotid={slot.position}
+                            data-kiosk-disabled-reason={lockDisabledReason}
+                            onClick={(event) => {
+                                logKioskInteraction('slot-lock-click-handler', {
+                                    stationId,
+                                    moduleId: module.id,
+                                    slotid: slot.position,
+                                    isCurrentlyLocked: slot.isLocked,
+                                    isOnline,
+                                    disabledReason: lockDisabledReason,
+                                }, event);
+                                onLockSlot(stationId, module.id, slot.position, slot.isLocked);
+                            }}
                             disabled={!isOnline}
                             className="flex items-center justify-center w-8 h-8 rounded-r-md hover:bg-gray-200/50 disabled:cursor-not-allowed"
                             title={slot.isLocked ? t('unlock_slot') : t('lock_slot')}
@@ -509,12 +589,40 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         const hasCharger = (slot.sstat && slot.sstat !== '0C') || slot.isSstatError;
         const canEject = clientInfo.commands.eject;
         const canLock = clientInfo.commands.lock;
+        const ejectDisabledReason = !canEject ? 'permission' : !isOnline ? 'offline' : !hasCharger ? 'empty' : '';
+        const lockDisabledReason = !isOnline ? 'offline' : '';
 
         return (
-            <div className={`relative min-h-[40px] rounded-md border p-0.5 text-left transition-all duration-300 ${style.className} ${style.glow ? 'slot-glow' : ''}`}>
+            <div
+                className={`relative min-h-[40px] rounded-md border p-0.5 text-left transition-all duration-300 ${style.className} ${style.glow ? 'slot-glow' : ''}`}
+                data-kiosk-slot-debug="true"
+                data-kiosk-stationid={kiosk.stationid}
+                data-kiosk-moduleid={module.id}
+                data-kiosk-slotid={slot.position}
+            >
                 <div className="flex h-full w-full min-w-0 items-start gap-1.5 rounded-md px-2 py-0.5 pr-7">
                     <button
-                        onClick={() => hasCharger && canEject && onSlotClick(kiosk.stationid, module.id, slot.position)}
+                        type="button"
+                        data-kiosk-action="compact slot eject"
+                        data-kiosk-stationid={kiosk.stationid}
+                        data-kiosk-moduleid={module.id}
+                        data-kiosk-slotid={slot.position}
+                        data-kiosk-disabled-reason={ejectDisabledReason}
+                        onClick={(event) => {
+                            logKioskInteraction('compact-slot-eject-click-handler', {
+                                stationId: kiosk.stationid,
+                                moduleId: module.id,
+                                slotid: slot.position,
+                                displayPosition,
+                                canEject,
+                                isOnline,
+                                hasCharger,
+                                disabledReason: ejectDisabledReason,
+                            }, event);
+                            if (hasCharger && canEject) {
+                                onSlotClick(kiosk.stationid, module.id, slot.position);
+                            }
+                        }}
                         disabled={!canEject || !isOnline || !hasCharger}
                         className="flex min-w-0 flex-grow items-start gap-1.5 disabled:cursor-not-allowed"
                         title={hasCharger ? `SN ${slot.sn}` : `Slot ${displayPosition || slot.position}`}
@@ -537,6 +645,10 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                     {hasCharger && (
                         <button
                             type="button"
+                            data-kiosk-action="compact charger link"
+                            data-kiosk-stationid={kiosk.stationid}
+                            data-kiosk-moduleid={module.id}
+                            data-kiosk-slotid={slot.position}
                             onClick={(event) => handleNavigateToCharger(event, slot.sn)}
                             className="absolute right-7 top-1.5 truncate font-mono text-[9px] leading-tight text-sky-700 underline decoration-sky-300 underline-offset-2 hover:text-sky-900"
                             title={`${t('chargers_page_title')}: ${slot.sn}`}
@@ -548,8 +660,23 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
 
                 {canLock && (
                     <button
+                        type="button"
+                        data-kiosk-action={slot.isLocked ? 'compact unlock slot' : 'compact lock slot'}
+                        data-kiosk-stationid={kiosk.stationid}
+                        data-kiosk-moduleid={module.id}
+                        data-kiosk-slotid={slot.position}
+                        data-kiosk-disabled-reason={lockDisabledReason}
                         onClick={(event) => {
                             event.stopPropagation();
+                            logKioskInteraction('compact-slot-lock-click-handler', {
+                                stationId: kiosk.stationid,
+                                moduleId: module.id,
+                                slotid: slot.position,
+                                displayPosition,
+                                isCurrentlyLocked: slot.isLocked,
+                                isOnline,
+                                disabledReason: lockDisabledReason,
+                            }, event);
                             onLockSlot(kiosk.stationid, module.id, slot.position, slot.isLocked);
                         }}
                         disabled={!isOnline}
@@ -790,7 +917,11 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     };
     
     return (
-            <div className={`detail-panel-enter ${isVisible ? 'detail-panel-enter-active' : ''}`}>
+            <div
+                className={`detail-panel-enter ${isVisible ? 'detail-panel-enter-active' : ''}`}
+                data-kiosk-detail-panel="true"
+                data-kiosk-stationid={stationId}
+            >
             <div className="flex flex-col gap-2 p-2 bg-gray-100 rounded-b-lg border-t border-gray-200">
                 {hasAnyCommands && (
                     <div className="w-full">

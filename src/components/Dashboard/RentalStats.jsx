@@ -80,7 +80,12 @@ function RentalStats({ rentalData, clientInfo, referenceTime, stationId, kiosks,
                     <p className={`${valueClass} font-bold text-gray-700 leading-tight`}>{count}</p>
                 )}
                 {(clientInfo?.features?.rental_revenue || clientInfo?.isAdmin) && (
-                    <p className="text-sm font-semibold text-green-600">{symbol}{revenue.toFixed(2)} / {initialCharge.toFixed(2)}</p>
+                    <p className="text-sm font-semibold text-green-600">
+                        <span className="block sm:inline">{symbol}{revenue.toFixed(0)}</span>
+                        <span className="hidden sm:inline"> / </span>
+                        <span className="mx-auto my-1 block h-px w-10 bg-green-300 sm:hidden" aria-hidden="true"></span>
+                        <span className="block sm:inline">{symbol}{initialCharge.toFixed(0)}</span>
+                    </p>
                 )}
                 <p className="text-xs text-gray-500 mt-1">{t(period)}</p>
             </div>
@@ -104,7 +109,7 @@ function RentalStats({ rentalData, clientInfo, referenceTime, stationId, kiosks,
                 <StatBox period="days_30" count={stats.last30Days.count} revenue={stats.last30Days.revenue} initialCharge={stats.last30Days.initialCharge} symbol={stats.symbol} onClick={onShowRentalDetails ? () => onShowRentalDetails('30days') : null} />
                 {showLeaseRevenue && (
                     <div className="bg-gray-100 p-2 rounded-md text-center flex flex-col justify-center">
-                        <p className={`${valueClass} font-bold text-purple-600 leading-tight`}>{stats.symbol}{leaseRevenue}</p>
+                        <p className="text-sm font-semibold text-purple-600 leading-tight">{stats.symbol}{leaseRevenue}</p>
                         {showRepLeaseCommission && (
                             <p className="text-xs font-semibold text-green-600">
                                 {stats.symbol}{repLeaseCommission.toFixed(2)}

@@ -128,6 +128,51 @@ function createCommandRequestId(action, stationid, moduleid) {
   return `${prefix}-${targetStation}-${targetModule}-${Date.now()}-${randomSegment}`;
 }
 
+function normalizeCommandScopeId(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') {
+    return normalizeCommandScopeId(value.id || value.socketId || value.socketid || value.sessionId || value.sessionid);
+  }
+  return String(value).trim();
+}
+
+function collectCommandScopeIds(source, fields) {
+  if (!source || typeof source !== 'object') return [];
+
+  return fields
+    .map((field) => normalizeCommandScopeId(source[field]))
+    .filter(Boolean);
+}
+
+function getCommandResponseRequestIds(data) {
+  const requestIdFields = ['requestId', 'requestid', 'commandRequestId', 'bulkRequestId', 'parentRequestId'];
+  const sources = [data, data?.payload, data?.data, data?.command].filter(Boolean);
+  return [...new Set(sources.flatMap((source) => collectCommandScopeIds(source, requestIdFields)))];
+}
+
+function getCommandResponseAdminId(data) {
+  const adminFields = ['admin', '_session', 'socketId', 'socketid', 'sessionId', 'sessionid', 'clientSocketId'];
+  const sources = [data, data?.payload, data?.data, data?.command].filter(Boolean);
+  const [adminId = ''] = sources.flatMap((source) => collectCommandScopeIds(source, adminFields));
+  return adminId;
+}
+
+function getMatchingOutgoingCommandScope(scopes, requestIds) {
+  for (const requestId of requestIds) {
+    if (scopes.has(requestId)) {
+      return scopes.get(requestId);
+    }
+
+    for (const [outgoingRequestId, scope] of scopes.entries()) {
+      if (requestId.startsWith(`${outgoingRequestId}-`)) {
+        return scope;
+      }
+    }
+  }
+
+  return null;
+}
+
 function getKioskRecencyTimestamp(kiosk) {
   const rawTimestamp = kiosk?.lastUpdated || kiosk?.lastUpdate || kiosk?.timestamp || '';
   if (!rawTimestamp) return 0;
@@ -159,6 +204,28 @@ function clearDerivedSlot(slot) {
   };
 }
 
+function normalizeAudioVolume(value, fallback = 0) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return Math.min(100, Math.max(0, Math.round(parsed)));
+}
+
+function withAudioHardwareState(station, volume) {
+  const normalizedVolume = normalizeAudioVolume(volume);
+
+  return {
+    ...station,
+    hardware: {
+      ...(station.hardware || {}),
+      volume: normalizedVolume,
+      audio: normalizedVolume === 0 ? 'off' : 'on',
+    },
+  };
+}
+
 function normalizeKioskPayloadForSave(action, kioskPayload, usesNewSchemaInfo) {
   if (!kioskPayload || typeof kioskPayload !== 'object') return kioskPayload;
   if (action !== 'infochange' || !kioskPayload.info || typeof kioskPayload.info !== 'object') {
@@ -183,6 +250,13 @@ const FIREBASE_SAVE_ACTIONS = {
 };
 
 const COMMAND_SOCKET_OPEN_TIMEOUT_MS = 3000;
+const COMMAND_RESPONSE_SCOPE_TTL_MS = 10 * 60 * 1000;
+const DEFAULT_EJECT_SLOT_TIMEOUT_MS = 90 * 1000;
+const EJECT_SLOT_TIMEOUT_MS_CONFIG = Number(import.meta.env.VITE_EJECT_SLOT_TIMEOUT_MS);
+const EJECT_SLOT_TIMEOUT_MS = Number.isFinite(EJECT_SLOT_TIMEOUT_MS_CONFIG) && EJECT_SLOT_TIMEOUT_MS_CONFIG > 0
+  ? EJECT_SLOT_TIMEOUT_MS_CONFIG
+  : DEFAULT_EJECT_SLOT_TIMEOUT_MS;
+const EJECT_TIMEOUT_CHECK_INTERVAL_MS = 1000;
 
 function waitForOpenWebSocket(socket, timeoutMs = COMMAND_SOCKET_OPEN_TIMEOUT_MS) {
   if (!socket) return Promise.resolve(null);
@@ -254,6 +328,7 @@ function buildClientInfoFromProfile(profile, uid) {
     connectivity: false,
     reboot: false,
     reload: false,
+    audio: false,
     disable: false,
     "client edit": false
   };
@@ -297,6 +372,7 @@ function buildClientInfoFromProfile(profile, uid) {
       connectivity: true,
       reboot: true,
       reload: true,
+      audio: true,
       disable: true,
       "client edit": true,
     };
@@ -373,6 +449,9 @@ function App() {
   const ws = useRef(null);
   const ignoredKiosksRef = useRef({});
   const failedEjectTimersRef = useRef(new Map());
+  const ejectingSlotsRef = useRef([]);
+  const outgoingCommandScopesRef = useRef(new Map());
+  const currentSocketSessionIdRef = useRef('');
   const startupListenerRef = useRef({ kiosksLogged: false, rentalsLogged: false });
 
   const [lockingSlots, setLockingSlots] = useState([]);
@@ -457,6 +536,10 @@ function App() {
       failedEjectTimers.clear();
     };
   }, []);
+
+  useEffect(() => {
+    ejectingSlotsRef.current = ejectingSlots;
+  }, [ejectingSlots]);
 
   const { showWarning, handleStay } = useIdleTimer({
     onIdle: () => {}, // The hook now returns showWarning, so onIdle can be empty
@@ -775,6 +858,43 @@ function App() {
     setEjectingSlots((prev) => prev.filter((slot) => !settledSlotKeys.has(getTrackedSlotKey(slot))));
   }, [allStationsData, debugEjectUi, ejectingSlots]);
 
+  useEffect(() => {
+    if (ejectingSlots.length === 0) return;
+
+    const checkTimedOutEjectSlots = () => {
+      const activeSlots = ejectingSlotsRef.current;
+      if (activeSlots.length === 0) return;
+
+      const now = Date.now();
+      const timedOutSlots = activeSlots.filter((slot) => {
+        const startedAt = Number(slot?.startedAt);
+        return Number.isFinite(startedAt) && startedAt > 0 && now - startedAt >= EJECT_SLOT_TIMEOUT_MS;
+      });
+      if (timedOutSlots.length === 0) return;
+
+      const timedOutSlotKeys = new Set(timedOutSlots.map(getTrackedSlotKey));
+
+      debugEjectUi('Eject slots timed out', timedOutSlots);
+      timedOutSlots.forEach((slot) => {
+        flashFailedEjectSlot(slot.stationid, slot.moduleid, slot.slotid);
+      });
+
+      setEjectingSlots((prev) => prev.filter((slot) => !timedOutSlotKeys.has(getTrackedSlotKey(slot))));
+      setPendingSlots((prev) => prev.filter((slot) => !timedOutSlotKeys.has(getTrackedSlotKey(slot))));
+      setCommandStatus({
+        state: 'error',
+        message: timedOutSlots.length === 1
+          ? t('eject_timeout_single')
+          : t('eject_timeout_multiple').replace('{count}', timedOutSlots.length),
+      });
+    };
+
+    const interval = setInterval(checkTimedOutEjectSlots, EJECT_TIMEOUT_CHECK_INTERVAL_MS);
+    checkTimedOutEjectSlots();
+
+    return () => clearInterval(interval);
+  }, [debugEjectUi, ejectingSlots.length, flashFailedEjectSlot, t]);
+
   const latestTimestamp = useMemo(() => {
     if (!allStationsData?.length) {
       return new Date();
@@ -861,6 +981,97 @@ function App() {
       ignoredKiosksRef.current = newIgnored;
     }
   }, []);
+
+  const pruneOutgoingCommandScopes = useCallback((now = Date.now()) => {
+    for (const [requestId, scope] of outgoingCommandScopesRef.current.entries()) {
+      if (now >= Number(scope?.expiresAt || 0)) {
+        outgoingCommandScopesRef.current.delete(requestId);
+      }
+    }
+  }, []);
+
+  const rememberOutgoingCommandScope = useCallback((requestId, metadata = {}) => {
+    const normalizedRequestId = normalizeCommandScopeId(requestId);
+    if (!normalizedRequestId) return;
+
+    const now = Date.now();
+    pruneOutgoingCommandScopes(now);
+    outgoingCommandScopesRef.current.set(normalizedRequestId, {
+      ...metadata,
+      requestId: normalizedRequestId,
+      createdAt: now,
+      expiresAt: now + COMMAND_RESPONSE_SCOPE_TTL_MS,
+    });
+  }, [pruneOutgoingCommandScopes]);
+
+  const getCommandStatusVisibility = useCallback((data) => {
+    const username = String(clientInfo?.username || '').trim().toLowerCase();
+    if (username === 'chargerent') {
+      return { shouldShow: true, reason: 'chargerent' };
+    }
+
+    if (!data || typeof data !== 'object') {
+      return { shouldShow: false, reason: 'unscoped-message' };
+    }
+
+    pruneOutgoingCommandScopes();
+
+    const requestIds = getCommandResponseRequestIds(data);
+    const adminId = getCommandResponseAdminId(data);
+    const matchingScope = getMatchingOutgoingCommandScope(outgoingCommandScopesRef.current, requestIds);
+
+    if (matchingScope) {
+      if (adminId && !currentSocketSessionIdRef.current) {
+        currentSocketSessionIdRef.current = adminId;
+      }
+      return {
+        shouldShow: true,
+        reason: 'matching-request',
+        requestIds,
+        adminId,
+        matchedRequestId: matchingScope.requestId,
+      };
+    }
+
+    const currentSocketSessionId = currentSocketSessionIdRef.current;
+    if (adminId && currentSocketSessionId && adminId === currentSocketSessionId) {
+      return {
+        shouldShow: true,
+        reason: 'matching-admin',
+        requestIds,
+        adminId,
+        matchedRequestId: '',
+      };
+    }
+
+    return {
+      shouldShow: false,
+      reason: adminId ? 'different-admin' : (requestIds.length > 0 ? 'unknown-request' : 'missing-scope'),
+      requestIds,
+      adminId,
+      matchedRequestId: '',
+    };
+  }, [clientInfo?.username, pruneOutgoingCommandScopes]);
+
+  const setScopedCommandStatus = useCallback((data, status) => {
+    const visibility = getCommandStatusVisibility(data);
+    if (visibility.shouldShow) {
+      setCommandStatus(status);
+      return true;
+    }
+
+    console.info('[WS Receive] Suppressed toast for different command scope', {
+      action: data?.action,
+      status: data?.status,
+      status_en: data?.status_en,
+      reason: visibility.reason,
+      requestIds: visibility.requestIds,
+      admin: visibility.adminId,
+      currentSocketSessionId: currentSocketSessionIdRef.current,
+      user: clientInfo?.username,
+    });
+    return false;
+  }, [clientInfo?.username, getCommandStatusVisibility]);
 
   const onCommand = useCallback(async (stationid, action, moduleid = null, provisionid = null, uiVersion = null, details = null) => {
     const targetKiosk = stationid
@@ -999,6 +1210,9 @@ function App() {
         ...(uiVersion && { version: uiVersion }),
         ...(moduleid && { moduleid }),
       };
+      const audioVolume = action === 'set volume'
+        ? normalizeAudioVolume(details?.volume, 0)
+        : null;
 
       let commandData = {};
       switch (action) {
@@ -1046,6 +1260,13 @@ function App() {
         case 'provision':
           commandData = { ...baseData, kiosk: details.kiosk };
           break;
+        case 'set volume':
+          commandData = {
+            ...baseData,
+            volume: audioVolume,
+            muted: details?.muted === true || audioVolume === 0,
+          };
+          break;
         default:
           commandData = {
             ...baseData,
@@ -1063,10 +1284,22 @@ function App() {
         data: commandData
       };
 
+      rememberOutgoingCommandScope(requestId, {
+        action,
+        stationid,
+        moduleid,
+      });
       commandSocket.send(JSON.stringify(message));
       console.log('[WS Send]', message);
       if (action.startsWith('eject') || action === 'rent' || action === 'vend') {
         debugEjectUi('Sent eject-style command', commandData);
+      }
+      if (action === 'set volume') {
+        setAllStationsData((prevStations) =>
+          prevStations.map((station) =>
+            station.stationid === stationid ? withAudioHardwareState(station, audioVolume) : station
+          )
+        );
       }
 
       console.log(`[2. IGNORE] Ignoring Firestore updates for ${stationid} for 30s.`);
@@ -1076,7 +1309,7 @@ function App() {
     } else {
       setCommandStatus({ state: 'error', message: t('connection_lost') });
     }
-  }, [allStationsData, debugEjectUi, token, t]);
+  }, [allStationsData, debugEjectUi, rememberOutgoingCommandScope, token, t]);
 
   // ---------------------------------------------
   // WebSocket connect (FULL HANDLER INCLUDED)
@@ -1117,29 +1350,29 @@ function App() {
 
           if (data.action === 'ngrok connect' || data.action === 'ngrok disconnect' || data.action === 'ssh connect' || data.action === 'ssh disconnect') {
             const isSuccess = data.status == 1;
-            setCommandStatus({ state: isSuccess ? 'success' : 'error', message: data.status_en || (isSuccess ? t('command_success') : t('command_failed')) });
+            const shouldShowCommandStatus = setScopedCommandStatus(data, { state: isSuccess ? 'success' : 'error', message: data.status_en || (isSuccess ? t('command_success') : t('command_failed')) });
             if (isSuccess) {
               const isConnecting = data.action.endsWith('connect');
               const type = data.action.startsWith('ngrok') ? 'ngrok' : 'ssh';
               setAllStationsData(prev => prev.map(station =>
                 station.stationid === data.kiosk ? { ...station, [type]: isConnecting } : station
               ));
-              if (isConnecting && type === 'ngrok' && data.status_en && data.action === 'ngrok connect') {
+              if (shouldShowCommandStatus && isConnecting && type === 'ngrok' && data.status_en && data.action === 'ngrok connect') {
                 setNgrokInfo({ kioskId: data.kiosk, message: data.status_en });
                 setNgrokModalOpen(true);
               }
             }
           } else if (data.action === 'provision') {
             const isSuccess = data.status_en === 'kiosk provisioned on server';
-            setCommandStatus({ state: isSuccess ? 'success' : 'pending', message: data.status_en });
+            const shouldShowCommandStatus = setScopedCommandStatus(data, { state: isSuccess ? 'success' : 'pending', message: data.status_en });
 
-            if (isSuccess && data.admin) {
+            if (shouldShowCommandStatus && isSuccess && data.admin) {
               setLastProvisionedId(data.admin);
             }
           } else if (data.action && (data.action.startsWith('eject') || data.action === 'rent' || data.action === 'vend')) { // EJECT LOGIC
             const isSuccess = data.status == 1;
             const fallbackFailureMessage = t('eject_failed');
-            setCommandStatus({
+            const shouldShowCommandStatus = setScopedCommandStatus(data, {
               state: isSuccess ? 'success' : 'error',
               message: data.status_en || (isSuccess ? t('command_success') : fallbackFailureMessage)
             });
@@ -1205,7 +1438,7 @@ function App() {
                 ignoredKiosksRef.current = { ...ignoredKiosksRef.current, [stationId]: Date.now() + 30000 };
                 return prev;
               });
-            } else if (stationId) {
+            } else if (shouldShowCommandStatus && stationId) {
               debugEjectUi('Eject response failed', {
                 action: data.action,
                 stationId,
@@ -1227,7 +1460,7 @@ function App() {
             const isImplicitSuccessUpdate = isSuccess && (data.status_en?.includes('locked') || data.status_en?.includes('unlocked'));
 
             if (isExplicitStatusUpdate || isImplicitSuccessUpdate) {
-              setCommandStatus({ state: 'success', message: data.status_en });
+              setScopedCommandStatus(data, { state: 'success', message: data.status_en });
 
               let isNowLocked = undefined;
               if (data.status === 'locked') {
@@ -1254,11 +1487,11 @@ function App() {
 
               setLockingSlots(prev => prev.filter(l => !(l.stationid === stationId && l.moduleid.toString().endsWith(`m${moduleIdNum}`) && l.slotid === slotId)));
             } else if (data.status_en) {
-              setCommandStatus({ state: isSuccess ? 'success' : 'error', message: data.status_en });
+              setScopedCommandStatus(data, { state: isSuccess ? 'success' : 'error', message: data.status_en });
             }
           } else if (data.action === 'enable' || data.action === 'disable') {
             const isSuccess = data.status == 1;
-            setCommandStatus({ state: isSuccess ? 'success' : 'error', message: data.status_en || (isSuccess ? 'Command successful!' : 'Command failed.') });
+            setScopedCommandStatus(data, { state: isSuccess ? 'success' : 'error', message: data.status_en || (isSuccess ? 'Command successful!' : 'Command failed.') });
             if (isSuccess && data.kiosk) {
               const stationId = data.kiosk;
               const isDisabled = data.action === 'disable';
@@ -1266,17 +1499,32 @@ function App() {
                 station.stationid === stationId ? { ...station, disabled: isDisabled ? { status: true } : null } : station
               ));
             }
+          } else if (data.action === 'set volume' || data.action === 'volume') {
+            const isSuccess = Number(data.status) === 1 || data.status === 'accepted' || data.status === 'success';
+            const stationId = data.kiosk || data.stationid;
+            const audioVolume = normalizeAudioVolume(data.volume ?? data.data, null);
+            setScopedCommandStatus(data, {
+              state: isSuccess ? 'success' : 'error',
+              message: data.status_en || (isSuccess ? t('command_success') : t('command_failed')),
+            });
+            if (isSuccess && stationId && audioVolume !== null) {
+              setAllStationsData((prevStations) =>
+                prevStations.map((station) =>
+                  station.stationid === stationId ? withAudioHardwareState(station, audioVolume) : station
+                )
+              );
+            }
           } else if (data.action === 'update module') {
             const isSuccess = Number(data.status) === 1 || data.status === 'accepted';
-            setCommandStatus({ state: isSuccess ? 'success' : 'error', message: data.status_en || (isSuccess ? t('command_success') : t('command_failed')) });
+            setScopedCommandStatus(data, { state: isSuccess ? 'success' : 'error', message: data.status_en || (isSuccess ? t('command_success') : t('command_failed')) });
           } else if (data.action === 'reboot module' || data.action === 'module reboot') {
             const isSuccess = Number(data.status) === 1 || data.status === 'accepted' || data.status === 'success';
-            setCommandStatus({ state: isSuccess ? 'success' : 'error', message: data.status_en || (isSuccess ? t('command_success') : t('command_failed')) });
+            setScopedCommandStatus(data, { state: isSuccess ? 'success' : 'error', message: data.status_en || (isSuccess ? t('command_success') : t('command_failed')) });
           } else if (data.action === 'odroid reboot') {
-            setCommandStatus({ state: 'success', message: data.status_en });
+            setScopedCommandStatus(data, { state: 'success', message: data.status_en });
           } else if (data.action === 'hotspot' && data.stationid) {
             const isSuccess = data.status === 1;
-            setCommandStatus({ state: isSuccess ? 'success' : 'error', message: data.status_en || (isSuccess ? t('command_successful') : t('command_failed')) });
+            setScopedCommandStatus(data, { state: isSuccess ? 'success' : 'error', message: data.status_en || (isSuccess ? t('command_successful') : t('command_failed')) });
           } else if (data.status_en && data.status_en.includes('flow for kiosk')) {
             const messageParts = data.status_en.split(' ');
             const kioskId = messageParts[3];
@@ -1290,7 +1538,7 @@ function App() {
                     : station
                 )
               );
-              setCommandStatus({ state: 'success', message: data.status_en });
+              setScopedCommandStatus(data, { state: 'success', message: data.status_en });
             }
           } else if (data.status_en && data.status_en.includes('UI for kiosk')) {
             const messageParts = data.status_en.split(' ');
@@ -1305,7 +1553,7 @@ function App() {
                     : station
                 )
               );
-              setCommandStatus({ state: 'success', message: data.status_en });
+              setScopedCommandStatus(data, { state: 'success', message: data.status_en });
             }
           } else if (data.action && data.action.includes('change')) {
             const isSuccess = data.statuscode == 1;
@@ -1314,7 +1562,7 @@ function App() {
             if (isSuccess) toastState = 'success';
             if (isPending) toastState = 'pending';
 
-            setCommandStatus({ state: toastState, message: data.status_en || (isSuccess ? t('command_success') : t('command_failed')) });
+            setScopedCommandStatus(data, { state: toastState, message: data.status_en || (isSuccess ? t('command_success') : t('command_failed')) });
 
             if (isSuccess && data.kiosk) {
               const [normalizedKiosk] = normalizeKioskData([data.kiosk]);
@@ -1328,12 +1576,12 @@ function App() {
             }
           } else if (data.action === 'refund') {
             const isSuccess = isSuccessfulRefundStatus(refundStatus);
-            setCommandStatus({ state: isSuccess ? 'success' : 'error', message: data.status_en || (isSuccess ? t('refund_success') : t('refund_failed')) });
+            setScopedCommandStatus(data, { state: isSuccess ? 'success' : 'error', message: data.status_en || (isSuccess ? t('refund_success') : t('refund_failed')) });
           }
 
         } catch (e) {
           console.error("Error handling WebSocket message in App.jsx:", e);
-          setCommandStatus({ state: 'error', message: t('invalid_response') });
+          setScopedCommandStatus(null, { state: 'error', message: t('invalid_response') });
         }
       };
 
@@ -1366,7 +1614,7 @@ function App() {
         ws.current = null;
       }
     };
-  }, [token, clientInfo, t, clearEjectCommandState, debugEjectUi, flashFailedEjectSlot]);
+  }, [token, clientInfo, t, clearEjectCommandState, debugEjectUi, flashFailedEjectSlot, setScopedCommandStatus]);
 
   // Login handler (kept for LoginPage)
   const handleLogin = () => {

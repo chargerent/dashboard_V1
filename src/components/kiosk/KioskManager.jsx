@@ -225,7 +225,7 @@ function KioskManager({ token, t, _setSuccessMessage, setErrorMessage }) {
     
     const clientInfo = useMemo(() => ({
         features: { rentals: true, details: true, stationid: true, address: true },
-        commands: { edit: true, lock: true, eject: true, eject_multiple: true, updates: true, connectivity: true, reboot: true, reload: true, disable: true }
+        commands: { edit: true, lock: true, eject: true, eject_multiple: true, updates: true, connectivity: true, reboot: true, reload: true, audio: true, disable: true }
     }), []);
 
     const onConfirm = () => {

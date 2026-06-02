@@ -28,6 +28,36 @@ const EXCLUDED_REPORT_RETURN_TYPES = new Set([
 
 const isExcludedReportReturnType = (returnType) => EXCLUDED_REPORT_RETURN_TYPES.has(String(returnType || '').toLowerCase());
 
+const getReportRentalStatus = (rental) => String(rental?.reportingStatus || rental?.status || '').toLowerCase();
+
+const getReportReturnType = (rental) => String(rental?.reportingReturnType || rental?.returnType || '').toLowerCase();
+
+const getReportRentalPeriod = (rental) => Number(rental?.reportingRentalPeriod ?? rental?.rentalPeriod);
+
+const normalizeRentalForReporting = (rental) => {
+    const reportingPeriod = getReportRentalPeriod(rental);
+    const hasReportingOverride = rental.reportingTimeOverride ||
+        rental.reportingStatus ||
+        rental.reportingReturnType ||
+        rental.reportingReturnTime ||
+        rental.reportingRentalPeriod !== undefined;
+    if (!hasReportingOverride) {
+        return rental;
+    }
+
+    return {
+        ...rental,
+        rawStatus: rental.status,
+        rawReturnType: rental.returnType,
+        rawReturnTime: rental.returnTime,
+        rawRentalPeriod: rental.rentalPeriod,
+        status: rental.reportingStatus || rental.status,
+        returnType: rental.reportingReturnType || rental.returnType,
+        returnTime: rental.reportingReturnTime || rental.returnTime,
+        rentalPeriod: Number.isFinite(reportingPeriod) ? reportingPeriod : rental.rentalPeriod,
+    };
+};
+
 
 // Adjusts bar at index by delta (±1). The bar immediately to the right compensates.
 // The last bar is read-only — it absorbs all compensation automatically.
@@ -309,8 +339,9 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
         }
 
         return activeRentalData.filter(rental => {
-            if (isExcludedReportRentalStatus(rental.status)) return false;
-            if (isExcludedReportReturnType(rental.returnType)) return false;
+            if (rental.excludeFromReporting) return false;
+            if (isExcludedReportRentalStatus(getReportRentalStatus(rental))) return false;
+            if (isExcludedReportReturnType(getReportReturnType(rental))) return false;
 
             const rentalDate = new Date(rental.rentalTime);
 
@@ -332,7 +363,7 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                 return clientKioskIds.has(rental.rentalStationid);
             }
             return true; // No location or kiosk filter applied (admin/partner)
-        });
+        }).map(normalizeRentalForReporting);
     }, [activeRentalData, selectedLocations, selectedKiosks, startDate, endDate, stationToLocationMap, userMode, clientKiosks, reportReady]);
 
     const originalTotalRentals = filteredRentals.length;
@@ -451,7 +482,7 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
 
     const averageRentalPeriod = useMemo(() => {
         const rentalPeriods = filteredRentals
-            .map(r => Number(r.rentalPeriod))
+            .map(getReportRentalPeriod)
             .filter(period => period > 0);
         if (rentalPeriods.length === 0) return '0m';
 

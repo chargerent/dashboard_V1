@@ -83,9 +83,14 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
         </button>
     );
 
+    const formatPermissionLabel = (label) => {
+        const translated = t(label);
+        return translated === label ? label.replace(/_/g, ' ') : translated;
+    };
+
     const PermissionToggle = ({ label, isChecked, onChange, disabled }) => (
         <div className={`flex items-center justify-between py-2 px-3 border-b border-gray-100 last:border-b-0 ${disabled ? 'opacity-50' : ''}`}>
-            <span className="text-sm font-medium text-gray-700 capitalize">{label.replace(/_/g, ' ')}</span>
+            <span className="text-sm font-medium text-gray-700 capitalize">{formatPermissionLabel(label)}</span>
             <label className={`flex shrink-0 items-center ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}>
                 <div className="relative">
                    <input type="checkbox" className="sr-only" checked={!!isChecked} onChange={e => !disabled && onChange(e.target.checked)} disabled={disabled} />

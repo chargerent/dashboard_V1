@@ -69,6 +69,9 @@ export default defineConfig(({ command }) => ({
 
   // ✅ Proxy setup for Node-RED APIs and WebSockets
   server: {
+    watch: {
+      ignored: ['**/dist/**', '**/.codex-tmp/**', '**/tmp/**'],
+    },
     proxy: {
       '/__functions': {
         target: 'https://us-central1-node-red-alerts.cloudfunctions.net',

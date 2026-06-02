@@ -14,7 +14,7 @@ import { collection, getDocs } from 'firebase/firestore';
 
 // permission keys
 const featuresList = ['rentals', 'details', 'stationid', 'address', 'status', 'reporting', 'lease_revenue', 'rental_counts', 'rental_revenue', 'client_commission', 'rep_commission', 'search', 'media', 'binding', 'testing'];
-const commandsList = ['edit', 'lock', 'eject', 'eject_multiple', 'updates', 'connectivity', 'reboot', 'reload', 'disable', 'client edit'];
+const commandsList = ['edit', 'lock', 'eject', 'eject_multiple', 'updates', 'connectivity', 'reboot', 'reload', 'audio', 'disable', 'client edit'];
 
 function AdminPage({
   onNavigateToDashboard,

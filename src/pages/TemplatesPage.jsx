@@ -22,6 +22,7 @@ const previewClientInfo = {
     connectivity: false,
     reboot: false,
     reload: false,
+    audio: false,
     disable: false,
     'client edit': false,
   },

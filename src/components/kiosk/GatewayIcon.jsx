@@ -1,5 +1,7 @@
 // src/components/kiosk/GatewayIcon.jsx
 
+import { QrCodeIcon } from '@heroicons/react/24/outline';
+
 function GatewayIcon({ gateway, _t }) {
     const iconSize = "h-4 w-4";
 
@@ -23,11 +25,9 @@ function GatewayIcon({ gateway, _t }) {
                 </div>
             );
         case 'STRIPE':
-             return (
+            return (
                 <div title="Stripe" className="text-gray-600">
-                    <svg xmlns="http://www.w3.org/2000/svg" className={iconSize} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v1m6 11h2m-6.5 3.5l-1-1M6 12H4m11.5 3.5l1-1M12 20v-1m6-11h-2M7.5 7.5l-1 1M12 4h.01M16 12h-2M7.5 16.5l-1-1M12 20h.01m4.49-12.5l-1 1M12 8V6" />
-                    </svg>
+                    <QrCodeIcon className={iconSize} />
                 </div>
             );
         case 'PHONE':
