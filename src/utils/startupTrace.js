@@ -1,5 +1,14 @@
 const TRACE_KEY = 'dashboardStartupTraceEnabled';
 
+export function createTraceId(prefix = 'trace') {
+  const safePrefix = String(prefix || 'trace').replace(/[^a-z0-9_-]+/gi, '-').slice(0, 24) || 'trace';
+  const randomSegment = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID().slice(0, 8)
+    : Math.random().toString(36).slice(2, 10);
+
+  return `${safePrefix}-${Date.now()}-${randomSegment}`;
+}
+
 function canTrace() {
   if (typeof window === 'undefined') return false;
 
@@ -16,6 +25,7 @@ function getStore() {
   if (!window.__dashboardStartupTrace) {
     window.__dashboardStartupTrace = {
       label: 'startup',
+      traceId: createTraceId('startup'),
       startedAt: performance.now(),
       steps: [],
     };
@@ -29,15 +39,21 @@ function roundDuration(value) {
 }
 
 export function resetStartupTrace(label = 'startup') {
-  if (!canTrace()) return;
+  const traceId = createTraceId(label);
 
-  window.__dashboardStartupTrace = {
-    label,
-    startedAt: performance.now(),
-    steps: [],
-  };
+  if (typeof window !== 'undefined') {
+    window.__dashboardStartupTrace = {
+      label,
+      traceId,
+      startedAt: performance.now(),
+      steps: [],
+    };
+  }
 
-  console.log(`[StartupTrace] reset "${label}"`);
+  if (!canTrace()) return traceId;
+
+  console.log(`[StartupTrace:${traceId}] reset "${label}"`);
+  return traceId;
 }
 
 export function markStartupStep(step, details = {}) {
@@ -51,15 +67,24 @@ export function markStartupStep(step, details = {}) {
     step,
     elapsedMs,
     details,
+    traceId: store.traceId,
     at: new Date().toISOString(),
   };
 
   store.steps.push(entry);
-  console.log(`[StartupTrace +${elapsedMs}ms] ${step}`, details);
+  console.log(`[StartupTrace:${store.traceId} +${elapsedMs}ms] ${step}`, details);
 }
 
 export function measureStartupDuration(startedAt) {
   return roundDuration(performance.now() - startedAt);
+}
+
+export function getStartupTraceId() {
+  try {
+    return window.__dashboardStartupTrace?.traceId || null;
+  } catch {
+    return null;
+  }
 }
 
 export function isStartupTraceEnabled() {

@@ -1,5 +1,5 @@
 // src/pages/DashboardPage.jsx
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import FilterPanel from '../components/Dashboard/FilterPanel';
 import KioskPanel from '../components/kiosk/kioskPanel';
 import KioskDetailPanel from '../components/kiosk/KioskDetailPanel';
@@ -19,6 +19,7 @@ import RentalDetailView from '../components/Dashboard/RentalDetailView';
 import { CheckCircleIcon, CpuChipIcon, ExclamationTriangleIcon, QrCodeIcon, SparklesIcon } from '@heroicons/react/24/outline';
 import useKioskCommandFlow from '../hooks/useKioskCommandFlow';
 import { VERSION as DASHBOARD_VERSION } from '../version';
+import { markStartupStep } from '../utils/startupTrace';
 
 const EMPTY_RENTALS = Object.freeze([]);
 const COUNTRY_ORDER = { CA: 1, FR: 2, US: 3 };
@@ -85,6 +86,8 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     const [rentalDetailView, setRentalDetailView] = useState(null); // { kioskId, period }
     const [showSoldOutModal, setShowSoldOutModal] = useState(false);
     const [statusFocusedKioskId, setStatusFocusedKioskId] = useState('');
+    const dashboardMountedLoggedRef = useRef(false);
+    const dashboardReadyLoggedRef = useRef(false);
     const isAdminUser = !!clientInfo?.isAdmin;
     const hasStatusAccess = clientInfo?.features?.status === true;
     const hasReportingAccess = clientInfo?.features?.reporting === true || isAdminUser;
@@ -113,6 +116,19 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     useEffect(() => {
         setLoading(!kiosksReady);
     }, [kiosksReady]);
+
+    useEffect(() => {
+        if (dashboardMountedLoggedRef.current) return;
+
+        dashboardMountedLoggedRef.current = true;
+        markStartupStep('dashboard.mounted', {
+            username: clientInfo?.username || null,
+            role: clientInfo?.role || null,
+            kiosksReady,
+            stationCount: allStationsData.length,
+            rentalCount: rentalData.length,
+        });
+    }, [allStationsData.length, clientInfo?.role, clientInfo?.username, kiosksReady, rentalData.length]);
 
     // Debounce search term
     useEffect(() => {
@@ -467,6 +483,34 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
             return acc;
         }, {});
     }, [stationStatusRows]);
+
+    useEffect(() => {
+        if (dashboardReadyLoggedRef.current || loading) return;
+
+        dashboardReadyLoggedRef.current = true;
+        markStartupStep('dashboard.ready', {
+            username: clientInfo?.username || null,
+            role: clientInfo?.role || null,
+            stationCount: allStationsData.length,
+            clientStationCount: clientStations.length,
+            locationCount: filteredLocations.length,
+            rentalCount: rentalData.length,
+            visiblePageCount: paginatedLocations.length,
+            statusIssueCount: stationStatusIssueCount,
+            showInitialStatus,
+        });
+    }, [
+        allStationsData.length,
+        clientInfo?.role,
+        clientInfo?.username,
+        clientStations.length,
+        filteredLocations.length,
+        loading,
+        paginatedLocations.length,
+        rentalData.length,
+        showInitialStatus,
+        stationStatusIssueCount,
+    ]);
     
 return (
     <div>

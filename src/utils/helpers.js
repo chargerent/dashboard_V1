@@ -373,12 +373,19 @@ export const filterStationsForClient = (stations, clientInfo) => {
         return stationList;
     }
 
-    if (clientInfo.partner) {
-        const partnerId = clientInfo.clientId?.toLowerCase();
-        return stationList.filter((station) => station.info.rep?.toLowerCase() === partnerId);
+    const clientId = String(clientInfo.clientId || '').trim().toLowerCase();
+    const isPartner = clientInfo.partner === true || String(clientInfo.role || '').toLowerCase() === 'partner';
+
+    if (!clientId) {
+        return [];
     }
 
-    return stationList.filter((station) => station.info.client === clientInfo.clientId);
+    if (isPartner) {
+        const partnerId = clientInfo.clientId?.toLowerCase();
+        return stationList.filter((station) => String(station.info.rep || '').trim().toLowerCase() === partnerId);
+    }
+
+    return stationList.filter((station) => String(station.info.client || '').trim().toLowerCase() === clientId);
 };
 
 /**

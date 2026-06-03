@@ -41,16 +41,49 @@ function LoginPage({ onLogin }) {
       }
 
       const email = `${u}@${AUTH_MAPPING_DOMAIN}`;
-      resetStartupTrace(`login:${u}`);
-      markStartupStep("login.submit", { username: u });
+      const loginTraceId = resetStartupTrace(`login:${u}`);
+      markStartupStep("login.submit", { username: u, loginTraceId });
 
       const trackAttempt = (success) => {
-        callFunctionPublic("auth_trackAttempt", { username: u, success }).catch(() => {});
+        const trackStartedAt = performance.now();
+        markStartupStep("login.trackAttempt.dispatch", {
+          username: u,
+          success,
+          loginTraceId,
+        });
+
+        callFunctionPublic("auth_trackAttempt", { username: u, success, loginTraceId })
+          .then(() => {
+            markStartupStep("login.trackAttempt.resolved", {
+              username: u,
+              success,
+              loginTraceId,
+              durationMs: measureStartupDuration(trackStartedAt),
+            });
+          })
+          .catch((trackError) => {
+            markStartupStep("login.trackAttempt.error", {
+              username: u,
+              success,
+              loginTraceId,
+              durationMs: measureStartupDuration(trackStartedAt),
+              message: trackError?.message || "unknown error",
+            });
+          });
       };
 
+      const lockoutStartedAt = performance.now();
+      markStartupStep("login.lockoutCheck.start", { username: u, loginTraceId });
       const lockSnap = await getDoc(doc(db, "loginAttempts", u));
+      const lockData = lockSnap.exists() ? (lockSnap.data() || {}) : {};
+      markStartupStep("login.lockoutCheck.resolved", {
+        username: u,
+        loginTraceId,
+        durationMs: measureStartupDuration(lockoutStartedAt),
+        exists: lockSnap.exists(),
+        locked: Boolean(lockData.lockedUntil && new Date(lockData.lockedUntil) > new Date()),
+      });
       if (lockSnap.exists()) {
-        const lockData = lockSnap.data() || {};
         if (lockData.lockedUntil && new Date(lockData.lockedUntil) > new Date()) {
           trackAttempt(false);
           throw new Error(t("login_error"));
@@ -58,6 +91,7 @@ function LoginPage({ onLogin }) {
       }
 
       const signInStartedAt = performance.now();
+      markStartupStep("login.signIn.start", { username: u, loginTraceId });
       try {
         await signInWithEmailAndPassword(auth, email, password);
       } catch (authError) {
@@ -67,6 +101,8 @@ function LoginPage({ onLogin }) {
 
       trackAttempt(true);
       markStartupStep("login.signIn.resolved", {
+        username: u,
+        loginTraceId,
         durationMs: measureStartupDuration(signInStartedAt),
       });
       onLogin();

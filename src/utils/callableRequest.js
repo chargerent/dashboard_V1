@@ -1,4 +1,5 @@
 import { app, auth, FUNCTIONS_REGION } from '../firebase-config';
+import { isStartupTraceEnabled, markStartupStep, measureStartupDuration } from './startupTrace';
 
 const HTTP_FUNCTION_NAME_MAP = {
   admin_listUsers: 'admin_httpListUsers',
@@ -70,6 +71,16 @@ function getErrorMessage(payload, fallbackMessage) {
   return payload.error.message || payload.error.status || fallbackMessage;
 }
 
+function nowMs() {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
+function markFunctionStep(step, details) {
+  if (!isStartupTraceEnabled()) return;
+
+  markStartupStep(step, details);
+}
+
 export async function callFunctionWithAuth(functionName, data = {}, options = {}) {
   if (!auth.currentUser) {
     throw new Error('Not signed in');
@@ -82,6 +93,13 @@ export async function callFunctionWithAuth(functionName, data = {}, options = {}
     abortMessage = '',
   } = options;
 
+  const requestStartedAt = nowMs();
+  const url = getCallableUrl(functionName);
+  markFunctionStep('function.auth.start', {
+    functionName,
+    timeoutMs: Number(timeoutMs) || 0,
+  });
+
   const controller = abortController || (typeof AbortController !== 'undefined' ? new AbortController() : null);
   let didTimeout = false;
   let timeoutId = null;
@@ -93,17 +111,30 @@ export async function callFunctionWithAuth(functionName, data = {}, options = {}
   }
 
   let idToken = '';
+  const tokenStartedAt = nowMs();
   try {
     idToken = await auth.currentUser.getIdToken(true);
+    markFunctionStep('function.auth.token.resolved', {
+      functionName,
+      forceRefresh: true,
+      durationMs: measureStartupDuration(tokenStartedAt),
+    });
   } catch (error) {
     if (timeoutId) {
       globalThis.clearTimeout(timeoutId);
     }
+    markFunctionStep('function.auth.token.error', {
+      functionName,
+      forceRefresh: true,
+      durationMs: measureStartupDuration(tokenStartedAt),
+      message: error?.message || 'unknown error',
+    });
     throw error;
   }
   let response;
+  const fetchStartedAt = nowMs();
   try {
-    response = await fetch(getCallableUrl(functionName), {
+    response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -117,10 +148,24 @@ export async function callFunctionWithAuth(functionName, data = {}, options = {}
       }),
       ...(controller ? { signal: controller.signal } : {}),
     });
+    markFunctionStep('function.auth.fetch.resolved', {
+      functionName,
+      durationMs: measureStartupDuration(fetchStartedAt),
+      status: response.status,
+    });
   } catch (error) {
     if (timeoutId) {
       globalThis.clearTimeout(timeoutId);
     }
+
+    markFunctionStep('function.auth.fetch.error', {
+      functionName,
+      durationMs: measureStartupDuration(fetchStartedAt),
+      totalDurationMs: measureStartupDuration(requestStartedAt),
+      didTimeout,
+      aborted: Boolean(controller?.signal?.aborted),
+      message: error?.message || 'unknown error',
+    });
 
     if (didTimeout) {
       throw new Error(timeoutMessage || `${functionName} timed out.`);
@@ -145,20 +190,53 @@ export async function callFunctionWithAuth(functionName, data = {}, options = {}
   }
 
   if (!response.ok || payload?.error) {
-    throw new Error(getErrorMessage(payload, `Request failed (${response.status})`));
+    const message = getErrorMessage(payload, `Request failed (${response.status})`);
+    markFunctionStep('function.auth.error', {
+      functionName,
+      totalDurationMs: measureStartupDuration(requestStartedAt),
+      status: response.status,
+      message,
+    });
+    throw new Error(message);
   }
+
+  markFunctionStep('function.auth.complete', {
+    functionName,
+    totalDurationMs: measureStartupDuration(requestStartedAt),
+    status: response.status,
+  });
 
   return payload?.result ?? payload?.data ?? payload ?? {};
 }
 
 export async function callFunctionPublic(functionName, data = {}) {
-  const response = await fetch(getCallableUrl(functionName), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ data }),
-  });
+  const requestStartedAt = nowMs();
+  markFunctionStep('function.public.start', { functionName });
+
+  let response;
+  const fetchStartedAt = nowMs();
+  try {
+    response = await fetch(getCallableUrl(functionName), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ data }),
+    });
+    markFunctionStep('function.public.fetch.resolved', {
+      functionName,
+      durationMs: measureStartupDuration(fetchStartedAt),
+      status: response.status,
+    });
+  } catch (error) {
+    markFunctionStep('function.public.fetch.error', {
+      functionName,
+      durationMs: measureStartupDuration(fetchStartedAt),
+      totalDurationMs: measureStartupDuration(requestStartedAt),
+      message: error?.message || 'unknown error',
+    });
+    throw error;
+  }
 
   let payload = null;
   try {
@@ -168,8 +246,21 @@ export async function callFunctionPublic(functionName, data = {}) {
   }
 
   if (!response.ok || payload?.error) {
-    throw new Error(getErrorMessage(payload, `Request failed (${response.status})`));
+    const message = getErrorMessage(payload, `Request failed (${response.status})`);
+    markFunctionStep('function.public.error', {
+      functionName,
+      totalDurationMs: measureStartupDuration(requestStartedAt),
+      status: response.status,
+      message,
+    });
+    throw new Error(message);
   }
+
+  markFunctionStep('function.public.complete', {
+    functionName,
+    totalDurationMs: measureStartupDuration(requestStartedAt),
+    status: response.status,
+  });
 
   return payload?.result ?? payload?.data ?? payload ?? {};
 }

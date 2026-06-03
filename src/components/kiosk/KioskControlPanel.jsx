@@ -1,7 +1,7 @@
 // src/components/kiosk/KioskControlPanel.jsx
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { CheckIcon, SpeakerWaveIcon, SpeakerXMarkIcon } from '@heroicons/react/24/outline';
+import { useMemo } from 'react';
+import { SpeakerXMarkIcon } from '@heroicons/react/24/outline';
 import { getKioskPowerThreshold } from '../../utils/helpers';
 import { logKioskInteraction } from '../../utils/kioskInteractionDebug';
 
@@ -69,18 +69,13 @@ const getDisplayVersion = (version) => (
 );
 
 const V2AudioControl = ({ kiosk, t, onCommand, disabled }) => {
-    const initialVolume = getKioskAudioVolume(kiosk);
-    const [volume, setVolume] = useState(initialVolume);
-    const lastAudibleVolumeRef = useRef(initialVolume > 0 ? initialVolume : DEFAULT_AUDIO_VOLUME);
-
-    useEffect(() => {
-        const nextVolume = getKioskAudioVolume(kiosk);
-        setVolume(nextVolume);
-        if (nextVolume > 0) {
-            lastAudibleVolumeRef.current = nextVolume;
-        }
-    }, [kiosk?.hardware?.audio, kiosk?.hardware?.volume, kiosk?.stationid]);
-
+    const currentVolume = getKioskAudioVolume(kiosk);
+    const audioPresets = [
+        { label: '', ariaLabel: t('mute_audio'), volume: 0, icon: <SpeakerXMarkIcon className="h-5 w-5 stroke-2" /> },
+        { label: '10%', volume: 10 },
+        { label: '25%', volume: 25 },
+        { label: '100%', volume: 100 },
+    ];
     const requestVolume = (nextVolume) => {
         const normalizedVolume = clampVolume(nextVolume);
 
@@ -94,63 +89,37 @@ const V2AudioControl = ({ kiosk, t, onCommand, disabled }) => {
         });
     };
 
-    const handleSliderChange = (event) => {
-        setVolume(clampVolume(event.target.value));
-    };
-
-    const muted = volume === 0;
-    const toggleLabel = muted ? t('unmute_audio') : t('mute_audio');
-    const nextMuteVolume = muted ? lastAudibleVolumeRef.current : 0;
-
     return (
         <div className="col-span-2 rounded-lg border border-sky-100 bg-sky-50 px-3 py-2 text-sky-900">
-            <div className="flex items-center gap-3">
-                <button
-                    type="button"
-                    onClick={(event) => {
-                        event.stopPropagation();
-                        requestVolume(nextMuteVolume);
-                    }}
-                    disabled={disabled}
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-white text-sky-700 shadow-sm transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:text-gray-300"
-                    title={toggleLabel}
-                    aria-label={toggleLabel}
-                >
-                    {muted ? (
-                        <SpeakerXMarkIcon className="h-5 w-5" />
-                    ) : (
-                        <SpeakerWaveIcon className="h-5 w-5" />
-                    )}
-                </button>
-                <label className="min-w-0 flex-1">
-                    <span className="mb-1 flex items-center justify-between text-[11px] font-semibold">
-                        <span>{t('audio_volume')}</span>
-                        <span className="font-mono">{volume}%</span>
-                    </span>
-                    <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        step="1"
-                        value={volume}
-                        disabled={disabled}
-                        onChange={handleSliderChange}
-                        className="h-2 w-full cursor-pointer accent-sky-600 disabled:cursor-not-allowed"
-                        aria-label={t('audio_volume')}
-                    />
-                </label>
-                <button
-                    type="button"
-                    onClick={(event) => {
-                        event.stopPropagation();
-                        requestVolume(volume);
-                    }}
-                    disabled={disabled}
-                    className="flex h-8 shrink-0 items-center justify-center gap-1 rounded-md bg-sky-600 px-2.5 text-[11px] font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
-                >
-                    <CheckIcon className="h-3.5 w-3.5" />
-                    {t('set_volume')}
-                </button>
+            <div className="mb-2 flex items-center justify-between text-[11px] font-semibold">
+                <span>{t('audio_volume')}</span>
+                <span className="font-mono">{currentVolume}%</span>
+            </div>
+            <div className="grid grid-cols-4 gap-2">
+                {audioPresets.map((preset) => {
+                    const isActive = currentVolume === preset.volume;
+                    return (
+                        <button
+                            key={preset.volume}
+                            type="button"
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                requestVolume(preset.volume);
+                            }}
+                            disabled={disabled}
+                            className={`flex h-9 min-w-0 items-center justify-center gap-1 rounded-md px-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400 ${
+                                isActive
+                                    ? 'bg-sky-700 text-white shadow-sm'
+                                    : 'bg-white text-sky-800 shadow-sm hover:bg-sky-100'
+                            }`}
+                            title={preset.ariaLabel || `${t('set_volume')} ${preset.label}`}
+                            aria-label={preset.ariaLabel || `${t('set_volume')} ${preset.label}`}
+                        >
+                            {preset.icon}
+                            {preset.label && <span className="truncate">{preset.label}</span>}
+                        </button>
+                    );
+                })}
             </div>
         </div>
     );

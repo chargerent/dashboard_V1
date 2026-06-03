@@ -14,7 +14,7 @@ import {
   isSuccessfulRefundStatus,
   rentalMatchesRefundConfirmation,
 } from './utils/rentals.js';
-import { markStartupStep, measureStartupDuration } from './utils/startupTrace.js';
+import { getStartupTraceId, markStartupStep, measureStartupDuration } from './utils/startupTrace.js';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 // 🔥 firebase-config must export BOTH db and auth
@@ -257,6 +257,108 @@ const EJECT_SLOT_TIMEOUT_MS = Number.isFinite(EJECT_SLOT_TIMEOUT_MS_CONFIG) && E
   ? EJECT_SLOT_TIMEOUT_MS_CONFIG
   : DEFAULT_EJECT_SLOT_TIMEOUT_MS;
 const EJECT_TIMEOUT_CHECK_INTERVAL_MS = 1000;
+const FIRESTORE_IN_QUERY_LIMIT = 30;
+const ADMIN_RENTAL_SCOPE = Object.freeze({
+  ready: true,
+  scopeType: 'all',
+  stationIds: [],
+});
+
+function arraysEqual(left, right) {
+  if (left === right) return true;
+  if (!Array.isArray(left) || !Array.isArray(right)) return false;
+  if (left.length !== right.length) return false;
+
+  return left.every((value, index) => value === right[index]);
+}
+
+function uniqueSortedValues(values) {
+  return [...new Set(
+    values
+      .map((value) => String(value || '').trim())
+      .filter(Boolean)
+  )].sort((left, right) => left.localeCompare(right));
+}
+
+function chunkValues(values, size = FIRESTORE_IN_QUERY_LIMIT) {
+  const chunks = [];
+
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+
+  return chunks;
+}
+
+function getScopeValueVariants(value) {
+  const normalizedValue = String(value || '').trim();
+  if (!normalizedValue) return [];
+
+  return uniqueSortedValues([
+    normalizedValue,
+    normalizedValue.toUpperCase(),
+    normalizedValue.toLowerCase(),
+  ]);
+}
+
+function isPartnerClient(clientInfo) {
+  return clientInfo?.partner === true || String(clientInfo?.role || '').toLowerCase() === 'partner';
+}
+
+function buildScopedKioskQuery(kiosksCollectionRef, clientInfo) {
+  if (!clientInfo) {
+    return {
+      queryRef: null,
+      scopeType: 'none',
+      scopeField: null,
+      scopeValues: [],
+    };
+  }
+
+  if (clientInfo.isAdmin) {
+    return {
+      queryRef: kiosksCollectionRef,
+      scopeType: 'all',
+      scopeField: null,
+      scopeValues: [],
+    };
+  }
+
+  const scopeValues = getScopeValueVariants(clientInfo.clientId);
+  if (scopeValues.length === 0) {
+    return {
+      queryRef: null,
+      scopeType: 'empty',
+      scopeField: null,
+      scopeValues: [],
+    };
+  }
+
+  const scopeField = isPartnerClient(clientInfo) ? 'info.rep' : 'info.client';
+  return {
+    queryRef: scopeValues.length === 1
+      ? query(kiosksCollectionRef, where(scopeField, '==', scopeValues[0]))
+      : query(kiosksCollectionRef, where(scopeField, 'in', scopeValues)),
+    scopeType: isPartnerClient(clientInfo) ? 'partner' : 'client',
+    scopeField,
+    scopeValues,
+  };
+}
+
+function buildScopedRentalQueries(rentalsCollectionRef, stationIds) {
+  return chunkValues(stationIds).map((stationIdChunk) => ({
+    key: stationIdChunk.join('|'),
+    stationIds: stationIdChunk,
+    queryRef: stationIdChunk.length === 1
+      ? query(rentalsCollectionRef, where('rentalStationid', '==', stationIdChunk[0]))
+      : query(rentalsCollectionRef, where('rentalStationid', 'in', stationIdChunk)),
+  }));
+}
+
+function rentalIsWithinWindow(rental, dateThresholdMs) {
+  const rentalTimeMs = Date.parse(String(rental?.rentalTime || ''));
+  return Number.isFinite(rentalTimeMs) && rentalTimeMs >= dateThresholdMs;
+}
 
 function waitForOpenWebSocket(socket, timeoutMs = COMMAND_SOCKET_OPEN_TIMEOUT_MS) {
   if (!socket) return Promise.resolve(null);
@@ -401,10 +503,52 @@ function buildClientInfoFromProfile(profile, uid) {
   };
 }
 
+function decodeTokenPayload(token) {
+  if (!token) return null;
+
+  try {
+    const encodedPayload = String(token).split('.')[1] || '';
+    const normalizedPayload = encodedPayload.replace(/-/g, '+').replace(/_/g, '/');
+    const paddedPayload = normalizedPayload.padEnd(Math.ceil(normalizedPayload.length / 4) * 4, '=');
+    return JSON.parse(atob(paddedPayload));
+  } catch {
+    return null;
+  }
+}
+
+function normalizeClaimCommands(commands) {
+  if (!commands || typeof commands !== 'object') return {};
+
+  return Object.fromEntries(
+    Object.entries(commands).map(([key, value]) => [key, value === true])
+  );
+}
+
+function tokenClaimsMatchProfile(token, profile) {
+  const claims = decodeTokenPayload(token);
+  if (!claims || !profile) return false;
+
+  const username = String(profile.username || '').trim().toLowerCase();
+  const clientId = String(profile.clientId || '').trim().toUpperCase();
+  const role = String(profile.role || (username === 'chargerent' ? 'admin' : 'user')).trim().toLowerCase();
+  const profileCommands = normalizeClaimCommands(profile.commands || profile.Commands);
+  const claimCommands = normalizeClaimCommands(claims.commands);
+  const commandKeys = new Set([...Object.keys(profileCommands), ...Object.keys(claimCommands)]);
+
+  const commandsMatch = [...commandKeys].every((key) => Boolean(profileCommands[key]) === Boolean(claimCommands[key]));
+
+  return (
+    String(claims.username || '').trim().toLowerCase() === username &&
+    String(claims.clientId || '').trim().toUpperCase() === clientId &&
+    String(claims.role || '').trim().toLowerCase() === role &&
+    commandsMatch
+  );
+}
+
 function isTokenExpired(token) {
   if (!token) return true;
   try {
-    const payload = JSON.parse(atob(token.split('.')[1]));
+    const payload = decodeTokenPayload(token);
     const isExpired = Date.now() >= payload.exp * 1000;
     if (isExpired) console.log("Authentication token has expired.");
     return isExpired;
@@ -458,6 +602,11 @@ function App() {
   const [allStationsData, setAllStationsData] = useState([]);
   const [ngrokInfo, setNgrokInfo] = useState(null);
   const [kiosksReady, setKiosksReady] = useState(false);
+  const [rentalScope, setRentalScope] = useState({
+    ready: false,
+    scopeType: 'pending',
+    stationIds: [],
+  });
   const debugEjectUi = useCallback((message, payload) => {
     if (typeof window === 'undefined') return;
 
@@ -526,6 +675,7 @@ function App() {
     setLanguage('en');
     setPage('dashboard');
     setInitialStatusCheck(false);
+    setRentalScope({ ready: false, scopeType: 'pending', stationIds: [] });
   }, []);
 
   useEffect(() => {
@@ -576,9 +726,11 @@ function App() {
   // ---------------------------------------------
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
+      const bootstrapStartedAt = performance.now();
       markStartupStep('auth.onAuthStateChanged', {
         hasUser: !!user,
         uid: user?.uid || null,
+        loginTraceId: getStartupTraceId(),
       });
 
       if (!user) {
@@ -590,6 +742,7 @@ function App() {
         setAllStationsData([]);
         setRentalData([]);
         setKiosksReady(false);
+        setRentalScope({ ready: false, scopeType: 'pending', stationIds: [] });
         markStartupStep('auth.signedOut');
         setAuthReady(true);
         return;
@@ -597,17 +750,28 @@ function App() {
 
       try {
         const tokenStartedAt = performance.now();
-        const idToken = await user.getIdToken(true);
+        markStartupStep('auth.getIdToken.start', {
+          forceRefresh: false,
+          loginTraceId: getStartupTraceId(),
+        });
+        const idToken = await user.getIdToken(false);
         markStartupStep('auth.getIdToken.resolved', {
+          forceRefresh: false,
           durationMs: measureStartupDuration(tokenStartedAt),
+          loginTraceId: getStartupTraceId(),
         });
         let tokenToUse = idToken;
 
         const profileStartedAt = performance.now();
+        markStartupStep('auth.profileFetch.start', {
+          uid: user.uid,
+          loginTraceId: getStartupTraceId(),
+        });
         const snap = await getDoc(doc(db, 'users', user.uid));
         markStartupStep('auth.profileFetch.resolved', {
           durationMs: measureStartupDuration(profileStartedAt),
           exists: snap.exists(),
+          loginTraceId: getStartupTraceId(),
         });
         if (!snap.exists()) {
           await handleLogout();
@@ -622,11 +786,48 @@ function App() {
           return;
         }
 
-        try {
-          await callFunctionWithAuth('auth_syncOwnClaims');
-          tokenToUse = await user.getIdToken(true);
-        } catch (syncError) {
-          console.warn('Unable to sync auth claims during bootstrap:', syncError);
+        const claimsAlreadyCurrent = tokenClaimsMatchProfile(idToken, profile);
+        if (claimsAlreadyCurrent) {
+          markStartupStep('auth.claimsSync.skipped', {
+            uid: user.uid,
+            loginTraceId: getStartupTraceId(),
+            reason: 'token_claims_match_profile',
+          });
+        } else {
+          try {
+            const claimsStartedAt = performance.now();
+            const loginTraceId = getStartupTraceId();
+            markStartupStep('auth.claimsSync.start', {
+              uid: user.uid,
+              loginTraceId,
+            });
+            await callFunctionWithAuth('auth_syncOwnClaims', { loginTraceId });
+            markStartupStep('auth.claimsSync.resolved', {
+              uid: user.uid,
+              loginTraceId,
+              durationMs: measureStartupDuration(claimsStartedAt),
+            });
+            const refreshedTokenStartedAt = performance.now();
+            markStartupStep('auth.claimsTokenRefresh.start', {
+              uid: user.uid,
+              forceRefresh: true,
+              loginTraceId,
+            });
+            tokenToUse = await user.getIdToken(true);
+            markStartupStep('auth.claimsTokenRefresh.resolved', {
+              uid: user.uid,
+              forceRefresh: true,
+              loginTraceId,
+              durationMs: measureStartupDuration(refreshedTokenStartedAt),
+            });
+          } catch (syncError) {
+            console.warn('Unable to sync auth claims during bootstrap:', syncError);
+            markStartupStep('auth.claimsSync.error', {
+              uid: user.uid,
+              loginTraceId: getStartupTraceId(),
+              message: syncError?.message || 'unknown error',
+            });
+          }
         }
 
         localStorage.setItem('dashboardToken', tokenToUse);
@@ -638,12 +839,18 @@ function App() {
         markStartupStep('auth.bootstrap.complete', {
           uid: user.uid,
           language: info?.features?.defaultlanguage || 'en',
+          role: info?.role || null,
+          clientId: info?.clientId || null,
+          totalDurationMs: measureStartupDuration(bootstrapStartedAt),
+          loginTraceId: getStartupTraceId(),
         });
         setAuthReady(true);
       } catch (e) {
         console.error('Auth bootstrap failed:', e);
         markStartupStep('auth.bootstrap.error', {
           message: e?.message || 'unknown error',
+          totalDurationMs: measureStartupDuration(bootstrapStartedAt),
+          loginTraceId: getStartupTraceId(),
         });
         await handleLogout();
         setAuthReady(true);
@@ -717,35 +924,112 @@ function App() {
     };
   }, [handleLogout]);
 
+  const listenerHasClientInfo = Boolean(clientInfo);
+  const listenerUid = clientInfo?.uid || '';
+  const listenerUsername = clientInfo?.username || null;
+  const listenerClientId = clientInfo?.clientId || null;
+  const listenerRole = clientInfo?.role || null;
+  const listenerCountry = clientInfo?.features?.country || null;
+  const listenerIsAdmin = Boolean(clientInfo?.isAdmin);
+  const listenerIsPartner = Boolean(clientInfo?.partner === true || listenerRole === 'partner');
+  const listenerClientInfo = useMemo(() => {
+    if (!listenerHasClientInfo) return null;
+
+    return {
+      uid: listenerUid,
+      username: listenerUsername,
+      clientId: listenerClientId,
+      role: listenerRole,
+      partner: listenerIsPartner,
+      isAdmin: listenerIsAdmin,
+    };
+  }, [
+    listenerClientId,
+    listenerHasClientInfo,
+    listenerIsAdmin,
+    listenerIsPartner,
+    listenerRole,
+    listenerUid,
+    listenerUsername,
+  ]);
+  const effectiveRentalScope = useMemo(() => (
+    listenerIsAdmin ? ADMIN_RENTAL_SCOPE : rentalScope
+  ), [listenerIsAdmin, rentalScope]);
+  const effectiveRentalStationIds = effectiveRentalScope.stationIds;
+  const effectiveRentalStationIdsKey = effectiveRentalStationIds.join('\u001f');
+
   // ---------------------------------------------
   // Firestore listeners
   // ---------------------------------------------
   useEffect(() => {
     // ✅ Require actual firebase session too
-    if (!token || !auth.currentUser || !clientInfo) return;
+    if (!token || !auth.currentUser || !listenerClientInfo) return;
 
     setKiosksReady(false);
+    setRentalData([]);
+    setRentalScope({
+      ready: listenerIsAdmin,
+      scopeType: listenerIsAdmin ? 'all' : 'pending',
+      stationIds: [],
+    });
     startupListenerRef.current = { kiosksLogged: false, rentalsLogged: false };
     const listenersStartedAt = performance.now();
+    const kiosksCollectionRef = collection(db, 'kiosks');
+    const kioskScope = buildScopedKioskQuery(kiosksCollectionRef, listenerClientInfo);
     markStartupStep('firestore.listeners.attach', {
       uid: auth.currentUser.uid,
+      username: listenerUsername,
+      clientId: listenerClientId,
+      role: listenerRole,
+      country: listenerCountry,
+      isAdmin: listenerIsAdmin,
+      kioskScopeType: kioskScope.scopeType,
+      kioskScopeField: kioskScope.scopeField,
+      kioskScopeValueCount: kioskScope.scopeValues.length,
     });
 
-    // Step 1: Real-time listener for raw Kiosk Data from Firestore
-    const kiosksCollectionRef = collection(db, 'kiosks');
-    const unsubscribeKiosks = onSnapshot(kiosksCollectionRef, (querySnapshot) => {
-      const now = Date.now();
-      const firestoreKiosksData = querySnapshot.docs.map(docSnap => ({ stationid: docSnap.id, ...docSnap.data() }));
-
-      if (firestoreError) setFirestoreError(null); // Clear error on new data
+    if (!kioskScope.queryRef) {
+      setAllStationsData([]);
       setKiosksReady(true);
-      if (!startupListenerRef.current.kiosksLogged) {
+      setRentalScope({ ready: true, scopeType: kioskScope.scopeType, stationIds: [] });
+      markStartupStep('firestore.kiosks.skipped', {
+        reason: 'empty_scope',
+        scopeType: kioskScope.scopeType,
+      });
+      return undefined;
+    }
+
+    // Step 1: Real-time listener for raw Kiosk Data from Firestore
+    const unsubscribeKiosks = onSnapshot(kioskScope.queryRef, (querySnapshot) => {
+      const snapshotStartedAt = performance.now();
+      const shouldLogFirstKioskSnapshot = !startupListenerRef.current.kiosksLogged;
+      const now = Date.now();
+      const mapStartedAt = performance.now();
+      const firestoreKiosksData = querySnapshot.docs.map(docSnap => ({ stationid: docSnap.id, ...docSnap.data() }));
+      const mapDurationMs = measureStartupDuration(mapStartedAt);
+
+      setFirestoreError(null); // Clear error on new data
+      setKiosksReady(true);
+      if (shouldLogFirstKioskSnapshot) {
         startupListenerRef.current.kiosksLogged = true;
-        markStartupStep('firestore.kiosks.firstSnapshot', {
-          durationMs: measureStartupDuration(listenersStartedAt),
-          count: firestoreKiosksData.length,
-        });
       }
+
+      const nextRentalStationIds = listenerIsAdmin
+        ? []
+        : uniqueSortedValues(firestoreKiosksData.map((kiosk) => kiosk.stationid));
+      setRentalScope((prevScope) => {
+        const nextScope = {
+          ready: true,
+          scopeType: kioskScope.scopeType,
+          stationIds: nextRentalStationIds,
+        };
+
+        return (
+          prevScope.ready === nextScope.ready &&
+          prevScope.scopeType === nextScope.scopeType &&
+          arraysEqual(prevScope.stationIds, nextScope.stationIds)
+        ) ? prevScope : nextScope;
+      });
 
       // Filter out updates for ignored kiosks.
       setAllStationsData(prevStations => {
@@ -760,6 +1044,20 @@ function App() {
         return newStations;
       });
 
+      if (shouldLogFirstKioskSnapshot) {
+        markStartupStep('firestore.kiosks.firstSnapshot', {
+          durationMs: measureStartupDuration(listenersStartedAt),
+          callbackDurationMs: measureStartupDuration(snapshotStartedAt),
+          mapDurationMs,
+          count: firestoreKiosksData.length,
+          rentalStationScopeCount: nextRentalStationIds.length,
+          scopeType: kioskScope.scopeType,
+          scopeField: kioskScope.scopeField,
+          fromCache: querySnapshot.metadata?.fromCache === true,
+          hasPendingWrites: querySnapshot.metadata?.hasPendingWrites === true,
+        });
+      }
+
     }, (error) => {
       setKiosksReady(true);
       markStartupStep('firestore.kiosks.error', {
@@ -769,35 +1067,132 @@ function App() {
       console.error("Error fetching real-time kiosks: ", error);
     });
 
-    // Step 2: Real-time listener for Rental Data
+    return () => {
+      unsubscribeKiosks();
+    };
+  }, [
+    token,
+    listenerClientId,
+    listenerCountry,
+    listenerClientInfo,
+    listenerIsAdmin,
+    listenerIsPartner,
+    listenerRole,
+    listenerUid,
+    listenerUsername,
+  ]);
+
+  useEffect(() => {
+    if (!token || !auth.currentUser || !listenerClientInfo) return;
+    if (!effectiveRentalScope.ready) return;
+
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
     const dateThreshold = thirtyDaysAgo.toISOString();
-    const rentalQuery = query(collection(db, 'rentals'), where('rentalTime', '>=', dateThreshold));
-    const unsubscribeRentals = onSnapshot(rentalQuery, (querySnapshot) => {
-      const rentals = querySnapshot.docs.map(docSnap => ({ rawid: docSnap.id, ...docSnap.data() }));
-      if (firestoreError) setFirestoreError(null);
-      if (!startupListenerRef.current.rentalsLogged) {
-        startupListenerRef.current.rentalsLogged = true;
-        markStartupStep('firestore.rentals.firstSnapshot', {
-          durationMs: measureStartupDuration(listenersStartedAt),
-          count: rentals.length,
-        });
-      }
-      setRentalData(rentals);
-    }, (error) => {
-      markStartupStep('firestore.rentals.error', {
-        message: error?.message || 'unknown error',
+    const dateThresholdMs = Date.parse(dateThreshold);
+    const rentalsCollectionRef = collection(db, 'rentals');
+    const rentalListenersStartedAt = performance.now();
+
+    if (!listenerIsAdmin && effectiveRentalStationIds.length === 0) {
+      setRentalData([]);
+      startupListenerRef.current.rentalsLogged = true;
+      markStartupStep('firestore.rentals.skipped', {
+        reason: 'empty_station_scope',
+        scopeType: effectiveRentalScope.scopeType,
       });
-      setFirestoreError('Failed to connect to rental data. The dashboard may be out of date.');
-      console.error("Error fetching real-time rentals: ", error);
+      return undefined;
+    }
+
+    const rentalQuerySpecs = listenerIsAdmin
+      ? [{
+          key: 'all',
+          stationIds: [],
+          queryRef: query(rentalsCollectionRef, where('rentalTime', '>=', dateThreshold)),
+        }]
+      : buildScopedRentalQueries(rentalsCollectionRef, effectiveRentalStationIds);
+    const rentalSnapshotsByQuery = new Map();
+    const rentalMetadataByQuery = new Map();
+
+    startupListenerRef.current.rentalsLogged = false;
+    markStartupStep('firestore.rentals.listeners.attach', {
+      scopeType: effectiveRentalScope.scopeType,
+      stationCount: listenerIsAdmin ? null : effectiveRentalStationIds.length,
+      queryCount: rentalQuerySpecs.length,
+      dateThreshold,
+      serverDateFiltered: listenerIsAdmin,
     });
 
+    const unsubscribeRentals = rentalQuerySpecs.map((querySpec) => (
+      onSnapshot(querySpec.queryRef, (querySnapshot) => {
+        const snapshotStartedAt = performance.now();
+        const mapStartedAt = performance.now();
+        const rawRentals = querySnapshot.docs.map(docSnap => ({ rawid: docSnap.id, ...docSnap.data() }));
+        const rentals = listenerIsAdmin
+          ? rawRentals
+          : rawRentals.filter((rental) => rentalIsWithinWindow(rental, dateThresholdMs));
+        const mapDurationMs = measureStartupDuration(mapStartedAt);
+        setFirestoreError(null);
+
+        rentalSnapshotsByQuery.set(querySpec.key, rentals);
+        rentalMetadataByQuery.set(querySpec.key, {
+          fromCache: querySnapshot.metadata?.fromCache === true,
+          hasPendingWrites: querySnapshot.metadata?.hasPendingWrites === true,
+          rawCount: rawRentals.length,
+          filteredCount: rentals.length,
+          mapDurationMs,
+        });
+
+        const hasAllInitialSnapshots = rentalSnapshotsByQuery.size === rentalQuerySpecs.length;
+        if (!hasAllInitialSnapshots && !startupListenerRef.current.rentalsLogged) {
+          return;
+        }
+
+        const combineStartedAt = performance.now();
+        const combinedRentals = Array.from(rentalSnapshotsByQuery.values()).flat();
+        const combineDurationMs = measureStartupDuration(combineStartedAt);
+        setRentalData(combinedRentals);
+
+        if (!startupListenerRef.current.rentalsLogged) {
+          startupListenerRef.current.rentalsLogged = true;
+          const metadata = Array.from(rentalMetadataByQuery.values());
+          markStartupStep('firestore.rentals.firstSnapshot', {
+            durationMs: measureStartupDuration(rentalListenersStartedAt),
+            callbackDurationMs: measureStartupDuration(snapshotStartedAt),
+            mapDurationMs,
+            combineDurationMs,
+            count: combinedRentals.length,
+            rawCount: metadata.reduce((sum, item) => sum + item.rawCount, 0),
+            scopeType: effectiveRentalScope.scopeType,
+            stationCount: listenerIsAdmin ? null : effectiveRentalStationIds.length,
+            queryCount: rentalQuerySpecs.length,
+            fromCache: metadata.every((item) => item.fromCache),
+            hasPendingWrites: metadata.some((item) => item.hasPendingWrites),
+            serverDateFiltered: listenerIsAdmin,
+          });
+        }
+      }, (error) => {
+        markStartupStep('firestore.rentals.error', {
+          message: error?.message || 'unknown error',
+          scopeType: effectiveRentalScope.scopeType,
+          stationCount: listenerIsAdmin ? null : effectiveRentalStationIds.length,
+          queryCount: rentalQuerySpecs.length,
+        });
+        setFirestoreError('Failed to connect to rental data. The dashboard may be out of date.');
+        console.error("Error fetching real-time rentals: ", error);
+      })
+    ));
+
     return () => {
-      unsubscribeKiosks();
-      unsubscribeRentals();
+      unsubscribeRentals.forEach((unsubscribe) => unsubscribe());
     };
-  }, [token, clientInfo, firestoreError]);
+  }, [
+    effectiveRentalScope,
+    effectiveRentalStationIds,
+    effectiveRentalStationIdsKey,
+    listenerClientInfo,
+    listenerIsAdmin,
+    token,
+  ]);
 
   // Failsafe Effect: Cleans up lingering UI effects when Firestore data confirms the state.
   useEffect(() => {

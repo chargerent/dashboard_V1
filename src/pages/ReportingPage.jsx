@@ -734,7 +734,7 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                                         <label htmlFor="reporting-show-v2" className="ml-2 text-sm text-gray-900">V2</label>
                                     </div>
                                 </div>
-                                <select multiple value={selectedKiosks} onChange={e => handleKioskSelectionChange(Array.from(e.target.selectedOptions, option => option.value))} className={`mt-1 block w-full ${userMode ? 'h-48' : 'h-24'} border border-gray-300 rounded-md disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed`} disabled={!canChooseKiosks}>
+                                <select multiple size={15} value={selectedKiosks} onChange={e => handleKioskSelectionChange(Array.from(e.target.selectedOptions, option => option.value))} className="mt-1 block w-full border border-gray-300 rounded-md disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed" disabled={!canChooseKiosks}>
                                     {availableKiosksForFilter.map(kiosk => <option key={kiosk.stationid} value={kiosk.stationid}>{kiosk.stationid} - {kiosk.info.place}</option>)}
                                 </select>
                                 <div className="flex justify-between mt-1">
