@@ -7,7 +7,6 @@ import { signInWithEmailAndPassword } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "../firebase-config";
 import { callFunctionPublic } from "../utils/callableRequest";
-import { markStartupStep, measureStartupDuration, resetStartupTrace } from "../utils/startupTrace";
 
 // Change if you picked a different mapping domain
 const AUTH_MAPPING_DOMAIN = "auth.charge.rent";
@@ -41,48 +40,14 @@ function LoginPage({ onLogin }) {
       }
 
       const email = `${u}@${AUTH_MAPPING_DOMAIN}`;
-      const loginTraceId = resetStartupTrace(`login:${u}`);
-      markStartupStep("login.submit", { username: u, loginTraceId });
 
       const trackAttempt = (success) => {
-        const trackStartedAt = performance.now();
-        markStartupStep("login.trackAttempt.dispatch", {
-          username: u,
-          success,
-          loginTraceId,
-        });
-
-        callFunctionPublic("auth_trackAttempt", { username: u, success, loginTraceId })
-          .then(() => {
-            markStartupStep("login.trackAttempt.resolved", {
-              username: u,
-              success,
-              loginTraceId,
-              durationMs: measureStartupDuration(trackStartedAt),
-            });
-          })
-          .catch((trackError) => {
-            markStartupStep("login.trackAttempt.error", {
-              username: u,
-              success,
-              loginTraceId,
-              durationMs: measureStartupDuration(trackStartedAt),
-              message: trackError?.message || "unknown error",
-            });
-          });
+        callFunctionPublic("auth_trackAttempt", { username: u, success })
+          .catch((trackError) => console.warn("Unable to track login attempt:", trackError));
       };
 
-      const lockoutStartedAt = performance.now();
-      markStartupStep("login.lockoutCheck.start", { username: u, loginTraceId });
       const lockSnap = await getDoc(doc(db, "loginAttempts", u));
       const lockData = lockSnap.exists() ? (lockSnap.data() || {}) : {};
-      markStartupStep("login.lockoutCheck.resolved", {
-        username: u,
-        loginTraceId,
-        durationMs: measureStartupDuration(lockoutStartedAt),
-        exists: lockSnap.exists(),
-        locked: Boolean(lockData.lockedUntil && new Date(lockData.lockedUntil) > new Date()),
-      });
       if (lockSnap.exists()) {
         if (lockData.lockedUntil && new Date(lockData.lockedUntil) > new Date()) {
           trackAttempt(false);
@@ -90,8 +55,6 @@ function LoginPage({ onLogin }) {
         }
       }
 
-      const signInStartedAt = performance.now();
-      markStartupStep("login.signIn.start", { username: u, loginTraceId });
       try {
         await signInWithEmailAndPassword(auth, email, password);
       } catch (authError) {
@@ -100,18 +63,9 @@ function LoginPage({ onLogin }) {
       }
 
       trackAttempt(true);
-      markStartupStep("login.signIn.resolved", {
-        username: u,
-        loginTraceId,
-        durationMs: measureStartupDuration(signInStartedAt),
-      });
       onLogin();
       return;
-    } catch (err) {
-      markStartupStep("login.error", {
-        code: err?.code || "unknown",
-        message: err?.message || t("login_error"),
-      });
+    } catch {
       // IMPORTANT: mask all errors as the same message
       setError(t("login_error"));
       setPassword("");

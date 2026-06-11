@@ -1,6 +1,7 @@
 // src/components/Dashboard/RentalDetailView.jsx
 import { useMemo, useState } from 'react';
 import { formatDateTime, formatDuration } from '../../utils/dateFormatter';
+import { formatRentalChargeAmount } from '../../utils/rentals.js';
 import RefundModal from '../UI/RefundModal';
 
 export default function RentalDetailView({ kiosk, period, rentalData, onClose, t, onCommand }) {
@@ -79,7 +80,7 @@ export default function RentalDetailView({ kiosk, period, rentalData, onClose, t
                                         <td className="px-2 py-2 whitespace-nowrap">
                                             <div className="text-gray-800">{formatDuration(rental.rentalTime, rental.returnTime)}</div>
                                             <div className="text-gray-500 font-mono">
-                                                {rental.status !== 'rented' ? `${rental.symbol || ''}${(rental.totalCharged ?? rental.buyprice)?.toFixed(2) || '0.00'}` : ''}
+                                                {rental.status !== 'rented' ? formatRentalChargeAmount(rental) : ''}
                                             </div>
                                         </td>
                                     </tr>

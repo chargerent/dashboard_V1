@@ -6,6 +6,9 @@ export const translations = {
         loading: "Loading...",
         welcome: "Welcome",
         logout: "Logout",
+        previous: "Previous",
+        next: "Next",
+        showing: "Showing",
         no_stations_found: "No stations found matching the current filter.",
         // Filter Panel
         filter_by: "Filter by:",
@@ -473,6 +476,9 @@ export const translations = {
         loading: "Chargement...",
         welcome: "Bienvenue",
         logout: "Déconnexion",
+        previous: "Précédent",
+        next: "Suivant",
+        showing: "Affichage",
         no_stations_found: "Aucune station trouvée correspondant au filtre actuel.",
         // Filter Panel
         filter_by: "Filtrer par :",

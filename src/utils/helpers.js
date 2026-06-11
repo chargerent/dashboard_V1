@@ -40,6 +40,7 @@ const DEFAULT_MEDIA_OPTIONS = {
     assetIds: [],
     playlist: [],
 };
+const PENDING_STATION_STATUSES = new Set(['pending', 'pending-provision', 'pending_provision']);
 export const DEFAULT_KIOSK_POWER_THRESHOLD = 80;
 const isPlainObject = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
 const mergeLocalizedMarketingValue = (value, defaults) => {
@@ -170,6 +171,18 @@ export const normalizeKioskInfoForSchema = (info, isNewSchema = false) => {
     delete normalizedInfo.address;
     normalizedInfo.stationaddress = address;
     return normalizedInfo;
+};
+
+export const isStationProvisioned = (station) => {
+    const stationid = String(station?.stationid || '').trim();
+    const provisionid = String(station?.provisionid || '').trim();
+    const status = String(station?.status || '').trim().toLowerCase();
+
+    if (!stationid) return false;
+    if (status.includes('pending') || PENDING_STATION_STATUSES.has(status)) return false;
+    if (provisionid && stationid.toLowerCase() === provisionid.toLowerCase()) return false;
+
+    return true;
 };
 
 export const isModuleOnline = (module, referenceTime) => (

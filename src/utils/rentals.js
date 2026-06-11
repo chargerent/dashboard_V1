@@ -1,6 +1,7 @@
 import { normalizeText } from './text';
 
 const SUCCESSFUL_REFUND_STATUSES = new Set(['approved', 'refunded', 'succeeded']);
+const PENDING_REFUND_STATUSES = new Set(['pending']);
 
 const toValidIsoTimestamp = (value) => {
     if (!value) return '';
@@ -20,10 +21,29 @@ const calculateRentalPeriod = (rentalTime, returnTime, fallbackValue) => {
     return Math.max(0, returnTimestamp - rentalTimestamp);
 };
 
+const toFiniteNumber = (value) => {
+    if (value === null || value === undefined || value === '') return null;
+
+    const numericValue = Number(value);
+    return Number.isFinite(numericValue) ? numericValue : null;
+};
+
 export const normalizeRefundStatus = (status) => normalizeText(status);
+
+export const getRentalChargeAmount = (rental) => (
+    toFiniteNumber(rental?.totalCharged ?? rental?.buyprice) ?? 0
+);
+
+export const formatRentalChargeAmount = (rental) => (
+    `${rental?.symbol || ''}${getRentalChargeAmount(rental).toFixed(2)}`
+);
 
 export const isSuccessfulRefundStatus = (status) => (
     SUCCESSFUL_REFUND_STATUSES.has(normalizeRefundStatus(status))
+);
+
+export const isPendingRefundStatus = (status) => (
+    PENDING_REFUND_STATUSES.has(normalizeRefundStatus(status))
 );
 
 export const hasRefundRequest = (rental) => (

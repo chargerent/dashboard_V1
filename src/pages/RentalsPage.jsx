@@ -4,6 +4,7 @@ import { useState, useMemo } from 'react';
 import { formatDateTime, formatDuration, formatDate } from '../utils/dateFormatter';
 import { normalizeText, textEquals, textIncludes } from '../utils/text';
 import {
+    formatRentalChargeAmount,
     hasRefundRequest,
     isRefundedRental,
     isReturnedRentalStatus,
@@ -14,15 +15,42 @@ import RefundModal from '../components/UI/RefundModal.jsx';
 import ConfirmationModal from '../components/UI/ConfirmationModal.jsx';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
 
+const RENTALS_PER_PAGE = 30;
+
+const resolveRefundTransactionId = (rental) => (
+    String(
+        rental?.rawid ||
+        rental?.paymentSessionId ||
+        rental?.transactionid ||
+        rental?.transactionId ||
+        rental?.orderid ||
+        ''
+    ).trim()
+);
+
+const resolveRefundGateway = (rental, station) => (
+    String(rental?.gateway || station?.hardware?.gateway || '').trim()
+);
+
+const formatTransactionId = (value) => {
+    const transactionId = String(value || '').trim();
+
+    if (transactionId.length <= 24) return transactionId;
+
+    return `${transactionId.slice(0, 12)}...${transactionId.slice(-8)}`;
+};
+
 // Safely turn Firestore TS / string / ms into Date
 const safeToDate = (timestamp) => {
     if (!timestamp) return null;
+    if (timestamp instanceof Date) return isNaN(timestamp.getTime()) ? null : timestamp;
     if (typeof timestamp.toDate === 'function') return timestamp.toDate();
     const d = new Date(timestamp);
     return isNaN(d.getTime()) ? null : d;
 };
 
 const RentalCard = ({ rental, t, onRefund, onLockClick, canLock }) => {
+    const transactionId = String(rental.orderid || '').trim();
     const normalizedRefundStatus = normalizeRefundStatus(rental.refundStatus);
     const statusClass = rental.status === 'rented' ? 'bg-blue-100 text-blue-800' :
                         rental.status === 'purchased' ? 'bg-purple-100 text-purple-800' :
@@ -58,7 +86,9 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock }) => {
             <div className="mt-4 grid grid-cols-3 gap-x-4 gap-y-2 text-xs">
                 <div>
                     <p className="text-gray-500">{t('order_id')}</p>
-                    <p className="font-mono text-gray-800">{rental.orderid}</p>
+                    <p className="font-mono text-gray-800 truncate" title={transactionId}>
+                        {formatTransactionId(transactionId)}
+                    </p>
                 </div>
                 <div>
                     <p className="text-gray-500">{t('charger_sn')}</p>
@@ -94,7 +124,7 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock }) => {
                     <p className="text-gray-500">{t('amount')}</p>
                     <p className="font-mono text-base font-bold text-gray-800">
                         {(isReturnedRentalStatus(rental.status) || rental.status === 'purchased')
-                            ? `${rental.symbol || ''}${(rental.totalCharged ?? rental.buyprice)?.toFixed(2) || '0.00'}`
+                            ? formatRentalChargeAmount(rental)
                             : ''}
                     </p>
                 </div>
@@ -154,6 +184,7 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock }) => {
 export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalData, allStationsData, t, language, setLanguage, onLogout, onCommand, commandStatus, setCommandStatus, referenceTime }) {
     const [activeFilters, setActiveFilters] = useState({ period: 'today', status: 'all', returnType: 'all' });
     const [searchTerm, setSearchTerm] = useState('');
+    const [currentPage, setCurrentPage] = useState(1);
     const [showRefundModal, setShowRefundModal] = useState(false);
     const [rentalToRefund, setRentalToRefund] = useState(null);
     const [commandDetails, setCommandDetails] = useState(null);
@@ -162,8 +193,8 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
     const chargerLocations = useMemo(() => {
         const map = new Map();
         (allStationsData || []).forEach(kiosk => {
-            kiosk.modules.forEach(module => {
-                module.slots.forEach(slot => {
+            (kiosk.modules || []).forEach(module => {
+                (module.slots || []).forEach(slot => {
                     if (slot.sn && slot.sn !== 0) {
                         map.set(String(slot.sn), {
                             stationId: kiosk.stationid,
@@ -178,19 +209,19 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
         });
         return map;
     }, [allStationsData]);
-    
+
     const filteredRentals = useMemo(() => {
         const stationToClientMap = new Map();
         // We need to map both client and rep to correctly filter for partners.
         (allStationsData || []).forEach(station => {
-            stationToClientMap.set(station.stationid, { 
-                clientId: station.info.client, 
-                rep: station.info.rep,
-                location: station.info.location, 
-                place: station.info.place 
+            stationToClientMap.set(station.stationid, {
+                clientId: station.info?.client,
+                rep: station.info?.rep,
+                location: station.info?.location,
+                place: station.info?.place
             });
         });
-        
+
         let rentals = (rentalData || []).map(rental => {
             const chargerLocation = chargerLocations.get(String(rental.sn));
             const stationInfo = stationToClientMap.get(rental.rentalStationid);
@@ -219,7 +250,7 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
         // Filter by period
         if (!referenceTime) return []; // Guard against undefined referenceTime
 
-        const now = safeToDate(referenceTime);
+        const now = safeToDate(referenceTime) || new Date();
         let startDate;
         switch (activeFilters.period) {
             case 'today':
@@ -228,11 +259,11 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
                 break;
             case '30days':
                 startDate = new Date(now);
-                startDate.setDate(now.getDate() - 30);
+                startDate.setDate(startDate.getDate() - 30);
                 break;
             case '7days':
                 startDate = new Date(now);
-                startDate.setDate(now.getDate() - 7);
+                startDate.setDate(startDate.getDate() - 7);
                 break;
             default: // Default to 'today'
                 startDate = new Date(now);
@@ -243,7 +274,7 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
         rentals = rentals.filter(r => {
             if (!r.rentalTime) return false;
             const rentalDate = safeToDate(r.rentalTime);
-            return rentalDate >= startDate;
+            return rentalDate && rentalDate >= startDate;
         });
 
         // Filter by status
@@ -280,8 +311,31 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
 
     }, [rentalData, allStationsData, clientInfo, activeFilters, searchTerm, referenceTime, chargerLocations]);
 
+    const totalPages = Math.max(1, Math.ceil(filteredRentals.length / RENTALS_PER_PAGE));
+    const visiblePage = Math.min(currentPage, totalPages);
+    const pageStartIndex = filteredRentals.length === 0 ? 0 : ((visiblePage - 1) * RENTALS_PER_PAGE) + 1;
+    const pageEndIndex = Math.min(visiblePage * RENTALS_PER_PAGE, filteredRentals.length);
+    const paginatedRentals = useMemo(() => {
+        const startIndex = (visiblePage - 1) * RENTALS_PER_PAGE;
+        return filteredRentals.slice(startIndex, startIndex + RENTALS_PER_PAGE);
+    }, [filteredRentals, visiblePage]);
+
     const handleFilterChange = (type, value) => {
         setActiveFilters(prev => ({ ...prev, [type]: value }));
+        setCurrentPage(1);
+    };
+
+    const handleSearchChange = (event) => {
+        setSearchTerm(event.target.value);
+        setCurrentPage(1);
+    };
+
+    const handlePreviousPage = () => {
+        setCurrentPage(page => Math.max(1, page - 1));
+    };
+
+    const handleNextPage = () => {
+        setCurrentPage(page => Math.min(totalPages, page + 1));
     };
 
     const handleRefundClick = (rental) => {
@@ -292,10 +346,11 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
     const handleConfirmRefund = (amount) => {
         if (rentalToRefund) {
             const station = allStationsData.find(s => s.stationid === rentalToRefund.rentalStationid);
-            const gateway = station?.hardware?.gateway;
+            const gateway = resolveRefundGateway(rentalToRefund, station);
+            const transactionid = resolveRefundTransactionId(rentalToRefund);
             // The onCommand function expects a different structure for refunds.
             // The 6th argument is used for the refund payload, which includes the transactionid.
-            onCommand(rentalToRefund.rentalStationid, 'refund', null, null, null, { transactionid: rentalToRefund.rawid, amount, gateway });
+            onCommand(rentalToRefund.rentalStationid, 'refund', null, null, null, { transactionid, amount, gateway });
             setCommandStatus({ state: 'sending', message: t('sending_command') });
         }
         setShowRefundModal(false);
@@ -377,6 +432,11 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
                         <div className="text-right">
                             <span className="text-lg font-bold text-gray-800">{filteredRentals.length}</span>
                             <span className="text-sm text-gray-500 ml-2">{t('rentals')}</span>
+                            {filteredRentals.length > RENTALS_PER_PAGE && (
+                                <p className="text-xs text-gray-500">
+                                    {t('showing')} {pageStartIndex}-{pageEndIndex}
+                                </p>
+                            )}
                         </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-4 mt-4">
@@ -401,7 +461,7 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
                             type="text"
                             placeholder={t('rentals_search_placeholder')}
                             value={searchTerm}
-                            onChange={e => setSearchTerm(e.target.value)}
+                            onChange={handleSearchChange}
                             className="w-full pl-9 pr-9 py-1.5 border border-gray-300 rounded-full focus:ring-2 focus:ring-blue-500 focus:outline-none"
                         />
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -418,15 +478,37 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
                     </div>
                 </div>
 
+                {totalPages > 1 && (
+                    <div className="mb-6 flex items-center justify-between gap-4">
+                        <button
+                            onClick={handlePreviousPage}
+                            disabled={visiblePage === 1}
+                            className="px-4 py-2 text-sm font-semibold rounded-md bg-white text-gray-700 shadow-sm border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {t('previous')}
+                        </button>
+                        <div className="text-sm font-medium text-gray-600">
+                            {t('page')} {visiblePage} / {totalPages}
+                        </div>
+                        <button
+                            onClick={handleNextPage}
+                            disabled={visiblePage === totalPages}
+                            className="px-4 py-2 text-sm font-semibold rounded-md bg-white text-gray-700 shadow-sm border border-gray-200 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {t('next')}
+                        </button>
+                    </div>
+                )}
+
                 {/* Rentals Grid */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
                     {filteredRentals.length > 0 ? (
-                        filteredRentals.map(rental => {
-                            const canLock = clientInfo.commands.lock && isReturnedRentalStatus(rental.status) && rental.location;
+                        paginatedRentals.map(rental => {
+                            const canLock = clientInfo?.commands?.lock && isReturnedRentalStatus(rental.status) && rental.location;
                             return <RentalCard 
                                 key={`${rental.orderid}-${rental.status}-${rental.rentalTime}`} 
                                 rental={rental} t={t} 
-                                onRefund={clientInfo.features.rentals ? handleRefundClick : null}
+                                onRefund={clientInfo?.features?.rentals ? handleRefundClick : null}
                                 onLockClick={() => handleLockClick(rental)}
                                 canLock={canLock} />;
                         })

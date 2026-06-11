@@ -1785,25 +1785,6 @@ function normalizeUsername(u) {
   return String(u || "").trim().toLowerCase();
 }
 
-function nowMs() {
-  return Number(process.hrtime.bigint()) / 1000000;
-}
-
-function durationMs(startedAt) {
-  return Math.round(nowMs() - Number(startedAt || 0));
-}
-
-function getLoginTraceId(data) {
-  const traceId = String(
-      data?.loginTraceId ||
-      data?.traceId ||
-      data?.__loginTraceId ||
-      "",
-  ).trim();
-
-  return traceId ? traceId.slice(0, 120) : null;
-}
-
 function isValidUsername(u) {
   return /^[a-z0-9._-]+$/.test(u);
 }
@@ -6582,19 +6563,15 @@ async function setUserPasswordImpl(data) {
 }
 
 async function trackLoginAttemptImpl(data, req = null) {
-  const startedAt = nowMs();
   const username = normalizeUsername(data?.username);
   const success = data?.success === true;
-  const loginTraceId = getLoginTraceId(data);
 
   if (!username || !isValidUsername(username)) {
     throw new functions.https.HttpsError("invalid-argument", "valid username required");
   }
 
   const ref = db.collection("loginAttempts").doc(username);
-  const readStartedAt = nowMs();
   const snap = await ref.get();
-  const readDurationMs = durationMs(readStartedAt);
   const existing = snap.exists ? (snap.data() || {}) : {};
 
   const now = new Date();
@@ -6622,20 +6599,7 @@ async function trackLoginAttemptImpl(data, req = null) {
     update = {count: newCount, lockedUntil, logs};
   }
 
-  const writeStartedAt = nowMs();
   await ref.set(update, {merge: true});
-  const writeDurationMs = durationMs(writeStartedAt);
-  console.info("auth.trackAttempt.timing", {
-    loginTraceId,
-    username,
-    success,
-    readDurationMs,
-    writeDurationMs,
-    totalDurationMs: durationMs(startedAt),
-    existingCount: Number(existing.count || 0),
-    count: Number(update.count || 0),
-    locked: Boolean(update.lockedUntil),
-  });
   return {
     ok: true,
     count: Number(update.count || 0),
@@ -6643,22 +6607,11 @@ async function trackLoginAttemptImpl(data, req = null) {
   };
 }
 
-async function syncOwnClaimsImpl(authState, data = {}) {
-  const startedAt = nowMs();
-  const claimsStartedAt = nowMs();
+async function syncOwnClaimsImpl(authState) {
   const claims = await syncCustomClaimsForProfile(
       authState.uid,
       authState.profile,
   );
-  console.info("auth.syncOwnClaims.timing", {
-    loginTraceId: getLoginTraceId(data),
-    uid: authState.uid,
-    username: normalizeUsername(authState.profile?.username),
-    clientId: String(authState.profile?.clientId || "").trim().toUpperCase() || null,
-    role: String(authState.profile?.role || "").trim().toLowerCase() || null,
-    setClaimsDurationMs: durationMs(claimsStartedAt),
-    totalDurationMs: durationMs(startedAt),
-  });
   return {
     ok: true,
     claims,
@@ -7649,16 +7602,9 @@ exports.auth_trackAttempt = functions.https.onCall(async (data, context) => (
   trackLoginAttemptImpl(data, context?.rawRequest || null)
 ));
 
-exports.auth_syncOwnClaims = functions.https.onCall(async (data, context) => {
-  const authStartedAt = nowMs();
+exports.auth_syncOwnClaims = functions.https.onCall(async (_data, context) => {
   const authState = await getAuthorizedProfileFromContext(context);
-  console.info("auth.syncOwnClaims.authorized", {
-    loginTraceId: getLoginTraceId(data),
-    uid: authState.uid,
-    username: normalizeUsername(authState.profile?.username),
-    authDurationMs: durationMs(authStartedAt),
-  });
-  return syncOwnClaimsImpl(authState, data);
+  return syncOwnClaimsImpl(authState);
 });
 
 exports.admin_unlockUser = functions.https.onCall(async (data, context) => {
@@ -7696,15 +7642,8 @@ exports.auth_httpTrackAttempt = handleHttpFunction(async (data, req) => (
 ));
 
 exports.auth_httpSyncOwnClaims = handleHttpFunction(async (data, req) => {
-  const authStartedAt = nowMs();
   const authState = await getAuthorizedProfileFromRequest(req, data);
-  console.info("auth.httpSyncOwnClaims.authorized", {
-    loginTraceId: getLoginTraceId(data),
-    uid: authState.uid,
-    username: normalizeUsername(authState.profile?.username),
-    authDurationMs: durationMs(authStartedAt),
-  });
-  return syncOwnClaimsImpl(authState, data);
+  return syncOwnClaimsImpl(authState);
 });
 
 exports.admin_httpUnlockUser = handleHttpFunction(async (data, req) => {

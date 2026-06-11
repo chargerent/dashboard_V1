@@ -15,6 +15,7 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
     const isPending = String(kiosk.status || '').toLowerCase() === 'pending';
     const hasPricing = kiosk.pricing && Object.keys(kiosk.pricing).length > 0;
     const isPricingOnlineDisabled = hasPricing && kiosk.pricing?.online === false;
+    const fullPowerThreshold = getKioskPowerThreshold(kiosk);
     
     const stats = useMemo(() => {
         let total = 0;
@@ -23,7 +24,6 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
         let locked = 0;
         let emptySlots = 0;
         let totalPhysicalSlots = 0;
-        const fullThreshold = getKioskPowerThreshold(kiosk);
 
         kiosk.modules.forEach(module => {
             totalPhysicalSlots += module.slots.length;
@@ -35,7 +35,7 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
 
                     if (s.sn && s.sn !== 0) {
                         total++;
-                        if (!kiosk.disabled && !s.isLocked && s.batteryLevel >= fullThreshold) {
+                        if (!kiosk.disabled && !s.isLocked && s.batteryLevel >= fullPowerThreshold) {
                             full++;
                         }
                         if (s.chargingCurrent > 0) {
@@ -53,7 +53,7 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
         }
 
         return { total, full, charging, slot: emptySlots, locked };
-    }, [kiosk]);
+    }, [kiosk, fullPowerThreshold]);
 
     const handleToggle = useCallback(() => {
         if (canExpand) {
@@ -129,7 +129,7 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                     </div>
                     <div>
                         <p className="text-2xl font-bold text-green-600">{stats.full}</p>
-                        <p className="text-xs text-gray-500">{t('full')}</p>
+                        <p className="text-xs text-gray-500">{t('full')} / {fullPowerThreshold}</p>
                     </div>
                      <div>
                         <p className="text-2xl font-bold text-blue-500">{stats.charging}</p>
