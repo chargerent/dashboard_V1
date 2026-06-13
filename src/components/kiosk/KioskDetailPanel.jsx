@@ -2,7 +2,14 @@
 
 import React, { useMemo, useCallback, useEffect } from 'react';
 import KioskControlPanel from './KioskControlPanel';
-import { getKioskPowerThreshold, isKioskOnline, isModuleOnline, isNewSchemaKiosk } from '../../utils/helpers';
+import {
+    getKioskPowerThreshold,
+    isChargeStatusError,
+    isKioskOnline,
+    isModuleOnline,
+    isNewSchemaKiosk,
+    isSlotActivelyCharging,
+} from '../../utils/helpers';
 import { installKioskInteractionDebugCapture, logKioskInteraction } from '../../utils/kioskInteractionDebug';
 
 // --- Sub-component for the charger status code ---
@@ -19,6 +26,21 @@ const StatusIndicator = ({ status }) => {
 
     return (
         <span className={`text-[10px] font-mono font-bold ${colorClass}`}>{status || ''}</span>
+    );
+};
+
+const ChargeStatusIndicator = ({ slot }) => {
+    const normalizedStatus = String(slot?.cmos ?? '').trim().toUpperCase();
+    if (!normalizedStatus) return null;
+
+    const colorClass = isChargeStatusError(slot)
+        ? 'text-red-600'
+        : isSlotActivelyCharging(slot)
+            ? 'text-green-600'
+            : 'text-gray-500';
+
+    return (
+        <span className={`text-[10px] font-mono font-bold ${colorClass}`}>{normalizedStatus}</span>
     );
 };
 
@@ -151,7 +173,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                         slot &&
                         slot.sn &&
                         slot.sn !== 0 &&
-                        Number(slot.chargingCurrent ?? 0) > 0
+                        isSlotActivelyCharging(slot)
                     ))
                     : [];
                 const hasReadyCharger = Array.isArray(module?.slots) && module.slots.some((slot) => (
@@ -246,7 +268,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
             return { className: 'border-gray-300 bg-gray-100 text-gray-400', glow: false };
         }
 
-        const isCharging = slot.chargingCurrent > 0;
+        const isCharging = isSlotActivelyCharging(slot);
         let className = '';
 
         if (slot.batteryLevel >= chargeReadyThreshold) {
@@ -364,7 +386,10 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                             <StatusIndicator status={slot.sstat} />
                         </div>
                         <div className="flex flex-col items-start min-w-0">
-                            <span className="text-xs font-mono font-bold">{hasCharger ? `${slot.batteryLevel}%` : t('empty')}</span>
+                            <span className="flex items-center gap-1 text-xs font-mono font-bold">
+                                <span>{hasCharger ? `${slot.batteryLevel}%` : t('empty')}</span>
+                                <ChargeStatusIndicator slot={slot} />
+                            </span>
                             <span className="text-[10px] text-gray-400 font-mono leading-tight truncate">{'\u00A0'}</span>
                         </div>
                     </button>
@@ -634,8 +659,9 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                             <StatusIndicator status={slot.sstat} />
                         </div>
                         <div className="flex min-w-0 flex-col pt-0.5">
-                            <span className="text-[13px] font-bold leading-none">
-                                {hasCharger ? `${slot.batteryLevel}%` : '—'}
+                            <span className="flex items-center gap-1 text-[13px] font-bold leading-none">
+                                <span>{hasCharger ? `${slot.batteryLevel}%` : '—'}</span>
+                                <ChargeStatusIndicator slot={slot} />
                             </span>
                             <span className="truncate font-mono text-[9px] leading-tight text-gray-500">
                                 {'\u00A0'}

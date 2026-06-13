@@ -158,6 +158,71 @@ export const getKioskInfoAddress = (info) => (
     String(info?.address ?? info?.stationaddress ?? '')
 );
 
+export const CHARGING_CURRENT_THRESHOLD_MA = 50;
+
+export const hasNonZeroChargerId = (value) => {
+    const normalizedValue = String(value ?? '').trim();
+    return !!normalizedValue && !/^0+$/.test(normalizedValue);
+};
+
+export const getChargingCurrentMa = (slot) => {
+    const rawValue = slot?.chargingCurrent ?? slot?.chargeCurrent ?? slot?.cstate ?? 0;
+
+    if (typeof rawValue === 'number') {
+        return Number.isFinite(rawValue) ? rawValue : 0;
+    }
+
+    const match = String(rawValue || '0').match(/-?\d+(?:\.\d+)?/);
+    return match ? Number(match[0]) : 0;
+};
+
+export const getChargeStatusFlag = (slot) => {
+    const rawFlag = String(slot?.cmos ?? '').trim();
+    if (!rawFlag || !/^[0-9a-f]+$/i.test(rawFlag)) return null;
+
+    const parsedFlag = parseInt(rawFlag, 16);
+    return Number.isFinite(parsedFlag) ? parsedFlag : null;
+};
+
+export const isSlotActivelyCharging = (slot) => {
+    if (!slot || slot.sstat === '0C' || !hasNonZeroChargerId(slot.sn)) {
+        return false;
+    }
+
+    const currentMa = getChargingCurrentMa(slot);
+    const rawFlag = String(slot?.cmos ?? '').trim();
+
+    if (!rawFlag) {
+        return currentMa > 0;
+    }
+
+    const statusFlag = getChargeStatusFlag(slot);
+    if (statusFlag === null || currentMa < CHARGING_CURRENT_THRESHOLD_MA) {
+        return false;
+    }
+
+    const chargingEnabled = (statusFlag & 0x08) !== 0;
+    const mosOpen = (statusFlag & 0x02) !== 0;
+    return chargingEnabled && mosOpen;
+};
+
+export const isChargeStatusError = (slot) => {
+    const rawFlag = String(slot?.cmos ?? '').trim();
+    if (!rawFlag) return false;
+    if (!/^[0-9a-f]+$/i.test(rawFlag)) return true;
+    if (slot?.sstat === '0E') return true;
+
+    const statusFlag = getChargeStatusFlag(slot);
+    const currentMa = getChargingCurrentMa(slot);
+    if (statusFlag === null || currentMa < CHARGING_CURRENT_THRESHOLD_MA) {
+        return false;
+    }
+
+    const chargingEnabled = (statusFlag & 0x08) !== 0;
+    const mosOpen = (statusFlag & 0x02) !== 0;
+    return !chargingEnabled || !mosOpen;
+};
+
 export const normalizeKioskInfoForSchema = (info, isNewSchema = false) => {
     const normalizedInfo = JSON.parse(JSON.stringify(info || {}));
     const address = getKioskInfoAddress(normalizedInfo);
@@ -285,6 +350,7 @@ export const normalizeKioskData = (kiosks) => {
                 lastUpdated,
                 slots,
                 output: module.output,
+                heartbeatOutput: module.heartbeatOutput,
                 heartbeat: module.heartbeat,
                 chargeMetrics: module.chargeMetrics || null,
                 softwareVersion: Number.isFinite(moduleSoftwareVersion) ? moduleSoftwareVersion : 0,

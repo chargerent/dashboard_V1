@@ -1,7 +1,8 @@
 // src/components/kiosk/KioskPanel.jsx
 
 import { useMemo, useCallback } from 'react';
-import { isKioskOnline, isModuleOnline, getKioskPowerThreshold, isNewSchemaKiosk } from '../../utils/helpers';
+import { HeartIcon } from '@heroicons/react/24/solid';
+import { isKioskOnline, getKioskPowerThreshold, isNewSchemaKiosk, isSlotActivelyCharging } from '../../utils/helpers';
 import { formatDateTime } from '../../utils/dateFormatter';
 import RentalStats from '../Dashboard/RentalStats';
 import GatewayIcon from './GatewayIcon';
@@ -38,7 +39,7 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                         if (!kiosk.disabled && !s.isLocked && s.batteryLevel >= fullPowerThreshold) {
                             full++;
                         }
-                        if (s.chargingCurrent > 0) {
+                        if (isSlotActivelyCharging(s)) {
                             charging++;
                         }
                     }
@@ -97,10 +98,9 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                         </div>
                         <div className="flex items-center gap-1.5" title={t('module_output_status')}>
                             {kiosk.modules.map(module => {
-                                const outputOk = kiosk.isNewSchema
-                                    ? isModuleOnline(module, mockNow)
-                                    : !!module.output;
-                                return <div key={module.id} className={`w-2 h-2 rounded-sm ${outputOk ? 'bg-green-500' : 'bg-red-500'}`} />;
+                                const hasHeartbeatOutput = module.heartbeatOutput !== undefined && module.heartbeatOutput !== null;
+                                const outputOk = hasHeartbeatOutput ? module.heartbeatOutput === true : module.output === true;
+                                return <HeartIcon key={module.id} className={`h-3 w-3 ${outputOk ? 'text-green-500' : 'text-red-500'}`} />;
                             })}
                         </div>
                         <div className="flex flex-col items-center">
