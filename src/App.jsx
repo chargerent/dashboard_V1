@@ -7,7 +7,7 @@ import { subscribeUserToPush } from './push';
 import { translations } from './utils/translations';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage.jsx';
-import { isKioskOnline, isNewSchemaKiosk, normalizeKioskData, normalizeKioskInfoForSchema } from './utils/helpers.js';
+import { isKioskOnline, isNewSchemaKiosk, isV2Kiosk, normalizeKioskData, normalizeKioskInfoForSchema } from './utils/helpers.js';
 import { callFunctionWithAuth } from './utils/callableRequest.js';
 import {
   applyRefundConfirmationToRental,
@@ -238,9 +238,26 @@ function normalizeKioskPayloadForSave(action, kioskPayload, usesNewSchemaInfo) {
   };
 }
 
+function normalizeWifiCommandPayload(kioskPayload) {
+  const wifi = kioskPayload?.wifi && typeof kioskPayload.wifi === 'object'
+    ? kioskPayload.wifi
+    : {};
+  const ssid = String(wifi.ssid || wifi.name || '').trim();
+  const password = String(wifi.password || '').trim();
+
+  return {
+    wifi: {
+      ...wifi,
+      name: ssid,
+      password,
+    },
+    ssid,
+    password,
+  };
+}
+
 const FIREBASE_SAVE_ACTIONS = {
   infochange: 'info',
-  wifichange: 'wifi',
   formoptionschange: 'formoptions',
   marketingoptionschange: 'marketingoptions',
   analyticsoptionschange: 'analyticsoptions',
@@ -251,6 +268,23 @@ const FIREBASE_SAVE_ACTIONS = {
 
 const COMMAND_SOCKET_OPEN_TIMEOUT_MS = 3000;
 const COMMAND_RESPONSE_SCOPE_TTL_MS = 10 * 60 * 1000;
+const WIFI_DEBUG_PREFIX = '[V2 WiFi Debug]';
+
+function getSocketReadyStateLabel(socket) {
+  if (!socket) return 'missing';
+  switch (socket.readyState) {
+    case WebSocket.CONNECTING:
+      return 'CONNECTING';
+    case WebSocket.OPEN:
+      return 'OPEN';
+    case WebSocket.CLOSING:
+      return 'CLOSING';
+    case WebSocket.CLOSED:
+      return 'CLOSED';
+    default:
+      return `UNKNOWN:${socket.readyState}`;
+  }
+}
 const DEFAULT_EJECT_SLOT_TIMEOUT_MS = 90 * 1000;
 const EJECT_SLOT_TIMEOUT_MS_CONFIG = Number(import.meta.env.VITE_EJECT_SLOT_TIMEOUT_MS);
 const EJECT_SLOT_TIMEOUT_MS = Number.isFinite(EJECT_SLOT_TIMEOUT_MS_CONFIG) && EJECT_SLOT_TIMEOUT_MS_CONFIG > 0
@@ -1418,6 +1452,7 @@ function App() {
     const targetKiosk = stationid
       ? allStationsData.find((kiosk) => kiosk.stationid === stationid)
       : null;
+    const targetIsV2Kiosk = isV2Kiosk(targetKiosk);
     const kioskType = String(targetKiosk?.hardware?.type || '').trim();
     const shouldUseFirebaseForLock = Boolean(
       targetKiosk &&
@@ -1428,13 +1463,31 @@ function App() {
     const shouldUseFirebaseForSave = Boolean(
       firebaseSection &&
       targetKiosk &&
-      isNewSchemaKiosk(targetKiosk)
+      targetIsV2Kiosk
     );
     const normalizedKioskPayload = normalizeKioskPayloadForSave(
       action,
       details?.kiosk || null,
       shouldUseFirebaseForSave,
     );
+    const isWifiCommandAttempt = action === 'wifichange' || details?.section === 'wifi';
+
+    if (isWifiCommandAttempt) {
+      console.info(`${WIFI_DEBUG_PREFIX} 4. App onCommand received`, {
+        stationid,
+        action,
+        section: details?.section || '',
+        targetFound: Boolean(targetKiosk),
+        targetIsV2Kiosk,
+        kioskType,
+        firebaseSection,
+        shouldUseFirebaseForSave,
+        shouldUseFirebaseForLock,
+        hasToken: Boolean(token),
+        socketState: getSocketReadyStateLabel(ws.current),
+        wifi: details?.kiosk?.wifi || null,
+      });
+    }
 
     if (shouldUseFirebaseForLock) {
       const requestId = createCommandRequestId(action, stationid, moduleid);
@@ -1499,6 +1552,16 @@ function App() {
 
     if (shouldUseFirebaseForSave) {
       const requestId = createCommandRequestId(action, stationid, moduleid);
+      if (isWifiCommandAttempt) {
+        console.warn(`${WIFI_DEBUG_PREFIX} 5. routing to Firebase section save instead of websocket`, {
+          stationid,
+          action,
+          section: details?.section || '',
+          firebaseSection,
+          targetIsV2Kiosk,
+          requestId,
+        });
+      }
       setCommandStatus({ state: 'sending', message: t('sending_command') });
 
       try {
@@ -1534,9 +1597,28 @@ function App() {
       return;
     }
 
+    if (isWifiCommandAttempt) {
+      console.info(`${WIFI_DEBUG_PREFIX} 5. checking websocket before command send`, {
+        stationid,
+        action,
+        section: details?.section || '',
+        socketStateBeforeWait: getSocketReadyStateLabel(ws.current),
+        hasToken: Boolean(token),
+      });
+    }
+
     const commandSocket = ws.current?.readyState === WebSocket.OPEN
       ? ws.current
       : await waitForOpenWebSocket(ws.current);
+
+    if (isWifiCommandAttempt) {
+      console.info(`${WIFI_DEBUG_PREFIX} 6. websocket wait result`, {
+        stationid,
+        action,
+        section: details?.section || '',
+        socketStateAfterWait: getSocketReadyStateLabel(commandSocket),
+      });
+    }
 
     if (commandSocket && commandSocket.readyState === WebSocket.OPEN) {
       const timerequested = Date.now();
@@ -1566,7 +1648,11 @@ function App() {
               slotid: details.slotid,
             }]);
           }
-          commandData = { ...baseData, slotid: details?.slotid };
+          commandData = {
+            ...baseData,
+            slotid: details?.slotid,
+            ...(details?.info != null ? { info: details.info } : {}),
+          };
           break;
         case 'lock module':
           commandData = { ...baseData };
@@ -1608,6 +1694,26 @@ function App() {
             muted: details?.muted === true || audioVolume === 0,
           };
           break;
+        case 'wifichange': {
+          const wifiPayload = normalizeWifiCommandPayload(normalizedKioskPayload);
+          console.info(`${WIFI_DEBUG_PREFIX} 7. normalized wifichange socket payload`, {
+          stationid,
+          section: details?.section || '',
+          requestId,
+            ssid: wifiPayload.ssid,
+            passwordLength: wifiPayload.password.length,
+            kioskStationid: normalizedKioskPayload?.stationid || null,
+            hasKioskPayload: Boolean(normalizedKioskPayload),
+          });
+          commandData = {
+            ...baseData,
+            kiosk: normalizedKioskPayload,
+            wifi: wifiPayload.wifi,
+            ssid: wifiPayload.ssid,
+            password: wifiPayload.password,
+          };
+          break;
+        }
         default:
           commandData = {
             ...baseData,
@@ -1631,6 +1737,16 @@ function App() {
         moduleid,
       });
       commandSocket.send(JSON.stringify(message));
+      if (isWifiCommandAttempt) {
+        console.info(`${WIFI_DEBUG_PREFIX} 8. websocket command sent`, {
+          stationid,
+          action,
+          section: details?.section || '',
+          requestId,
+          socketState: getSocketReadyStateLabel(commandSocket),
+          message,
+        });
+      }
       console.log('[WS Send]', message);
       if (action.startsWith('eject') || action === 'rent' || action === 'vend') {
         debugEjectUi('Sent eject-style command', commandData);
@@ -1648,6 +1764,15 @@ function App() {
 
       setCommandStatus({ state: 'sending', message: t('sending_command') });
     } else {
+      if (isWifiCommandAttempt) {
+        console.warn(`${WIFI_DEBUG_PREFIX} 6b. websocket unavailable; command not sent`, {
+          stationid,
+          action,
+          section: details?.section || '',
+          socketState: getSocketReadyStateLabel(commandSocket || ws.current),
+          hasToken: Boolean(token),
+        });
+      }
       setCommandStatus({ state: 'error', message: t('connection_lost') });
     }
   }, [allStationsData, debugEjectUi, rememberOutgoingCommandScope, token, t]);
@@ -1897,15 +2022,16 @@ function App() {
               setScopedCommandStatus(data, { state: 'success', message: data.status_en });
             }
           } else if (data.action && data.action.includes('change')) {
-            const isSuccess = data.statuscode == 1;
-            const isPending = data.statuscode == 2;
+            const statusValue = data.statuscode ?? data.status;
+            const isSuccess = Number(statusValue) === 1 || statusValue === 'success' || statusValue === 'accepted';
+            const isPending = Number(statusValue) === 2 || statusValue === 'pending';
             let toastState = 'error';
             if (isSuccess) toastState = 'success';
             if (isPending) toastState = 'pending';
 
             setScopedCommandStatus(data, { state: toastState, message: data.status_en || (isSuccess ? t('command_success') : t('command_failed')) });
 
-            if (isSuccess && data.kiosk) {
+            if (isSuccess && data.kiosk && typeof data.kiosk === 'object') {
               const [normalizedKiosk] = normalizeKioskData([data.kiosk]);
               const stationId = normalizedKiosk.stationid;
 

@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import { logKioskInteraction } from '../../utils/kioskInteractionDebug';
 
+const WIFI_DEBUG_PREFIX = '[V2 WiFi Debug]';
+
 function ConfirmationModal({ isOpen, onClose, onConfirm, details, t }) {
     const [reason, setReason] = useState('');
     const [checkboxValue, setCheckboxValue] = useState(false);
@@ -26,6 +28,19 @@ function ConfirmationModal({ isOpen, onClose, onConfirm, details, t }) {
     }, [details, isOpen]);
 
     const handleConfirm = () => {
+        if (details?.section === 'wifi' || details?.action === 'wifichange') {
+            console.info(`${WIFI_DEBUG_PREFIX} 2b. confirmation modal confirm clicked`, {
+                stationid: details?.stationid,
+                action: details?.action,
+                section: details?.section,
+                checkbox: details?.checkbox ? {
+                    name: details.checkbox.name,
+                    checked: checkboxValue,
+                    disabled: details.checkbox.disabled === true,
+                } : null,
+            });
+        }
+
         logKioskInteraction('confirmation-modal-confirm-click', {
             action: details?.action,
             stationid: details?.stationid,

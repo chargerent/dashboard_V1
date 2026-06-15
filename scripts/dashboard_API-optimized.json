@@ -1757,11 +1757,16 @@
                 "t": "eq",
                 "v": "vend",
                 "vt": "str"
+            },
+            {
+                "t": "eq",
+                "v": "wifichange",
+                "vt": "str"
             }
         ],
         "checkall": "true",
         "repair": false,
-        "outputs": 26,
+        "outputs": 27,
         "x": 2150,
         "y": 1240,
         "wires": [
@@ -1842,6 +1847,9 @@
             ],
             [
                 "26a1de0bb3832ea8"
+            ],
+            [
+                "8b75f414f68e819a"
             ]
         ]
     },
@@ -3930,15 +3938,42 @@
                 "vt": "str"
             },
             {
+                "t": "cont",
+                "v": "CA8",
+                "vt": "str"
+            },
+            {
+                "t": "cont",
+                "v": "FR8",
+                "vt": "str"
+            },
+            {
+                "t": "cont",
+                "v": "US8",
+                "vt": "str"
+            },
+            {
                 "t": "else"
             }
         ],
         "checkall": "true",
         "repair": false,
-        "outputs": 4,
+        "outputs": 7,
         "x": 1950,
         "y": 1260,
         "wires": [
+            [
+                "91f0f3db6ab3c201",
+                "2bfbfc5de8e02c99"
+            ],
+            [
+                "91f0f3db6ab3c201",
+                "2bfbfc5de8e02c99"
+            ],
+            [
+                "91f0f3db6ab3c201",
+                "2bfbfc5de8e02c99"
+            ],
             [
                 "91f0f3db6ab3c201",
                 "2bfbfc5de8e02c99"
@@ -3966,7 +4001,8 @@
         "links": [
             "ce73e96d279fd273",
             "8b9fe8b7500de432",
-            "f02a67acb743f201"
+            "f02a67acb743f201",
+            "b7de2b389a6e9cb1"
         ],
         "x": 2670,
         "y": 1500,
@@ -4149,7 +4185,7 @@
         "z": "c31dd5c4cac7132c",
         "g": "f0e8b40fe39e16cd",
         "name": "Prepare Command Authorization",
-        "func": "const user = msg.payload || {};\nconst command = msg.command || {};\n\nconst ACTION_TO_PERMISSION = {\n  'eject specific': 'eject',\n  'eject all': 'eject',\n  'eject full': 'eject',\n  'eject empty': 'eject',\n  'eject locked': 'eject',\n  'eject module': 'eject',\n  'eject count': 'eject',\n  'rent': 'eject',\n  'vend': 'eject',\n  'refund': 'eject',\n  'lock slot': 'lock',\n  'unlock slot': 'lock',\n  'reboot': 'reboot',\n  'reload ui': 'reload',\n  'set volume': 'audio',\n  'ngrok connect': 'connectivity',\n  'ngrok disconnect': 'connectivity',\n  'hotspot': 'connectivity',\n  'update flow': 'updates',\n  'update ui': 'updates',\n  'disable': 'disable',\n  'enable': 'disable',\n  'infochange': 'client edit',\n  'hardwarechange': 'client edit',\n  'pricechange': 'client edit',\n  'uichange': 'client edit',\n  'provision': 'edit'\n};\n\nconst requiredPerm = ACTION_TO_PERMISSION[String(command.action || '')];\nconst userCommands = user.commands || {};\nconst isAdmin = user.role === 'admin' || user.username === 'chargerent';\n\nif (!isAdmin && requiredPerm && userCommands[requiredPerm] !== true) {\n  return [null, null, { _session: msg._session, payload: { status: 'error', reason: 'Permission denied' } }];\n}\n\nif (isAdmin) {\n  return [msg, null, null];\n}\n\nconst stationid = String(command.stationid || command.kiosk?.stationid || '').trim();\nif (!stationid) {\n  return [null, null, { _session: msg._session, payload: { status: 'error', reason: 'Kiosk not found' } }];\n}\n\nmsg._authContext = {\n  user,\n  command,\n  stationid\n};\nmsg.payload = {\n  path: 'kiosks',\n  query: [{ fieldPath: 'stationid', opStr: '==', value: stationid }]\n};\nreturn [null, msg, null];",
+        "func": "const user = msg.payload || {};\nconst command = msg.command || {};\n\nconst ACTION_TO_PERMISSION = {\n  'eject specific': 'eject',\n  'eject all': 'eject',\n  'eject full': 'eject',\n  'eject empty': 'eject',\n  'eject locked': 'eject',\n  'eject module': 'eject',\n  'eject count': 'eject',\n  'rent': 'eject',\n  'vend': 'eject',\n  'refund': 'eject',\n  'lock slot': 'lock',\n  'unlock slot': 'lock',\n  'reboot': 'reboot',\n  'reload ui': 'reload',\n  'set volume': 'audio',\n  'ngrok connect': 'connectivity',\n  'ngrok disconnect': 'connectivity',\n  'hotspot': 'connectivity',\n  'update flow': 'updates',\n  'update ui': 'updates',\n  'disable': 'disable',\n  'enable': 'disable',\n  'infochange': 'client edit',\n  'wifichange': 'client edit',\n  'hardwarechange': 'client edit',\n  'pricechange': 'client edit',\n  'uichange': 'client edit',\n  'provision': 'edit'\n};\n\nconst requiredPerm = ACTION_TO_PERMISSION[String(command.action || '')];\nconst userCommands = user.commands || {};\nconst isAdmin = user.role === 'admin' || user.username === 'chargerent';\n\nif (!isAdmin && requiredPerm && userCommands[requiredPerm] !== true) {\n  return [null, null, { _session: msg._session, payload: { status: 'error', reason: 'Permission denied' } }];\n}\n\nif (isAdmin) {\n  return [msg, null, null];\n}\n\nconst stationid = String(command.stationid || command.kiosk?.stationid || '').trim();\nif (!stationid) {\n  return [null, null, { _session: msg._session, payload: { status: 'error', reason: 'Kiosk not found' } }];\n}\n\nmsg._authContext = {\n  user,\n  command,\n  stationid\n};\nmsg.payload = {\n  path: 'kiosks',\n  query: [{ fieldPath: 'stationid', opStr: '==', value: stationid }]\n};\nreturn [null, msg, null];",
         "outputs": 3,
         "noerr": 0,
         "initialize": "",
@@ -4400,7 +4436,7 @@
         "type": "function",
         "z": "c31dd5c4cac7132c",
         "name": "Authorize Command",
-        "func": "const user = msg.payload;\nconst command = msg.command;\nconst allKiosks = global.get('info') || [];\n\n// Admins can do everything\nif (user.role === 'admin' || user.username === 'chargerent') {\n  return [msg, null];\n}\n\n// Map raw command action to the permission key stored in user.commands\nconst ACTION_TO_PERMISSION = {\n  'eject specific': 'eject', 'eject all': 'eject', 'eject full': 'eject',\n  'eject empty': 'eject', 'eject locked': 'eject', 'eject module': 'eject',\n  'eject count': 'eject', 'rent': 'eject', 'refund': 'eject',\n  'lock slot': 'lock', 'unlock slot': 'lock',\n  'reboot': 'reboot',\n  'reload ui': 'reload',\n  'set volume': 'audio',\n  'ngrok connect': 'connectivity', 'ngrok disconnect': 'connectivity', 'hotspot': 'connectivity',\n  'update flow': 'updates', 'update ui': 'updates',\n  'disable': 'disable', 'enable': 'disable',\n  'infochange': 'client edit', 'hardwarechange': 'client edit',\n  'pricechange': 'client edit', 'uichange': 'client edit',\n  'provision': 'edit',\n};\n\nconst requiredPerm = ACTION_TO_PERMISSION[command?.action];\nconst userCommands = user.commands || {};\n\n// Check clientId matches kiosk's client or rep\nconst targetKiosk = allKiosks.find(k => k?.stationid === command?.stationid);\nconst userClientId = String(user.clientId || '').trim();\n\nif (!targetKiosk?.info) {\n  node.send([null, { _session: msg._session, payload: { status: 'error', reason: 'Kiosk not found' } }]);\n  return null;\n}\n\nconst kioskClient = String(targetKiosk.info.client || '').trim();\nconst kioskRep    = String(targetKiosk.info.rep || '').trim();\nconst clientMatch = !!(userClientId && (kioskClient === userClientId || kioskRep === userClientId));\n\nif (!clientMatch) {\n  node.send([null, { _session: msg._session, payload: { status: 'error', reason: 'Unauthorized' } }]);\n  return null;\n}\n\n// Check specific command permission\nif (requiredPerm && userCommands[requiredPerm] !== true) {\n  node.send([null, { _session: msg._session, payload: { status: 'error', reason: 'Permission denied' } }]);\n  return null;\n}\n\nreturn [msg, null];",
+        "func": "const user = msg.payload;\nconst command = msg.command;\nconst allKiosks = global.get('info') || [];\n\n// Admins can do everything\nif (user.role === 'admin' || user.username === 'chargerent') {\n  return [msg, null];\n}\n\n// Map raw command action to the permission key stored in user.commands\nconst ACTION_TO_PERMISSION = {\n  'eject specific': 'eject', 'eject all': 'eject', 'eject full': 'eject',\n  'eject empty': 'eject', 'eject locked': 'eject', 'eject module': 'eject',\n  'eject count': 'eject', 'rent': 'eject', 'refund': 'eject',\n  'lock slot': 'lock', 'unlock slot': 'lock',\n  'reboot': 'reboot',\n  'reload ui': 'reload',\n  'set volume': 'audio',\n  'ngrok connect': 'connectivity', 'ngrok disconnect': 'connectivity', 'hotspot': 'connectivity',\n  'update flow': 'updates', 'update ui': 'updates',\n  'disable': 'disable', 'enable': 'disable',\n  'infochange': 'client edit',\n  'wifichange': 'client edit',\n  'hardwarechange': 'client edit',\n  'pricechange': 'client edit', 'uichange': 'client edit',\n  'provision': 'edit',\n};\n\nconst requiredPerm = ACTION_TO_PERMISSION[command?.action];\nconst userCommands = user.commands || {};\n\n// Check clientId matches kiosk's client or rep\nconst targetKiosk = allKiosks.find(k => k?.stationid === command?.stationid);\nconst userClientId = String(user.clientId || '').trim();\n\nif (!targetKiosk?.info) {\n  node.send([null, { _session: msg._session, payload: { status: 'error', reason: 'Kiosk not found' } }]);\n  return null;\n}\n\nconst kioskClient = String(targetKiosk.info.client || '').trim();\nconst kioskRep    = String(targetKiosk.info.rep || '').trim();\nconst clientMatch = !!(userClientId && (kioskClient === userClientId || kioskRep === userClientId));\n\nif (!clientMatch) {\n  node.send([null, { _session: msg._session, payload: { status: 'error', reason: 'Unauthorized' } }]);\n  return null;\n}\n\n// Check specific command permission\nif (requiredPerm && userCommands[requiredPerm] !== true) {\n  node.send([null, { _session: msg._session, payload: { status: 'error', reason: 'Permission denied' } }]);\n  return null;\n}\n\nreturn [msg, null];",
         "outputs": 2,
         "noerr": 0,
         "initialize": "",

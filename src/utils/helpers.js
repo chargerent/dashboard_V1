@@ -5,6 +5,7 @@ const ONLINE_WINDOW_MS = 10 * 60 * 1000;
 const LEGACY_TIMESTAMP_PATTERN = /(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2}):(\d{2})/;
 const HAS_TIMEZONE_PATTERN = /(Z|[+-]\d{2}:?\d{2})$/i;
 const DEFAULT_WIFI = { name: 'chargerent', password: 'Charger33' };
+const V2_DEFAULT_WIFI = { name: 'powerbank', password: '123456789' };
 const DEFAULT_FORM_OPTIONS = { active: false };
 const DEFAULT_MARKETING_OPTIONS = {
     active: true,
@@ -148,6 +149,14 @@ export const isNewSchemaKiosk = (kiosk) => {
     if (kiosk.isNewSchema === true) return true;
     return NEW_KIOSK_TYPES.has(String(kiosk.hardware?.type || '').toUpperCase());
 };
+
+export const isNewBoundKioskStation = (stationid) => (
+    /^((CA|FR|US)8\d{3}|(CAB|FRB|USB)\d{4})$/.test(String(stationid || '').trim().toUpperCase())
+);
+
+export const isV2Kiosk = (kiosk) => (
+    isNewSchemaKiosk(kiosk) || isNewBoundKioskStation(kiosk?.stationid)
+);
 
 export const getKioskPowerThreshold = (kiosk) => {
     const configuredPower = Number(kiosk?.hardware?.power);
@@ -371,6 +380,8 @@ export const normalizeKioskData = (kiosks) => {
             hardware = { ...hardware, type: inferNewSchemaHardwareType(normalizedModules) };
         }
 
+        const normalizedKiosk = { ...kiosk, hardware };
+        const defaultWifi = isV2Kiosk(normalizedKiosk) ? V2_DEFAULT_WIFI : DEFAULT_WIFI;
         const fullThreshold = getKioskPowerThreshold({ hardware });
         const derivedCount = normalizedModules.reduce((sum, module) => (
             sum + module.slots.filter(slot => (
@@ -409,8 +420,8 @@ export const normalizeKioskData = (kiosks) => {
                 reppercent: kiosk.info?.reppercent || 0
             },
             wifi: {
-                name: kiosk.wifi?.name || DEFAULT_WIFI.name,
-                password: kiosk.wifi?.password || DEFAULT_WIFI.password,
+                name: kiosk.wifi?.name || defaultWifi.name,
+                password: kiosk.wifi?.password || defaultWifi.password,
             },
             formoptions: {
                 active: kiosk.formoptions?.active === true || DEFAULT_FORM_OPTIONS.active,

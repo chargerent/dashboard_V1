@@ -9,10 +9,11 @@ import {
     FormSelect,
     FormColorPicker
 } from '../forms/FormFields.jsx';
-import { getKioskPowerThreshold, isNewSchemaKiosk, normalizeKioskInfoForSchema } from '../../utils/helpers';
+import { getKioskPowerThreshold, isNewBoundKioskStation, isV2Kiosk, normalizeKioskInfoForSchema } from '../../utils/helpers';
 
-const isNewBoundKioskStation = (stationid) => /^(CA|FR|US)8\d{3}$/.test(String(stationid || '').trim().toUpperCase());
+const WIFI_DEBUG_PREFIX = '[V2 WiFi Debug]';
 const DEFAULT_WIFI = { name: 'chargerent', password: 'Charger33' };
+const V2_DEFAULT_WIFI = { name: 'powerbank', password: '123456789' };
 const DEFAULT_FORM_OPTIONS = { active: false };
 const MARKETING_OPTION_LANGUAGES = [
     ['english', 'English'],
@@ -117,11 +118,14 @@ const getInitialPricing = (kiosk) => {
 
     return pricing;
 };
-const isV2Kiosk = (kiosk) => isNewSchemaKiosk(kiosk) || isNewBoundKioskStation(kiosk?.stationid);
 const getInitialInfo = (kiosk) => normalizeKioskInfoForSchema({
     autoGeocode: true,
     ...(kiosk?.info || {}),
 }, isV2Kiosk(kiosk));
+const getInitialWifi = (kiosk) => ({
+    ...(isV2Kiosk(kiosk) ? V2_DEFAULT_WIFI : DEFAULT_WIFI),
+    ...(kiosk?.wifi || {}),
+});
 
 export const Section = ({ title, sectionKey, children, isOpen, onToggle, onSave, data }) => (
         <div className="bg-white rounded-lg shadow-sm mb-2">
@@ -201,7 +205,7 @@ function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVe
     const isNewBoundKiosk = isNewBoundKioskStation(kiosk?.stationid);
     const usesNewSchemaInfo = isV2Kiosk(kiosk);
     const addressFieldName = usesNewSchemaInfo ? 'address' : 'stationaddress';
-    const initialWifi = { ...DEFAULT_WIFI, ...(kiosk.wifi || {}) };
+    const initialWifi = getInitialWifi(kiosk);
     const initialFormOptions = { ...DEFAULT_FORM_OPTIONS, ...(kiosk.formoptions || {}) };
     const initialMarketingOptions = getInitialMarketingOptions(kiosk);
     const initialAnalyticsOptions = { ...DEFAULT_ANALYTICS_OPTIONS, ...(kiosk.analyticsoptions || {}) };
@@ -239,7 +243,7 @@ function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVe
 
         setFormData({
             info: initialInfo,
-            wifi: { ...DEFAULT_WIFI, ...(kiosk.wifi || {}) },
+            wifi: getInitialWifi(kiosk),
             formoptions: { ...DEFAULT_FORM_OPTIONS, ...(kiosk.formoptions || {}) },
             marketingoptions: getInitialMarketingOptions(kiosk),
             analyticsoptions: { ...DEFAULT_ANALYTICS_OPTIONS, ...(kiosk.analyticsoptions || {}) },
@@ -249,7 +253,7 @@ function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVe
         });
         setOriginalData({
             info: initialInfo,
-            wifi: { ...DEFAULT_WIFI, ...(kiosk.wifi || {}) },
+            wifi: getInitialWifi(kiosk),
             formoptions: { ...DEFAULT_FORM_OPTIONS, ...(kiosk.formoptions || {}) },
             marketingoptions: getInitialMarketingOptions(kiosk),
             analyticsoptions: { ...DEFAULT_ANALYTICS_OPTIONS, ...(kiosk.analyticsoptions || {}) },
@@ -359,6 +363,15 @@ function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVe
             ...formData,
             info: normalizeKioskInfoForSchema(formData.info, usesNewSchemaInfo),
         };
+        if (section === 'wifi') {
+            console.info(`${WIFI_DEBUG_PREFIX} 1. edit panel save clicked`, {
+                stationid: kiosk.stationid,
+                isV2Kiosk: usesNewSchemaInfo,
+                isNewBoundKiosk,
+                hardwareType: kiosk?.hardware?.type || '',
+                wifi: nextFormData.wifi,
+            });
+        }
         onSave(kiosk.stationid, section, nextFormData, nextFormData.info.autoGeocode);
     };
 

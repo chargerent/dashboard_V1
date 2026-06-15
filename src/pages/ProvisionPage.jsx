@@ -22,6 +22,9 @@ const initialFormData = {
     pricing: { currency: 'US', symbol: '$', kioskmode: 'LEASE', text: 'LEASE - SIMPLE DAILY', webapp: true, mobileapp: true, online: true, startpage: { active: true }, taxrate: 0 }
 };
 
+const V2_KIOSK_TYPES = new Set(['CT3', 'CT4', 'CT8', 'CT12', 'CK48']);
+const V2_DEFAULT_WIFI = { name: 'powerbank', password: '123456789' };
+
 const formatWaitTime = (startTime) => {
     if (!startTime) return 'unknown';
     const start = new Date(startTime.endsWith('Z') ? startTime : startTime + 'Z');
@@ -198,6 +201,11 @@ const isKnownHqDefault = (field, value) => (
 );
 
 const normalizeStationId = (value) => String(value || '').trim().toUpperCase();
+
+const isV2ProvisionPayload = (payload) => (
+    V2_KIOSK_TYPES.has(String(payload?.hardware?.type || '').trim().toUpperCase()) ||
+    /^(CA|FR|US)8\d{3}$/.test(normalizeStationId(payload?.stationid))
+);
 
 const getCountryPrefix = (country) => {
     return normalizeCountryOption(country);
@@ -489,6 +497,10 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAiBooths, onLogout, 
         delete payload.hardware.modversion;
 
         payload.stationid = assignedStationId;
+
+        if (isV2ProvisionPayload(payload)) {
+            payload.wifi = { ...V2_DEFAULT_WIFI };
+        }
 
         if (selectedIsAiBooth && String(payload.provisionid || '').toLowerCase().startsWith('aid-')) {
             setCommandStatus?.({ state: 'sending', message: t('sending_command') });

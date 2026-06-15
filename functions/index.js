@@ -277,6 +277,10 @@ const DEFAULT_MEDIA_OPTIONS = {
   loop: true,
 };
 const NEW_KIOSK_TYPES = new Set(["CT3", "CT4", "CT8", "CT12", "CK48"]);
+const V2_DEFAULT_WIFI = Object.freeze({
+  name: "powerbank",
+  password: "123456789",
+});
 const GOOGLE_MAPS_SECRET = "GOOGLE_MAPS_API_KEY";
 const COUNTRY_PREFIXES = {
   CA: "CA",
@@ -2220,6 +2224,10 @@ function isNewSchemaKioskDocument(kiosk) {
   if (!kiosk) return false;
   if (kiosk.isNewSchema === true) return true;
 
+  if (/^((CA|FR|US)8\d{3}|(CAB|FRB|USB)\d{4})$/.test(normalizeStationId(kiosk.stationid).toUpperCase())) {
+    return true;
+  }
+
   const hardwareType = String(kiosk?.hardware?.type || "").trim().toUpperCase();
   if (NEW_KIOSK_TYPES.has(hardwareType)) {
     return true;
@@ -3479,8 +3487,6 @@ function createBoundKioskDocument({
     charging: 0,
   };
 
-  const templateWifi = clonePlain(templateKiosk?.wifi) || {};
-
   const kiosk = {
     stationid,
     provisionid,
@@ -3490,10 +3496,7 @@ function createBoundKioskDocument({
     timestamp: null,
     lastUpdate: null,
     info: getDefaultBoundKioskInfo(normalizedCountry),
-    wifi: {
-      name: String(templateWifi?.name || "chargerent").trim() || "chargerent",
-      password: String(templateWifi?.password || "Charger33").trim() || "Charger33",
-    },
+    wifi: {...V2_DEFAULT_WIFI},
     formoptions: {
       active: templateKiosk?.formoptions?.active === true,
     },

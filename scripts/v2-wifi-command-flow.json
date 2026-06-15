@@ -1,0 +1,202 @@
+[
+    {
+        "id": "7f49e8b7b0b66e10",
+        "type": "tab",
+        "label": "V2 Kiosk Wi-Fi",
+        "disabled": false,
+        "info": "Dashboard V2 Wi-Fi control. Publishes Besiter setWifi commands to /<stationid>/<moduleid>/user/get for every module with payload {\"cmd\":\"setWifi\",\"username\":\"<ssid>\",\"password\":\"<password>\"}.",
+        "env": []
+    },
+    {
+        "id": "d0972721f5cf85cc",
+        "type": "comment",
+        "z": "7f49e8b7b0b66e10",
+        "name": "V2 Wi-Fi from dashboard edit card",
+        "info": "Listens to the authenticated dashboard V2 command link, resolves the kiosk/modules from Firestore, publishes the Besiter setWifi command, persists kiosk.wifi, and sends a dashboard toast. The dashboard API link out must include b7de2b389a6e9cb1.",
+        "x": 320,
+        "y": 80,
+        "wires": []
+    },
+    {
+        "id": "b7de2b389a6e9cb1",
+        "type": "link in",
+        "z": "7f49e8b7b0b66e10",
+        "name": "V2 Wi-Fi command in",
+        "links": [
+            "121936a8363204a0",
+            "8b75f414f68e819a"
+        ],
+        "x": 115,
+        "y": 160,
+        "wires": [
+            [
+                "f78de32a0a5297ea"
+            ]
+        ]
+    },
+    {
+        "id": "f78de32a0a5297ea",
+        "type": "switch",
+        "z": "7f49e8b7b0b66e10",
+        "name": "Route Wi-Fi change",
+        "property": "command.action",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "eq",
+                "v": "wifichange",
+                "vt": "str"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 1,
+        "x": 285,
+        "y": 160,
+        "wires": [
+            [
+                "b7a45320bd2bc3f5"
+            ]
+        ]
+    },
+    {
+        "id": "b7a45320bd2bc3f5",
+        "type": "function",
+        "z": "7f49e8b7b0b66e10",
+        "name": "Prepare V2 Wi-Fi lookup",
+        "func": "const command = msg.command || {};\nconst authUser = msg.payload && typeof msg.payload === 'object' && !Array.isArray(msg.payload)\n  ? JSON.parse(JSON.stringify(msg.payload))\n  : null;\nconst kioskPayload = command.kiosk && typeof command.kiosk === 'object' ? command.kiosk : {};\nconst wifiPayload = command.wifi && typeof command.wifi === 'object' ? command.wifi : (kioskPayload.wifi || {});\nconst stationid = String(command.stationid || kioskPayload.stationid || '').trim();\nconst ssid = String(command.ssid || wifiPayload.ssid || wifiPayload.name || '').trim();\nconst password = String(command.password ?? wifiPayload.password ?? '').trim();\nconst now = Date.now();\nconst requestId = String(command.requestId || `wifi-change-${stationid || 'unknown'}-${now}`).trim();\n\nfunction response(status, statusEn, extra = {}) {\n  return {\n    _session: msg._session,\n    payload: {\n      action: 'wifichange',\n      stationid,\n      kiosk: stationid,\n      status,\n      statuscode: status,\n      status_en: statusEn,\n      requestId,\n      timerequested: Number(command.timerequested || now),\n      timeresponded: Date.now(),\n      ...extra\n    }\n  };\n}\n\nif (!stationid) {\n  return [null, response(0, 'Missing stationid for V2 Wi-Fi command')];\n}\n\nif (!ssid) {\n  return [null, response(0, 'Wi-Fi name is required')];\n}\n\nmsg._v2Wifi = {\n  authUser,\n  command: { ...command, requestId, ssid, password },\n  stationid,\n  requestId,\n  timerequested: Number(command.timerequested || now),\n  ssid,\n  password\n};\nmsg.payload = {\n  path: 'kiosks',\n  query: [{ fieldPath: 'stationid', opStr: '==', value: stationid }]\n};\nreturn [msg, null];",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 525,
+        "y": 160,
+        "wires": [
+            [
+                "b88ac698f1b2b5dd"
+            ],
+            [
+                "590392fc03398acc"
+            ]
+        ]
+    },
+    {
+        "id": "b88ac698f1b2b5dd",
+        "type": "google-cloud-firestore",
+        "z": "7f49e8b7b0b66e10",
+        "account": "",
+        "keyFilename": "/home/george/firestore/firestore-key.json",
+        "name": "Query kiosk for V2 Wi-Fi",
+        "projectId": "node-red-alerts",
+        "mode": "query",
+        "x": 785,
+        "y": 160,
+        "wires": [
+            [
+                "e59e6d966fd9f7b2"
+            ]
+        ]
+    },
+    {
+        "id": "e59e6d966fd9f7b2",
+        "type": "function",
+        "z": "7f49e8b7b0b66e10",
+        "name": "Publish Besiter Wi-Fi",
+        "func": "const V2_TYPES = new Set(['CT3', 'CT4', 'CT8', 'CT12', 'CK48']);\nconst docs = Array.isArray(msg.payload) ? msg.payload : [];\nconst ctx = msg._v2Wifi || {};\nconst command = ctx.command || msg.command || {};\nconst authUser = ctx.authUser || null;\nconst stationid = String(ctx.stationid || command.stationid || '').trim();\nconst ssid = String(ctx.ssid || command.ssid || '').trim();\nconst password = String(ctx.password ?? command.password ?? '').trim();\nconst requestId = String(ctx.requestId || command.requestId || `wifi-change-${stationid}-${Date.now()}`).trim();\nconst timerequested = Number(ctx.timerequested || command.timerequested || Date.now());\nconst sessionValue = msg._session || command.admin || null;\nconst stationidUpper = stationid.toUpperCase();\n\nfunction buildResponse(status, statusEn, extra = {}) {\n  return {\n    _session: sessionValue,\n    payload: {\n      action: 'wifichange',\n      stationid,\n      kiosk: stationid,\n      status,\n      statuscode: status,\n      status_en: statusEn,\n      requestId,\n      timerequested,\n      timeresponded: Date.now(),\n      ...extra\n    }\n  };\n}\n\nfunction toModules(kiosk) {\n  if (Array.isArray(kiosk?.modules)) return kiosk.modules;\n  if (kiosk?.modules && typeof kiosk.modules === 'object') return Object.values(kiosk.modules);\n  return [];\n}\n\nfunction getModuleIds(kiosk) {\n  const seen = new Set();\n  return toModules(kiosk)\n    .filter((module) => module?.output !== false)\n    .map((module) => String(module?.id || '').trim())\n    .filter((moduleid) => {\n      if (!moduleid || seen.has(moduleid)) return false;\n      seen.add(moduleid);\n      return true;\n    });\n}\n\nif (!authUser) {\n  return [null, buildResponse(0, 'V2 Wi-Fi command requires authenticated dashboard context'), null];\n}\n\nconst isAdmin = authUser.role === 'admin' || authUser.username === 'chargerent';\nif (!isAdmin && authUser.commands?.['client edit'] !== true) {\n  return [null, buildResponse(0, 'Permission denied'), null];\n}\n\nif (docs.length === 0) {\n  return [null, buildResponse(0, `Kiosk ${stationid} not found`), null];\n}\n\nconst kiosk = docs[0] || {};\nconst hardwareType = String(kiosk?.hardware?.type || '').toUpperCase();\nconst modules = toModules(kiosk);\nconst moduleids = getModuleIds(kiosk);\nconst isV2 = kiosk?.isNewSchema === true ||\n  V2_TYPES.has(hardwareType) ||\n  modules.some((module) => Array.isArray(module?.slots)) ||\n  /^(CA|FR|US)8\\d{3}$/.test(stationidUpper) ||\n  /^(CAB|FRB|USB)\\d{4}$/.test(stationidUpper);\n\nif (!isV2) {\n  return [null, buildResponse(0, `${stationid} is not a V2 kiosk`), null];\n}\n\nif (!ssid) {\n  return [null, buildResponse(0, 'Wi-Fi name is required'), null];\n}\n\nif (moduleids.length === 0) {\n  return [null, buildResponse(0, `No modules found for ${stationid}`), null];\n}\n\nconst nextWifi = { name: ssid, password };\nconst publishMessages = moduleids.map((moduleid) => ({\n  topic: `/${stationid}/${moduleid}/user/get`,\n  payload: {\n    cmd: 'setWifi',\n    username: ssid,\n    password\n  },\n  qos: '0',\n  retain: 'false'\n}));\n\nconst nextKiosk = {\n  ...kiosk,\n  wifi: nextWifi\n};\nif (typeof command.kiosk?.status === 'string' && command.kiosk.status.trim()) {\n  nextKiosk.status = command.kiosk.status.trim();\n}\n\nconst responseMessage = buildResponse(\n  1,\n  `Wi-Fi update sent to ${stationid} (${moduleids.length} modules)`,\n  { kiosk: nextKiosk, wifi: { name: ssid }, moduleids, moduleCount: moduleids.length }\n);\nconst provisionid = String(kiosk?.provisionid || '').trim();\nconst firestoreContent = {\n  wifi: nextWifi,\n  updatedAt: new Date().toISOString()\n};\nif (typeof nextKiosk.status === 'string' && nextKiosk.status.trim()) {\n  firestoreContent.status = nextKiosk.status.trim();\n}\nconst firestoreMessage = provisionid\n  ? {\n      payload: {\n        path: `kiosks/${provisionid}`,\n        content: firestoreContent\n      }\n    }\n  : null;\n\nnode.warn(`Dashboard set Wi-Fi for ${stationid} modules [${moduleids.join(', ')}] request ${requestId}`);\nreturn [publishMessages, responseMessage, firestoreMessage];",
+        "outputs": 3,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1040,
+        "y": 160,
+        "wires": [
+            [
+                "db4c2fdd131c98f0"
+            ],
+            [
+                "590392fc03398acc"
+            ],
+            [
+                "df2fa6f8f2a918f4"
+            ]
+        ]
+    },
+    {
+        "id": "db4c2fdd131c98f0",
+        "type": "mqtt out",
+        "z": "7f49e8b7b0b66e10",
+        "name": "Publish Wi-Fi",
+        "topic": "",
+        "qos": "",
+        "retain": "",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "49a917a3f001a2dc",
+        "x": 1290,
+        "y": 120,
+        "wires": []
+    },
+    {
+        "id": "df2fa6f8f2a918f4",
+        "type": "google-cloud-firestore",
+        "z": "7f49e8b7b0b66e10",
+        "account": "",
+        "keyFilename": "/home/george/firestore/firestore-key.json",
+        "name": "Persist Wi-Fi state",
+        "projectId": "node-red-alerts",
+        "mode": "update",
+        "x": 1300,
+        "y": 200,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "cbcf977a3e68d480",
+        "type": "comment",
+        "z": "7f49e8b7b0b66e10",
+        "name": "Response wires target the existing dashboard websocket response node",
+        "info": "The dangling target id 590392fc03398acc is the same dashboard response path used by the V2 bulk/audio command imports. If your Node-RED workspace uses a different response node, wire the response outputs there.",
+        "x": 1050,
+        "y": 260,
+        "wires": []
+    },
+    {
+        "id": "49a917a3f001a2dc",
+        "type": "mqtt-broker",
+        "name": "",
+        "broker": "http://34.56.244.66/",
+        "port": "1883",
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": "4",
+        "keepalive": "60",
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    }
+]

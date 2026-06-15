@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { getKioskPowerThreshold, isNewSchemaKiosk } from '../utils/helpers';
+import { getKioskPowerThreshold, isV2Kiosk } from '../utils/helpers';
 import { logKioskInteraction } from '../utils/kioskInteractionDebug';
+
+const WIFI_DEBUG_PREFIX = '[V2 WiFi Debug]';
 
 const summarizeCommandDetails = (details) => {
   if (!details) return null;
@@ -15,6 +17,7 @@ const summarizeCommandDetails = (details) => {
     chargerid: details.chargerid,
     volume: details.volume,
     muted: details.muted,
+    section: details.section,
     hasKioskPayload: Boolean(details.kiosk),
     hasCheckbox: Boolean(details.checkbox),
     hasLockReason: Boolean(details.lockReason),
@@ -110,6 +113,7 @@ export default function useKioskCommandFlow({
       return;
     }
     const { stationid, moduleid, slotid, action } = commandDetails;
+    const isWifiSave = commandDetails.section === 'wifi' || action === 'wifichange';
 
     if (action.includes('change')) {
       manageIgnoredKiosk(stationid, false);
@@ -222,6 +226,7 @@ export default function useKioskCommandFlow({
       : commandDetails.kiosk;
 
     const details = {
+      ...(commandDetails.section && { section: commandDetails.section }),
       ...(commandDetails.action.includes('change') && { kiosk: kioskPayload, autoGeocode: commandDetails.autoGeocode }),
       ...((commandDetails.action === 'lock slot' || commandDetails.action === 'unlock slot' || commandDetails.action === 'eject specific' || commandDetails.action === 'rent' || commandDetails.action === 'vend') && { slotid: commandDetails.slotid, info: lockReason }),
       ...((commandDetails.action === 'eject specific' || commandDetails.action === 'vend') && commandDetails.chargerid ? { chargerid: commandDetails.chargerid } : {}),
@@ -230,20 +235,30 @@ export default function useKioskCommandFlow({
       ...extraConfirmationDetails,
     };
 
+    if (isWifiSave) {
+      console.info(`${WIFI_DEBUG_PREFIX} 3. command modal confirmed; calling onCommand`, {
+        stationid: commandDetails.stationid,
+        action: commandDetails.action,
+        section: commandDetails.section,
+        confirmationResult,
+        wifi: details?.kiosk?.wifi || null,
+      });
+    }
+
     onCommand(commandDetails.stationid, commandDetails.action, commandDetails.moduleid, commandDetails.provisionid, commandDetails.uiVersion, details);
   }, [allStationsData, commandDetails, manageIgnoredKiosk, onCommand, setEjectingSlots]);
 
   const handleKioskSave = useCallback((stationid, section, data, autoGeocode) => {
     const targetKiosk = allStationsData.find((kiosk) => kiosk.stationid === stationid);
     const normalizedStatus = String(targetKiosk?.status || '').trim().toLowerCase();
-    const showProvisionStatusCheckbox = isNewSchemaKiosk(targetKiosk) && (
+    const showProvisionStatusCheckbox = isV2Kiosk(targetKiosk) && (
       normalizedStatus === 'pending' || normalizedStatus === 'provisioned'
     );
     let action;
     if (section === 'formoptions') {
       action = 'formoptionschange';
     } else if (section === 'wifi') {
-      action = isNewSchemaKiosk(targetKiosk) ? 'wifichange' : 'infochange';
+      action = isV2Kiosk(targetKiosk) ? 'wifichange' : 'infochange';
     } else if (section === 'marketingoptions') {
       action = 'marketingoptionschange';
     } else if (section === 'analyticsoptions') {
@@ -258,9 +273,25 @@ export default function useKioskCommandFlow({
       action = 'infochange';
     }
 
+    if (section === 'wifi') {
+      const targetIsV2Kiosk = isV2Kiosk(targetKiosk);
+      console.info(`${WIFI_DEBUG_PREFIX} 2. command hook selected save action`, {
+        stationid,
+        section,
+        action,
+        targetFound: Boolean(targetKiosk),
+        targetIsV2Kiosk,
+        hardwareType: targetKiosk?.hardware?.type || '',
+        status: normalizedStatus,
+        allStationsCount: allStationsData.length,
+        wifi: data?.wifi || null,
+      });
+    }
+
     setCommandDetails({
       stationid,
       action,
+      section,
       kiosk: data,
       autoGeocode,
       confirmationText: t('save_info_confirmation'),
