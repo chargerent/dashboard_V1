@@ -2,7 +2,7 @@
 
 import { useMemo, useCallback } from 'react';
 import { HeartIcon } from '@heroicons/react/24/solid';
-import { isKioskOnline, getKioskPowerThreshold, isNewSchemaKiosk, isSlotActivelyCharging } from '../../utils/helpers';
+import { isKioskOnline, getKioskPowerThreshold, isModuleOnline, isNewSchemaKiosk, isSlotActivelyCharging } from '../../utils/helpers';
 import { formatDateTime } from '../../utils/dateFormatter';
 import RentalStats from '../Dashboard/RentalStats';
 import GatewayIcon from './GatewayIcon';
@@ -99,7 +99,11 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                         <div className="flex items-center gap-1.5" title={t('module_output_status')}>
                             {kiosk.modules.map(module => {
                                 const hasHeartbeatOutput = module.heartbeatOutput !== undefined && module.heartbeatOutput !== null;
-                                const outputOk = hasHeartbeatOutput ? module.heartbeatOutput === true : module.output === true;
+                                const outputOk = isV2Kiosk
+                                    ? isModuleOnline(module, mockNow)
+                                    : hasHeartbeatOutput
+                                        ? module.heartbeatOutput === true
+                                        : module.output === true;
                                 return <HeartIcon key={module.id} className={`h-3 w-3 ${outputOk ? 'text-green-500' : 'text-red-500'}`} />;
                             })}
                         </div>

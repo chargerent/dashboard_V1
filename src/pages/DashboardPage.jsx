@@ -10,7 +10,7 @@ import LoadingSpinner from '../components/UI/LoadingSpinner';
 import InitialStatusPage from '../components/UI/InitialStatusPage';
 import SoldOutKiosksModal from '../components/UI/SoldOutKiosksModal.jsx';
 import TimeoutWarningModal from '../components/UI/TimeoutWarningModal';
-import { filterStationsForClient, isKioskOnline, isKioskActive, isModuleOnline, isStationProvisioned } from '../utils/helpers';
+import { filterStationsForClient, isKioskOnline, isKioskActive, isModuleOnline, isNewSchemaKiosk, isStationProvisioned } from '../utils/helpers';
 import GlobalRentalActivity from '../components/Dashboard/GlobalRentalActivity';
 import { useIdleTimer } from '../hooks/useIdleTimer';
 import LocationSummary from '../components/Dashboard/LocationSummary';
@@ -41,7 +41,7 @@ const getDisconnectedModules = (kiosk, referenceTime) => {
     const modules = Array.isArray(kiosk?.modules) ? kiosk.modules : [];
 
     return modules.filter(module => (
-        kiosk?.isNewSchema ? !isModuleOnline(module, referenceTime) : module?.output === false
+        isNewSchemaKiosk(kiosk) ? !isModuleOnline(module, referenceTime) : module?.output === false
     ));
 };
 
