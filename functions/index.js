@@ -26,6 +26,7 @@ const DEFAULT_AI_BOOTH_INTAKE_MAX_FILE_SIZE_MB = 20;
 const AI_BOOTH_EVENTS_COLLECTION = "aiBoothEvents";
 const AI_BOOTH_INSTALLS_COLLECTION = "aiBoothInstalls";
 const EVENT_INTAKE_SUBMISSIONS_COLLECTION = "eventIntakeSubmissions";
+const UI_PROFILES_COLLECTION = "uiProfiles";
 const EVENT_INTAKE_STATUSES = new Set([
   "draft",
   "submitted",
@@ -37,6 +38,10 @@ const EVENT_INTAKE_STATUSES = new Set([
 const STATION_RESERVATIONS_COLLECTION = "stationIdReservations";
 const DEFAULT_KIOSK_POWER_THRESHOLD = 80;
 const MAX_MEDIA_UPLOAD_BYTES = 250 * 1024 * 1024;
+const MAX_FIRMWARE_UPLOAD_BYTES = 512 * 1024 * 1024;
+const FIRMWARE_RELEASES_COLLECTION = "firmwareReleases";
+const FIRMWARE_CHANNELS_COLLECTION = "firmwareChannels";
+const FIRMWARE_TARGETS = new Set(["mcu", "12B", "12M"]);
 const DEFAULT_MARKETING_OPTIONS = {
   active: true,
   title: {
@@ -277,6 +282,13 @@ const DEFAULT_MEDIA_OPTIONS = {
   loop: true,
 };
 const NEW_KIOSK_TYPES = new Set(["CT3", "CT4", "CT8", "CT12", "CK48"]);
+const BOUND_KIOSK_TYPE_CONFIG = Object.freeze({
+  CT3: {modules: 1, slots: 3},
+  CT4: {modules: 1, slots: 4},
+  CT8: {modules: 2, slots: 8, screen: "16IN"},
+  CT12: {modules: 3, slots: 12},
+  CK48: {modules: 12, slots: 48},
+});
 const V2_DEFAULT_WIFI = Object.freeze({
   name: "powerbank",
   password: "123456789",
@@ -357,6 +369,41 @@ function isSupportedMediaContentType(contentType) {
     normalizedContentType.startsWith("video/") ||
     normalizedContentType === "application/pdf"
   );
+}
+
+function normalizeFirmwareTarget(value, fallback = "12B") {
+  const raw = String(value || "").trim();
+  const normalized = raw.toLowerCase();
+
+  if (normalized === "12b") return "12B";
+  if (normalized === "12m") return "12M";
+  if (normalized === "mcu" || normalized === "default") return "mcu";
+
+  return FIRMWARE_TARGETS.has(fallback) ? fallback : "12B";
+}
+
+function getFirmwareTargetStorageSegment(target) {
+  return normalizeFirmwareTarget(target).toLowerCase();
+}
+
+function isSupportedFirmwareFileName(fileName) {
+  return /\.(bin|pac)$/i.test(String(fileName || "").trim());
+}
+
+function normalizeFirmwareContentType(contentType) {
+  const normalizedContentType = String(contentType || "").trim().toLowerCase();
+  return normalizedContentType || "application/octet-stream";
+}
+
+function extractFirmwareVersion(fileName, explicitVersion = "") {
+  const cleanVersion = cleanAiBoothText(explicitVersion, 80);
+  if (cleanVersion) {
+    return cleanVersion;
+  }
+
+  const name = String(fileName || "").trim();
+  const versionMatch = name.match(/(?:^|[-_vV])(\d+(?:\.\d+){1,4})(?:[-_.]|$)/);
+  return versionMatch ? versionMatch[1] : "";
 }
 
 function sanitizeFileName(fileName) {
@@ -548,6 +595,79 @@ function hasMediaFeature(authState) {
   return authState?.profile?.features?.media === true;
 }
 
+function hasFirmwareUpdatePermission(authState) {
+  const username = normalizeUsername(authState?.profile?.username);
+  if (username === "chargerent" || authState?.isAdmin) {
+    return true;
+  }
+
+  const commands = authState?.profile?.commands || authState?.profile?.Commands || {};
+  return commands.updates === true;
+}
+
+function hasUiProfileFeature(authState) {
+  const username = normalizeUsername(authState?.profile?.username);
+  if (username === "chargerent" || authState?.isAdmin) {
+    return true;
+  }
+
+  const features = authState?.profile?.features || {};
+  const commands = authState?.profile?.commands || authState?.profile?.Commands || {};
+  return features.ui_editor === true || commands["client edit"] === true;
+}
+
+function canManageUiProfileClient(authState, clientId) {
+  if (!hasUiProfileFeature(authState)) {
+    return false;
+  }
+
+  if (authState?.isAdmin || normalizeUsername(authState?.profile?.username) === "chargerent") {
+    return true;
+  }
+
+  const authClientId = getAuthClientId(authState);
+  return !!authClientId && authClientId === String(clientId || "").trim().toUpperCase();
+}
+
+function canManageUiProfileForKiosk(authState, kiosk) {
+  if (authState?.isAdmin || normalizeUsername(authState?.profile?.username) === "chargerent") {
+    return true;
+  }
+
+  if (!hasUiProfileFeature(authState)) {
+    return false;
+  }
+
+  const authClientId = getAuthClientId(authState);
+  const kioskClient = String(kiosk?.info?.client || kiosk?.info?.clientId || "").trim().toUpperCase();
+  const kioskRep = String(kiosk?.info?.rep || "").trim().toUpperCase();
+  return !!authClientId && (kioskClient === authClientId || kioskRep === authClientId);
+}
+
+async function assertCanManageUiProfilesFromContext(context) {
+  const authState = await getAuthorizedProfileFromContext(context);
+  if (hasUiProfileFeature(authState)) {
+    return authState;
+  }
+
+  throw new functions.https.HttpsError(
+      "permission-denied",
+      "Not allowed to manage kiosk UI profiles",
+  );
+}
+
+async function assertCanManageUiProfiles(req, data) {
+  const authState = await getAuthorizedProfileFromRequest(req, data);
+  if (hasUiProfileFeature(authState)) {
+    return authState;
+  }
+
+  throw new functions.https.HttpsError(
+      "permission-denied",
+      "Not allowed to manage kiosk UI profiles",
+  );
+}
+
 async function assertCanManageMedia(req, data) {
   const authState = await getAuthorizedProfileFromRequest(req, data);
   if (hasMediaFeature(authState)) {
@@ -569,6 +689,30 @@ async function assertCanManageMediaFromContext(context) {
   throw new functions.https.HttpsError(
       "permission-denied",
       "Not allowed to manage media",
+  );
+}
+
+async function assertCanManageFirmware(req, data) {
+  const authState = await getAuthorizedProfileFromRequest(req, data);
+  if (hasFirmwareUpdatePermission(authState)) {
+    return authState;
+  }
+
+  throw new functions.https.HttpsError(
+      "permission-denied",
+      "Not allowed to manage firmware",
+  );
+}
+
+async function assertCanManageFirmwareFromContext(context) {
+  const authState = await getAuthorizedProfileFromContext(context);
+  if (hasFirmwareUpdatePermission(authState)) {
+    return authState;
+  }
+
+  throw new functions.https.HttpsError(
+      "permission-denied",
+      "Not allowed to manage firmware",
   );
 }
 
@@ -1919,6 +2063,31 @@ function serializeMediaAssetSnapshot(docSnap) {
   };
 }
 
+function serializeFirmwareReleaseSnapshot(docSnap) {
+  const release = docSnap.data() || {};
+
+  return {
+    id: docSnap.id,
+    target: normalizeFirmwareTarget(release.target),
+    version: String(release.version || ""),
+    name: String(release.name || release.fileName || ""),
+    fileName: String(release.fileName || ""),
+    contentType: String(release.contentType || "application/octet-stream"),
+    size: Number(release.size || 0),
+    bucketName: String(release.bucketName || STORAGE_BUCKET),
+    storagePath: String(release.storagePath || ""),
+    crc32c: String(release.crc32c || ""),
+    md5Hash: String(release.md5Hash || ""),
+    status: String(release.status || "draft"),
+    active: release.active === true,
+    createdByUid: String(release.createdByUid || ""),
+    createdByUsername: String(release.createdByUsername || ""),
+    createdAt: serializeFirestoreTimestamp(release.createdAt),
+    updatedAt: serializeFirestoreTimestamp(release.updatedAt),
+    activatedAt: serializeFirestoreTimestamp(release.activatedAt),
+  };
+}
+
 function normalizeMediaTagValue(value, maxLength = 160) {
   return String(value || "").trim().slice(0, maxLength);
 }
@@ -3011,6 +3180,283 @@ async function mediaFinalizeUploadImpl(data, authState) {
   };
 }
 
+async function firmwareCreateUploadUrlImpl(data, authState, req = null) {
+  const fileName = String(data?.fileName || "").trim();
+  const contentType = normalizeFirmwareContentType(data?.contentType);
+  const size = Number(data?.size || 0);
+  const target = normalizeFirmwareTarget(data?.target);
+
+  if (!fileName) {
+    throw new functions.https.HttpsError("invalid-argument", "fileName required");
+  }
+
+  if (!isSupportedFirmwareFileName(fileName)) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Only .bin and .pac firmware uploads are supported",
+    );
+  }
+
+  if (!Number.isFinite(size) || size <= 0) {
+    throw new functions.https.HttpsError("invalid-argument", "size must be a positive number");
+  }
+
+  if (size > MAX_FIRMWARE_UPLOAD_BYTES) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        `Firmware uploads must be ${MAX_FIRMWARE_UPLOAD_BYTES / (1024 * 1024)} MB or smaller`,
+    );
+  }
+
+  const releaseId = db.collection(FIRMWARE_RELEASES_COLLECTION).doc().id;
+  const storagePath = `firmware/${getFirmwareTargetStorageSegment(target)}/${releaseId}/${sanitizeFileName(fileName)}`;
+  const expiresAt = Date.now() + (15 * 60 * 1000);
+  let uploadUrl = "";
+  let uploadMode = "signed";
+  let bucketName = STORAGE_BUCKET;
+  let lastError = null;
+
+  for (const candidateBucketName of getStorageBucketCandidates()) {
+    const bucket = getStorageBucket(candidateBucketName);
+    const file = bucket.file(storagePath);
+
+    try {
+      [uploadUrl] = await file.getSignedUrl({
+        version: "v4",
+        action: "write",
+        expires: expiresAt,
+        contentType,
+      });
+      bucketName = candidateBucketName;
+      uploadMode = "signed";
+      break;
+    } catch (error) {
+      lastError = error;
+      console.error("firmwareCreateUploadUrl.getSignedUrlFailed", {
+        bucket: candidateBucketName,
+        storagePath,
+        contentType,
+        uid: authState?.uid || null,
+        code: error?.code || null,
+        message: error?.message || String(error),
+      });
+
+      try {
+        const resumableOptions = {
+          metadata: {
+            contentType,
+          },
+        };
+        const origin = String(req?.headers?.origin || "").trim();
+        if (origin) {
+          resumableOptions.origin = origin;
+        }
+
+        [uploadUrl] = await file.createResumableUpload(resumableOptions);
+        bucketName = candidateBucketName;
+        uploadMode = "resumable";
+        lastError = null;
+        break;
+      } catch (resumableError) {
+        lastError = resumableError;
+        console.error("firmwareCreateUploadUrl.createResumableUploadFailed", {
+          bucket: candidateBucketName,
+          storagePath,
+          contentType,
+          uid: authState?.uid || null,
+          code: resumableError?.code || null,
+          message: resumableError?.message || String(resumableError),
+        });
+      }
+    }
+  }
+
+  if (!uploadUrl) {
+    throw new functions.https.HttpsError(
+        "internal",
+        lastError?.message || "Unable to create firmware upload URL",
+    );
+  }
+
+  return {
+    releaseId,
+    target,
+    storagePath,
+    uploadUrl,
+    uploadMode,
+    bucketName,
+    expiresAt: new Date(expiresAt).toISOString(),
+  };
+}
+
+async function firmwareFinalizeUploadImpl(data, authState) {
+  const releaseId = String(data?.releaseId || "").trim();
+  const fileName = String(data?.fileName || "").trim();
+  const storagePath = String(data?.storagePath || "").trim();
+  const requestedBucketName = String(data?.bucketName || "").trim();
+  const target = normalizeFirmwareTarget(data?.target);
+  const contentTypeInput = normalizeFirmwareContentType(data?.contentType);
+  const sizeInput = Number(data?.size || 0);
+  const version = extractFirmwareVersion(fileName, data?.version);
+  const activate = data?.activate !== false;
+
+  if (!releaseId || !fileName || !storagePath) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "releaseId, fileName, and storagePath are required",
+    );
+  }
+
+  if (!isSupportedFirmwareFileName(fileName)) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Only .bin and .pac firmware uploads are supported",
+    );
+  }
+
+  const expectedPrefix = `firmware/${getFirmwareTargetStorageSegment(target)}/${releaseId}/`;
+  if (!storagePath.startsWith(expectedPrefix)) {
+    throw new functions.https.HttpsError("invalid-argument", "Invalid firmware storagePath");
+  }
+
+  let file = null;
+  let metadata = null;
+  let resolvedBucketName = "";
+
+  for (const candidateBucketName of getStorageBucketCandidates(requestedBucketName)) {
+    const candidateFile = getStorageBucket(candidateBucketName).file(storagePath);
+    const [exists] = await candidateFile.exists();
+    if (!exists) {
+      continue;
+    }
+
+    file = candidateFile;
+    resolvedBucketName = candidateBucketName;
+    [metadata] = await candidateFile.getMetadata();
+    break;
+  }
+
+  if (!file || !metadata) {
+    throw new functions.https.HttpsError("not-found", "Uploaded firmware file not found");
+  }
+
+  const contentType = normalizeFirmwareContentType(metadata?.contentType || contentTypeInput);
+  await file.setMetadata({
+    contentType,
+    cacheControl: "private,max-age=300",
+    metadata: {
+      ...(metadata?.metadata || {}),
+      firmwareTarget: target,
+      firmwareReleaseId: releaseId,
+    },
+  });
+
+  const releaseRef = db.collection(FIRMWARE_RELEASES_COLLECTION).doc(releaseId);
+  const releaseData = {
+    target,
+    version,
+    name: fileName,
+    fileName,
+    contentType,
+    size: Number(metadata?.size || sizeInput || 0),
+    bucketName: resolvedBucketName,
+    storagePath,
+    crc32c: String(metadata?.crc32c || ""),
+    md5Hash: String(metadata?.md5Hash || ""),
+    status: activate ? "active" : "uploaded",
+    active: activate,
+    createdByUid: authState.uid,
+    createdByUsername: normalizeUsername(authState.profile?.username),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    ...(activate ? {activatedAt: admin.firestore.FieldValue.serverTimestamp()} : {}),
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  const batch = db.batch();
+  batch.set(releaseRef, releaseData, {merge: true});
+
+  if (activate) {
+    const channelRef = db.collection(FIRMWARE_CHANNELS_COLLECTION).doc(target);
+    batch.set(channelRef, {
+      target,
+      activeReleaseId: releaseId,
+      activeFileName: fileName,
+      activeVersion: version,
+      updatedByUid: authState.uid,
+      updatedByUsername: normalizeUsername(authState.profile?.username),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, {merge: true});
+  }
+
+  await batch.commit();
+  const savedSnap = await releaseRef.get();
+
+  return {
+    ok: true,
+    release: serializeFirmwareReleaseSnapshot(savedSnap),
+  };
+}
+
+async function firmwareResolveReleaseImpl(data = {}) {
+  const target = normalizeFirmwareTarget(data?.target, "mcu");
+  const channelSnap = await db.collection(FIRMWARE_CHANNELS_COLLECTION).doc(target).get();
+  let releaseId = String(channelSnap.data()?.activeReleaseId || "").trim();
+
+  if (!releaseId) {
+    const releaseSnapshot = await db.collection(FIRMWARE_RELEASES_COLLECTION)
+        .where("target", "==", target)
+        .where("active", "==", true)
+        .limit(1)
+        .get();
+
+    releaseId = releaseSnapshot.docs[0]?.id || "";
+  }
+
+  if (!releaseId) {
+    throw new functions.https.HttpsError("not-found", `No active firmware release for ${target}`);
+  }
+
+  const releaseSnap = await db.collection(FIRMWARE_RELEASES_COLLECTION).doc(releaseId).get();
+  if (!releaseSnap.exists) {
+    throw new functions.https.HttpsError("not-found", `Firmware release ${releaseId} not found`);
+  }
+
+  const release = serializeFirmwareReleaseSnapshot(releaseSnap);
+  if (!release.storagePath || !release.fileName) {
+    throw new functions.https.HttpsError("failed-precondition", "Firmware release is missing file metadata");
+  }
+
+  const file = getStorageBucket(release.bucketName).file(release.storagePath);
+  const [exists] = await file.exists();
+  if (!exists) {
+    throw new functions.https.HttpsError("not-found", `Firmware file ${release.fileName} not found`);
+  }
+
+  const [downloadUrl] = await file.getSignedUrl({
+    version: "v4",
+    action: "read",
+    expires: Date.now() + (60 * 60 * 1000),
+  });
+
+  return {
+    code: 200,
+    type: 0,
+    data: `${release.fileName},${release.size},${downloadUrl}`,
+    msg: "ok",
+    time: Date.now(),
+    target,
+    release: {
+      id: release.id,
+      target,
+      version: release.version,
+      fileName: release.fileName,
+      size: release.size,
+      crc32c: release.crc32c,
+      md5Hash: release.md5Hash,
+    },
+  };
+}
+
 async function mediaArchiveAssetImpl(data, authState) {
   const assetId = String(data?.assetId || "").trim();
   if (!assetId) {
@@ -3427,9 +3873,39 @@ function mergeDefinedProvisionFields(target, source) {
   return next;
 }
 
+function getBoundKioskTypeConfig(kioskType) {
+  return BOUND_KIOSK_TYPE_CONFIG[normalizeKioskType(kioskType)] || null;
+}
+
+function createEmptyBoundSlots(kioskType) {
+  const config = getBoundKioskTypeConfig(kioskType);
+  const slotCount = Number(config?.slots || 0);
+
+  return Array.from({length: slotCount}, (_, index) => ({
+    position: index + 1,
+    absolutePosition: index + 1,
+    status: 0,
+    dischargeCurrent: 0,
+    cellVoltage: 0,
+    areaCode: 0,
+    sn: 0,
+    batteryLevel: null,
+    temperature: 0,
+    chargingVoltage: 0,
+    chargingCurrent: 0,
+    softwareVersion: 0,
+    holeDetection: 0,
+    lock: false,
+    lockReason: "",
+    rented: false,
+    cycle: 0,
+  }));
+}
+
 function getDefaultBoundKioskHardware(templateKiosk = null, kioskType = "") {
   const templateHardware = clonePlain(templateKiosk?.hardware) || {};
   const normalizedKioskType = normalizeKioskType(kioskType);
+  const typeConfig = getBoundKioskTypeConfig(normalizedKioskType);
   const hardware = {
     gateway: "",
     gatewayoptions: "",
@@ -3454,6 +3930,13 @@ function getDefaultBoundKioskHardware(templateKiosk = null, kioskType = "") {
     hardware.type = normalizedKioskType;
   } else {
     delete hardware.type;
+  }
+
+  if (typeConfig) {
+    hardware.modules = Number(templateHardware?.modules || typeConfig.modules);
+    if (typeConfig.screen && !templateHardware?.screen) {
+      hardware.screen = typeConfig.screen;
+    }
   }
 
   return hardware;
@@ -3482,7 +3965,7 @@ function createBoundKioskDocument({
     slot: 0,
     empty: 0,
     lock: 0,
-    slots: [],
+    slots: createEmptyBoundSlots(kioskType),
     lastUpdated: null,
     charging: 0,
   };
@@ -6430,6 +6913,235 @@ async function listUsersImpl() {
   return { users };
 }
 
+function normalizeUiProfileId(value) {
+  return String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 120);
+}
+
+function cleanUiProfileName(value) {
+  return String(value || "").trim().slice(0, 120);
+}
+
+function normalizeUiProfileStatus(value) {
+  const status = String(value || "draft").trim().toLowerCase();
+  return ["draft", "published", "archived"].includes(status) ? status : "draft";
+}
+
+function serializeUiProfileDoc(docSnap) {
+  const data = docSnap.data() || {};
+  return {
+    id: docSnap.id,
+    name: String(data.name || ""),
+    clientId: String(data.clientId || "").trim().toUpperCase(),
+    status: normalizeUiProfileStatus(data.status),
+    version: Number(data.version || 1),
+    ui: clonePlain(data.ui) || {},
+    languages: clonePlain(data.languages) || {},
+    createdAt: serializeFirestoreTimestamp(data.createdAt),
+    updatedAt: serializeFirestoreTimestamp(data.updatedAt),
+    updatedByUid: String(data.updatedByUid || ""),
+    updatedByUsername: String(data.updatedByUsername || ""),
+  };
+}
+
+function buildUiProfileSnapshot(profile) {
+  const ui = clonePlain(profile.ui) || {};
+  const colors = isPlainObject(ui.colors) ? ui.colors : {};
+  const theme = isPlainObject(ui.theme) ? ui.theme : {};
+  const primary = String(theme.primary || colors.bcolor1 || "#078B8C");
+  const secondary = String(theme.secondary || colors.bcolor2 || "#131E3A");
+
+  return {
+    ...ui,
+    profileId: profile.id,
+    profileName: String(profile.name || ""),
+    profileVersion: Number(profile.version || 1),
+    colors: {
+      ...colors,
+      bcolor1: primary,
+      bcolor2: secondary,
+    },
+    theme: {
+      ...theme,
+      primary,
+      secondary,
+    },
+    languages: clonePlain(profile.languages) || {},
+    profileAppliedAt: new Date().toISOString(),
+  };
+}
+
+async function uiProfileListImpl(authState) {
+  let query = db.collection(UI_PROFILES_COLLECTION);
+  if (!authState.isAdmin && normalizeUsername(authState.profile?.username) !== "chargerent") {
+    const clientId = getAuthClientId(authState);
+    if (!clientId) {
+      return {profiles: []};
+    }
+    query = query.where("clientId", "==", clientId);
+  }
+
+  const snap = await query.get();
+  const profiles = snap.docs
+      .map(serializeUiProfileDoc)
+      .filter((profile) => canManageUiProfileClient(authState, profile.clientId));
+
+  return {profiles};
+}
+
+async function uiProfileUpsertImpl(data, authState) {
+  const source = clonePlain(data?.profile) || {};
+  const requestedId = normalizeUiProfileId(source.id || source.profileId);
+  const fallbackId = normalizeUiProfileId(`${source.clientId || getAuthClientId(authState)}-${source.name || "kiosk-ui"}`);
+  const profileId = requestedId || fallbackId || db.collection(UI_PROFILES_COLLECTION).doc().id;
+  const profileRef = db.collection(UI_PROFILES_COLLECTION).doc(profileId);
+  const existingSnap = await profileRef.get();
+  const existing = existingSnap.exists ? existingSnap.data() || {} : {};
+  const clientId = String(source.clientId || existing.clientId || getAuthClientId(authState)).trim().toUpperCase();
+
+  if (!clientId) {
+    throw new functions.https.HttpsError("invalid-argument", "clientId required");
+  }
+
+  if (!canManageUiProfileClient(authState, clientId)) {
+    throw new functions.https.HttpsError("permission-denied", "Not allowed to edit this UI profile");
+  }
+
+  const name = cleanUiProfileName(source.name || existing.name || `${clientId} Kiosk UI`);
+  const nextVersion = Math.max(1, Number(existing.version || 0) + 1);
+  const timestamp = admin.firestore.FieldValue.serverTimestamp();
+  const profileData = {
+    name,
+    clientId,
+    status: normalizeUiProfileStatus(source.status || existing.status),
+    version: nextVersion,
+    ui: clonePlain(source.ui) || {},
+    languages: clonePlain(source.languages) || {},
+    updatedAt: timestamp,
+    updatedByUid: authState.uid || "",
+    updatedByUsername: normalizeUsername(authState.profile?.username),
+  };
+
+  if (!existingSnap.exists) {
+    profileData.createdAt = timestamp;
+  }
+
+  await profileRef.set(profileData, {merge: true});
+  const savedSnap = await profileRef.get();
+  return {
+    ok: true,
+    profile: serializeUiProfileDoc(savedSnap),
+  };
+}
+
+async function uiProfileDeleteImpl(data, authState) {
+  const profileId = normalizeUiProfileId(data?.profileId);
+  if (!profileId) {
+    throw new functions.https.HttpsError("invalid-argument", "profileId required");
+  }
+
+  const profileRef = db.collection(UI_PROFILES_COLLECTION).doc(profileId);
+  const profileSnap = await profileRef.get();
+  if (!profileSnap.exists) {
+    return {ok: true};
+  }
+
+  const profile = serializeUiProfileDoc(profileSnap);
+  if (!canManageUiProfileClient(authState, profile.clientId)) {
+    throw new functions.https.HttpsError("permission-denied", "Not allowed to delete this UI profile");
+  }
+
+  await profileRef.delete();
+  return {ok: true};
+}
+
+async function uiProfileApplyImpl(data, authState) {
+  const profileId = normalizeUiProfileId(data?.profileId);
+  const stationIds = Array.isArray(data?.stationids) ? data.stationids.map(normalizeStationId).filter(Boolean) : [];
+
+  if (!profileId) {
+    throw new functions.https.HttpsError("invalid-argument", "profileId required");
+  }
+  if (!stationIds.length) {
+    throw new functions.https.HttpsError("invalid-argument", "stationids required");
+  }
+
+  const profileSnap = await db.collection(UI_PROFILES_COLLECTION).doc(profileId).get();
+  if (!profileSnap.exists) {
+    throw new functions.https.HttpsError("not-found", "UI profile not found");
+  }
+
+  const profile = serializeUiProfileDoc(profileSnap);
+  if (!canManageUiProfileClient(authState, profile.clientId)) {
+    throw new functions.https.HttpsError("permission-denied", "Not allowed to apply this UI profile");
+  }
+
+  const uniqueStationIds = [...new Set(stationIds)];
+  const kioskSnaps = [];
+  for (const chunk of chunkArray(uniqueStationIds, 30)) {
+    const snap = await db.collection("kiosks").where("stationid", "in", chunk).get();
+    kioskSnaps.push(...snap.docs);
+  }
+
+  const uiSnapshot = buildUiProfileSnapshot(profile);
+  const updatedKiosks = [];
+  let batch = db.batch();
+  let writesInBatch = 0;
+
+  for (const docSnap of kioskSnaps) {
+    const kiosk = docSnap.data() || {};
+    const stationid = normalizeStationId(kiosk.stationid || docSnap.id);
+    if (!uniqueStationIds.includes(stationid)) continue;
+
+    if (!canManageUiProfileForKiosk(authState, kiosk)) {
+      continue;
+    }
+
+    const kioskClientId = String(kiosk?.info?.client || kiosk?.info?.clientId || "").trim().toUpperCase();
+    if (profile.clientId && kioskClientId && kioskClientId !== profile.clientId) {
+      continue;
+    }
+
+    const nextKiosk = {
+      ...clonePlain(kiosk),
+      ui: uiSnapshot,
+      uiProfileId: profile.id,
+      updatedAt: new Date().toISOString(),
+    };
+
+    batch.set(docSnap.ref, {
+      ui: uiSnapshot,
+      uiProfileId: profile.id,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedBy: normalizeUsername(authState.profile?.username),
+    }, {merge: true});
+    writesInBatch += 1;
+    updatedKiosks.push(nextKiosk);
+
+    if (writesInBatch >= 400) {
+      await batch.commit();
+      batch = db.batch();
+      writesInBatch = 0;
+    }
+  }
+
+  if (writesInBatch > 0) {
+    await batch.commit();
+  }
+
+  return {
+    ok: true,
+    profile,
+    updatedCount: updatedKiosks.length,
+    stationids: updatedKiosks.map((kiosk) => kiosk.stationid),
+    kiosks: updatedKiosks,
+  };
+}
+
 async function deleteUserImpl(data) {
   const uid = String(data?.uid || "").trim();
   if (!uid) throw new functions.https.HttpsError("invalid-argument", "uid required");
@@ -7371,6 +8083,46 @@ exports.admin_setUserPassword = functions.https.onCall(async (data, context) => 
   return setUserPasswordImpl(data);
 });
 
+exports.uiProfile_list = functions.https.onCall(async (data, context) => {
+  const authState = await assertCanManageUiProfilesFromContext(context);
+  return uiProfileListImpl(authState, data);
+});
+
+exports.uiProfile_upsert = functions.https.onCall(async (data, context) => {
+  const authState = await assertCanManageUiProfilesFromContext(context);
+  return uiProfileUpsertImpl(data, authState);
+});
+
+exports.uiProfile_delete = functions.https.onCall(async (data, context) => {
+  const authState = await assertCanManageUiProfilesFromContext(context);
+  return uiProfileDeleteImpl(data, authState);
+});
+
+exports.uiProfile_apply = functions.https.onCall(async (data, context) => {
+  const authState = await assertCanManageUiProfilesFromContext(context);
+  return uiProfileApplyImpl(data, authState);
+});
+
+exports.uiProfile_httpList = handleHttpFunction(async (data, req) => {
+  const authState = await assertCanManageUiProfiles(req, data);
+  return uiProfileListImpl(authState, data);
+});
+
+exports.uiProfile_httpUpsert = handleHttpFunction(async (data, req) => {
+  const authState = await assertCanManageUiProfiles(req, data);
+  return uiProfileUpsertImpl(data, authState);
+});
+
+exports.uiProfile_httpDelete = handleHttpFunction(async (data, req) => {
+  const authState = await assertCanManageUiProfiles(req, data);
+  return uiProfileDeleteImpl(data, authState);
+});
+
+exports.uiProfile_httpApply = handleHttpFunction(async (data, req) => {
+  const authState = await assertCanManageUiProfiles(req, data);
+  return uiProfileApplyImpl(data, authState);
+});
+
 exports.media_listAssets = functions.https.onCall(async (data, context) => {
   const authState = await assertCanManageMediaFromContext(context);
   return mediaListAssetsImpl(authState, data);
@@ -7400,6 +8152,30 @@ exports.media_httpFinalizeUpload = handleHttpFunction(async (data, req) => {
   const authState = await assertCanManageMedia(req, data);
   return mediaFinalizeUploadImpl(data, authState);
 });
+
+exports.firmware_createUploadUrl = functions.https.onCall(async (data, context) => {
+  const authState = await assertCanManageFirmwareFromContext(context);
+  return firmwareCreateUploadUrlImpl(data, authState, context?.rawRequest || null);
+});
+
+exports.firmware_httpCreateUploadUrl = handleHttpFunction(async (data, req) => {
+  const authState = await assertCanManageFirmware(req, data);
+  return firmwareCreateUploadUrlImpl(data, authState, req);
+});
+
+exports.firmware_finalizeUpload = functions.https.onCall(async (data, context) => {
+  const authState = await assertCanManageFirmwareFromContext(context);
+  return firmwareFinalizeUploadImpl(data, authState);
+});
+
+exports.firmware_httpFinalizeUpload = handleHttpFunction(async (data, req) => {
+  const authState = await assertCanManageFirmware(req, data);
+  return firmwareFinalizeUploadImpl(data, authState);
+});
+
+exports.firmware_httpResolveRelease = handleHttpFunction(async (data) => (
+  firmwareResolveReleaseImpl(data)
+));
 
 exports.media_archiveAsset = functions.https.onCall(async (data, context) => {
   const authState = await assertCanManageMediaFromContext(context);

@@ -386,7 +386,10 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAiBooths, onLogout, 
             if (section === 'hardware' && path === 'type') {
                 const moduleMap = {
                     'CT3': 1,
+                    'CT4': 1,
+                    'CT8': 2,
                     'CT10': 1,
+                    'CT12': 3,
                     'CA36': 12,
                     'CK20': 2,
                     'CK30': 3,
@@ -651,7 +654,7 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAiBooths, onLogout, 
                             <div className="p-4 rounded-lg">
                                 <SectionTitle title="Hardware" />
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <FormMultiSwitch label="Type" name="type" options={['CT3', 'CT10', 'CA36', 'CK20', 'CK30', 'CK48', 'CK50']} value={formData.hardware.type} section="hardware" onDataChange={onDataChange} />
+                                    <FormMultiSwitch label="Type" name="type" options={['CT3', 'CT4', 'CT8', 'CT10', 'CT12', 'CA36', 'CK20', 'CK30', 'CK48', 'CK50']} value={formData.hardware.type} section="hardware" onDataChange={onDataChange} />
                                     <FormMultiSwitch label="Mode" name="mode" options={['AI', 'LIVE', 'TEST']} value={formData.hardware.mode} section="hardware" onDataChange={onDataChange} />
                                     <FormInput label="Modules" name="modules" type="number" value={formData.hardware.modules} section="hardware" onDataChange={onDataChange} />
                                     <FormInput label="CPU" name="cpu" value={formData.hardware.cpu} section="hardware" onDataChange={onDataChange} />
@@ -664,7 +667,7 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAiBooths, onLogout, 
                                     <FormMultiSwitch label="Gateway" name="gateway" options={['P68', 'SWIPE', 'SCAN', 'RFID', 'STRIPE', 'APO', 'TOUCH']} value={{'PAYTERP68': 'P68', 'APOLLO': 'APO'}[formData.hardware.gateway] || formData.hardware.gateway} section="hardware" onDataChange={(sec, name, val) => handleMultiSwitchChange(sec, name, val, {'P68': 'PAYTERP68', 'APO': 'APOLLO'})} />
                                     <FormInput label={selectedIsAiBooth ? 'SN (Optional)' : 'SN'} name="sn" value={formData.hardware.sn} section="hardware" onDataChange={onDataChange} isInvalid={missingFields.includes('hardware.sn')} />
                                     <FormMultiSwitch label="Gateway Options" name="gatewayoptions" options={['INITIAL', 'FULL', 'OPEN', 'CLOSED', 'RES']} value={{'INITIALPRICE': 'INITIAL', 'FULLPRICE':'FULL', 'OPENMODE':'OPEN', 'CLOSEDLOOP':'CLOSED', 'RESERVATION':'RES'}[formData.hardware.gatewayoptions] || formData.hardware.gatewayoptions} section="hardware" onDataChange={(sec, name, val) => handleMultiSwitchChange(sec, name, val, {'INITIAL': 'INITIALPRICE', 'FULL': 'FULLPRICE', 'OPEN': 'OPENMODE', 'CLOSED': 'CLOSEDLOOP', 'RES': 'RESERVATION'})} />
-                                    <FormMultiSwitch label="Screen" name="screen" options={['7', '10', '21', '32', '49']} value={String(formData.hardware.screen || '49').toUpperCase().replace('IN', '')} section="hardware" onDataChange={onDataChange} />
+                                    <FormMultiSwitch label="Screen" name="screen" options={['7', '10', '16', '21', '32', '49']} value={String(formData.hardware.screen || '49').toUpperCase().replace('IN', '')} section="hardware" onDataChange={onDataChange} />
                                     <FormInput label="Port" name="port" value={formData.hardware.port} section="hardware" onDataChange={onDataChange} />
                                     <FormInput label="Server" name="server" value={formData.hardware.server} section="hardware" onDataChange={onDataChange} />
                                 </div>

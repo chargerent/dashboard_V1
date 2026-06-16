@@ -11,7 +11,6 @@ import {
 } from '../forms/FormFields.jsx';
 import { getKioskPowerThreshold, isNewBoundKioskStation, isV2Kiosk, normalizeKioskInfoForSchema } from '../../utils/helpers';
 
-const WIFI_DEBUG_PREFIX = '[V2 WiFi Debug]';
 const DEFAULT_WIFI = { name: 'chargerent', password: 'Charger33' };
 const V2_DEFAULT_WIFI = { name: 'powerbank', password: '123456789' };
 const DEFAULT_FORM_OPTIONS = { active: false };
@@ -363,15 +362,6 @@ function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVe
             ...formData,
             info: normalizeKioskInfoForSchema(formData.info, usesNewSchemaInfo),
         };
-        if (section === 'wifi') {
-            console.info(`${WIFI_DEBUG_PREFIX} 1. edit panel save clicked`, {
-                stationid: kiosk.stationid,
-                isV2Kiosk: usesNewSchemaInfo,
-                isNewBoundKiosk,
-                hardwareType: kiosk?.hardware?.type || '',
-                wifi: nextFormData.wifi,
-            });
-        }
         onSave(kiosk.stationid, section, nextFormData, nextFormData.info.autoGeocode);
     };
 

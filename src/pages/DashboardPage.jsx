@@ -1,5 +1,5 @@
 // src/pages/DashboardPage.jsx
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import FilterPanel from '../components/Dashboard/FilterPanel';
 import KioskPanel from '../components/kiosk/kioskPanel';
 import KioskDetailPanel from '../components/kiosk/KioskDetailPanel';
@@ -10,6 +10,7 @@ import LoadingSpinner from '../components/UI/LoadingSpinner';
 import InitialStatusPage from '../components/UI/InitialStatusPage';
 import SoldOutKiosksModal from '../components/UI/SoldOutKiosksModal.jsx';
 import TimeoutWarningModal from '../components/UI/TimeoutWarningModal';
+import FirmwareUpdateModal from '../components/UI/FirmwareUpdateModal.jsx';
 import { filterStationsForClient, isKioskOnline, isKioskActive, isModuleOnline, isNewSchemaKiosk, isStationProvisioned } from '../utils/helpers';
 import GlobalRentalActivity from '../components/Dashboard/GlobalRentalActivity';
 import { useIdleTimer } from '../hooks/useIdleTimer';
@@ -85,12 +86,31 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     const [rentalDetailView, setRentalDetailView] = useState(null); // { kioskId, period }
     const [showSoldOutModal, setShowSoldOutModal] = useState(false);
     const [statusFocusedKioskId, setStatusFocusedKioskId] = useState('');
+    const [firmwareUpdateDetails, setFirmwareUpdateDetails] = useState(null);
     const isAdminUser = !!clientInfo?.isAdmin;
     const hasStatusAccess = clientInfo?.features?.status === true;
     const hasReportingAccess = clientInfo?.features?.reporting === true || isAdminUser;
     const hasBindingAccess = clientInfo?.username === 'chargerent' || clientInfo?.features?.binding === true || clientInfo?.commands?.binding === true;
     const hasTestingAccess = clientInfo?.username === 'chargerent' || clientInfo?.features?.testing === true;
-    const canOpenAdminTools = isAdminUser || clientInfo?.commands?.['client edit'] === true || clientInfo?.features?.media === true;
+    const canOpenAdminTools = isAdminUser || clientInfo?.commands?.['client edit'] === true || clientInfo?.features?.media === true || clientInfo?.features?.ui_editor === true;
+    const handleFirmwareUpdateRequest = useCallback((details) => {
+        setFirmwareUpdateDetails(details);
+    }, []);
+
+    const handleFirmwareReady = useCallback((firmware) => {
+        if (!firmwareUpdateDetails?.stationid || !firmwareUpdateDetails?.moduleid) {
+            return;
+        }
+
+        onCommand(
+            firmwareUpdateDetails.stationid,
+            'update module',
+            firmwareUpdateDetails.moduleid,
+            null,
+            null,
+            { firmware }
+        );
+    }, [firmwareUpdateDetails, onCommand]);
 
     const { showWarning, handleStay } = useIdleTimer({ onLogout, idleTimeout: 540000, warningTimeout: 60000 });
     const {
@@ -107,6 +127,7 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
         setEjectingSlots,
         manageIgnoredKiosk,
         onCommand,
+        onFirmwareUpdateRequest: handleFirmwareUpdateRequest,
         t,
     });
 
@@ -476,6 +497,14 @@ return (
             onClose={() => setCommandModalOpen(false)}
             onConfirm={handleSendCommand}
             details={commandDetails}
+            t={t}
+        />
+        <FirmwareUpdateModal
+            isOpen={Boolean(firmwareUpdateDetails)}
+            details={firmwareUpdateDetails}
+            onClose={() => setFirmwareUpdateDetails(null)}
+            onFirmwareReady={handleFirmwareReady}
+            setCommandStatus={setCommandStatus}
             t={t}
         />
         <NgrokModal

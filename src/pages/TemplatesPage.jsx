@@ -98,10 +98,17 @@ function createRepeatingModule(id, count, options = {}) {
 
 function createTemplateKiosk(type) {
   const isNewSchema = ['CT3', 'CT4', 'CT8', 'CT12', 'CK48'].includes(type);
+  const hardwareDefaultsByType = {
+    CT3: { modules: 1 },
+    CT4: { modules: 1 },
+    CT8: { modules: 2, screen: '16IN' },
+    CT12: { modules: 3 },
+    CK48: { modules: 12 },
+  };
   const base = {
     stationid: `TPL-${type}`,
     provisionid: `template-${type.toLowerCase()}`,
-    hardware: { type, power: 80, sn: `SN-${type}` },
+    hardware: { type, power: 80, sn: `SN-${type}`, ...(hardwareDefaultsByType[type] || {}) },
     info: {
       location: 'Template Preview',
       place: type,

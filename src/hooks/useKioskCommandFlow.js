@@ -2,8 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { getKioskPowerThreshold, isV2Kiosk } from '../utils/helpers';
 import { logKioskInteraction } from '../utils/kioskInteractionDebug';
 
-const WIFI_DEBUG_PREFIX = '[V2 WiFi Debug]';
-
 const summarizeCommandDetails = (details) => {
   if (!details) return null;
 
@@ -17,7 +15,6 @@ const summarizeCommandDetails = (details) => {
     chargerid: details.chargerid,
     volume: details.volume,
     muted: details.muted,
-    section: details.section,
     hasKioskPayload: Boolean(details.kiosk),
     hasCheckbox: Boolean(details.checkbox),
     hasLockReason: Boolean(details.lockReason),
@@ -30,6 +27,7 @@ export default function useKioskCommandFlow({
   setEjectingSlots,
   manageIgnoredKiosk,
   onCommand,
+  onFirmwareUpdateRequest,
   t,
 }) {
   const [commandDetails, setCommandDetails] = useState(null);
@@ -113,7 +111,6 @@ export default function useKioskCommandFlow({
       return;
     }
     const { stationid, moduleid, slotid, action } = commandDetails;
-    const isWifiSave = commandDetails.section === 'wifi' || action === 'wifichange';
 
     if (action.includes('change')) {
       manageIgnoredKiosk(stationid, false);
@@ -226,7 +223,6 @@ export default function useKioskCommandFlow({
       : commandDetails.kiosk;
 
     const details = {
-      ...(commandDetails.section && { section: commandDetails.section }),
       ...(commandDetails.action.includes('change') && { kiosk: kioskPayload, autoGeocode: commandDetails.autoGeocode }),
       ...((commandDetails.action === 'lock slot' || commandDetails.action === 'unlock slot' || commandDetails.action === 'eject specific' || commandDetails.action === 'rent' || commandDetails.action === 'vend') && { slotid: commandDetails.slotid, info: lockReason }),
       ...((commandDetails.action === 'eject specific' || commandDetails.action === 'vend') && commandDetails.chargerid ? { chargerid: commandDetails.chargerid } : {}),
@@ -234,16 +230,6 @@ export default function useKioskCommandFlow({
       ...(commandDetails.action === 'set volume' && { volume: commandDetails.volume, muted: commandDetails.muted === true }),
       ...extraConfirmationDetails,
     };
-
-    if (isWifiSave) {
-      console.info(`${WIFI_DEBUG_PREFIX} 3. command modal confirmed; calling onCommand`, {
-        stationid: commandDetails.stationid,
-        action: commandDetails.action,
-        section: commandDetails.section,
-        confirmationResult,
-        wifi: details?.kiosk?.wifi || null,
-      });
-    }
 
     onCommand(commandDetails.stationid, commandDetails.action, commandDetails.moduleid, commandDetails.provisionid, commandDetails.uiVersion, details);
   }, [allStationsData, commandDetails, manageIgnoredKiosk, onCommand, setEjectingSlots]);
@@ -273,25 +259,9 @@ export default function useKioskCommandFlow({
       action = 'infochange';
     }
 
-    if (section === 'wifi') {
-      const targetIsV2Kiosk = isV2Kiosk(targetKiosk);
-      console.info(`${WIFI_DEBUG_PREFIX} 2. command hook selected save action`, {
-        stationid,
-        section,
-        action,
-        targetFound: Boolean(targetKiosk),
-        targetIsV2Kiosk,
-        hardwareType: targetKiosk?.hardware?.type || '',
-        status: normalizedStatus,
-        allStationsCount: allStationsData.length,
-        wifi: data?.wifi || null,
-      });
-    }
-
     setCommandDetails({
       stationid,
       action,
-      section,
       kiosk: data,
       autoGeocode,
       confirmationText: t('save_info_confirmation'),
@@ -346,6 +316,15 @@ export default function useKioskCommandFlow({
       confirmationText = `${t('reboot_module_confirmation')} ${moduleid}?`;
       commandDetailsPayload.slotid = moduleid;
     } else if (action === 'update module') {
+      if (typeof onFirmwareUpdateRequest === 'function' && isV2Kiosk(targetKiosk)) {
+        onFirmwareUpdateRequest({
+          stationid,
+          moduleid,
+          action,
+          kiosk: targetKiosk,
+        });
+        return;
+      }
       confirmationText = `${t('update_module_confirmation')} ${moduleid}?`;
     } else if (action === 'lock module') {
       confirmationText = `${t('lock_module_confirmation')}?`;
@@ -365,7 +344,7 @@ export default function useKioskCommandFlow({
     commandDetailsPayload.confirmationText = confirmationText;
     setCommandDetails(commandDetailsPayload);
     setCommandModalOpen(true);
-  }, [allStationsData, onCommand, t]);
+  }, [allStationsData, onCommand, onFirmwareUpdateRequest, t]);
 
   return {
     commandDetails,

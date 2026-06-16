@@ -11,6 +11,9 @@ const COUNTRY_OPTIONS = [
   { code: 'US', label: 'United States' },
 ];
 
+const KIOSK_TYPE_OPTIONS = ['CT3', 'CT4', 'CT8', 'CT12', 'CK48'];
+const DEFAULT_KIOSK_TYPE = 'CT8';
+
 function normalizeModuleId(moduleId) {
   return String(moduleId || '').trim();
 }
@@ -62,6 +65,11 @@ function getCountryFromStationId(stationid) {
   if (normalized.startsWith('FR')) return 'FR';
   if (normalized.startsWith('US')) return 'US';
   return '';
+}
+
+function normalizeKioskType(value) {
+  const normalizedType = String(value || '').trim().toUpperCase();
+  return KIOSK_TYPE_OPTIONS.includes(normalizedType) ? normalizedType : DEFAULT_KIOSK_TYPE;
 }
 
 function parseModuleScanInput(value) {
@@ -212,6 +220,7 @@ export default function BindingPage({
   const moduleIdInputRef = useRef(null);
   const [stationQrInput, setStationQrInput] = useState('');
   const [moduleId, setModuleId] = useState('');
+  const [kioskType, setKioskType] = useState(DEFAULT_KIOSK_TYPE);
   const [stationInfo, setStationInfo] = useState({ stationid: '', qrUrl: '' });
   const [pageError, setPageError] = useState('');
   const [moveError, setMoveError] = useState('');
@@ -222,6 +231,7 @@ export default function BindingPage({
   const [moveDestinationMode, setMoveDestinationMode] = useState('existing');
   const [moveDestinationStationId, setMoveDestinationStationId] = useState('');
   const [moveDestinationCountry, setMoveDestinationCountry] = useState('');
+  const [moveDestinationKioskType, setMoveDestinationKioskType] = useState(DEFAULT_KIOSK_TYPE);
   const [moveDestinationInfo, setMoveDestinationInfo] = useState({ stationid: '', qrUrl: '' });
   const [loadingMoveNextStation, setLoadingMoveNextStation] = useState(false);
 
@@ -264,7 +274,7 @@ export default function BindingPage({
     });
   }, []);
 
-  const loadMoveNextStation = useCallback(async (selectedCountry) => {
+  const loadMoveNextStation = useCallback(async (selectedCountry, selectedKioskType = moveDestinationKioskType) => {
     if (!canManageBindings || !selectedCountry) {
       setMoveDestinationInfo({ stationid: '', qrUrl: '' });
       return;
@@ -283,6 +293,7 @@ export default function BindingPage({
       await ensureSignedIn();
       const response = await callFunctionWithAuth('stationBinding_getNextStation', {
         country: selectedCountry,
+        kioskType: normalizeKioskType(selectedKioskType),
       });
       syncMoveDestinationInfo(response || {});
     } catch (error) {
@@ -292,7 +303,7 @@ export default function BindingPage({
     } finally {
       setLoadingMoveNextStation(false);
     }
-  }, [canManageBindings, ensureSignedIn, firebaseUser, syncMoveDestinationInfo, t]);
+  }, [canManageBindings, ensureSignedIn, firebaseUser, moveDestinationKioskType, syncMoveDestinationInfo, t]);
 
   useEffect(() => {
     if (!moveSourceStationId) {
@@ -323,8 +334,8 @@ export default function BindingPage({
       return;
     }
 
-    loadMoveNextStation(moveDestinationCountry);
-  }, [loadMoveNextStation, moveDestinationCountry, moveDestinationMode]);
+    loadMoveNextStation(moveDestinationCountry, moveDestinationKioskType);
+  }, [loadMoveNextStation, moveDestinationCountry, moveDestinationKioskType, moveDestinationMode]);
 
   const newKioskStations = (allStationsData || [])
     .filter((kiosk) => isNewKioskStation(kiosk?.stationid))
@@ -358,6 +369,8 @@ export default function BindingPage({
     if (!moveDestinationCountry) {
       setMoveDestinationCountry(getCountryFromStationId(selectedSourceKiosk.stationid));
     }
+
+    setMoveDestinationKioskType(normalizeKioskType(selectedSourceKiosk.hardware?.type));
   }, [moveDestinationCountry, moveModuleId, selectedSourceKiosk]);
 
   useEffect(() => {
@@ -665,6 +678,7 @@ export default function BindingPage({
         country: bindingCountry,
         stationid: normalizedStationId,
         moduleId: moduleResolution.resolvedModuleId,
+        kioskType,
       });
 
       resetBindingForm();
@@ -678,6 +692,7 @@ export default function BindingPage({
     bindingCountry,
     ensureSignedIn,
     focusStationQrInput,
+    kioskType,
     moduleId,
     normalizedStationId,
     resetBindingForm,
@@ -778,6 +793,7 @@ export default function BindingPage({
           moveDestinationInfo.stationid :
           moveDestinationStationId,
         destinationCountry: moveDestinationMode === 'new' ? moveDestinationCountry : '',
+        kioskType: moveDestinationMode === 'new' ? moveDestinationKioskType : '',
       });
 
       setMoveSourceStationId('');
@@ -785,7 +801,7 @@ export default function BindingPage({
       if (moveDestinationMode === 'new') {
         syncMoveDestinationInfo(payload || {});
         if (!payload?.nextStationid) {
-          await loadMoveNextStation(moveDestinationCountry);
+          await loadMoveNextStation(moveDestinationCountry, moveDestinationKioskType);
         }
       }
       setStatus({ state: 'success', message: payload?.message || t('command_success') });
@@ -794,7 +810,7 @@ export default function BindingPage({
       setMoveError(error?.message || t('command_failed'));
       setStatus({ state: 'error', message: error?.message || t('command_failed') });
       if (moveDestinationMode === 'new' && moveDestinationCountry) {
-        await loadMoveNextStation(moveDestinationCountry);
+        await loadMoveNextStation(moveDestinationCountry, moveDestinationKioskType);
       }
     }
   }, [
@@ -802,6 +818,7 @@ export default function BindingPage({
     loadMoveNextStation,
     moveDestinationCountry,
     moveDestinationInfo.stationid,
+    moveDestinationKioskType,
     moveDestinationMode,
     moveDestinationStationId,
     moveModuleId,
@@ -887,6 +904,29 @@ export default function BindingPage({
                     <p className="mt-1 text-2xl font-bold tracking-[0.08em] text-gray-900">
                       {normalizedStationId || '--'}
                     </p>
+                  </div>
+
+                  <div>
+                    <p className="mb-3 text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">{t('kiosk_type')}</p>
+                    <div className="flex flex-wrap gap-2 rounded-lg border border-gray-200 bg-gray-100 p-1">
+                      {KIOSK_TYPE_OPTIONS.map((option) => {
+                        const active = kioskType === option;
+                        return (
+                          <button
+                            key={option}
+                            type="button"
+                            onClick={() => setKioskType(option)}
+                            className={`rounded-md px-4 py-2 text-sm font-bold transition ${
+                              active
+                                ? 'bg-blue-600 text-white shadow-sm'
+                                : 'text-gray-600 hover:bg-white hover:text-gray-900'
+                            }`}
+                          >
+                            {option}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
 
                   <label className="block">
@@ -1039,6 +1079,30 @@ export default function BindingPage({
                                 } disabled:cursor-not-allowed disabled:text-gray-400`}
                               >
                                 {option.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div>
+                        <p className="mb-3 text-xs font-semibold uppercase tracking-[0.24em] text-gray-500">{t('kiosk_type')}</p>
+                        <div className="flex flex-wrap gap-2 rounded-lg border border-gray-200 bg-gray-100 p-1">
+                          {KIOSK_TYPE_OPTIONS.map((option) => {
+                            const active = moveDestinationKioskType === option;
+                            return (
+                              <button
+                                key={option}
+                                type="button"
+                                onClick={() => setMoveDestinationKioskType(option)}
+                                disabled={!moveFormReady}
+                                className={`rounded-md px-4 py-2 text-sm font-bold transition ${
+                                  active
+                                    ? 'bg-blue-600 text-white shadow-sm'
+                                    : 'text-gray-600 hover:bg-white hover:text-gray-900'
+                                } disabled:cursor-not-allowed disabled:text-gray-400`}
+                              >
+                                {option}
                               </button>
                             );
                           })}

@@ -1,0 +1,330 @@
+[
+  {
+    "id": "f2b17e2c4a4a2c01",
+    "type": "tab",
+    "label": "Firmware Firebase Backend",
+    "disabled": false,
+    "info": "Kiosk-facing firmware metadata endpoints. Preserves existing Besiter/FOTA response shape {code,type,data,msg,time}; data is filename,size,url. Proxies active release lookup to Firebase function firmware_httpResolveRelease."
+  },
+  {
+    "id": "d61b6fb2d1eea9aa",
+    "type": "group",
+    "z": "f2b17e2c4a4a2c01",
+    "name": "Firmware update - Firebase active releases",
+    "style": {
+      "stroke": "#001f60",
+      "fill": "#bfc7d7",
+      "label": true,
+      "color": "#000000"
+    },
+    "nodes": [
+      "a0359eb030360305",
+      "5f8e2ff241ce65ef",
+      "95c43be5f49efd33",
+      "3f885f56079f760a",
+      "3e756f62129a7884",
+      "f9acf844b1154285",
+      "e690861aa0667480",
+      "80c16e312abf29ad",
+      "addfd55b3baa71b8",
+      "b745c23ccbc48187",
+      "a269ed3c49ddf5c6",
+      "ba73bdfc053c12ac",
+      "d3aeef22ae42127e",
+      "f6f8f9b73a094821"
+    ],
+    "x": 54,
+    "y": 39,
+    "w": 1232,
+    "h": 262
+  },
+  {
+    "id": "a0359eb030360305",
+    "type": "comment",
+    "z": "f2b17e2c4a4a2c01",
+    "g": "d61b6fb2d1eea9aa",
+    "name": "Optional: set flow.firmwareResolveUrl to override the Firebase function URL.",
+    "info": "Default URL: https://us-central1-node-red-alerts.cloudfunctions.net/firmware_httpResolveRelease\nExpected function input: POST {\"data\":{\"target\":\"mcu\"|\"12B\"|\"12M\"}}\nExpected function result payload can be either {result:{code,type,data,msg,time}} or {code,type,data,msg,time}.",
+    "x": 390,
+    "y": 80,
+    "wires": []
+  },
+  {
+    "id": "5f8e2ff241ce65ef",
+    "type": "http in",
+    "z": "f2b17e2c4a4a2c01",
+    "g": "d61b6fb2d1eea9aa",
+    "name": "Firmware Update Info",
+    "url": "/api/iot/app/version/publish/mcu",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 190,
+    "y": 140,
+    "wires": [
+      [
+        "3f885f56079f760a"
+      ]
+    ]
+  },
+  {
+    "id": "95c43be5f49efd33",
+    "type": "http in",
+    "z": "f2b17e2c4a4a2c01",
+    "g": "d61b6fb2d1eea9aa",
+    "name": "Firmware Update Info 12B",
+    "url": "/api/iot/app/version/publish/mcu/12B",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 200,
+    "y": 200,
+    "wires": [
+      [
+        "3e756f62129a7884"
+      ]
+    ]
+  },
+  {
+    "id": "f9acf844b1154285",
+    "type": "http in",
+    "z": "f2b17e2c4a4a2c01",
+    "g": "d61b6fb2d1eea9aa",
+    "name": "Firmware Update Info 12M",
+    "url": "/api/iot/app/version/publish/mcu/12M",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 200,
+    "y": 260,
+    "wires": [
+      [
+        "e690861aa0667480"
+      ]
+    ]
+  },
+  {
+    "id": "3f885f56079f760a",
+    "type": "change",
+    "z": "f2b17e2c4a4a2c01",
+    "g": "d61b6fb2d1eea9aa",
+    "name": "target mcu",
+    "rules": [
+      {
+        "t": "set",
+        "p": "firmwareTarget",
+        "pt": "msg",
+        "to": "mcu",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 430,
+    "y": 140,
+    "wires": [
+      [
+        "80c16e312abf29ad"
+      ]
+    ]
+  },
+  {
+    "id": "3e756f62129a7884",
+    "type": "change",
+    "z": "f2b17e2c4a4a2c01",
+    "g": "d61b6fb2d1eea9aa",
+    "name": "target 12B",
+    "rules": [
+      {
+        "t": "set",
+        "p": "firmwareTarget",
+        "pt": "msg",
+        "to": "12B",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 430,
+    "y": 200,
+    "wires": [
+      [
+        "80c16e312abf29ad"
+      ]
+    ]
+  },
+  {
+    "id": "e690861aa0667480",
+    "type": "change",
+    "z": "f2b17e2c4a4a2c01",
+    "g": "d61b6fb2d1eea9aa",
+    "name": "target 12M",
+    "rules": [
+      {
+        "t": "set",
+        "p": "firmwareTarget",
+        "pt": "msg",
+        "to": "12M",
+        "tot": "str"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 430,
+    "y": 260,
+    "wires": [
+      [
+        "80c16e312abf29ad"
+      ]
+    ]
+  },
+  {
+    "id": "80c16e312abf29ad",
+    "type": "function",
+    "z": "f2b17e2c4a4a2c01",
+    "g": "d61b6fb2d1eea9aa",
+    "name": "Build Firebase resolver request",
+    "func": "const DEFAULT_RESOLVE_URL = 'https://us-central1-node-red-alerts.cloudfunctions.net/firmware_httpResolveRelease';\nconst rawTarget = String(msg.firmwareTarget || msg.req?.params?.target || msg.req?.query?.target || 'mcu').trim();\nconst normalized = rawTarget.toLowerCase();\nconst target = normalized === '12b' ? '12B' : normalized === '12m' ? '12M' : 'mcu';\n\nmsg._firmwareTarget = target;\nmsg.method = 'POST';\nmsg.url = String(flow.get('firmwareResolveUrl') || DEFAULT_RESOLVE_URL).trim() || DEFAULT_RESOLVE_URL;\nmsg.headers = {\n    'Content-Type': 'application/json'\n};\nmsg.payload = {\n    data: { target }\n};\n\nnode.status({ fill: 'blue', shape: 'dot', text: `Resolving ${target}` });\nreturn msg;",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 670,
+    "y": 200,
+    "wires": [
+      [
+        "addfd55b3baa71b8"
+      ]
+    ]
+  },
+  {
+    "id": "addfd55b3baa71b8",
+    "type": "http request",
+    "z": "f2b17e2c4a4a2c01",
+    "g": "d61b6fb2d1eea9aa",
+    "name": "Call Firebase firmware resolver",
+    "method": "use",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 940,
+    "y": 200,
+    "wires": [
+      [
+        "b745c23ccbc48187"
+      ]
+    ]
+  },
+  {
+    "id": "b745c23ccbc48187",
+    "type": "function",
+    "z": "f2b17e2c4a4a2c01",
+    "g": "d61b6fb2d1eea9aa",
+    "name": "Return kiosk firmware metadata",
+    "func": "const target = msg._firmwareTarget || 'mcu';\nconst body = msg.payload || {};\nconst result = body.result || body.data || body;\n\nfunction fail(statusCode, message, extra = {}) {\n    msg.statusCode = statusCode;\n    msg.headers = {\n        'Content-Type': 'application/json; charset=utf-8',\n        'Cache-Control': 'no-store'\n    };\n    msg.payload = {\n        code: statusCode,\n        type: 0,\n        data: '',\n        msg: message,\n        time: Date.now(),\n        target,\n        ...extra\n    };\n    node.status({ fill: 'red', shape: 'ring', text: `${target}: ${message}` });\n    return msg;\n}\n\nif (body.error) {\n    return fail(Number(msg.statusCode || 500), body.error.message || body.error.status || 'Firmware resolver error', {\n        error: body.error\n    });\n}\n\nif (!result || Number(result.code) !== 200 || !result.data) {\n    return fail(502, 'No active firmware metadata returned', {\n        resolverPayload: result || null\n    });\n}\n\nmsg.statusCode = 200;\nmsg.headers = {\n    'Content-Type': 'application/json; charset=utf-8',\n    'Cache-Control': 'no-store'\n};\nmsg.payload = {\n    code: 200,\n    type: Number(result.type || 0),\n    data: String(result.data),\n    msg: result.msg || 'ok',\n    time: Number(result.time || Date.now())\n};\n\nnode.status({ fill: 'green', shape: 'dot', text: `${target}: ${msg.payload.data.split(',')[0]}` });\nreturn msg;",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1200,
+    "y": 200,
+    "wires": [
+      [
+        "a269ed3c49ddf5c6",
+        "ba73bdfc053c12ac"
+      ]
+    ]
+  },
+  {
+    "id": "a269ed3c49ddf5c6",
+    "type": "http response",
+    "z": "f2b17e2c4a4a2c01",
+    "g": "d61b6fb2d1eea9aa",
+    "name": "Kiosk response",
+    "statusCode": "",
+    "headers": {},
+    "x": 1140,
+    "y": 260,
+    "wires": []
+  },
+  {
+    "id": "ba73bdfc053c12ac",
+    "type": "debug",
+    "z": "f2b17e2c4a4a2c01",
+    "g": "d61b6fb2d1eea9aa",
+    "name": "firmware metadata response",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1180,
+    "y": 120,
+    "wires": []
+  },
+  {
+    "id": "d3aeef22ae42127e",
+    "type": "catch",
+    "z": "f2b17e2c4a4a2c01",
+    "g": "d61b6fb2d1eea9aa",
+    "name": "Firmware endpoint errors",
+    "scope": [
+      "80c16e312abf29ad",
+      "addfd55b3baa71b8",
+      "b745c23ccbc48187"
+    ],
+    "uncaught": false,
+    "x": 670,
+    "y": 260,
+    "wires": [
+      [
+        "f6f8f9b73a094821"
+      ]
+    ]
+  },
+  {
+    "id": "f6f8f9b73a094821",
+    "type": "function",
+    "z": "f2b17e2c4a4a2c01",
+    "g": "d61b6fb2d1eea9aa",
+    "name": "Return firmware error",
+    "func": "const message = msg.error?.message || 'Firmware endpoint failed';\nmsg.statusCode = 500;\nmsg.headers = {\n    'Content-Type': 'application/json; charset=utf-8',\n    'Cache-Control': 'no-store'\n};\nmsg.payload = {\n    code: 500,\n    type: 0,\n    data: '',\n    msg: message,\n    time: Date.now(),\n    target: msg._firmwareTarget || msg.firmwareTarget || ''\n};\nnode.status({ fill: 'red', shape: 'ring', text: message });\nreturn msg;",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 910,
+    "y": 260,
+    "wires": [
+      [
+        "a269ed3c49ddf5c6",
+        "ba73bdfc053c12ac"
+      ]
+    ]
+  }
+]

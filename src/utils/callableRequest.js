@@ -11,12 +11,18 @@ const HTTP_FUNCTION_NAME_MAP = {
   auth_syncOwnClaims: 'auth_httpSyncOwnClaims',
   kiosk_updateSection: 'kiosk_httpUpdateSection',
   kiosk_updateSlotLock: 'kiosk_httpUpdateSlotLock',
+  uiProfile_list: 'uiProfile_httpList',
+  uiProfile_upsert: 'uiProfile_httpUpsert',
+  uiProfile_delete: 'uiProfile_httpDelete',
+  uiProfile_apply: 'uiProfile_httpApply',
   media_listAssets: 'media_httpListAssets',
   media_createUploadUrl: 'media_httpCreateUploadUrl',
   media_finalizeUpload: 'media_httpFinalizeUpload',
   media_archiveAsset: 'media_httpArchiveAsset',
   media_deleteAsset: 'media_httpDeleteAsset',
   media_assignPlaylist: 'media_httpAssignPlaylist',
+  firmware_createUploadUrl: 'firmware_httpCreateUploadUrl',
+  firmware_finalizeUpload: 'firmware_httpFinalizeUpload',
   aiBooths_listEvents: 'aiBooths_httpListEvents',
   aiBooths_saveEvent: 'aiBooths_httpSaveEvent',
   aiBooths_saveInstall: 'aiBooths_httpSaveInstall',
@@ -148,7 +154,12 @@ export async function callFunctionWithAuth(functionName, data = {}, options = {}
 
   if (!response.ok || payload?.error) {
     const message = getErrorMessage(payload, `Request failed (${response.status})`);
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    error.functionName = functionName;
+    error.url = url;
+    error.payload = payload;
+    throw error;
   }
 
   return payload?.result ?? payload?.data ?? payload ?? {};
@@ -172,7 +183,12 @@ export async function callFunctionPublic(functionName, data = {}) {
 
   if (!response.ok || payload?.error) {
     const message = getErrorMessage(payload, `Request failed (${response.status})`);
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    error.functionName = functionName;
+    error.url = getCallableUrl(functionName);
+    error.payload = payload;
+    throw error;
   }
 
   return payload?.result ?? payload?.data ?? payload ?? {};

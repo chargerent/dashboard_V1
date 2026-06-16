@@ -761,6 +761,45 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         );
     };
 
+    const CompactPortraitScreen = ({ label = '16IN' }) => (
+        <div className="overflow-hidden rounded-lg bg-gray-950 shadow-lg ring-1 ring-gray-800">
+            <div className="flex w-full flex-col justify-between p-3 text-white" style={{ aspectRatio: '9 / 16' }}>
+                <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-white/50">{label}</p>
+                    <p className="mt-1 truncate text-xs font-semibold text-white">{kiosk.ui?.mode || 'MEDIA'}</p>
+                </div>
+                <div className="space-y-2">
+                    <div className="h-1.5 w-2/3 rounded-full bg-white/20" />
+                    <div className="h-1.5 w-1/2 rounded-full bg-white/10" />
+                    <div className="h-12 rounded-md bg-white/10" />
+                </div>
+                <div className="text-[10px] font-mono text-white/55">
+                    {kiosk.hardware?.sn || kiosk.stationid || '---'}
+                </div>
+            </div>
+        </div>
+    );
+
+    const renderCT8 = () => {
+        const { slotsByPosition } = buildCompactSlotMap(kiosk.modules);
+
+        return (
+            <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
+                <div className="w-full max-w-xl space-y-3">
+                    <CompactTowerHeader />
+                    <div className="grid grid-cols-[minmax(0,1fr)_minmax(128px,0.72fr)] items-start gap-3">
+                        <CompactPortraitScreen label="16IN" />
+                        <div className="flex flex-col gap-2 pt-1">
+                            {[0, 1].map((groupIndex) => (
+                                <CompactGroupCard key={groupIndex} slotsByPosition={slotsByPosition} groupIndex={groupIndex} />
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     const renderCK48 = () => {
         // CK48 stores all 48 slots flat in modules[0] with absolute positions 1–48.
         // Visual layout: 12 logical modules arranged in 2 columns (right: 0–5, left: 6–11).
@@ -929,7 +968,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
             case 'CT4':
                 return renderCompactTower(1);
             case 'CT8':
-                return renderCompactTower(2);
+                return renderCT8();
             case 'CT12':
                 return renderCompactTower(3);
             case 'CT10':

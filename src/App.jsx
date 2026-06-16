@@ -34,6 +34,7 @@ const BindingPage = lazy(() => import('./pages/BindingPage.jsx'));
 const TemplatesPage = lazy(() => import('./pages/TemplatesPage.jsx'));
 const TestingPage = lazy(() => import('./pages/TestingPage.jsx'));
 const MediaPage = lazy(() => import('./pages/MediaPage.jsx'));
+const UiProfilesPage = lazy(() => import('./pages/UiProfilesPage.jsx'));
 const AiBoothsPage = lazy(() => import('./pages/AiBoothsPage.jsx'));
 
 function moduleMatchesResponse(module, moduleRef) {
@@ -452,6 +453,7 @@ function buildClientInfoFromProfile(profile, uid) {
     reporting: false,
     testing: false,
     media: false,
+    ui_editor: false,
   };
 
   const defaultCommands = {
@@ -495,6 +497,7 @@ function buildClientInfoFromProfile(profile, uid) {
       rep_commission: true,
       search: true,
       media: true,
+      ui_editor: true,
       binding: false,
       testing: false,
     };
@@ -1463,7 +1466,8 @@ function App() {
     const shouldUseFirebaseForSave = Boolean(
       firebaseSection &&
       targetKiosk &&
-      targetIsV2Kiosk
+      targetIsV2Kiosk &&
+      details?.pushOnly !== true
     );
     const normalizedKioskPayload = normalizeKioskPayloadForSave(
       action,
@@ -1488,6 +1492,42 @@ function App() {
         wifi: details?.kiosk?.wifi || null,
       });
     }
+
+    const pushUiChangeToKiosk = async (kioskPayload, parentRequestId = '') => {
+      const commandSocket = ws.current?.readyState === WebSocket.OPEN
+        ? ws.current
+        : await waitForOpenWebSocket(ws.current);
+
+      if (!commandSocket || commandSocket.readyState !== WebSocket.OPEN) {
+        return false;
+      }
+
+      const requestId = parentRequestId
+        ? `${parentRequestId}-push`
+        : createCommandRequestId('uichange', stationid, moduleid);
+      const commandData = {
+        stationid,
+        action: 'uichange',
+        requestId,
+        timerequested: Date.now(),
+        ...(provisionid && { provisionid }),
+        ...(uiVersion && { version: uiVersion }),
+        kiosk: kioskPayload,
+      };
+
+      rememberOutgoingCommandScope(requestId, {
+        action: 'uichange',
+        stationid,
+        moduleid,
+      });
+      commandSocket.send(JSON.stringify({
+        type: 'command',
+        token,
+        data: commandData,
+      }));
+      ignoredKiosksRef.current = { ...ignoredKiosksRef.current, [stationid]: Date.now() + 30000 };
+      return true;
+    };
 
     if (shouldUseFirebaseForLock) {
       const requestId = createCommandRequestId(action, stationid, moduleid);
@@ -1584,9 +1624,18 @@ function App() {
           );
         }
 
+        const shouldPushUiChange = action === 'uichange';
+        const pushSent = shouldPushUiChange
+          ? await pushUiChangeToKiosk(normalizedKiosk || normalizedKioskPayload, requestId)
+          : false;
+
         setCommandStatus({
-          state: 'success',
-          message: payload?.message || t('command_success'),
+          state: pushSent || !shouldPushUiChange ? 'success' : 'error',
+          message: pushSent
+            ? `${payload?.message || t('command_success')} Push sent.`
+            : shouldPushUiChange
+              ? `${payload?.message || t('command_success')} Kiosk push failed: ${t('connection_lost')}`
+              : payload?.message || t('command_success'),
         });
       } catch (error) {
         setCommandStatus({
@@ -1681,6 +1730,9 @@ function App() {
         case 'reboot module':
           commandData = { ...baseData, ...details };
           break;
+        case 'update module':
+          commandData = { ...baseData, ...details };
+          break;
         case 'refund':
           commandData = { ...baseData, ...details };
           break;
@@ -1697,9 +1749,9 @@ function App() {
         case 'wifichange': {
           const wifiPayload = normalizeWifiCommandPayload(normalizedKioskPayload);
           console.info(`${WIFI_DEBUG_PREFIX} 7. normalized wifichange socket payload`, {
-          stationid,
-          section: details?.section || '',
-          requestId,
+            stationid,
+            section: details?.section || '',
+            requestId,
             ssid: wifiPayload.ssid,
             passwordLength: wifiPayload.password.length,
             kioskStationid: normalizedKioskPayload?.stationid || null,
@@ -2109,6 +2161,7 @@ function App() {
       initialSearch={dashboardSearchTerm}
       onNavigateToReporting={() => setPage('reporting')}
       onNavigateToTesting={() => setPage('testing')}
+      onNavigateToUiProfiles={() => setPage('ui-profiles')}
       onNavigateToAnalytics={onNavigateToAnalytics}
       onNavigateToKioskEditor={() => setPage('kiosk-editor')}
       rentalData={rentalData}
@@ -2165,7 +2218,8 @@ function App() {
     const hasBindingAccess = clientInfo.username === 'chargerent' || clientInfo.features?.binding === true || clientInfo.commands?.binding === true;
     const hasReportingAccess = clientInfo.isAdmin || clientInfo.features?.reporting === true;
     const hasMediaAccess = clientInfo.isAdmin || clientInfo.features?.media === true;
-    const canOpenAdminTools = clientInfo.isAdmin || clientInfo.commands?.['client edit'] === true || hasMediaAccess;
+    const hasUiProfilesAccess = clientInfo.isAdmin || clientInfo.features?.ui_editor === true || clientInfo.commands?.['client edit'] === true;
+    const canOpenAdminTools = clientInfo.isAdmin || clientInfo.commands?.['client edit'] === true || hasMediaAccess || hasUiProfilesAccess;
     const hasAiBoothsAccess = canOpenAdminTools;
     const isRegularReportingUser = !clientInfo.isAdmin && clientInfo.role !== 'partner';
 
@@ -2184,8 +2238,24 @@ function App() {
             onNavigateToAgreement={() => setPage('agreement')}
             onNavigateToTemplates={() => setPage('templates')}
             onNavigateToMedia={() => setPage('media')}
+            onNavigateToUiProfiles={() => setPage('ui-profiles')}
             onNavigateToAiBooths={() => setPage('ai-booths')}
             currentUser={clientInfo}
+            t={t}
+          />
+        );
+      case 'ui-profiles':
+        if (!hasUiProfilesAccess) {
+          return dashboard;
+        }
+
+        return (
+          <UiProfilesPage
+            onLogout={handleLogout}
+            onNavigateToAdmin={() => setPage('admin')}
+            currentUser={clientInfo}
+            allStationsData={dedupedStationsData}
+            onCommand={onCommand}
             t={t}
           />
         );

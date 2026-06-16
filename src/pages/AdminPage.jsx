@@ -1,6 +1,6 @@
 // src/pages/AdminPage.jsx
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { SparklesIcon } from '@heroicons/react/24/outline';
+import { PaintBrushIcon, SparklesIcon } from '@heroicons/react/24/outline';
 import ConfirmationModal from '../components/UI/ConfirmationModal.jsx';
 import LoadingSpinner from '../components/UI/LoadingSpinner.jsx';
 import ClientAdminCard from './ClientAdminCard.jsx';
@@ -13,7 +13,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { collection, getDocs } from 'firebase/firestore';
 
 // permission keys
-const featuresList = ['rentals', 'details', 'stationid', 'address', 'status', 'reporting', 'lease_revenue', 'rental_counts', 'rental_revenue', 'client_commission', 'rep_commission', 'search', 'media', 'binding', 'testing'];
+const featuresList = ['rentals', 'details', 'stationid', 'address', 'status', 'reporting', 'lease_revenue', 'rental_counts', 'rental_revenue', 'client_commission', 'rep_commission', 'search', 'media', 'ui_editor', 'binding', 'testing'];
 const commandsList = ['edit', 'lock', 'eject', 'eject_multiple', 'updates', 'connectivity', 'reboot', 'reload', 'audio', 'disable', 'client edit'];
 
 function AdminPage({
@@ -24,6 +24,7 @@ function AdminPage({
   onNavigateToAgreement,
   onNavigateToTemplates,
   onNavigateToMedia,
+  onNavigateToUiProfiles,
   onNavigateToAiBooths,
   currentUser,
 }) {
@@ -46,6 +47,7 @@ function AdminPage({
   const isAdmin = currentUser?.role === 'admin' || currentUser?.username === 'chargerent';
   const canManageClients = isAdmin || currentUser?.commands?.['client edit'] === true;
   const canAccessMedia = isAdmin || currentUser?.features?.media === true;
+  const canAccessUiProfiles = isAdmin || currentUser?.features?.ui_editor === true || currentUser?.commands?.['client edit'] === true;
   const canUseAiBooths = canManageClients || canAccessMedia;
   const canUseProvisionTools = isAdmin || currentUser?.commands?.edit === true || canManageClients;
   const canViewTemplates = currentUser?.username === 'chargerent';
@@ -362,6 +364,12 @@ function AdminPage({
               </button>
             )}
 
+            {canAccessUiProfiles && (
+              <button onClick={onNavigateToUiProfiles} className="p-2 rounded-md bg-sky-100 text-sky-700 hover:bg-sky-200" title="Kiosk UI Profiles">
+                <PaintBrushIcon className="h-6 w-6" />
+              </button>
+            )}
+
             {canUseAiBooths && (
               <button onClick={onNavigateToAiBooths} className="p-2 rounded-md bg-cyan-100 text-cyan-800 hover:bg-cyan-200" title="AI Booths">
                 <SparklesIcon className="h-6 w-6" />
@@ -468,6 +476,21 @@ function AdminPage({
                     className="rounded-lg bg-emerald-600 px-5 py-3 font-semibold text-white hover:bg-emerald-700"
                   >
                     Open Media Library
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {!canManageClients && !canAccessMedia && canAccessUiProfiles && (
+              <div className="mx-auto max-w-2xl rounded-xl bg-white p-8 shadow-md">
+                <h2 className="text-xl font-semibold text-gray-900">Kiosk UI profiles are enabled for this account.</h2>
+                <div className="mt-6">
+                  <button
+                    type="button"
+                    onClick={onNavigateToUiProfiles}
+                    className="rounded-lg bg-sky-600 px-5 py-3 font-semibold text-white hover:bg-sky-700"
+                  >
+                    Open UI Profiles
                   </button>
                 </div>
               </div>
