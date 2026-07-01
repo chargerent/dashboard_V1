@@ -1,0 +1,60 @@
+HTTP Returned Charger Interface
+149 W ord
+if the charging treasure is returned successfully, it will actively report http and mqtt.
+Return failure only reports mqtt
+interface Description
+request Address
+request Parameters
+Request URL Method Note
+/api/rentbox/order/return GET report the return data of charging treasure
+
+parameter
+Name
+whethe
+r it is
+necess
+ary
+example 参数说明
+rentboxSN yes 352681099911357 柜机唯一标识IMEI
+singleSN yes 20000972 充电宝唯一标识
+3/2/25, 12:04 PM HTTP Returned Charger Interface
+https://wed5ug.yuque.com/wed5ug/msogmg/gaypxhbniw4s7u45 1/3
+149 W ord
+response Results
+hole yes 0 归还孔位
+sign yes 03f89e71170cd1c9314717ca917e8056MD5签名
+{
+    "code": 200,
+    "type": 0,
+    "data": "",
+    "msg": "OK",
+    "time": 1571400154718
+}
+1
+2
+3
+4
+5
+6
+7
+Plain Text Copy
+Parameter Name Parameter Name
+example
+说明
+code int 200 状态码：200成功
+type int 0 异常类型
+data String "" 自定义数据
+msg String ok 异常信息
+3/2/25, 12:04 PM HTTP Returned Charger Interface
+https://wed5ug.yuque.com/wed5ug/msogmg/gaypxhbniw4s7u45 2/3
+149 W ord
+https://s.besiter.com.cn/sw/api/rentbox/order/return?
+rentboxSN=866838067280343&singleSN=50076352&hole=17&sign=499e59a47ca062a616f9d706dfb0f655
+<https://s.besiter.com.cn/sw/api/rentbox/order/return?
+rentboxSN=866838067280343&singleSN=50076352&hole=17&sign=499e59a47ca062a616f9d706dfb0f655>
+sign=MD5("hole=5|rentboxSN=865501047654489|singleSN=20000972")
+Return the charging treasure DEMO
+●
+time long 1571400154718 时间戳
+3/2/25, 12:04 PM HTTP Returned Charger Interface
+https://wed5ug.yuque.com/wed5ug/msogmg/gaypxhbniw4s7u45 3/3

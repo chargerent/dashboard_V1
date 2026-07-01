@@ -1,0 +1,14 @@
+Setting up WIFI
+Setting WIFI hotspot commands：
+{"cmd":"setWifi","username":"xxx","password":"123"}
+The device returns：
+{"username":"xxx","password":"123"}
+Byte0 Byte1~2 Byte3 Byte4 Byte 5~n Byte n+1
+headcode lengths commandmovemen
+t
+digital calibration
+0xA8 n+2 0xCD 0x10 JSON XX
+3/1/25, 1:12 PM Setting up WIFI
+https://wed5ug.yuque.com/wed5ug/msogmg/pe2eoglp6btdqb23 1/2
+3/1/25, 1:12 PM Setting up WIFI
+https://wed5ug.yuque.com/wed5ug/msogmg/pe2eoglp6btdqb23 2/2

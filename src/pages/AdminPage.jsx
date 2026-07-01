@@ -365,7 +365,7 @@ function AdminPage({
             )}
 
             {canAccessUiProfiles && (
-              <button onClick={onNavigateToUiProfiles} className="p-2 rounded-md bg-sky-100 text-sky-700 hover:bg-sky-200" title="Kiosk UI Profiles">
+              <button onClick={onNavigateToUiProfiles} className="hidden rounded-md bg-sky-100 p-2 text-sky-700 hover:bg-sky-200 lg:inline-flex" title="Kiosk UI Profiles">
                 <PaintBrushIcon className="h-6 w-6" />
               </button>
             )}
@@ -482,7 +482,7 @@ function AdminPage({
             )}
 
             {!canManageClients && !canAccessMedia && canAccessUiProfiles && (
-              <div className="mx-auto max-w-2xl rounded-xl bg-white p-8 shadow-md">
+              <div className="mx-auto hidden max-w-2xl rounded-xl bg-white p-8 shadow-md lg:block">
                 <h2 className="text-xl font-semibold text-gray-900">Kiosk UI profiles are enabled for this account.</h2>
                 <div className="mt-6">
                   <button

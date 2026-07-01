@@ -1,0 +1,81 @@
+HTTP device configuration information interface
+457 W ord
+Different configurations for different customers
+Machine access to the interface will be brought up to 8 parameters, you need to create a product type table (fields such as the
+following interface return value) and the machine requested parameter rentboxSN to establish a correlation, different types of
+machines need to return parameters are not consistent.
+connector：
+/api/rentbox/config/data
+example:
+https://s.besiter.com.cn/sw/api/rentbox/config/data?
+rentboxSN=866838067280343&dRotationEnable=1&dRotationNumber=12&dRotationRefer=15&dMotorEnable=1&dAreaCon
+fig=4&dHeadConfig=43&sign=34628cdedce666808f3b60b69d43a6ca <https://s.besiter.com.cn/sw/api/rentbox/config/data?
+rentboxSN=866838067280343&dRotationEnable=1&dRotationNumber=12&dRotationRefer=15&dMotorEnable=1&dAreaCon
+fig=4&dHeadConfig=43&sign=34628cdedce666808f3b60b69d43a6ca>
+javas ample code (computing)
+//-----------java示例代码----------------
+@RequestMapping("/api/rentbox/config/data")
+public HttpResult rentboxConfigData() {
+3/2/25, 12:04 PM HTTP device configuration information interface
+https://wed5ug.yuque.com/wed5ug/msogmg/eq6rkaz2nmdggyed 1/5
+457 W ord
+    HttpResult httpResult = new HttpResult();
+    httpResult.setData("
+{\"dRotationRefer\":\"15\",\"dReturnLocked\":\"0\",\"dHeadConfig\":\"43\",\"dRotationNumber\":\"4\",\"dRotationEnable\":\"1\
+",\"dMotorEnable\":\"1\",\"dAreaConfig\":\"07\"}");
+    return httpResult;
+}
+//----------java-示例代码----------------
+The standard json format is as follows
+
+{"dRotationRefer":"15","dReturnLocked":"0","dHeadConfig":"43","dRotationNumber":"4","dRotationEnable":"1","dMotorEnable":
+"1","dAreaConfig":"07"}
+Since the communication module needs to escape the format of the data it
+receives, the backend needs to escape the standard json format first and then put
+it into httpResult.setData(“”) as follows
+3/2/25, 12:04 PM HTTP device configuration information interface
+https://wed5ug.yuque.com/wed5ug/msogmg/eq6rkaz2nmdggyed 2/5
+457 W ord
+{\"dRotationRefer\":\"15\",\"dReturnLocked\":\"0\",\"dHeadConfig\":\"43\",\"dRotationNumber\":\"4\",\"dRotationEnable\":\"1\
+",\"dMotorEnable\":\"1\",\"dAreaConfig\":\"07\"}
+Device receives data, escapes it.
+{"dRotationRefer":"15","dReturnLocked":"0","dHeadConfig":"43","dRotationNumber":"4","dRotationEnable":"1","dMotorEnable":
+"1","dAreaConfig":"07"}
+The final request returns the following format
+{
+"code":200,
+"type":0,
+"data":"
+{\"dRotationRefer\":\"15\",\"dReturnLocked\":\"0\",\"dHeadConfig\":\"43\",\"dRotationNumber\":\"4\",\"dRotationEnable\":\"1\
+",\"dMotorEnable\":\"1\",\"dAreaConfig\":\"07\"}",
+"msg":"ok",
+"time":1661397831292
+}
+具体示例如下
+3/2/25, 12:04 PM HTTP device configuration information interface
+https://wed5ug.yuque.com/wed5ug/msogmg/eq6rkaz2nmdggyed 3/5
+457 W ord
+Note: Our side is now not with the screen equivalent to three sets of firmware, the old six old 12-port shared a set of old eight
+a set of these two rounds of the number of charging are written directly to death of 4, the new 4 new 8 new 12 new 16 port
+shared a set of firmware, the new cabinet rounds of charging the number of the new 4-port 2, the new 8 new 12-port open 4,
+the new 16-port tentative open 4!
+
+When generating the cabinet QR code can add a parameter (such as the third) will need to return to the configuration and its
+binding together, through direct control of the QR code can be directly controlled configuration. When you need to return to
+3/2/25, 12:04 PM HTTP device configuration information interface
+https://wed5ug.yuque.com/wed5ug/msogmg/eq6rkaz2nmdggyed 4/5
+457 W ord
+the configuration, you can check the corresponding QR code in the database according to the IMEI, and the background can
+determine the number of rounds of charging by reading the value of this position (the third digit) of the QR code and return
+the corresponding parameter in the corresponding interface.
+Examples of dynamic configurations are as follows (for reference only, specific implementations are designed by the
+customer's product manager)
+The example QR code for this sample is as follows: add the number of round robin after the id
+https://s.besiter.com.cn/sw/app/r/scan.html?id4=10005442 <https://s.besiter.com.cn/sw>
+In the configuration interface /api/rentbox/config/data, the machine needs to obtain the corresponding configuration
+parameters, of which dRotationNumber needs to be obtained dynamically.
+When the machine accesses the interface, it will bring the IMEI parameter, the background can check the corresponding
+bound QR code ID according to the IMEI, and when it gets the QR code ID, it can put the 4 in the QR code id, and then put the
+4 into the dRotationNumber value when the interface returns.
+3/2/25, 12:04 PM HTTP device configuration information interface
+https://wed5ug.yuque.com/wed5ug/msogmg/eq6rkaz2nmdggyed 5/5

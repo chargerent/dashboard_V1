@@ -1,0 +1,54 @@
+SN number pops up
+152 W ord
+topic：/$productKey/$deviceName/user/get
+Subscribe to content：{"cmd":"popup_sn","data":"123456"}
+topic：/$productKey/$deviceName/user/update
+Reported results：
+New version data
+SN number pops up
+Reporting of results
+data-charger SN
+20002121 batterySN：20002121
+20002125 batterySN：20002125
+20002125 batterySN：20002125
+Byte0 Byte 1~2 Byte3 Byte4 Byte5~8 Byte9 Byte10 Byte11
+headcode lengths command Movement
+address
+batterySN exit status Solenoid
+status
+calibration
+ 0xA8 0x00 0C 0x31 ibid ibid 预留 补码校验
+
+exit status
+0x01 Ejected successfully
+0x00 ejection failure
+0x02 Anti-theft protocol communication is unsuccessful
+152 W ord
+Solenoid status
+0x03 This rechargeable does not exist
+0x04 command timeout
+     // 模拟弹出 SN 成功
+    public void receivePopupSNTest() throws SerialPortException {
+        //0x00 1A DE 03 = 1760771
+        SerialPortData serialPortData = new SerialPortData(0x31, new int[]{0x10, 0x00, 0x1A, 0xDE, 0x03, 0x01});
+        ReceivePopupSN receivePopupSN = new ReceivePopupSN(serialPortData.getBytes());
+        String data = ByteUtils.to16Hexs(receivePopupSN.getBytes());
+        System.out.println(data);
+        System.out.println(ToStringBuilder.reflectionToString(receivePopupSN));
+    }
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+Plain Text Copy
+A8 00 0B 31 10 00 1A DE 03 01 10
+message.ReceivePopupSN@2f0e140b[pinboardIndex=16,sn={0,26,222,3},status=1,snAsInt=1760771,snAsString=1760771,bytes={-88,0,11,49,16,0,26,-34,3,1,16},ints={168,0,11,49,16,0,26,222,3,1,16},h
+1
+2
+Plain Text Copy

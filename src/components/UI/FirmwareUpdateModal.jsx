@@ -150,7 +150,7 @@ export default function FirmwareUpdateModal({
 
       setStatus('complete');
       setCommandStatus?.({ state: 'sending', message: getLabel(t, 'sending_command', 'Sending command...') });
-      onFirmwareReady?.({
+      await onFirmwareReady?.({
         target: uploadConfig.target || target,
         fileName: file.name,
         size: file.size,

@@ -1,0 +1,32 @@
+Cabinet heartbeat and signal
+159 W ord
+determine whether MQTT is online
+1. Subscribe to the topic of the MQTT listener:/ deviceName/user/heart
+Publish and subscribe to the same topic.
+3, this theme is that in order to judge whether its mqtt is online, the cabinet will send a
+data to the above theme every 9 minutes. This theme will return the original data to the
+cabinet. If the Cabinet does not receive the returned data twice in a row, the cabinet will
+judge that it is not online and then restart.
+Send Content
+DEMO data
+A8 00 10 7A 10 43 53 51 3A 20 33 31 2C 39 39 7B
+ASCII：43 53 51 3A 20 33 31 2C 39 39 =CSQ: 31.99
+productKey/
+Byte0 Byte 1~2 Byte3 Byte4 Byte5-n Byte n+1
+head Codelength comma
+nd
+moveme
+nt
+Address
+signal value(ASCII) check
+0xA8 n+2 0x7A 0x10 CSQ:31 Two's
+comple
+ment
+check
+3/1/25, 1:10 PM Cabinet heartbeat and signal
+https://wed5ug.yuque.com/wed5ug/msogmg/sdgrfcg4zy9k7aie 1/2
+159 W ord
+heartbeat configuration location Alibaba Cloud IoT product topic class list customization
+
+3/1/25, 1:10 PM Cabinet heartbeat and signal
+https://wed5ug.yuque.com/wed5ug/msogmg/sdgrfcg4zy9k7aie 2/2

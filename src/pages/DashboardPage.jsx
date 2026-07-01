@@ -1,5 +1,6 @@
 // src/pages/DashboardPage.jsx
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import { collection, limit, onSnapshot, orderBy, query } from 'firebase/firestore';
 import FilterPanel from '../components/Dashboard/FilterPanel';
 import KioskPanel from '../components/kiosk/kioskPanel';
 import KioskDetailPanel from '../components/kiosk/KioskDetailPanel';
@@ -19,9 +20,12 @@ import CommandStatusToast from '../components/UI/CommandStatusToast';
 import RentalDetailView from '../components/Dashboard/RentalDetailView';
 import { CheckCircleIcon, CpuChipIcon, ExclamationTriangleIcon, QrCodeIcon, SparklesIcon } from '@heroicons/react/24/outline';
 import useKioskCommandFlow from '../hooks/useKioskCommandFlow';
+import { db } from '../firebase-config';
+import { callFunctionWithAuth } from '../utils/callableRequest';
 import { VERSION as DASHBOARD_VERSION } from '../version';
 
 const EMPTY_RENTALS = Object.freeze([]);
+const FIRMWARE_UPDATE_SESSION_VISIBLE_MS = 24 * 60 * 60 * 1000;
 const COUNTRY_ORDER = { CA: 1, FR: 2, US: 3 };
 const STATUS_BUTTON_CLASSES = {
     offline: 'bg-red-100 text-red-700 hover:bg-red-200',
@@ -37,6 +41,43 @@ const STATUS_BADGE_CLASSES = {
 };
 
 const getCountrySortOrder = (country) => COUNTRY_ORDER[(country || 'ZZ').toUpperCase()] || 99;
+
+const normalizeFirmwareSessionPart = (value, fallback = 'na') => {
+    const normalized = String(value || '').trim().replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '');
+    return normalized || fallback;
+};
+
+const getFirestoreMillis = (value) => {
+    if (!value) return 0;
+    if (typeof value.toMillis === 'function') return value.toMillis();
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? 0 : parsed;
+};
+
+const createFirmwareSessionRequestId = (details, firmware) => {
+    const stationPart = normalizeFirmwareSessionPart(details?.stationid, 'station');
+    const modulePart = normalizeFirmwareSessionPart(details?.moduleid, 'module');
+    const targetPart = normalizeFirmwareSessionPart(firmware?.target, 'firmware').toLowerCase();
+    const randomPart = Math.random().toString(36).slice(2, 10);
+    return `firmware-${stationPart}-${modulePart}-${targetPart}-${Date.now()}-${randomPart}`;
+};
+
+const serializeFirmwareUpdateSessionSnapshot = (docSnapshot) => {
+    const data = docSnapshot.data() || {};
+    const updatedAtMillis = Number(data.updatedAtMillis) || getFirestoreMillis(data.updatedAt);
+    const createdAtMillis = Number(data.createdAtMillis) || getFirestoreMillis(data.createdAt);
+
+    return {
+        id: docSnapshot.id,
+        ...data,
+        requestId: String(data.requestId || docSnapshot.id),
+        stationid: String(data.stationid || data.stationId || ''),
+        moduleid: String(data.moduleid || data.moduleId || ''),
+        updatedAtMillis,
+        createdAtMillis,
+    };
+};
 
 const getDisconnectedModules = (kiosk, referenceTime) => {
     const modules = Array.isArray(kiosk?.modules) ? kiosk.modules : [];
@@ -87,6 +128,7 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     const [showSoldOutModal, setShowSoldOutModal] = useState(false);
     const [statusFocusedKioskId, setStatusFocusedKioskId] = useState('');
     const [firmwareUpdateDetails, setFirmwareUpdateDetails] = useState(null);
+    const [firmwareUpdateSessions, setFirmwareUpdateSessions] = useState([]);
     const isAdminUser = !!clientInfo?.isAdmin;
     const hasStatusAccess = clientInfo?.features?.status === true;
     const hasReportingAccess = clientInfo?.features?.reporting === true || isAdminUser;
@@ -97,10 +139,61 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
         setFirmwareUpdateDetails(details);
     }, []);
 
-    const handleFirmwareReady = useCallback((firmware) => {
+    const canWatchFirmwareUpdates = isAdminUser || clientInfo?.commands?.updates === true;
+
+    useEffect(() => {
+        if (!canWatchFirmwareUpdates) {
+            setFirmwareUpdateSessions([]);
+            return undefined;
+        }
+
+        const sessionsQuery = query(
+            collection(db, 'firmwareUpdateSessions'),
+            orderBy('updatedAtMillis', 'desc'),
+            limit(100)
+        );
+
+        return onSnapshot(sessionsQuery, (snapshot) => {
+            const now = Date.now();
+            const sessions = snapshot.docs
+                .map(serializeFirmwareUpdateSessionSnapshot)
+                .filter((session) => (
+                    session.active === true ||
+                    (now - Number(session.updatedAtMillis || session.createdAtMillis || 0)) <= FIRMWARE_UPDATE_SESSION_VISIBLE_MS
+                ));
+
+            setFirmwareUpdateSessions(sessions);
+        }, (snapshotError) => {
+            console.warn('[Firmware] Unable to watch update sessions', snapshotError);
+            setFirmwareUpdateSessions([]);
+        });
+    }, [canWatchFirmwareUpdates]);
+
+    const handleFirmwareReady = useCallback(async (firmware) => {
         if (!firmwareUpdateDetails?.stationid || !firmwareUpdateDetails?.moduleid) {
             return;
         }
+
+        const requestId = createFirmwareSessionRequestId(firmwareUpdateDetails, firmware);
+        const trackedFirmware = {
+            ...firmware,
+            requestId,
+            sessionId: requestId,
+        };
+
+        await callFunctionWithAuth('firmware_createUpdateSession', {
+            requestId,
+            stationid: firmwareUpdateDetails.stationid,
+            moduleid: firmwareUpdateDetails.moduleid,
+            target: firmware.target,
+            fileName: firmware.fileName,
+            size: firmware.size,
+            version: firmware.version,
+            release: firmware.release,
+        }, {
+            timeoutMs: 30000,
+            timeoutMessage: 'Creating firmware update session took too long.',
+        });
 
         onCommand(
             firmwareUpdateDetails.stationid,
@@ -108,7 +201,11 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
             firmwareUpdateDetails.moduleid,
             null,
             null,
-            { firmware }
+            {
+                firmware: trackedFirmware,
+                requestId,
+                firmwareSessionId: requestId,
+            }
         );
     }, [firmwareUpdateDetails, onCommand]);
 
@@ -677,7 +774,7 @@ return (
                                                     {isEditing && kioskToEdit ? (
                                                         <KioskEditPanel kiosk={kioskToEdit} onSave={handleKioskSave} clientInfo={clientInfo} isVisible={editingKioskId === kiosk.stationid} t={t} onCommand={handleGeneralCommand} />
                                                     ) : (
-                                                        clientInfo.features.details && isExpanded && <KioskDetailPanel kiosk={kiosk} isVisible={true} onSlotClick={handleSlotClick} onLockSlot={handleLockSlotClick} pendingSlots={pendingSlots} ejectingSlots={ejectingSlots} failedEjectSlots={failedEjectSlots} lockingSlots={lockingSlots} t={t} onCommand={handleGeneralCommand} onNavigateToChargers={onNavigateToChargers} clientInfo={clientInfo} mockNow={latestTimestamp} serverFlowVersion={serverFlowVersion} serverUiVersion={serverUiVersion} />
+                                                        clientInfo.features.details && isExpanded && <KioskDetailPanel kiosk={kiosk} isVisible={true} onSlotClick={handleSlotClick} onLockSlot={handleLockSlotClick} pendingSlots={pendingSlots} ejectingSlots={ejectingSlots} failedEjectSlots={failedEjectSlots} lockingSlots={lockingSlots} t={t} onCommand={handleGeneralCommand} onNavigateToChargers={onNavigateToChargers} clientInfo={clientInfo} mockNow={latestTimestamp} serverFlowVersion={serverFlowVersion} serverUiVersion={serverUiVersion} firmwareUpdateSessions={firmwareUpdateSessions} />
                                                     )}
                                                     {rentalDetailView?.kioskId === kiosk.stationid && (
                                                         <RentalDetailView kiosk={kiosk} period={rentalDetailView.period} rentalData={enrichedRentalData} onClose={() => setRentalDetailView(null)} onCommand={handleGeneralCommand} t={t} />

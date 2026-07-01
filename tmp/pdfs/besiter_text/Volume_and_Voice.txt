@@ -1,0 +1,17 @@
+Volume and Voice
+subscribe to topic:/$productKey/$deviceName/user/get
+subscriptions:{"cmd":"volume","data":"70"}
+data refers to the volume, ranging from 0 to 100;
+Subscribe to topic: /$productKey/$deviceName/user/get
+Subscription content: {"cmd":"setAudio","data":"https://s.besiter.com.cn/sw/audio/en.json"}
+<https://d.test.dudubox.cn/sw/audio/en.json"}>
+data is the request address of the voice content. The following figure shows the result
+returned after the access. The voice file name is followed by the download address of the
+voice file.
+adjust Volume
+issuance of instructions
+change voice content
+3/1/25, 1:11 PM Volume and Voice
+https://wed5ug.yuque.com/wed5ug/msogmg/ty7p83rm0tbx3o4x 1/2
+3/1/25, 1:11 PM Volume and Voice
+https://wed5ug.yuque.com/wed5ug/msogmg/ty7p83rm0tbx3o4x 2/2

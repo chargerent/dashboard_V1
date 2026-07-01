@@ -1,0 +1,323 @@
+http complete machine reporting interface
+1372 W ord
+interface
+/api/rentbox/upload/data
+example
+interface Description
+the format of the complete machine data reported by MQTT is the same as that of the
+complete machine data reported by MQTT.
+Automatic HTTP reporting of complete machine data every 20 minutes
+https://s.besiter.com.cn/sw/api/rentbox/upload/data?
+rentboxSN=100039691712714720&signal=RSSI:-71&ssid=powerbank&sign=7dd784ecc6c9174f01ba0653589aef
+99 <https://s.besiter.com.cn/sw/api/rentbox/upload/data?
+rentboxSN=100039691712714720&signal=RSSI:-71&ssid=powerbank&sign=7dd784ecc6c9174f01ba0653589aef99>
+request Parameters
+request Address
+Request URL Method Note
+3/2/25, 12:03 PM http complete machine reporting interface
+https://wed5ug.yuque.com/wed5ug/msogmg/ligicyihdvl52k6a 1/13
+1372 W ord
+https://s.besiter.com.cn/sw/api/rentbox/upload/data?
+rentboxSN=100039691712714720&signal=RSSI:-71&ssid=powerbank&sign=7dd784ecc6c9174f01ba0653589aef
+99 <https://s.besiter.com.cn/sw/api/rentbox/upload/data?
+rentboxSN=100039691712714720&signal=RSSI:-71&ssid=powerbank&sign=7dd784ecc6c9174f01ba0653589aef99>
+请求参数
+/api/rentbox/upload/data POST report complete machine data
+parameter
+Name
+whethe
+r it is
+necessa
+ry
+example 参数说明
+rentboxSN yes 352681099911357 硬件唯一标识IMEI
+signal yes 100 信号值
+sign yes ab0b3ef01e43dc1a5656b5b550e183bdMD5签名
+CRC16 yes 0x2358 程序CRC校验码
+IAP16 yes 0x845A 程序底层校验码
+dRotationEnabl
+e
+yes 1 配置参数
+dRotationNumb
+er
+yes 5 配置参数
+dRotationRefer yes 15 配置参数
+3/2/25, 12:03 PM http complete machine reporting interface
+https://wed5ug.yuque.com/wed5ug/msogmg/ligicyihdvl52k6a 2/13
+1372 W ord
+the cabinet actively REPORTS Data to Android or MCU every 1 second.
+This data format is suitable for 1-5 groups of movements, each movement has 5 charging treasures, and supports 5-20
+cabinet machine protocols.
+the red part is the basic agreement
+the Blue part is the 5-port charging cabinet agreement.
+the green part is the Cabinet machine agreement with&gt; 5 ports.
+POST BODY: packet format (hexadecimal)
+●
+●
+●
+dMotorEnable yes 0 配置参数
+Byte0 Byte 1~2 Byte3
+头码 长度 命令
+0xA8 0x149 0x10
+Byte4—9 Byte10—24 Byte25—39 Byte40—54 Byte55—69 Byte70—84
+机芯1 充电宝1 充电宝2 充电宝3 充电宝4 充电宝5
+Byte85—90 Byte91—105 Byte106—120 Byte121—135 Byte136—150 Byte151—165
+3/2/25, 12:03 PM http complete machine reporting interface
+https://wed5ug.yuque.com/wed5ug/msogmg/ligicyihdvl52k6a 3/13
+1372 W ord
+header code: fixed protocol header 0XA8
+length: The length of the packet. The packet length is: 0x 149=329
+command: 0x 10, both proactively report complete machine information
+●
+●
+●
+机芯2 充电宝6 充电宝7 充电宝8 充电宝9 充电宝10
+Byte166—171 Byte172—186 Byte187—201 Byte202—216 Byte217—231 Byte232—246
+机芯3 充电宝1 充电宝2 充电宝3 充电宝4 充电宝5
+Byte247—252 Byte253—267 Byte268—282 Byte283—297 Byte298—312 Byte313—327
+机芯4 充电宝1 充电宝2 充电宝3 充电宝4 充电宝5
+Byte 328
+补码校验
+机芯数据：6Byte
+Byte0 Byte1 Byte2 Byte3 Byte4 Byte5
+机芯地址 预留 预留 温度 软件版本 硬件版本
+0x00：不存在 0x00 0x00 0x01：不存在 0x00：不存在 0x00：不存在
+0x10：机芯1 0x00 0x00 0x01：1℃ 0x01：1 0x01：1
+0x20：机芯2 0x00 0x00 0x10：10℃ 0x10：10 0x10：10
+3/2/25, 12:03 PM http complete machine reporting interface
+https://wed5ug.yuque.com/wed5ug/msogmg/ligicyihdvl52k6a 4/13
+1372 W ord
+Note: The movement data Byte1 and Byte2 bits reported by the commercial Cabinet machine are 0x 00; The two bits reported by the commercial
+Cabinet machine are 0xFF;
+Popular version movement data
+0x30：机芯3 0x00 0x00 0x0F：16℃ 0x0F：16 0x0F：16
+0x40：机芯4 0x00 0x00 0x64：100℃ 0xFF：255 0xFF：255
+Movement Data：6Byte
+Byte0 Byte1 Byte2 Byte3 Byte4 Byte5
+机芯地址 Number of
+holes carried by
+the current
+movement
+area code hightemp software
+version
+hardware
+version
+0x00：non-
+existent
+0x04 0x00 0x01：non-
+existent
+0x00：non-
+existent
+0x00：non-
+existent
+0x01：机芯1 0x04 0x00 0x01：1℃ 0x01：1 0x01：1
+0x02：机芯2 0x04 0x00 0x10：10℃ 0x10：10 0x10：10
+0x03：机芯3 0x04 0x00 0x0F：16℃ 0x0F：16 0x0F：16
+0x04：机芯4 0x04 0x00 0x64：100℃ 0xFF：255 0xFF：255
+3/2/25, 12:03 PM http complete machine reporting interface
+https://wed5ug.yuque.com/wed5ug/msogmg/ligicyihdvl52k6a 5/13
+1372 W ord
+charging Treasure Data：15Byte
+Byte0 Byte1 Byte2 Byte3 Byte4 Byte5-8 Byte9 Byte10 Byte11 Byte12 Byte13 Byte14
+hole status
+message
+discharg
+e current
+Cell
+Voltage
+area
+code
+rechargea
+ble
+battery
+SN
+electrici
+ty
+temp charging
+voltage
+charging
+current
+software
+version
+hole
+position
+detection
+
+charging treasure-hole position
+0x01 hole position1
+0x05 hole position5
+0x0A hole position10
+0x0B hole position11
+0x14 hole position20
+Power bank-status information
+0x00 no mobile power
+0x01 charging treasure normal
+3/2/25, 12:03 PM http complete machine reporting interface
+https://wed5ug.yuque.com/wed5ug/msogmg/ligicyihdvl52k6a 6/13
+1372 W ord
+0x02 abnormal charging
+0x03 abnormal communication
+0x04 cappel
+0x05 key forced release
+0x06 when returning solenoid valve not home
+0x07 none
+0x08 anti-theft protocol communication unsuccessful
+0x09 Typec short circuit
+0x0A return failed, battery does not eject
+0x0B~0x0FF retention
+Charging treasure-charging treasure SN
+0x00 00 00 00 no mobile power
+0x00 00 00 01 SN：1
+0x00 00 00 A0 SN：160
+0x00 00 0B CF SN：3023
+0x00 1A DE 03 SN：1760771
+0xFF FF FF FF SN： 4294967295
+3/2/25, 12:03 PM http complete machine reporting interface
+https://wed5ug.yuque.com/wed5ug/msogmg/ligicyihdvl52k6a 7/13
+1372 W ord
+Charging treasure-power
+0x00 0%
+0x01 1%
+0x02 2%
+0x64 100%
+0xFF no mobile power
+Charging treasure-temperature
+0x00 0℃
+0x01 1℃
+0x02 2℃
+0x64 100℃
+0xFF no mobile power
+charging treasure-voltage
+0x00 0.0V
+0x01 0.1V
+3/2/25, 12:03 PM http complete machine reporting interface
+https://wed5ug.yuque.com/wed5ug/msogmg/ligicyihdvl52k6a 8/13
+1372 W ord
+0x02 0.2V
+0x32 5.0V
+0xFF no mobile power
+Charging treasure-current
+0x00 0.0A
+0x01 0.1A
+0x02 0.2A
+0x32 5.0A
+0xFF no mobile power
+
+charging treasure-software version, hardware version
+0x00 no mobile power
+0x01 V001
+0x02 V002
+0x0A V010
+0x16 V016
+
+3/2/25, 12:03 PM http complete machine reporting interface
+https://wed5ug.yuque.com/wed5ug/msogmg/ligicyihdvl52k6a 9/13
+1372 W ord
+Byte14：
+0x 80 solenoid valve closed, button open
+0x 40 solenoid valve open, Button closed
+0x 00 solenoid valve closed, Button closed
+0xC0 solenoid valve disconnected, Button disconnected
+JAVA test cases
+Byte14 hole position detection, converted to binary corresponding state
+key solenoid valve
+switch
+reserved reserved reserved reserve
+d
+reserved reserved
+1 Open 0 closed 1 Open 0 closed0 0 0 0 0 0
+0 0 0 0 0 0 0 0
+0 1 0 0 0 0 0 0
+1 1 0 0 0 0 0 0
+1 0 0 0 0 0 0 0
+3/2/25, 12:03 PM http complete machine reporting interface
+https://wed5ug.yuque.com/wed5ug/msogmg/ligicyihdvl52k6a 10/13
+1372 W ord
+Output Results
+public class Main {
+    public static void main(String[] args) throws SerialPortException {
+        //5 ⼝柜机上报数据（模拟 16 进制）
+
+        Main main = new Main();
+        main.receiveUpload5Test();;
+    }
+    public void receiveUpload5Test() throws SerialPortException {
+        //5 ⼝柜机上报数据（模拟 16 进制）
+        String data = "A8 00 56 10 10 00 00 64 66 01 01 01 00 00 01 01 31 4E 71 64 00 32 0F 03 01 02 01 00 00 0
+        System.out.println(data);
+        byte[] bytes = ByteUtils.toBytes(data);
+        ReceiveUpload uploadMessage = new ReceiveUpload(bytes);
+        List<Powerbank> powerbanks = uploadMessage.getPowerbanks();
+        for(Powerbank item : powerbanks){
+            System.out.println(ToStringBuilder.reflectionToString(item));
+        }
+    }
+}
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+Plain Text Copy
+3/2/25, 12:03 PM http complete machine reporting interface
+https://wed5ug.yuque.com/wed5ug/msogmg/ligicyihdvl52k6a 11/13
+1372 W ord
+Response Results
+A8 00 56 10 10 00 00 64 66 01 01 01 00 00 01 01 31 4E 71 64 00 32 0F 03 01 02 01 00 00 01 01 31 3C 4B 64 00 32 0
+message.Powerbank@2f0e140b[data={1,1,0,0,1,1,49,78,113,100,0,50,15,3,1},pinboardIndex=16,index=1,status=1,undefi
+message.Powerbank@3fee733d[data={2,1,0,0,1,1,49,60,75,100,0,50,15,3,1},pinboardIndex=16,index=2,status=1,undefin
+message.Powerbank@36baf30c[data={3,1,0,0,1,1,49,67,170,100,0,50,15,3,1},pinboardIndex=16,index=3,status=1,undefi
+message.Powerbank@24d46ca6[data={4,0,0,0,0,0,0,0,0,255,255,255,255,0,0},pinboardIndex=16,index=4,status=0,undefi
+message.Powerbank@2f92e0f4[data={5,0,0,0,0,0,0,0,0,255,255,255,255,0,0},pinboardIndex=16,index=5,status=0,undefi
+message.Powerbank@2f0e140b
+1
+2
+3
+4
+5
+6
+7
+Plain Text Copy
+{
+    "code": 200,
+    "type": 0,
+    "data": "",
+    "msg": "OK",
+    "time": 1571400154718
+}
+1
+2
+3
+4
+5
+6
+7
+Plain Text Copy
+Parameter Name parameter Type example 说明
+code int 200 状态码：200成功
+type int 0 异常类型
+3/2/25, 12:03 PM http complete machine reporting interface
+https://wed5ug.yuque.com/wed5ug/msogmg/ligicyihdvl52k6a 12/13
+1372 W ord
+data String "" 鉴权数据
+msg String ok 异常信息
+time long 1571400154718 时间戳
+3/2/25, 12:03 PM http complete machine reporting interface
+https://wed5ug.yuque.com/wed5ug/msogmg/ligicyihdvl52k6a 13/13

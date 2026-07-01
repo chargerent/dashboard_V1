@@ -41,6 +41,7 @@ const MAX_MEDIA_UPLOAD_BYTES = 250 * 1024 * 1024;
 const MAX_FIRMWARE_UPLOAD_BYTES = 512 * 1024 * 1024;
 const FIRMWARE_RELEASES_COLLECTION = "firmwareReleases";
 const FIRMWARE_CHANNELS_COLLECTION = "firmwareChannels";
+const FIRMWARE_UPDATE_SESSIONS_COLLECTION = "firmwareUpdateSessions";
 const FIRMWARE_TARGETS = new Set(["mcu", "12B", "12M"]);
 const DEFAULT_MARKETING_OPTIONS = {
   active: true,
@@ -3453,6 +3454,120 @@ async function firmwareResolveReleaseImpl(data = {}) {
       size: release.size,
       crc32c: release.crc32c,
       md5Hash: release.md5Hash,
+    },
+  };
+}
+
+function normalizeFirmwareUpdateSessionId(value) {
+  const requestId = String(value || "").trim();
+  if (!requestId || requestId.includes("/") || requestId.length > 240) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "A valid firmware update requestId is required",
+    );
+  }
+  return requestId;
+}
+
+function cleanFirmwareSessionText(value, maxLength = 180) {
+  return String(value || "").trim().slice(0, maxLength);
+}
+
+async function firmwareCreateUpdateSessionImpl(data = {}, authState) {
+  const firmware = data?.firmware && typeof data.firmware === "object" ? data.firmware : {};
+  const release = data?.release && typeof data.release === "object" ?
+    data.release :
+    (firmware.release && typeof firmware.release === "object" ? firmware.release : {});
+  const requestId = normalizeFirmwareUpdateSessionId(
+      data?.requestId || data?.sessionId || firmware.requestId || firmware.sessionId,
+  );
+  const stationid = cleanFirmwareSessionText(
+      data?.stationid || data?.stationId || firmware.stationid || firmware.stationId,
+      80,
+  );
+  const moduleid = cleanFirmwareSessionText(
+      data?.moduleid || data?.moduleId || firmware.moduleid || firmware.moduleId,
+      80,
+  );
+  const target = normalizeFirmwareTarget(data?.target || firmware.target || release.target);
+  const fileName = cleanFirmwareSessionText(
+      data?.fileName || firmware.fileName || release.fileName,
+      240,
+  );
+  const version = cleanFirmwareSessionText(
+      data?.version || firmware.version || release.version,
+      120,
+  );
+  const size = Number(data?.size || firmware.size || release.size || 0);
+  const releaseId = cleanFirmwareSessionText(
+      data?.releaseId || firmware.releaseId || release.id,
+      160,
+  );
+
+  if (!stationid || !moduleid) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "stationid and moduleid are required",
+    );
+  }
+
+  if (!fileName || !isSupportedFirmwareFileName(fileName)) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "A .bin or .pac firmware fileName is required",
+    );
+  }
+
+  const sessionRef = db.collection(FIRMWARE_UPDATE_SESSIONS_COLLECTION).doc(requestId);
+  const existingSnap = await sessionRef.get();
+  const nowMillis = Date.now();
+  const sessionData = {
+    active: true,
+    requestId,
+    stationid,
+    stationId: stationid,
+    moduleid,
+    moduleId: moduleid,
+    target,
+    fileName,
+    version,
+    size: Number.isFinite(size) && size > 0 ? size : 0,
+    releaseId,
+    status: "uploaded",
+    phase: "uploaded",
+    statusLabel: "Firmware uploaded, waiting for module command",
+    source: "dashboard",
+    bytesDownloaded: 0,
+    percent: 0,
+    downloadComplete: false,
+    installConfirmed: false,
+    createdByUid: authState.uid,
+    createdByUsername: normalizeUsername(authState.profile?.username),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAtMillis: nowMillis,
+  };
+
+  if (!existingSnap.exists) {
+    sessionData.createdAt = admin.firestore.FieldValue.serverTimestamp();
+    sessionData.createdAtMillis = nowMillis;
+  }
+
+  await sessionRef.set(sessionData, {merge: true});
+
+  return {
+    ok: true,
+    session: {
+      requestId,
+      stationid,
+      moduleid,
+      target,
+      fileName,
+      version,
+      size: sessionData.size,
+      status: sessionData.status,
+      phase: sessionData.phase,
+      statusLabel: sessionData.statusLabel,
+      updatedAtMillis: nowMillis,
     },
   };
 }
@@ -8176,6 +8291,16 @@ exports.firmware_httpFinalizeUpload = handleHttpFunction(async (data, req) => {
 exports.firmware_httpResolveRelease = handleHttpFunction(async (data) => (
   firmwareResolveReleaseImpl(data)
 ));
+
+exports.firmware_createUpdateSession = functions.https.onCall(async (data, context) => {
+  const authState = await assertCanManageFirmwareFromContext(context);
+  return firmwareCreateUpdateSessionImpl(data, authState);
+});
+
+exports.firmware_httpCreateUpdateSession = handleHttpFunction(async (data, req) => {
+  const authState = await assertCanManageFirmware(req, data);
+  return firmwareCreateUpdateSessionImpl(data, authState);
+});
 
 exports.media_archiveAsset = functions.https.onCall(async (data, context) => {
   const authState = await assertCanManageMediaFromContext(context);

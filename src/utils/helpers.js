@@ -285,6 +285,13 @@ export const normalizeKioskData = (kiosks) => {
             const moduleHardwareVersion = Number(module?.hardwareVersion ?? 0);
             const rawModuleTemperature = Number(module?.temperature ?? module?.temp);
             const moduleTemperature = Number.isFinite(rawModuleTemperature) ? rawModuleTemperature : null;
+            const moduleFirmwareVersion = String(
+                module?.firmwareVersion ||
+                module?.fotaVersion ||
+                module?.mcuVersion ||
+                module?.lastSeenHardware ||
+                ''
+            ).trim();
 
             if (isNewSchema) {
                 // New schema: slots array with status/sn/lock/holeDetection fields
@@ -364,6 +371,11 @@ export const normalizeKioskData = (kiosks) => {
                 chargeMetrics: module.chargeMetrics || null,
                 softwareVersion: Number.isFinite(moduleSoftwareVersion) ? moduleSoftwareVersion : 0,
                 hardwareVersion: Number.isFinite(moduleHardwareVersion) ? moduleHardwareVersion : 0,
+                firmwareVersion: moduleFirmwareVersion,
+                fotaVersion: String(module?.fotaVersion || moduleFirmwareVersion).trim(),
+                firmwareVersionNumber: module?.firmwareVersionNumber ?? null,
+                firmwareVersionUpdatedAt: module?.firmwareVersionUpdatedAt || module?.lastSeenHardwareAt || null,
+                firmwareVersionSource: module?.firmwareVersionSource || '',
                 temperature: moduleTemperature,
                 isNewSchema,
             };
@@ -421,7 +433,7 @@ export const normalizeKioskData = (kiosks) => {
             },
             wifi: {
                 name: kiosk.wifi?.name || defaultWifi.name,
-                password: kiosk.wifi?.password || defaultWifi.password,
+                password: kiosk.wifi?.password ?? defaultWifi.password,
             },
             formoptions: {
                 active: kiosk.formoptions?.active === true || DEFAULT_FORM_OPTIONS.active,

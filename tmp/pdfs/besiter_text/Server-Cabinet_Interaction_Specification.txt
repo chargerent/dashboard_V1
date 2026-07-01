@@ -1,0 +1,86 @@
+Server-Cabinet Interaction Specification
+369 W ord
+1、Cabinet receives messages（MQTT）：{"cmd":"check"}
+2、Reporting of whole machine data for cabinets（MQTT）： 0X10
+Rental process
+Byte0 Byte 1~2 Byte3
+headcode lengths command
+0xA8 0x149 0x10
+Byte4—9 Byte10—24 Byte25—39 Byte40—54 Byte55—69 Byte70—84
+movement 1 powerbank 1 powerbank2 powerbank3 powerbank4 powerbank 5
+Byte85—90 Byte91—105 Byte106—120 Byte121—135 Byte136—150 Byte151—165
+movement 2 powerbank6 powerbank7 powerbank8 powerbank9 powerbank10
+Byte166—171 Byte172—186 Byte187—201 Byte202—216 Byte217—231 Byte232—246
+ movement 3 powerbank1 powerbank2 powerbank3 powerbank4 powerbank5
+Byte247—252 Byte253—267 Byte268—282 Byte283—297 Byte298—312 Byte313—327
+movement 4 powerbank1 powerbank2 powerbank3 powerbank4 powerbank5
+Byte 328
+complementary
+check
+3/2/25, 12:03 PM Server-Cabinet Interaction Specification
+https://wed5ug.yuque.com/wed5ug/msogmg/oyx6l1ds5olmhei7 1/5
+369 W ord
+3、Cabinet receives messages（MQTT）：{"cmd":"popup_sn","data":"123456"}data for rechargeable SN
+4、The counter reports pop-up results（MQTT）：0X31
+1、Cabinet receives messages（MQTT）：{"cmd":"popup","data":"1","io":"0"}
+孔位弹出
+Byte0 Byte 1~2 Byte3 Byte4 Byte5~8 Byte9 Byte10
+headcode lengths command Movement
+address
+powerbank
+SN
+exit status check
+ 0xA8 0x00 0A 0x31 同上 同上 0X01 ：
+successes
+else： fail
+complement
+ary check
+data：aperture number
+1 hole1
+2 hole2
+3 hole3
+10 hole10
+15 hole15
+20 hole20
+3/2/25, 12:03 PM Server-Cabinet Interaction Specification
+https://wed5ug.yuque.com/wed5ug/msogmg/oyx6l1ds5olmhei7 2/5
+369 W ord
+2、The counter reports pop-up results（MQTT）：0x21
+Cabinet Request Return Interface（HTTP）
+Returning the Chargers
+ioadapter plate
+0 Serial port 0, each serial port supports up to 40
+holes
+1 Serial port 1, each serial port supports up to 40
+holes
+Byte0 Byte 1~2 Byte3 Byte4 Byte5 Byte6 Byte7
+头码 长度 命令 机芯地址 孔位 弹出状态 校验
+ 0xA8 0x00 07 0x21 同上 同上 0x00 失败
+0x01 成功
+补码校验
+Request URL Method Note
+/api/rentbox/order/return GET Reporting of data on the return of rechargeable
+batteries
+3/2/25, 12:03 PM Server-Cabinet Interaction Specification
+https://wed5ug.yuque.com/wed5ug/msogmg/oyx6l1ds5olmhei7 3/5
+369 W ord
+Parameter
+name
+compul
+sory
+examples Parameter
+description
+rentboxSN yes 352681099911357 Cabinet Unique
+Identification IMEI
+singleSN yes 20000972 Unique identification
+of rechargeable
+batteries
+hole yes 0
+sign yes 03f89e71170cd1c9314717ca917e805
+6
+MD5 signature
+3/2/25, 12:03 PM Server-Cabinet Interaction Specification
+https://wed5ug.yuque.com/wed5ug/msogmg/oyx6l1ds5olmhei7 4/5
+369 W ord
+3/2/25, 12:03 PM Server-Cabinet Interaction Specification
+https://wed5ug.yuque.com/wed5ug/msogmg/oyx6l1ds5olmhei7 5/5

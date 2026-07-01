@@ -1,0 +1,167 @@
+[
+  {
+    "id": "fw-raw-vm-tab",
+    "type": "tab",
+    "label": "Firmware raw VM file",
+    "disabled": false,
+    "info": "Import-only Besiter firmware update flow. The metadata endpoints /mcu, /mcu/12B, and /mcu/12M return the raw Node-RED VM static file URL at /firmware/20260409-Chargerent-1.1.1.0-OU-FOTA.pac. Keep node-red-firmware-pac-sendfile-flow.json as the rollback version."
+  },
+  {
+    "id": "fw-raw-vm-group",
+    "type": "group",
+    "z": "fw-raw-vm-tab",
+    "name": "Firmware metadata + raw VM file URL",
+    "style": {
+      "label": true
+    },
+    "nodes": [
+      "fw-raw-vm-comment",
+      "fw-raw-vm-mcu-in",
+      "fw-raw-vm-12b-in",
+      "fw-raw-vm-12m-in",
+      "fw-raw-vm-read",
+      "fw-raw-vm-build",
+      "fw-raw-vm-response",
+      "fw-raw-vm-debug"
+    ],
+    "x": 34,
+    "y": 39,
+    "w": 1032,
+    "h": 262
+  },
+  {
+    "id": "fw-raw-vm-comment",
+    "type": "comment",
+    "z": "fw-raw-vm-tab",
+    "g": "fw-raw-vm-group",
+    "name": "Disable the streamed firmware group before deploying this. This returns the raw Node-RED static URL: /firmware/20260409-Chargerent-1.1.1.0-OU-FOTA.pac.",
+    "info": "",
+    "x": 560,
+    "y": 80,
+    "wires": []
+  },
+  {
+    "id": "fw-raw-vm-mcu-in",
+    "type": "http in",
+    "z": "fw-raw-vm-tab",
+    "g": "fw-raw-vm-group",
+    "name": "Firmware Update Info",
+    "url": "/api/iot/app/version/publish/mcu",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 170,
+    "y": 140,
+    "wires": [
+      [
+        "fw-raw-vm-read"
+      ]
+    ]
+  },
+  {
+    "id": "fw-raw-vm-12b-in",
+    "type": "http in",
+    "z": "fw-raw-vm-tab",
+    "g": "fw-raw-vm-group",
+    "name": "Firmware Update Info 12B",
+    "url": "/api/iot/app/version/publish/mcu/12B",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 180,
+    "y": 200,
+    "wires": [
+      [
+        "fw-raw-vm-read"
+      ]
+    ]
+  },
+  {
+    "id": "fw-raw-vm-12m-in",
+    "type": "http in",
+    "z": "fw-raw-vm-tab",
+    "g": "fw-raw-vm-group",
+    "name": "Firmware Update Info 12M",
+    "url": "/api/iot/app/version/publish/mcu/12M",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 180,
+    "y": 260,
+    "wires": [
+      [
+        "fw-raw-vm-read"
+      ]
+    ]
+  },
+  {
+    "id": "fw-raw-vm-read",
+    "type": "file in",
+    "z": "fw-raw-vm-tab",
+    "g": "fw-raw-vm-group",
+    "name": "Read PAC for size",
+    "filename": "/home/george/.node-red/public/firmware/20260409-Chargerent-1.1.1.0-OU-FOTA.pac",
+    "filenameType": "str",
+    "format": "",
+    "chunk": false,
+    "sendError": true,
+    "allProps": false,
+    "x": 440,
+    "y": 200,
+    "wires": [
+      [
+        "fw-raw-vm-build"
+      ]
+    ]
+  },
+  {
+    "id": "fw-raw-vm-build",
+    "type": "function",
+    "z": "fw-raw-vm-tab",
+    "g": "fw-raw-vm-group",
+    "name": "Build raw VM metadata",
+    "func": "const fileName = \"20260409-Chargerent-1.1.1.0-OU-FOTA.pac\";\nconst publicBaseUrl = \"http://34.56.244.66:1880\";\nconst fileUrl = publicBaseUrl + \"/firmware/\" + fileName;\nconst fileSize = Buffer.isBuffer(msg.payload) ? msg.payload.length : Number(msg.payload?.length || 0);\n\nif (!fileSize) {\n    msg.statusCode = 500;\n    msg.headers = { \"Content-Type\": \"application/json; charset=utf-8\" };\n    msg.payload = {\n        code: 500,\n        type: 0,\n        data: \"\",\n        msg: \"Firmware file is missing or empty\",\n        time: Date.now()\n    };\n    return msg;\n}\n\nmsg.statusCode = 200;\nmsg.headers = {\n    \"Content-Type\": \"application/json; charset=utf-8\",\n    \"Cache-Control\": \"no-store\"\n};\nmsg.payload = {\n    code: 200,\n    type: 0,\n    data: `${fileName},${fileSize},${fileUrl}`,\n    msg: \"ok\",\n    time: Date.now()\n};\n\nnode.warn(`Raw VM firmware metadata ${msg.req?.path || msg.req?.url || \"\"}: ${msg.payload.data}`);\nreturn msg;",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 690,
+    "y": 200,
+    "wires": [
+      [
+        "fw-raw-vm-response",
+        "fw-raw-vm-debug"
+      ]
+    ]
+  },
+  {
+    "id": "fw-raw-vm-response",
+    "type": "http response",
+    "z": "fw-raw-vm-tab",
+    "g": "fw-raw-vm-group",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 950,
+    "y": 180,
+    "wires": []
+  },
+  {
+    "id": "fw-raw-vm-debug",
+    "type": "debug",
+    "z": "fw-raw-vm-tab",
+    "g": "fw-raw-vm-group",
+    "name": "raw VM firmware metadata",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "x": 960,
+    "y": 220,
+    "wires": []
+  }
+]

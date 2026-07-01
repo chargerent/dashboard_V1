@@ -35,16 +35,16 @@
     ],
     "x": 54,
     "y": 39,
-    "w": 1232,
-    "h": 262
+    "w": 1322,
+    "h": 472
   },
   {
     "id": "a0359eb030360305",
     "type": "comment",
     "z": "f2b17e2c4a4a2c01",
     "g": "d61b6fb2d1eea9aa",
-    "name": "Optional: set flow.firmwareResolveUrl to override the Firebase function URL.",
-    "info": "Default URL: https://us-central1-node-red-alerts.cloudfunctions.net/firmware_httpResolveRelease\nExpected function input: POST {\"data\":{\"target\":\"mcu\"|\"12B\"|\"12M\"}}\nExpected function result payload can be either {result:{code,type,data,msg,time}} or {code,type,data,msg,time}.",
+    "name": "Optional: set flow.firmwareResolveUrl / flow.firmwareTargetAliases / flow.firmwarePublicBaseUrl.",
+    "info": "Default URL: https://us-central1-node-red-alerts.cloudfunctions.net/firmware_httpResolveRelease\nExpected function input: POST {\"data\":{\"target\":\"mcu\"|\"12B\"|\"12M\"}}\nExpected function result payload can be either {result:{code,type,data,msg,time}} or {code,type,data,msg,time}.\n\nThis flow now returns a short Node-RED firmware URL to the kiosk by default and proxies the Firebase signed download server-side. Set flow.firmwarePublicBaseUrl to the externally reachable Node-RED base URL, for example http://34.56.244.66:1880. If unset, the flow uses the incoming Host header. Set flow.firmwareUseLocalProxy to false to return the original Firebase signed URL directly.\n\nTarget aliasing is off by default, so /12M resolves the 12M channel and /12B resolves the 12B channel. If Besiter confirms /12M requests should receive the 12B package, set flow.set('firmwareTargetAliases', {\"12M\":\"12B\"}).",
     "x": 390,
     "y": 80,
     "wires": []
@@ -193,7 +193,7 @@
     "z": "f2b17e2c4a4a2c01",
     "g": "d61b6fb2d1eea9aa",
     "name": "Build Firebase resolver request",
-    "func": "const DEFAULT_RESOLVE_URL = 'https://us-central1-node-red-alerts.cloudfunctions.net/firmware_httpResolveRelease';\nconst rawTarget = String(msg.firmwareTarget || msg.req?.params?.target || msg.req?.query?.target || 'mcu').trim();\nconst normalized = rawTarget.toLowerCase();\nconst target = normalized === '12b' ? '12B' : normalized === '12m' ? '12M' : 'mcu';\n\nmsg._firmwareTarget = target;\nmsg.method = 'POST';\nmsg.url = String(flow.get('firmwareResolveUrl') || DEFAULT_RESOLVE_URL).trim() || DEFAULT_RESOLVE_URL;\nmsg.headers = {\n    'Content-Type': 'application/json'\n};\nmsg.payload = {\n    data: { target }\n};\n\nnode.status({ fill: 'blue', shape: 'dot', text: `Resolving ${target}` });\nreturn msg;",
+    "func": "const DEFAULT_RESOLVE_URL = 'https://us-central1-node-red-alerts.cloudfunctions.net/firmware_httpResolveRelease';\nconst DEFAULT_ALIASES = {};\n\nconst rawTarget = String(msg.firmwareTarget || msg.req?.params?.target || msg.req?.query?.target || 'mcu').trim();\nconst normalized = rawTarget.toLowerCase();\nconst requestedTarget = normalized === '12b' ? '12B' : normalized === '12m' ? '12M' : 'mcu';\nconst configuredAliases = flow.get('firmwareTargetAliases');\nconst aliases = configuredAliases && typeof configuredAliases === 'object'\n    ? configuredAliases\n    : DEFAULT_ALIASES;\nconst target = aliases[requestedTarget] || requestedTarget;\n\nmsg._firmwareRequestedTarget = requestedTarget;\nmsg._firmwareTarget = target;\nmsg.method = 'POST';\nmsg.url = String(flow.get('firmwareResolveUrl') || DEFAULT_RESOLVE_URL).trim() || DEFAULT_RESOLVE_URL;\nmsg.headers = {\n    'Content-Type': 'application/json'\n};\nmsg.payload = {\n    data: { target }\n};\n\nnode.status({\n    fill: 'blue',\n    shape: 'dot',\n    text: requestedTarget === target ? `Resolving ${target}` : `Resolving ${requestedTarget}->${target}`\n});\nreturn msg;",
     "outputs": 1,
     "timeout": "",
     "noerr": 0,
@@ -239,7 +239,7 @@
     "z": "f2b17e2c4a4a2c01",
     "g": "d61b6fb2d1eea9aa",
     "name": "Return kiosk firmware metadata",
-    "func": "const target = msg._firmwareTarget || 'mcu';\nconst body = msg.payload || {};\nconst result = body.result || body.data || body;\n\nfunction fail(statusCode, message, extra = {}) {\n    msg.statusCode = statusCode;\n    msg.headers = {\n        'Content-Type': 'application/json; charset=utf-8',\n        'Cache-Control': 'no-store'\n    };\n    msg.payload = {\n        code: statusCode,\n        type: 0,\n        data: '',\n        msg: message,\n        time: Date.now(),\n        target,\n        ...extra\n    };\n    node.status({ fill: 'red', shape: 'ring', text: `${target}: ${message}` });\n    return msg;\n}\n\nif (body.error) {\n    return fail(Number(msg.statusCode || 500), body.error.message || body.error.status || 'Firmware resolver error', {\n        error: body.error\n    });\n}\n\nif (!result || Number(result.code) !== 200 || !result.data) {\n    return fail(502, 'No active firmware metadata returned', {\n        resolverPayload: result || null\n    });\n}\n\nmsg.statusCode = 200;\nmsg.headers = {\n    'Content-Type': 'application/json; charset=utf-8',\n    'Cache-Control': 'no-store'\n};\nmsg.payload = {\n    code: 200,\n    type: Number(result.type || 0),\n    data: String(result.data),\n    msg: result.msg || 'ok',\n    time: Number(result.time || Date.now())\n};\n\nnode.status({ fill: 'green', shape: 'dot', text: `${target}: ${msg.payload.data.split(',')[0]}` });\nreturn msg;",
+    "func": "const target = msg._firmwareTarget || 'mcu';\nconst requestedTarget = msg._firmwareRequestedTarget || target;\nconst body = msg.payload || {};\nconst result = body && typeof body.result === 'object' ? body.result :\n    body && typeof body.data === 'object' ? body.data :\n    body;\n\nfunction fail(statusCode, message, extra) {\n    msg.statusCode = statusCode;\n    msg.headers = {\n        'Content-Type': 'application/json; charset=utf-8',\n        'Cache-Control': 'no-store'\n    };\n    msg.payload = Object.assign({\n        code: statusCode,\n        type: 0,\n        data: '',\n        msg: message,\n        time: Date.now(),\n        target,\n        requestedTarget\n    }, extra || {});\n    node.status({ fill: 'red', shape: 'ring', text: requestedTarget + '->' + target + ': ' + message });\n    return msg;\n}\n\nfunction getHeader(name) {\n    const headers = msg.req && msg.req.headers ? msg.req.headers : {};\n    const value = headers[String(name || '').toLowerCase()] || headers[name];\n    return Array.isArray(value) ? value[0] : String(value || '').trim();\n}\n\nfunction getPublicBaseUrl() {\n    let configured = String(flow.get('firmwarePublicBaseUrl') || '').trim();\n    while (configured.endsWith('/')) {\n        configured = configured.slice(0, -1);\n    }\n    if (configured) return configured;\n\n    const host = getHeader('host');\n    if (!host) return '';\n\n    const forwardedProto = getHeader('x-forwarded-proto').split(',')[0].trim();\n    const proto = forwardedProto || 'http';\n    return proto + '://' + host;\n}\n\nfunction parseFirmwareData(data) {\n    const parts = String(data || '').split(',');\n    const fileName = String(parts.shift() || '').trim();\n    const size = Number(String(parts.shift() || '').trim());\n    const signedUrl = parts.join(',').trim();\n    return { fileName, size, signedUrl };\n}\n\nfunction pruneCache(cache, now) {\n    Object.keys(cache || {}).forEach((key) => {\n        const item = cache[key];\n        if (!item || Number(item.expiresAt || 0) <= now) {\n            delete cache[key];\n        }\n    });\n    return cache || {};\n}\n\nif (body.error) {\n    return fail(Number(msg.statusCode || 500), body.error.message || body.error.status || 'Firmware resolver error', {\n        error: body.error\n    });\n}\n\nif (!result || Number(result.code) !== 200 || !result.data) {\n    return fail(502, 'No active firmware metadata returned', {\n        resolverPayload: result || null\n    });\n}\n\nconst parsed = parseFirmwareData(result.data);\nconst release = result.release || {};\nconst releaseId = String(release.id || '').trim();\nconst fileName = String(release.fileName || parsed.fileName || '').trim();\nconst size = Number(release.size || parsed.size || 0);\nconst signedUrl = parsed.signedUrl;\n\nif (!fileName || !Number.isFinite(size) || size <= 0 || !signedUrl) {\n    return fail(502, 'Firmware metadata is missing filename, size, or URL', {\n        resolverPayload: result || null\n    });\n}\n\nlet deliveryUrl = signedUrl;\nconst useLocalProxy = flow.get('firmwareUseLocalProxy') !== false;\nif (useLocalProxy) {\n    if (!releaseId) {\n        return fail(502, 'Firmware resolver did not return release id', {\n            resolverPayload: result || null\n        });\n    }\n\n    const publicBaseUrl = getPublicBaseUrl();\n    if (!publicBaseUrl) {\n        return fail(500, 'Set flow.firmwarePublicBaseUrl or call this endpoint with a Host header');\n    }\n\n    const now = Date.now();\n    const cache = pruneCache(flow.get('firmwareProxyCache') || {}, now);\n    cache[releaseId] = {\n        target,\n        requestedTarget,\n        releaseId,\n        fileName,\n        size,\n        signedUrl,\n        cachedAt: now,\n        expiresAt: now + (55 * 60 * 1000)\n    };\n    flow.set('firmwareProxyCache', cache);\n\n    deliveryUrl = publicBaseUrl + '/firmware/proxy/' + encodeURIComponent(target) + '/' + encodeURIComponent(releaseId) + '/' + encodeURIComponent(fileName);\n}\n\nmsg.statusCode = 200;\nmsg.headers = {\n    'Content-Type': 'application/json; charset=utf-8',\n    'Cache-Control': 'no-store'\n};\nmsg.payload = {\n    code: 200,\n    type: Number(result.type || 0),\n    data: fileName + ',' + size + ',' + deliveryUrl,\n    msg: result.msg || 'ok',\n    time: Number(result.time || Date.now())\n};\n\nconst statusPrefix = requestedTarget === target ? target : requestedTarget + '->' + target;\nnode.status({ fill: 'green', shape: 'dot', text: statusPrefix + ': ' + fileName + (useLocalProxy ? ' via proxy' : ' direct') });\nreturn msg;",
     "outputs": 1,
     "timeout": "",
     "noerr": 0,
@@ -324,6 +324,201 @@
       [
         "a269ed3c49ddf5c6",
         "ba73bdfc053c12ac"
+      ]
+    ]
+  },
+  {
+    "id": "fwproxy-http-in",
+    "type": "http in",
+    "z": "f2b17e2c4a4a2c01",
+    "g": "d61b6fb2d1eea9aa",
+    "name": "Proxied firmware file",
+    "url": "/firmware/proxy/:target/:releaseId/:fileName",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 190,
+    "y": 360,
+    "wires": [
+      [
+        "fwproxy-build-download"
+      ]
+    ]
+  },
+  {
+    "id": "fwproxy-build-download",
+    "type": "function",
+    "z": "f2b17e2c4a4a2c01",
+    "g": "d61b6fb2d1eea9aa",
+    "name": "Build proxy download request",
+    "func": "const DEFAULT_RESOLVE_URL = 'https://us-central1-node-red-alerts.cloudfunctions.net/firmware_httpResolveRelease';\nconst DEFAULT_ALIASES = {};\n\nfunction normalizeTarget(value) {\n    const normalized = String(value || 'mcu').trim().toLowerCase();\n    if (normalized === '12b') return '12B';\n    if (normalized === '12m') return '12M';\n    return 'mcu';\n}\n\nfunction fail(statusCode, message) {\n    msg.statusCode = statusCode;\n    msg._firmwareProxyError = message;\n    return [null, null, msg];\n}\n\nconst params = msg.req && msg.req.params ? msg.req.params : {};\nconst requestedTarget = normalizeTarget(params.target || 'mcu');\nconst configuredAliases = flow.get('firmwareTargetAliases');\nconst aliases = configuredAliases && typeof configuredAliases === 'object' ? configuredAliases : DEFAULT_ALIASES;\nconst target = aliases[requestedTarget] || requestedTarget;\nconst releaseId = String(params.releaseId || '').trim();\nconst fileName = String(params.fileName || '').trim();\n\nif (!releaseId || !fileName) {\n    return fail(400, 'Missing firmware releaseId or fileName');\n}\n\nconst now = Date.now();\nconst cache = flow.get('firmwareProxyCache') || {};\nconst cached = cache[releaseId];\nmsg._firmwareProxy = {\n    requestedTarget,\n    target,\n    releaseId,\n    fileName,\n    size: cached && Number(cached.size || 0) || 0\n};\n\nif (cached && cached.signedUrl && String(cached.target || '') === target && String(cached.fileName || '') === fileName && Number(cached.expiresAt || 0) > now + 60000) {\n    msg.method = 'GET';\n    msg.url = cached.signedUrl;\n    msg.headers = {};\n    msg.payload = null;\n    node.status({ fill: 'blue', shape: 'dot', text: 'Proxy cached ' + target + ': ' + fileName });\n    return [msg, null, null];\n}\n\nmsg.method = 'POST';\nmsg.url = String(flow.get('firmwareResolveUrl') || DEFAULT_RESOLVE_URL).trim() || DEFAULT_RESOLVE_URL;\nmsg.headers = {\n    'Content-Type': 'application/json'\n};\nmsg.payload = {\n    data: { target }\n};\nnode.status({ fill: 'blue', shape: 'ring', text: 'Proxy resolving ' + target });\nreturn [null, msg, null];",
+    "outputs": 3,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 440,
+    "y": 360,
+    "wires": [
+      [
+        "fwproxy-download-file"
+      ],
+      [
+        "fwproxy-resolve-release"
+      ],
+      [
+        "fwproxy-error-response"
+      ]
+    ]
+  },
+  {
+    "id": "fwproxy-resolve-release",
+    "type": "http request",
+    "z": "f2b17e2c4a4a2c01",
+    "g": "d61b6fb2d1eea9aa",
+    "name": "Resolve firmware for proxy",
+    "method": "use",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 720,
+    "y": 400,
+    "wires": [
+      [
+        "fwproxy-build-resolved-download"
+      ]
+    ]
+  },
+  {
+    "id": "fwproxy-build-resolved-download",
+    "type": "function",
+    "z": "f2b17e2c4a4a2c01",
+    "g": "d61b6fb2d1eea9aa",
+    "name": "Build download from resolved release",
+    "func": "const info = msg._firmwareProxy || {};\nconst body = msg.payload || {};\nconst result = body && typeof body.result === 'object' ? body.result :\n    body && typeof body.data === 'object' ? body.data :\n    body;\n\nfunction fail(statusCode, message, extra) {\n    msg.statusCode = statusCode;\n    msg._firmwareProxyError = message;\n    if (extra) msg._firmwareProxyExtra = extra;\n    return [null, msg];\n}\n\nfunction parseFirmwareData(data) {\n    const parts = String(data || '').split(',');\n    const fileName = String(parts.shift() || '').trim();\n    const size = Number(String(parts.shift() || '').trim());\n    const signedUrl = parts.join(',').trim();\n    return { fileName, size, signedUrl };\n}\n\nif (body.error) {\n    return fail(Number(msg.statusCode || 500), body.error.message || body.error.status || 'Firmware resolver error', body.error);\n}\n\nif (!result || Number(result.code) !== 200 || !result.data) {\n    return fail(502, 'No active firmware metadata returned', result || null);\n}\n\nconst parsed = parseFirmwareData(result.data);\nconst release = result.release || {};\nconst releaseId = String(release.id || '').trim();\nconst fileName = String(release.fileName || parsed.fileName || '').trim();\nconst size = Number(release.size || parsed.size || 0);\nconst signedUrl = parsed.signedUrl;\n\nif (releaseId && info.releaseId && releaseId !== info.releaseId) {\n    return fail(409, 'Firmware release changed before proxy download: expected ' + info.releaseId + ', current ' + releaseId);\n}\n\nif (info.fileName && fileName && fileName !== info.fileName) {\n    return fail(409, 'Firmware filename changed before proxy download: expected ' + info.fileName + ', current ' + fileName);\n}\n\nif (!signedUrl || !fileName || !Number.isFinite(size) || size <= 0) {\n    return fail(502, 'Resolved firmware metadata is missing filename, size, or URL', result || null);\n}\n\nconst now = Date.now();\nconst cache = flow.get('firmwareProxyCache') || {};\ncache[info.releaseId || releaseId] = {\n    target: info.target || result.target || 'mcu',\n    requestedTarget: info.requestedTarget || info.target || result.target || 'mcu',\n    releaseId: info.releaseId || releaseId,\n    fileName,\n    size,\n    signedUrl,\n    cachedAt: now,\n    expiresAt: now + (55 * 60 * 1000)\n};\nflow.set('firmwareProxyCache', cache);\n\nmsg._firmwareProxy = Object.assign({}, info, {\n    releaseId: info.releaseId || releaseId,\n    fileName,\n    size\n});\nmsg.method = 'GET';\nmsg.url = signedUrl;\nmsg.headers = {};\nmsg.payload = null;\nnode.status({ fill: 'blue', shape: 'dot', text: 'Proxy download ' + fileName });\nreturn [msg, null];",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 980,
+    "y": 400,
+    "wires": [
+      [
+        "fwproxy-download-file"
+      ],
+      [
+        "fwproxy-error-response"
+      ]
+    ]
+  },
+  {
+    "id": "fwproxy-download-file",
+    "type": "http request",
+    "z": "f2b17e2c4a4a2c01",
+    "g": "d61b6fb2d1eea9aa",
+    "name": "Download firmware from Firebase",
+    "method": "use",
+    "ret": "bin",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": false,
+    "headers": [],
+    "x": 740,
+    "y": 340,
+    "wires": [
+      [
+        "fwproxy-return-file"
+      ]
+    ]
+  },
+  {
+    "id": "fwproxy-return-file",
+    "type": "function",
+    "z": "f2b17e2c4a4a2c01",
+    "g": "d61b6fb2d1eea9aa",
+    "name": "Return proxied firmware file",
+    "func": "const info = msg._firmwareProxy || {};\nconst statusCode = Number(msg.statusCode || 200);\n\nfunction safeFileName(value) {\n    return String(value || 'firmware.bin').split('').map((ch) => {\n        const code = ch.charCodeAt(0);\n        return ch === '\"' || ch === '\\\\' || code === 10 || code === 13 ? '_' : ch;\n    }).join('');\n}\n\nif (statusCode >= 400) {\n    msg.statusCode = statusCode;\n    msg.headers = {\n        'Content-Type': 'text/plain; charset=utf-8',\n        'Cache-Control': 'no-store'\n    };\n    msg.payload = Buffer.isBuffer(msg.payload) ? msg.payload.toString('utf8') : String(msg.payload || 'Firmware download failed');\n    return msg;\n}\n\nmsg.statusCode = 200;\nmsg.headers = {\n    'Content-Type': 'application/octet-stream',\n    'Content-Disposition': 'attachment; filename=\"' + safeFileName(info.fileName) + '\"',\n    'Cache-Control': 'no-store'\n};\n\nif (Buffer.isBuffer(msg.payload)) {\n    msg.headers['Content-Length'] = String(msg.payload.length);\n}\n\nnode.status({ fill: 'green', shape: 'dot', text: 'Served ' + safeFileName(info.fileName) });\nreturn msg;",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1010,
+    "y": 340,
+    "wires": [
+      [
+        "fwproxy-http-response"
+      ]
+    ]
+  },
+  {
+    "id": "fwproxy-error-response",
+    "type": "function",
+    "z": "f2b17e2c4a4a2c01",
+    "g": "d61b6fb2d1eea9aa",
+    "name": "Return proxy firmware error",
+    "func": "const message = msg._firmwareProxyError || msg.error && msg.error.message || 'Firmware proxy failed';\nmsg.statusCode = Number(msg.statusCode || 500);\nmsg.headers = {\n    'Content-Type': 'text/plain; charset=utf-8',\n    'Cache-Control': 'no-store'\n};\nmsg.payload = message;\nnode.status({ fill: 'red', shape: 'ring', text: message });\nreturn msg;",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1010,
+    "y": 460,
+    "wires": [
+      [
+        "fwproxy-http-response"
+      ]
+    ]
+  },
+  {
+    "id": "fwproxy-http-response",
+    "type": "http response",
+    "z": "f2b17e2c4a4a2c01",
+    "g": "d61b6fb2d1eea9aa",
+    "name": "Firmware proxy response",
+    "statusCode": "",
+    "headers": {},
+    "x": 1250,
+    "y": 380,
+    "wires": []
+  },
+  {
+    "id": "fwproxy-catch",
+    "type": "catch",
+    "z": "f2b17e2c4a4a2c01",
+    "g": "d61b6fb2d1eea9aa",
+    "name": "Firmware proxy errors",
+    "scope": [
+      "fwproxy-build-download",
+      "fwproxy-resolve-release",
+      "fwproxy-build-resolved-download",
+      "fwproxy-download-file",
+      "fwproxy-return-file"
+    ],
+    "uncaught": false,
+    "x": 740,
+    "y": 460,
+    "wires": [
+      [
+        "fwproxy-error-response"
       ]
     ]
   }

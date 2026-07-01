@@ -1,0 +1,87 @@
+Return the charging treasure
+260 W ord
+topic:/$productKey/$deviceName/user/update
+published: Binary
+上报数据
+新版本数据
+return success and failure are reported to mqtt
+escalation Message
+Byte0 Byte 1~2 Byte3 Byte4 Byte5 Byte6 Byte7—10 Byte11 Byte12 Byte13 Byte14
+head Code length command moveme
+nt
+Address
+hole area charging
+treasure
+SN
+return
+Status
+version return
+power
+calibration
+
+ 0xA8 0x00 0F 0x40 Custom Custom 0x01 自定义 自定义 自定义 0x01 complemen
+t check
+
+movement Address
+0x10 movement 1
+0x20 movement 2
+260 W ord
+0x30 movement 3
+0x40 movement 4
+Hole position
+0x01 Hole position1
+0x02 Hole position2
+0x03 Hole position3
+0x04 Hole position4
+0x05 Hole position5
+0x14 Hole position20
+Charging treasure SN
+0x00 00 00 00 no mobile power
+0x00 00 00 01 SN：1
+0x00 00 00 A0 SN：160
+0x00 00 0B CF SN：3023
+0x00 1A DE 03 SN：1760771
+260 W ord
+0xFF FF FF FF SN： 4294967295
+Return Status
+0x01 return successful
+0x02 return failed, key detection, no communication pop him out
+0x03 return failure, no key detection, communication and then the status of this slot is
+also identified as key damage
+0x06 the motor did not return when returning.
+0x00 exception failed
+Charging treasure-software version
+260 W ord
+
+
+0x00 no mobile power
+0x01 V001
+0x02 V002
+0x0A V010
+0x16 V016
+     // 模拟充电宝归还 .SN:20010060
+    public void receiveReturnTest() throws SerialPortException {
+        byte[] bytes = ByteUtils.toBytes(0XA8,0X00,0X0E,0X40,0X20,0X06,0X01,0X01,0X31,0X54,0X4C,0X01,0X04,0X0C);
+
+        ReceiveReturn receiveReturn = new ReceiveReturn(bytes);
+        String data = ByteUtils.to16Hexs(receiveReturn.getBytes());
+        System.out.println(data);
+        System.out.println(ToStringBuilder.reflectionToString(receiveReturn));
+    }
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+Plain Text Copy
+A8 00 0E 40 20 06 01 01 31 54 4C 01 04 0C
+message.ReceiveReturn@2f0e140b[pinboardIndex=32,hole=6,area=1,sn={1,49,84,76},status=1,snAsInt=20010060,snAsString=20010060,version=4,bytes={-88,0,14,64,32,6,1,1,49,84,76,1,4,12},ints={16
+1
+2
+Plain Text Copy
+260 W ord

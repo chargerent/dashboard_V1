@@ -211,9 +211,6 @@ function KioskPreview({ profile }) {
   const dashboardColumns = Math.max(1, Number(viewport.dashboardColumns || DEFAULT_KIOSK_UI.viewport.dashboardColumns));
   const rowHeight = Math.max(24, Number(viewport.dashboardRowHeight || DEFAULT_KIOSK_UI.viewport.dashboardRowHeight));
   const dashboardGap = Math.max(0, Number(viewport.dashboardGap ?? DEFAULT_KIOSK_UI.viewport.dashboardGap));
-  const previewScale = Math.min(1, 380 / viewportWidth, 680 / viewportHeight);
-  const scaledWidth = Math.round(viewportWidth * previewScale);
-  const scaledHeight = Math.round(viewportHeight * previewScale);
   const nodeStyle = (widthUnits = dashboardColumns, heightUnits = 1) => ({
     width: `${Math.min(dashboardColumns, Number(widthUnits) || dashboardColumns) / dashboardColumns * 100}%`,
     height: Math.max(rowHeight * (Number(heightUnits) || 1), rowHeight),
@@ -490,11 +487,10 @@ function KioskPreview({ profile }) {
         ))}
       </div>
       <div className="mb-2 text-center text-xs font-semibold text-gray-600">
-        {viewportWidth} x {viewportHeight}px · {Math.round(previewScale * 100)}%
+        {viewportWidth} x {viewportHeight}px · 100%
       </div>
       <div
-        className="mx-auto overflow-hidden rounded-lg border border-gray-300 bg-black shadow-sm"
-        style={{ width: scaledWidth, height: scaledHeight }}
+        className="mx-auto max-w-full overflow-auto rounded-lg border border-gray-300 bg-black shadow-sm"
       >
         <div
           className="flex flex-col overflow-hidden"
@@ -505,8 +501,6 @@ function KioskPreview({ profile }) {
             boxSizing: 'border-box',
             backgroundColor: theme.background,
             color: theme.text,
-            transform: `scale(${previewScale})`,
-            transformOrigin: 'top left',
             justifyContent: alignItems,
             textAlign: screenTextAlign,
             fontSize: `${14 * fontScale}px`,
@@ -798,7 +792,21 @@ export default function UiProfilesPage({
     <div className="min-h-screen bg-gray-100">
       <CommandStatusToast status={saveStatus} onDismiss={() => setSaveStatus(null)} />
 
-      <header className="bg-white shadow-sm">
+      <div className="flex min-h-screen items-center justify-center px-4 lg:hidden">
+        <div className="max-w-sm rounded-lg bg-white p-6 text-center shadow-sm">
+          <h1 className="text-lg font-semibold text-gray-900">UI Editor is desktop only</h1>
+          <p className="mt-2 text-sm text-gray-600">Open this page on a desktop screen to edit kiosk layouts at full pixel size.</p>
+          <button
+            type="button"
+            onClick={onNavigateToAdmin}
+            className="mt-5 rounded-md bg-gray-900 px-4 py-2 text-sm font-semibold text-white hover:bg-gray-800"
+          >
+            Back to Admin
+          </button>
+        </div>
+      </div>
+
+      <header className="hidden bg-white shadow-sm lg:block">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3">
             <button onClick={onNavigateToAdmin} className="rounded-md bg-gray-200 p-2 text-gray-700 hover:bg-gray-300" title="Back to admin">
@@ -823,7 +831,7 @@ export default function UiProfilesPage({
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[280px_minmax(0,1fr)_360px] lg:px-8">
+      <main className="mx-auto hidden max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid lg:grid-cols-[280px_minmax(0,1fr)_360px] lg:px-8">
         <aside className="space-y-4">
           <div className="rounded-lg bg-white p-4 shadow-sm">
             <div className="mb-3 flex items-center justify-between">

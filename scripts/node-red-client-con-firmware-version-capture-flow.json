@@ -1,0 +1,284 @@
+[
+  {
+    "id": "fw-clientcon-tab",
+    "type": "tab",
+    "label": "Client Con Firmware Capture",
+    "disabled": false,
+    "info": "Captures hardware=... firmware/version strings reported by screenless MCU devices on /api/iot/client/con and stores them on the matching kiosk module in Firebase. Import this flow, then add a side link-out from the existing /api/iot/client/con handler to the link-in node. Do not replace the existing auth route."
+  },
+  {
+    "id": "fw-clientcon-group",
+    "type": "group",
+    "z": "fw-clientcon-tab",
+    "name": "Capture /api/iot/client/con hardware version",
+    "style": {
+      "stroke": "#001f60",
+      "fill": "#bfc7d7",
+      "label": true,
+      "color": "#000000"
+    },
+    "nodes": [
+      "fw-clientcon-comment",
+      "fw-clientcon-input",
+      "fw-clientcon-extract",
+      "fw-clientcon-ignored",
+      "fw-clientcon-query",
+      "fw-clientcon-build-write",
+      "fw-clientcon-write",
+      "fw-clientcon-write-debug",
+      "fw-clientcon-catch",
+      "fw-clientcon-error-debug",
+      "fw-clientcon-route-write-mode",
+      "fw-clientcon-set-pending",
+      "fw-clientcon-set-pending-debug"
+    ],
+    "x": 54,
+    "y": 39,
+    "w": 1450,
+    "h": 342
+  },
+  {
+    "id": "fw-clientcon-comment",
+    "type": "comment",
+    "z": "fw-clientcon-tab",
+    "g": "fw-clientcon-group",
+    "name": "Wire a side link-out from the existing /api/iot/client/con handler into this link-in. This records firmware; it does not answer the auth request.",
+    "info": "Expected incoming message is the existing Node-RED HTTP message for /api/iot/client/con. The flow reads msg.req.query.uuid and body/payload hardware=..., finds the matching kiosk module by modules[].id, and updates modules[].firmwareVersion/modules[].fotaVersion. If a vendor-confirmed auth uuid differs from the MQTT module id for the same physical module, set flow.clientConFirmwareModuleAliases, for example {\"AUTH_UUID\":\"MQTT_MODULE_ID\"}. If no kiosk is matched, it upserts pending/<uuid> with the reported version.",
+    "x": 580,
+    "y": 80,
+    "wires": []
+  },
+  {
+    "id": "fw-clientcon-input",
+    "type": "link in",
+    "z": "fw-clientcon-tab",
+    "g": "fw-clientcon-group",
+    "name": "client/con firmware input",
+    "links": [],
+    "x": 145,
+    "y": 180,
+    "wires": [
+      [
+        "fw-clientcon-extract"
+      ]
+    ]
+  },
+  {
+    "id": "fw-clientcon-extract",
+    "type": "function",
+    "z": "fw-clientcon-tab",
+    "g": "fw-clientcon-group",
+    "name": "Extract uuid + hardware version",
+    "func": "function getQuery(name) {\n    return msg.req && msg.req.query ? msg.req.query[name] : undefined;\n}\n\nfunction decodeFormPart(value) {\n    const normalized = String(value || '').replace(/\\+/g, ' ');\n    try {\n        return decodeURIComponent(normalized);\n    } catch (error) {\n        return normalized;\n    }\n}\n\nfunction parseFormBody(value) {\n    const parsed = {};\n    String(value || '').split('&').forEach((pair) => {\n        if (!pair) return;\n        const separatorIndex = pair.indexOf('=');\n        const rawKey = separatorIndex >= 0 ? pair.slice(0, separatorIndex) : pair;\n        const rawValue = separatorIndex >= 0 ? pair.slice(separatorIndex + 1) : '';\n        const key = decodeFormPart(rawKey).trim();\n        if (!key) return;\n        parsed[key] = decodeFormPart(rawValue);\n    });\n    return parsed;\n}\n\nfunction parseBody(value) {\n    if (Buffer.isBuffer(value)) {\n        value = value.toString('utf8');\n    }\n\n    if (value && typeof value === 'object' && !Array.isArray(value)) {\n        return value;\n    }\n\n    if (typeof value !== 'string') {\n        return {};\n    }\n\n    const trimmed = value.trim();\n    if (!trimmed) {\n        return {};\n    }\n\n    if (trimmed.startsWith('{')) {\n        try {\n            return JSON.parse(trimmed);\n        } catch (error) {\n            node.warn('Unable to parse JSON client/con body: ' + error.message);\n        }\n    }\n\n    const parsed = parseFormBody(trimmed);\n    if (Object.keys(parsed).length > 0) {\n        return parsed;\n    }\n\n    return { raw: trimmed };\n}\n\nfunction clean(value) {\n    return String(value || '').trim();\n}\n\nconst body = parseBody(\n    msg.payloadRaw !== undefined ? msg.payloadRaw :\n    msg.req && msg.req.body !== undefined ? msg.req.body :\n    msg.payload\n);\n\nconst moduleId = clean(\n    body.uuid ||\n    body.deviceUuid ||\n    msg.module ||\n    msg.moduleid ||\n    getQuery('uuid') ||\n    getQuery('deviceUuid')\n);\n\nconst hardwareVersion = clean(\n    body.hardware ||\n    body.hw ||\n    body.version ||\n    body.firmwareVersion ||\n    body.raw\n);\n\nif (!moduleId || !hardwareVersion) {\n    msg._clientConFirmwareIgnored = {\n        reason: !moduleId ? 'missing uuid' : 'missing hardware version',\n        uuid: moduleId,\n        payload: msg.payload,\n        body\n    };\n    return [null, msg];\n}\n\nconst receivedAt = new Date().toISOString();\nmsg._clientConFirmware = {\n    moduleId,\n    hardwareVersion,\n    rawHardware: hardwareVersion,\n    simUUID: clean(getQuery('simUUID')),\n    simMobile: clean(getQuery('simMobile')),\n    deviceId: clean(getQuery('deviceId')),\n    ssl: clean(getQuery('ssl')),\n    screen: clean(getQuery('screen')),\n    sign: clean(getQuery('sign')),\n    method: msg.req && msg.req.method ? msg.req.method : '',\n    url: msg.req && msg.req.originalUrl ? msg.req.originalUrl : msg.req && msg.req.url ? msg.req.url : '',\n    receivedAt\n};\n\nmsg.payload = {\n    path: 'kiosks',\n    query: []\n};\n\nreturn [msg, null];",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 360,
+    "y": 180,
+    "wires": [
+      [
+        "fw-clientcon-query"
+      ],
+      [
+        "fw-clientcon-ignored"
+      ]
+    ]
+  },
+  {
+    "id": "fw-clientcon-ignored",
+    "type": "debug",
+    "z": "fw-clientcon-tab",
+    "g": "fw-clientcon-group",
+    "name": "ignored client/con firmware report",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "_clientConFirmwareIgnored",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 690,
+    "y": 260,
+    "wires": []
+  },
+  {
+    "id": "fw-clientcon-query",
+    "type": "google-cloud-firestore",
+    "z": "fw-clientcon-tab",
+    "g": "fw-clientcon-group",
+    "name": "Query kiosks",
+    "account": "",
+    "keyFilename": "/home/george/firestore/firestore-key.json",
+    "projectId": "node-red-alerts",
+    "mode": "query",
+    "x": 590,
+    "y": 180,
+    "wires": [
+      [
+        "fw-clientcon-build-write"
+      ]
+    ]
+  },
+  {
+    "id": "fw-clientcon-build-write",
+    "type": "function",
+    "z": "fw-clientcon-tab",
+    "g": "fw-clientcon-group",
+    "name": "Build Firebase version write",
+    "func": "const docs = Array.isArray(msg.payload) ? msg.payload : [];\nconst info = msg._clientConFirmware || {};\nconst moduleId = String(info.moduleId || '').trim();\nconst hardwareVersion = String(info.hardwareVersion || '').trim();\nconst receivedAt = info.receivedAt || new Date().toISOString();\nconst aliasMap = flow.get('clientConFirmwareModuleAliases') || {};\n\nfunction normalize(value) {\n    return String(value || '').trim();\n}\n\nfunction addCandidate(candidates, value) {\n    const normalized = normalize(value);\n    if (normalized && candidates.indexOf(normalized) === -1) {\n        candidates.push(normalized);\n    }\n}\n\nfunction idsMatch(left, right) {\n    const a = normalize(left);\n    const b = normalize(right);\n    if (!a || !b) return false;\n    if (a === b) return true;\n    if (('1000' + a) === b) return true;\n    if (a === b.replace(/^1000/, '')) return true;\n    return false;\n}\n\nfunction clone(value) {\n    return JSON.parse(JSON.stringify(value));\n}\n\nfunction parseVersionNumber(value) {\n    const text = String(value || '');\n    const match = text.match(/(?:^|[-_])V?(\\d{3,5})(?:\\b|[-_.]|$)/i) || text.match(/V(\\d{3,5})/i);\n    if (!match) return null;\n    const parsed = Number(match[1]);\n    return Number.isFinite(parsed) ? parsed : null;\n}\n\nfunction moduleMatchesCandidate(module, candidateId) {\n    return idsMatch(module && module.id, candidateId) ||\n        idsMatch(module && module.moduleid, candidateId) ||\n        idsMatch(module && module.uuid, candidateId) ||\n        idsMatch(module && module.clientConUuid, candidateId) ||\n        idsMatch(module && module.authUuid, candidateId) ||\n        idsMatch(module && module.iotUuid, candidateId) ||\n        idsMatch(module && module.mcuUuid, candidateId) ||\n        idsMatch(module && module.clientCon && module.clientCon.moduleId, candidateId) ||\n        idsMatch(module && module.clientCon && module.clientCon.uuid, candidateId);\n}\n\nfunction kioskMatchesCandidate(kiosk, candidateId) {\n    const hardware = kiosk && kiosk.hardware && typeof kiosk.hardware === 'object' ? kiosk.hardware : {};\n    return idsMatch(kiosk && kiosk.stationid, candidateId) ||\n        idsMatch(kiosk && kiosk.id, candidateId) ||\n        idsMatch(kiosk && kiosk.provisionid, candidateId) ||\n        idsMatch(hardware.uuid, candidateId) ||\n        idsMatch(hardware.mcuUuid, candidateId) ||\n        idsMatch(hardware.clientConUuid, candidateId) ||\n        idsMatch(hardware.simUUID, candidateId) ||\n        idsMatch(hardware.simUuid, candidateId) ||\n        idsMatch(hardware.imei, candidateId) ||\n        idsMatch(hardware.sn, candidateId) ||\n        idsMatch(hardware.clientCon && hardware.clientCon.moduleId, candidateId) ||\n        idsMatch(hardware.clientCon && hardware.clientCon.uuid, candidateId);\n}\n\nconst candidates = [];\naddCandidate(candidates, moduleId);\naddCandidate(candidates, info.simUUID);\naddCandidate(candidates, info.deviceId);\naddCandidate(candidates, aliasMap[moduleId]);\naddCandidate(candidates, aliasMap[info.simUUID]);\naddCandidate(candidates, aliasMap[info.deviceId]);\n\nlet matchedDoc = null;\nlet matchedModuleIndex = -1;\nlet matchedBy = '';\n\nfor (const candidateId of candidates) {\n    for (const doc of docs) {\n        const modules = Array.isArray(doc && doc.modules) ? doc.modules : [];\n        const index = modules.findIndex((module) => moduleMatchesCandidate(module, candidateId));\n        if (index >= 0) {\n            matchedDoc = doc;\n            matchedModuleIndex = index;\n            matchedBy = candidateId;\n            break;\n        }\n    }\n    if (matchedDoc) break;\n}\n\nlet matchedStationOnly = null;\nlet matchedStationBy = '';\nif (!matchedDoc) {\n    for (const candidateId of candidates) {\n        matchedStationOnly = docs.find((doc) => kioskMatchesCandidate(doc, candidateId)) || null;\n        if (matchedStationOnly) {\n            matchedStationBy = candidateId;\n            break;\n        }\n    }\n}\n\nconst versionNumber = parseVersionNumber(hardwareVersion);\n\nif (!matchedDoc && matchedStationOnly) {\n    const kioskDoc = clone(matchedStationOnly);\n    const docId = normalize(kioskDoc.provisionid || kioskDoc.id || kioskDoc._id);\n    if (!docId) {\n        node.error('Matched kiosk for client/con uuid ' + moduleId + ' has no provisionid/id to update', msg);\n        return null;\n    }\n\n    const modules = Array.isArray(kioskDoc.modules) ? kioskDoc.modules : [];\n    modules.forEach((module) => {\n        if (!module || String(module.id || '').startsWith('disabled')) return;\n        module.firmwareVersion = hardwareVersion;\n        module.fotaVersion = hardwareVersion;\n        module.firmwareVersionRaw = info.rawHardware || hardwareVersion;\n        module.firmwareVersionNumber = versionNumber;\n        module.firmwareVersionSource = 'client/con hardware';\n        module.firmwareVersionUpdatedAt = receivedAt;\n        module.clientCon = info;\n        module.lastSeenHardware = hardwareVersion;\n        module.lastSeenHardwareAt = receivedAt;\n    });\n\n    const hardware = kioskDoc.hardware && typeof kioskDoc.hardware === 'object' ? kioskDoc.hardware : {};\n    hardware.firmwareVersion = hardwareVersion;\n    hardware.fotaVersion = hardwareVersion;\n    hardware.mcuVersion = hardwareVersion;\n    hardware.firmwareVersionNumber = versionNumber;\n    hardware.firmwareVersionSource = 'client/con hardware';\n    hardware.firmwareVersionUpdatedAt = receivedAt;\n    hardware.lastClientCon = info;\n\n    msg.payload = {\n        path: 'kiosks/' + docId,\n        content: {\n            modules,\n            hardware,\n            firmwareVersion: hardwareVersion,\n            fotaVersion: hardwareVersion,\n            firmwareVersionNumber: versionNumber,\n            firmwareVersionUpdatedAt: receivedAt,\n            lastFirmwareCheckAt: receivedAt\n        }\n    };\n\n    node.warn('Captured client/con firmware for station ' + (kioskDoc.stationid || docId) + ' via ' + matchedStationBy + ': ' + hardwareVersion);\n    return msg;\n}\n\nif (!matchedDoc) {\n    msg.payload = {\n        path: 'pending/' + moduleId,\n        content: {\n            moduleId,\n            rawUuid: moduleId,\n            stationid: 'pending',\n            active: false,\n            firmwareVersion: hardwareVersion,\n            fotaVersion: hardwareVersion,\n            firmwareVersionNumber: versionNumber,\n            firmwareVersionSource: 'client/con hardware',\n            firmwareVersionUpdatedAt: receivedAt,\n            clientCon: info,\n            candidateModuleIds: candidates,\n            aliasHint: 'Set flow.clientConFirmwareModuleAliases if this auth uuid differs from the MQTT module id',\n            lastSeen: receivedAt\n        }\n    };\n    node.warn('Captured client/con firmware for pending module ' + moduleId + ': ' + hardwareVersion + ' candidates=' + candidates.join(','));\n    return msg;\n}\n\nconst kioskDoc = clone(matchedDoc);\nconst docId = normalize(kioskDoc.provisionid || kioskDoc.id || kioskDoc._id);\nif (!docId) {\n    node.error('Matched kiosk for module ' + moduleId + ' has no provisionid/id to update', msg);\n    return null;\n}\n\nconst modules = Array.isArray(kioskDoc.modules) ? kioskDoc.modules : [];\nconst targetModule = modules[matchedModuleIndex];\nif (!targetModule) {\n    node.error('Matched module index disappeared for ' + moduleId, msg);\n    return null;\n}\n\ntargetModule.firmwareVersion = hardwareVersion;\ntargetModule.fotaVersion = hardwareVersion;\ntargetModule.firmwareVersionRaw = info.rawHardware || hardwareVersion;\ntargetModule.firmwareVersionNumber = versionNumber;\ntargetModule.firmwareVersionSource = 'client/con hardware';\ntargetModule.firmwareVersionUpdatedAt = receivedAt;\ntargetModule.clientCon = info;\ntargetModule.clientConUuid = moduleId;\ntargetModule.lastSeenHardware = hardwareVersion;\ntargetModule.lastSeenHardwareAt = receivedAt;\n\nconst hardware = kioskDoc.hardware && typeof kioskDoc.hardware === 'object' ? kioskDoc.hardware : {};\nhardware.firmwareVersion = hardwareVersion;\nhardware.fotaVersion = hardwareVersion;\nhardware.mcuVersion = hardwareVersion;\nhardware.firmwareVersionNumber = versionNumber;\nhardware.firmwareVersionSource = 'client/con hardware';\nhardware.firmwareVersionUpdatedAt = receivedAt;\nhardware.lastClientCon = info;\n\nmsg.payload = {\n    path: 'kiosks/' + docId,\n    content: {\n        modules,\n        hardware,\n        firmwareVersion: hardwareVersion,\n        fotaVersion: hardwareVersion,\n        firmwareVersionNumber: versionNumber,\n        firmwareVersionUpdatedAt: receivedAt,\n        lastFirmwareCheckAt: receivedAt\n    }\n};\n\nnode.warn('Captured client/con firmware for ' + (kioskDoc.stationid || docId) + '/' + targetModule.id + ' via ' + matchedBy + ': ' + hardwareVersion);\nreturn msg;",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 820,
+    "y": 180,
+    "wires": [
+      [
+        "fw-clientcon-route-write-mode"
+      ]
+    ]
+  },
+  {
+    "id": "fw-clientcon-write",
+    "type": "google-cloud-firestore",
+    "z": "fw-clientcon-tab",
+    "g": "fw-clientcon-group",
+    "name": "Write firmware version",
+    "account": "",
+    "keyFilename": "/home/george/firestore/firestore-key.json",
+    "projectId": "node-red-alerts",
+    "mode": "update",
+    "x": 1280,
+    "y": 160,
+    "wires": [
+      [
+        "fw-clientcon-write-debug"
+      ]
+    ]
+  },
+  {
+    "id": "fw-clientcon-write-debug",
+    "type": "debug",
+    "z": "fw-clientcon-tab",
+    "g": "fw-clientcon-group",
+    "name": "firmware version write result",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1120,
+    "y": 260,
+    "wires": []
+  },
+  {
+    "id": "fw-clientcon-catch",
+    "type": "catch",
+    "z": "fw-clientcon-tab",
+    "g": "fw-clientcon-group",
+    "name": "Firmware capture errors",
+    "scope": [
+      "fw-clientcon-extract",
+      "fw-clientcon-query",
+      "fw-clientcon-build-write",
+      "fw-clientcon-write",
+      "fw-clientcon-route-write-mode",
+      "fw-clientcon-set-pending"
+    ],
+    "uncaught": false,
+    "x": 370,
+    "y": 260,
+    "wires": [
+      [
+        "fw-clientcon-error-debug"
+      ]
+    ]
+  },
+  {
+    "id": "fw-clientcon-error-debug",
+    "type": "debug",
+    "z": "fw-clientcon-tab",
+    "g": "fw-clientcon-group",
+    "name": "firmware capture error",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "error",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 640,
+    "y": 320,
+    "wires": []
+  },
+  {
+    "id": "fw-clientcon-route-write-mode",
+    "type": "function",
+    "z": "fw-clientcon-tab",
+    "g": "fw-clientcon-group",
+    "name": "Route firmware write mode",
+    "func": "const path = String(msg.payload && msg.payload.path || '').trim();\nif (path.startsWith('pending/')) {\n    return [null, msg];\n}\nreturn [msg, null];",
+    "outputs": 2,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1040,
+    "y": 180,
+    "wires": [
+      [
+        "fw-clientcon-write"
+      ],
+      [
+        "fw-clientcon-set-pending"
+      ]
+    ]
+  },
+  {
+    "id": "fw-clientcon-set-pending",
+    "type": "google-cloud-firestore",
+    "z": "fw-clientcon-tab",
+    "g": "fw-clientcon-group",
+    "name": "Create pending firmware report",
+    "account": "",
+    "keyFilename": "/home/george/firestore/firestore-key.json",
+    "projectId": "node-red-alerts",
+    "mode": "set",
+    "x": 1280,
+    "y": 220,
+    "wires": [
+      [
+        "fw-clientcon-set-pending-debug"
+      ]
+    ]
+  },
+  {
+    "id": "fw-clientcon-set-pending-debug",
+    "type": "debug",
+    "z": "fw-clientcon-tab",
+    "g": "fw-clientcon-group",
+    "name": "pending firmware report write result",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "payload",
+    "targetType": "msg",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1350,
+    "y": 280,
+    "wires": []
+  }
+]

@@ -1,0 +1,315 @@
+[
+  {
+    "id": "orig-fw-tab",
+    "type": "tab",
+    "label": "Firmware update - original static",
+    "disabled": false,
+    "info": "Node-RED-only firmware metadata flow. Reads the local 20260409-Chargerent-1.1.1.0-OU-FOTA.pac file from /home/george/.node-red/public/firmware and returns Besiter metadata in the shape {code,type,data,msg,time}, where data is filename,size,http://34.56.244.66:1880/firmware/filename."
+  },
+  {
+    "id": "orig-fw-group",
+    "type": "group",
+    "z": "orig-fw-tab",
+    "name": "Firmware update",
+    "style": {
+      "label": true
+    },
+    "nodes": [
+      "orig-fw-comment",
+      "orig-fw-mcu-in",
+      "orig-fw-mcu-file",
+      "orig-fw-mcu-build",
+      "orig-fw-mcu-response",
+      "orig-fw-mcu-debug",
+      "orig-fw-12b-in",
+      "orig-fw-12b-file",
+      "orig-fw-12b-build",
+      "orig-fw-12b-response",
+      "orig-fw-12b-debug",
+      "orig-fw-12m-in",
+      "orig-fw-12m-file",
+      "orig-fw-12m-build",
+      "orig-fw-12m-response",
+      "orig-fw-12m-debug"
+    ],
+    "x": 54,
+    "y": 39,
+    "w": 914,
+    "h": 302
+  },
+  {
+    "id": "orig-fw-comment",
+    "type": "comment",
+    "z": "orig-fw-tab",
+    "g": "orig-fw-group",
+    "name": "Static firmware metadata endpoints. /mcu, /12B, and /12M all return 20260409-Chargerent-1.1.1.0-OU-FOTA.pac.",
+    "info": "",
+    "x": 510,
+    "y": 80,
+    "wires": []
+  },
+  {
+    "id": "orig-fw-mcu-in",
+    "type": "http in",
+    "z": "orig-fw-tab",
+    "g": "orig-fw-group",
+    "name": "Firmware Update Info",
+    "url": "/api/iot/app/version/publish/mcu",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 180,
+    "y": 140,
+    "wires": [
+      [
+        "orig-fw-mcu-file"
+      ]
+    ]
+  },
+  {
+    "id": "orig-fw-mcu-file",
+    "type": "file in",
+    "z": "orig-fw-tab",
+    "g": "orig-fw-group",
+    "name": "Read PAC (as buffer)",
+    "filename": "/home/george/.node-red/public/firmware/20260409-Chargerent-1.1.1.0-OU-FOTA.pac",
+    "filenameType": "str",
+    "format": "",
+    "chunk": false,
+    "sendError": true,
+    "allProps": false,
+    "x": 420,
+    "y": 140,
+    "wires": [
+      [
+        "orig-fw-mcu-build"
+      ]
+    ]
+  },
+  {
+    "id": "orig-fw-mcu-build",
+    "type": "function",
+    "z": "orig-fw-tab",
+    "g": "orig-fw-group",
+    "name": "Build firmware metadata",
+    "func": "// Replace with your actual public IP\nconst fileName = \"20260409-Chargerent-1.1.1.0-OU-FOTA.pac\";\nconst fileUrl = \"http://34.56.244.66:1880/firmware/\" + fileName;\nconst fileSize = msg.payload.length;\n\nmsg.payload = {\n    code: 200,\n    type: 0,\n    data: `${fileName},${fileSize},${fileUrl}`,\n    msg: \"ok\",\n    time: Date.now()\n};\nreturn msg;",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 670,
+    "y": 140,
+    "wires": [
+      [
+        "orig-fw-mcu-response",
+        "orig-fw-mcu-debug"
+      ]
+    ]
+  },
+  {
+    "id": "orig-fw-mcu-response",
+    "type": "http response",
+    "z": "orig-fw-tab",
+    "g": "orig-fw-group",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 900,
+    "y": 140,
+    "wires": []
+  },
+  {
+    "id": "orig-fw-mcu-debug",
+    "type": "debug",
+    "z": "orig-fw-tab",
+    "g": "orig-fw-group",
+    "name": "firmware response",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "x": 900,
+    "y": 180,
+    "wires": []
+  },
+  {
+    "id": "orig-fw-12b-in",
+    "type": "http in",
+    "z": "orig-fw-tab",
+    "g": "orig-fw-group",
+    "name": "Firmware Update Info 12B",
+    "url": "/api/iot/app/version/publish/mcu/12B",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 190,
+    "y": 220,
+    "wires": [
+      [
+        "orig-fw-12b-file"
+      ]
+    ]
+  },
+  {
+    "id": "orig-fw-12b-file",
+    "type": "file in",
+    "z": "orig-fw-tab",
+    "g": "orig-fw-group",
+    "name": "Read PAC (as buffer)",
+    "filename": "/home/george/.node-red/public/firmware/20260409-Chargerent-1.1.1.0-OU-FOTA.pac",
+    "filenameType": "str",
+    "format": "",
+    "chunk": false,
+    "sendError": true,
+    "allProps": false,
+    "x": 420,
+    "y": 220,
+    "wires": [
+      [
+        "orig-fw-12b-build"
+      ]
+    ]
+  },
+  {
+    "id": "orig-fw-12b-build",
+    "type": "function",
+    "z": "orig-fw-tab",
+    "g": "orig-fw-group",
+    "name": "Build firmware metadata",
+    "func": "// Replace with your actual public IP\nconst fileName = \"20260409-Chargerent-1.1.1.0-OU-FOTA.pac\";\nconst fileUrl = \"http://34.56.244.66:1880/firmware/\" + fileName;\nconst fileSize = msg.payload.length;\n\nmsg.payload = {\n    code: 200,\n    type: 0,\n    data: `${fileName},${fileSize},${fileUrl}`,\n    msg: \"ok\",\n    time: Date.now()\n};\nreturn msg;",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 670,
+    "y": 220,
+    "wires": [
+      [
+        "orig-fw-12b-response",
+        "orig-fw-12b-debug"
+      ]
+    ]
+  },
+  {
+    "id": "orig-fw-12b-response",
+    "type": "http response",
+    "z": "orig-fw-tab",
+    "g": "orig-fw-group",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 900,
+    "y": 220,
+    "wires": []
+  },
+  {
+    "id": "orig-fw-12b-debug",
+    "type": "debug",
+    "z": "orig-fw-tab",
+    "g": "orig-fw-group",
+    "name": "firmware response",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "x": 900,
+    "y": 260,
+    "wires": []
+  },
+  {
+    "id": "orig-fw-12m-in",
+    "type": "http in",
+    "z": "orig-fw-tab",
+    "g": "orig-fw-group",
+    "name": "Firmware Update Info 12M",
+    "url": "/api/iot/app/version/publish/mcu/12M",
+    "method": "get",
+    "upload": false,
+    "swaggerDoc": "",
+    "x": 190,
+    "y": 300,
+    "wires": [
+      [
+        "orig-fw-12m-file"
+      ]
+    ]
+  },
+  {
+    "id": "orig-fw-12m-file",
+    "type": "file in",
+    "z": "orig-fw-tab",
+    "g": "orig-fw-group",
+    "name": "Read PAC (as buffer)",
+    "filename": "/home/george/.node-red/public/firmware/20260409-Chargerent-1.1.1.0-OU-FOTA.pac",
+    "filenameType": "str",
+    "format": "",
+    "chunk": false,
+    "sendError": true,
+    "allProps": false,
+    "x": 420,
+    "y": 300,
+    "wires": [
+      [
+        "orig-fw-12m-build"
+      ]
+    ]
+  },
+  {
+    "id": "orig-fw-12m-build",
+    "type": "function",
+    "z": "orig-fw-tab",
+    "g": "orig-fw-group",
+    "name": "Build firmware metadata",
+    "func": "// Replace with your actual public IP\nconst fileName = \"20260409-Chargerent-1.1.1.0-OU-FOTA.pac\";\nconst fileUrl = \"http://34.56.244.66:1880/firmware/\" + fileName;\nconst fileSize = msg.payload.length;\n\nmsg.payload = {\n    code: 200,\n    type: 0,\n    data: `${fileName},${fileSize},${fileUrl}`,\n    msg: \"ok\",\n    time: Date.now()\n};\nreturn msg;",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 670,
+    "y": 300,
+    "wires": [
+      [
+        "orig-fw-12m-response",
+        "orig-fw-12m-debug"
+      ]
+    ]
+  },
+  {
+    "id": "orig-fw-12m-response",
+    "type": "http response",
+    "z": "orig-fw-tab",
+    "g": "orig-fw-group",
+    "name": "",
+    "statusCode": "",
+    "headers": {},
+    "x": 900,
+    "y": 300,
+    "wires": []
+  },
+  {
+    "id": "orig-fw-12m-debug",
+    "type": "debug",
+    "z": "orig-fw-tab",
+    "g": "orig-fw-group",
+    "name": "firmware response",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "x": 900,
+    "y": 340,
+    "wires": []
+  }
+]

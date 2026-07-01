@@ -12,6 +12,7 @@ dist
 dist-ssr
 .codex-tmp
 *.local
+tmp/hq-vm.json
 
 # Env files
 .env

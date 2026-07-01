@@ -247,6 +247,28 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
 
         const lowercasedSearch = normalizeText(searchTerm);
 
+        // Search is an override: once a query is entered, ignore period/status/return-type filters.
+        if (lowercasedSearch) {
+            rentals = rentals.filter(r =>
+                textIncludes(r.rentalLocation, lowercasedSearch) ||
+                textIncludes(r.rentalPlace, lowercasedSearch) ||
+                textIncludes(r.rentalStationid, lowercasedSearch) ||
+                textIncludes(r.card_last4, lowercasedSearch) ||
+                textIncludes(r.sn, lowercasedSearch) ||
+                textIncludes(r.orderid, lowercasedSearch) ||
+                textIncludes(r.rawid, lowercasedSearch) ||
+                textIncludes(r.transactionid, lowercasedSearch) ||
+                textIncludes(r.transactionId, lowercasedSearch) ||
+                textIncludes(r.paymentSessionId, lowercasedSearch)
+            );
+
+            return rentals.sort((a, b) => {
+                const bTime = safeToDate(b.rentalTime)?.getTime() ?? 0;
+                const aTime = safeToDate(a.rentalTime)?.getTime() ?? 0;
+                return bTime - aTime;
+            });
+        }
+
         // Filter by period
         if (!referenceTime) return []; // Guard against undefined referenceTime
 
@@ -290,16 +312,6 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
         // Filter by returnType
         if (activeFilters.returnType && activeFilters.returnType !== 'all') {
             rentals = rentals.filter(r => r.returnType === activeFilters.returnType);
-        }
-
-        // Filter by search term
-        if (lowercasedSearch) {
-            rentals = rentals.filter(r =>
-                textIncludes(r.rentalLocation, lowercasedSearch) ||
-                textIncludes(r.rentalStationid, lowercasedSearch) ||
-                textIncludes(r.card_last4, lowercasedSearch) ||
-                textIncludes(r.sn, lowercasedSearch)
-            );
         }
 
         // Sort by most recent

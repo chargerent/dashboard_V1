@@ -23,6 +23,7 @@ const HTTP_FUNCTION_NAME_MAP = {
   media_assignPlaylist: 'media_httpAssignPlaylist',
   firmware_createUploadUrl: 'firmware_httpCreateUploadUrl',
   firmware_finalizeUpload: 'firmware_httpFinalizeUpload',
+  firmware_createUpdateSession: 'firmware_httpCreateUpdateSession',
   aiBooths_listEvents: 'aiBooths_httpListEvents',
   aiBooths_saveEvent: 'aiBooths_httpSaveEvent',
   aiBooths_saveInstall: 'aiBooths_httpSaveInstall',
