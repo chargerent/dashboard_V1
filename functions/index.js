@@ -10,6 +10,7 @@ const db = admin.firestore();
 const ELEVENLABS_API_KEY = defineSecret("ELEVENLABS_API_KEY");
 const EVENT_INTAKE_SECRET = defineSecret("EVENT_INTAKE_SECRET");
 const SLASH_GOLF_RAPIDAPI_KEY = defineSecret("SLASH_GOLF_RAPIDAPI_KEY");
+const GMAIL_APP_PASSWORD = defineSecret("GMAIL_APP_PASSWORD");
 const STORAGE_BUCKET = "node-red-alerts.firebasestorage.app";
 const STORAGE_BUCKET_CANDIDATES = Array.from(new Set([
   STORAGE_BUCKET,
@@ -18,6 +19,9 @@ const STORAGE_BUCKET_CANDIDATES = Array.from(new Set([
 ]));
 
 const AUTH_MAPPING_DOMAIN = "auth.charge.rent";
+const DEFAULT_DASHBOARD_LOGIN_URL = "https://chargerentstations.com/portal/";
+const LOGIN_INVITE_FROM_EMAIL = "solutions@charge.rent";
+const LOGIN_INVITE_FROM_NAME = "Chargerent";
 const STATION_SEQUENCE_START = 8000;
 const AI_BOOTH_STATION_SEQUENCE_START = 9000;
 const AI_BOOTH_KIOSK_TYPE = "CA36";
@@ -1936,6 +1940,15 @@ function normalizeUsername(u) {
 
 function isValidUsername(u) {
   return /^[a-z0-9._-]+$/.test(u);
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+}
+
+function getDashboardLoginUrl() {
+  return String(process.env.DASHBOARD_LOGIN_URL || DEFAULT_DASHBOARD_LOGIN_URL).trim() ||
+    DEFAULT_DASHBOARD_LOGIN_URL;
 }
 
 function buildCustomClaimsFromProfile(profile) {
@@ -7285,7 +7298,7 @@ async function upsertUserProfileImpl(data) {
   return { ok: true };
 }
 
-async function createAuthUserAndProfileImpl(data) {
+async function createAuthUserAndProfileImpl(data, authState = null) {
   const username = normalizeUsername(data?.username);
   const password = String(data?.password || "");
   const clientId = String(data?.clientId || "").trim().toUpperCase();
@@ -7377,7 +7390,13 @@ async function createAuthUserAndProfileImpl(data) {
     );
   }
 
-  return { ok: true, uid, email };
+  let credentialsEmailSent = false;
+  if (data?.sendCredentials === true) {
+    await sendLoginInviteImpl({uid, password}, authState);
+    credentialsEmailSent = true;
+  }
+
+  return { ok: true, uid, email, credentialsEmailSent };
 }
 
 async function setUserPasswordImpl(data) {
@@ -7390,6 +7409,191 @@ async function setUserPasswordImpl(data) {
 
   await admin.auth().updateUser(uid, { password });
   return { ok: true };
+}
+
+function escapeHtml(value) {
+  return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+}
+
+function generateLoginPassword() {
+  const alphabet = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%";
+  const bytes = crypto.randomBytes(18);
+  const password = Array.from(bytes)
+      .map((byte) => alphabet[byte % alphabet.length])
+      .join("");
+
+  return `Cr-${password}`;
+}
+
+function buildLoginInviteMessage({contactName, username, dashboardUrl, loginPassword}) {
+  const greeting = contactName ? `Hi ${contactName},` : "Hi,";
+  const subject = "Your Chargerent dashboard login";
+  const body = [
+    greeting,
+    "",
+    "Your Chargerent dashboard account is ready.",
+    "",
+    `Username: ${username}`,
+    `Password: ${loginPassword}`,
+    `Dashboard: ${dashboardUrl}`,
+    "",
+    "Use these credentials to sign in. Please keep this email secure.",
+    "",
+    "Chargerent",
+  ].join("\n");
+  const displayName = contactName || "there";
+  const html = [
+    "<!doctype html>",
+    "<html>",
+    "<body style=\"margin:0;background:#eef2f7;\">",
+    "<div style=\"font-family:Inter,Arial,sans-serif;background:#eef2f7;padding:32px;\">",
+    "<div style=\"max-width:600px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #dbe3ef;\">",
+    "<div style=\"background:#0f172a;padding:28px 32px;\">",
+    "<h1 style=\"margin:0;color:#ffffff;font-size:24px;line-height:1.25;\">Welcome to Chargerent</h1>",
+    "<p style=\"margin:8px 0 0;color:#cbd5e1;font-size:14px;\">Dashboard credentials</p>",
+    "</div>",
+    "<div style=\"padding:32px;\">",
+    `<p style="color:#334155;font-size:15px;line-height:1.6;margin:0 0 14px;">Hi ${escapeHtml(displayName)},</p>`,
+    "<p style=\"color:#334155;font-size:15px;line-height:1.6;margin:0 0 18px;\">Your Chargerent dashboard account is ready. Use the credentials below to sign in.</p>",
+    "<div style=\"background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin:24px 0;\">",
+    "<p style=\"margin:0 0 8px;color:#64748b;font-size:13px;\">Username</p>",
+    `<p style="margin:0;color:#0f172a;font-size:16px;font-weight:700;">${escapeHtml(username)}</p>`,
+    "<div style=\"height:14px;\"></div>",
+    "<p style=\"margin:0 0 8px;color:#64748b;font-size:13px;\">Password</p>",
+    `<p style="margin:0;color:#0f172a;font-size:16px;font-weight:700;">${escapeHtml(loginPassword)}</p>`,
+    "</div>",
+    `<a href="${escapeHtml(dashboardUrl)}" style="background:#16a34a;color:#ffffff;text-decoration:none;padding:14px 20px;border-radius:9px;font-weight:700;display:inline-block;">Open dashboard</a>`,
+    "<p style=\"margin-top:24px;color:#64748b;font-size:13px;line-height:1.5;\">",
+    "If the button does not work, paste this link into your browser:<br>",
+    `<a href="${escapeHtml(dashboardUrl)}" style="color:#2563eb;word-break:break-all;">${escapeHtml(dashboardUrl)}</a>`,
+    "</p>",
+    "<p style=\"margin-top:24px;color:#94a3b8;font-size:12px;line-height:1.5;\">Please keep this email secure. Your Chargerent contact can issue a new password if needed.</p>",
+    "</div>",
+    "</div>",
+    "</div>",
+    "</body>",
+    "</html>",
+  ].join("");
+
+  return {subject, body, html};
+}
+
+async function sendLoginInviteEmail({to, subject, body, html}) {
+  const password = String(process.env.GMAIL_APP_PASSWORD || "").trim();
+  if (!password) {
+    throw new functions.https.HttpsError(
+        "failed-precondition",
+        "GMAIL_APP_PASSWORD secret is not configured",
+    );
+  }
+
+  let nodemailer;
+  try {
+    nodemailer = require("nodemailer");
+  } catch (error) {
+    console.error("Unable to load nodemailer", {
+      message: error?.message || "unknown error",
+    });
+    throw new functions.https.HttpsError("internal", "Email sender is not installed");
+  }
+
+  const transporter = nodemailer.createTransport({
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true,
+    auth: {
+      user: LOGIN_INVITE_FROM_EMAIL,
+      pass: password,
+    },
+  });
+
+  return transporter.sendMail({
+    from: `${LOGIN_INVITE_FROM_NAME} <${LOGIN_INVITE_FROM_EMAIL}>`,
+    to,
+    subject,
+    text: body,
+    html,
+  });
+}
+
+async function sendLoginInviteImpl(data, authState) {
+  const uid = String(data?.uid || "").trim();
+  if (!uid) {
+    throw new functions.https.HttpsError("invalid-argument", "uid required");
+  }
+
+  const profileSnap = await db.collection("users").doc(uid).get();
+  if (!profileSnap.exists) {
+    throw new functions.https.HttpsError("not-found", "User profile not found");
+  }
+
+  const profile = profileSnap.data() || {};
+  const username = normalizeUsername(profile.username);
+  if (!username || !isValidUsername(username)) {
+    throw new functions.https.HttpsError("failed-precondition", "User profile is missing a valid username");
+  }
+
+  const contact = isPlainObject(profile.contact) ? profile.contact : {};
+  const contactEmail = String(contact.email || profile.contactEmail || "").trim();
+  if (!isValidEmail(contactEmail)) {
+    throw new functions.https.HttpsError("failed-precondition", "Add a valid contact email before sending an invite");
+  }
+
+  const authEmail = String(profile.authEmail || `${username}@${AUTH_MAPPING_DOMAIN}`).trim().toLowerCase();
+  const dashboardUrl = getDashboardLoginUrl();
+  const requestedPassword = String(data?.password || "").trim();
+  const loginPassword = requestedPassword || generateLoginPassword();
+  if (loginPassword.length < 12) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Password must be at least 12 characters.",
+    );
+  }
+
+  await admin.auth().updateUser(uid, {password: loginPassword});
+  const message = buildLoginInviteMessage({
+    contactName: String(contact.name || "").trim(),
+    username,
+    dashboardUrl,
+    loginPassword,
+  });
+  const emailResult = await sendLoginInviteEmail({
+    to: contactEmail,
+    subject: message.subject,
+    body: message.body,
+    html: message.html,
+  });
+
+  await db.collection("loginInvites").add({
+    uid,
+    username,
+    authEmail,
+    contactEmail,
+    sentByUid: authState?.uid || "",
+    sentByUsername: normalizeUsername(authState?.profile?.username),
+    delivery: "gmail",
+    messageId: String(emailResult?.messageId || ""),
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  return {
+    ok: true,
+    uid,
+    username,
+    contactEmail,
+    dashboardUrl,
+    delivery: "gmail",
+    messageId: String(emailResult?.messageId || ""),
+    email: {
+      to: contactEmail,
+      subject: message.subject,
+    },
+  };
 }
 
 async function trackLoginAttemptImpl(data, req = null) {
@@ -8189,13 +8393,20 @@ exports.admin_upsertUserProfile = functions.https.onCall(async (data, context) =
 });
 
 exports.admin_createAuthUserAndProfile = functions.https.onCall(async (data, context) => {
-  await assertAdminFromContext(context);
-  return createAuthUserAndProfileImpl(data);
+  const authState = await assertAdminFromContext(context);
+  return createAuthUserAndProfileImpl(data, authState);
 });
 
 exports.admin_setUserPassword = functions.https.onCall(async (data, context) => {
   await assertAdminFromContext(context);
   return setUserPasswordImpl(data);
+});
+
+exports.admin_sendLoginInvite = functions.runWith({
+  secrets: [GMAIL_APP_PASSWORD],
+}).https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  return sendLoginInviteImpl(data, authState);
 });
 
 exports.uiProfile_list = functions.https.onCall(async (data, context) => {
@@ -8532,14 +8743,22 @@ exports.admin_httpUpsertUserProfile = handleHttpFunction(async (data, req) => {
 });
 
 exports.admin_httpCreateAuthUserAndProfile = handleHttpFunction(async (data, req) => {
-  await assertAdmin(req, data);
-  return createAuthUserAndProfileImpl(data);
+  const authState = await assertAdmin(req, data);
+  return createAuthUserAndProfileImpl(data, authState);
 });
 
 exports.admin_httpSetUserPassword = handleHttpFunction(async (data, req) => {
   await assertAdmin(req, data);
   return setUserPasswordImpl(data);
 });
+
+exports.admin_httpSendLoginInvite = handleHttpFunction(
+    async (data, req) => {
+      const authState = await assertAdmin(req, data);
+      return sendLoginInviteImpl(data, authState);
+    },
+    {secrets: [GMAIL_APP_PASSWORD]},
+);
 
 exports.auth_httpTrackAttempt = handleHttpFunction(async (data, req) => (
   trackLoginAttemptImpl(data, req)

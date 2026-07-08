@@ -43,6 +43,10 @@ function AdminPage({
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [clientToDelete, setClientToDelete] = useState(null);
   const [firebaseUser, setFirebaseUser] = useState(auth.currentUser || null);
+  const [inviteBusyUid, setInviteBusyUid] = useState(null);
+  const [credentialsClient, setCredentialsClient] = useState(null);
+  const [credentialsPassword, setCredentialsPassword] = useState('');
+  const [credentialsError, setCredentialsError] = useState('');
 
   const isAdmin = currentUser?.role === 'admin' || currentUser?.username === 'chargerent';
   const canManageClients = isAdmin || currentUser?.commands?.['client edit'] === true;
@@ -182,12 +186,16 @@ function AdminPage({
         profile: stripUnsafeFields(finalData),
       });
       if (nextPassword) {
-        await callFunctionWithAuth('admin_setUserPassword', {
+        setSaveStatus({ state: 'sending', message: 'Sending login credentials...' });
+        await callFunctionWithAuth('admin_sendLoginInvite', {
           uid: finalData.uid,
           password: nextPassword,
         });
       }
-      setSaveStatus({ state: 'success', message: t('update_success') });
+      setSaveStatus({
+        state: 'success',
+        message: nextPassword ? 'Client updated and login credentials sent.' : t('update_success'),
+      });
       await fetchClients(); // refresh from source of truth
     } catch (e) {
       console.error(e);
@@ -211,14 +219,19 @@ function AdminPage({
     setSaveStatus({ state: 'sending', message: 'Creating client...' });
     try {
       await ensureSignedIn();
-      await callFunctionWithAuth('admin_createAuthUserAndProfile', {
+      const result = await callFunctionWithAuth('admin_createAuthUserAndProfile', {
         username,
         password,
         clientId,
         profile: stripUnsafeFields(profile),
+        sendCredentials: !!String(profile?.contact?.email || '').trim(),
       });
       setShowCreateClientForm(false);
-      setSaveStatus({ state: 'success', message: t('create_success') });
+      if (result?.credentialsEmailSent) {
+        setSaveStatus({ state: 'success', message: 'Client created and login credentials sent.' });
+      } else {
+        setSaveStatus({ state: 'success', message: t('create_success') });
+      }
       await fetchClients();
     } catch (e) {
       console.error(e);
@@ -304,6 +317,62 @@ function AdminPage({
     }
   };
 
+  const openInviteDraft = (email) => {
+    const params = new URLSearchParams({
+      subject: email.subject || 'Your Chargerent dashboard access',
+      body: email.body || '',
+    });
+    window.open(`mailto:${encodeURIComponent(email.to)}?${params.toString()}`, '_self');
+  };
+
+  const openCredentialsModal = (client) => {
+    if (!client?.uid || !canManageClients) return;
+    setCredentialsClient(client);
+    setCredentialsPassword('');
+    setCredentialsError('');
+  };
+
+  const closeCredentialsModal = () => {
+    setCredentialsClient(null);
+    setCredentialsPassword('');
+    setCredentialsError('');
+  };
+
+  const handleSendLoginInvite = async () => {
+    if (!credentialsClient?.uid || !canManageClients) return;
+
+    const nextPassword = credentialsPassword.trim();
+    if (nextPassword.length < 12) {
+      setCredentialsError('Password must be at least 12 characters.');
+      return;
+    }
+
+    setInviteBusyUid(credentialsClient.uid);
+    setSaveStatus({ state: 'sending', message: 'Setting password and sending credentials...' });
+
+    try {
+      await ensureSignedIn();
+      const result = await callFunctionWithAuth('admin_sendLoginInvite', {
+        uid: credentialsClient.uid,
+        password: nextPassword,
+      });
+      if (result?.delivery === 'mailto' && result?.email?.to) {
+        openInviteDraft(result.email);
+      }
+      closeCredentialsModal();
+      setSaveStatus({
+        state: 'success',
+        message: result?.delivery === 'mailto' ? 'Login credentials email draft opened.' : 'Password set and sent from solutions@charge.rent.',
+      });
+      await fetchClients();
+    } catch (e) {
+      console.error(e);
+      setSaveStatus({ state: 'error', message: e?.message || 'Failed to send login credentials.' });
+    } finally {
+      setInviteBusyUid(null);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gray-100">
       <ConfirmationModal
@@ -318,6 +387,47 @@ function AdminPage({
       />
 
       <CommandStatusToast status={saveStatus} onDismiss={() => setSaveStatus(null)} />
+
+      {credentialsClient && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+            <h2 className="text-lg font-semibold text-gray-900">Set and send password</h2>
+            <p className="mt-2 text-sm text-gray-600">
+              Enter the password for {credentialsClient.username}. This will set their Firebase login password and email it to their contact email.
+            </p>
+            <label className="mt-4 block text-sm font-medium text-gray-700">Password</label>
+            <input
+              className="mt-1 block w-full rounded-md border border-gray-300 p-2 shadow-sm"
+              minLength={12}
+              onChange={(event) => {
+                setCredentialsPassword(event.target.value);
+                setCredentialsError('');
+              }}
+              type="text"
+              value={credentialsPassword}
+            />
+            <p className="mt-1 text-xs text-gray-500">Minimum 12 characters.</p>
+            {credentialsError && <p className="mt-2 text-sm text-red-600">{credentialsError}</p>}
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                className="rounded-md bg-gray-200 px-4 py-2 font-semibold text-gray-800 hover:bg-gray-300"
+                onClick={closeCredentialsModal}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="rounded-md bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
+                disabled={inviteBusyUid === credentialsClient.uid}
+                onClick={handleSendLoginInvite}
+                type="button"
+              >
+                Send credentials
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <header className="bg-white shadow-sm">
         <div className="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
@@ -430,6 +540,8 @@ function AdminPage({
                           commandsList={commandsList}
                           lockoutData={loginAttempts[usernameKey] || loginAttempts[client.username] || null}
                           onUnlock={() => handleUnlockUser(client.username)}
+                          onSendLoginInvite={() => openCredentialsModal(client)}
+                          inviteBusy={inviteBusyUid === client.uid}
                           t={t}
                         />
                         );

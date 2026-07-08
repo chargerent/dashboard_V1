@@ -1,6 +1,7 @@
 // src/components/admin/ClientAdminCard.jsx
 
 import { useState, useEffect } from 'react';
+import { EnvelopeIcon } from '@heroicons/react/24/outline';
 import MultiSwitch from '../utils/MultiSwitch';
 
 const getRole = (account) => {
@@ -26,7 +27,7 @@ const getEffectiveAdminFeatures = (account, featuresList) => {
     };
 };
 
-const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsList, t, isEditing, editedData, onEdit, onCancel, onSave, onDataChange, onDelete, currentUser, lockoutData, onUnlock }) => {
+const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsList, t, isEditing, editedData, onEdit, onCancel, onSave, onDataChange, onDelete, currentUser, lockoutData, onUnlock, onSendLoginInvite, inviteBusy }) => {
     const [openSection, setOpenSection] = useState(null);
 
     useEffect(() => {
@@ -229,6 +230,7 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
             ? Object.fromEntries((commandsList || []).map(k => [k, true]))
             : { ...Object.fromEntries((commandsList || []).map(k => [k, false])), ...(client.commands || {}) };
         const contact = client.contact || {};
+        const canSendInvite = !!String(contact.email || '').trim() && !inviteBusy;
         const loginLogs = Array.isArray(lockoutData?.logs) ? [...lockoutData.logs].reverse() : [];
 
         return (
@@ -254,6 +256,15 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
                                 </span>
                             )}
                         </div>                        <div className="flex items-center gap-2">
+                            <button
+                                onClick={onSendLoginInvite}
+                                className="p-1.5 rounded-full text-gray-400 hover:bg-blue-100 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-gray-400"
+                                title={contact.email ? (inviteBusy ? t('sending_login_credentials') : t('set_and_send_login_credentials')) : t('missing_contact_email')}
+                                type="button"
+                                disabled={!canSendInvite}
+                            >
+                                <EnvelopeIcon className="h-4 w-4" aria-hidden="true" />
+                            </button>
                             <button onClick={() => onEdit(client.username)} className="p-1.5 rounded-full text-gray-400 hover:bg-gray-200 hover:text-gray-600" title={t('edit_client')}>
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L14.732 3.732z" /></svg>
                             </button>

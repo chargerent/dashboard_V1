@@ -6,6 +6,7 @@ const HTTP_FUNCTION_NAME_MAP = {
   admin_upsertUserProfile: 'admin_httpUpsertUserProfile',
   admin_createAuthUserAndProfile: 'admin_httpCreateAuthUserAndProfile',
   admin_setUserPassword: 'admin_httpSetUserPassword',
+  admin_sendLoginInvite: 'admin_httpSendLoginInvite',
   admin_unlockUser: 'admin_httpUnlockUser',
   auth_trackAttempt: 'auth_httpTrackAttempt',
   auth_syncOwnClaims: 'auth_httpSyncOwnClaims',

@@ -34,6 +34,8 @@ const getReportReturnType = (rental) => String(rental?.reportingReturnType || re
 
 const getReportRentalPeriod = (rental) => Number(rental?.reportingRentalPeriod ?? rental?.rentalPeriod);
 
+const normalizeReportLocation = (location) => String(location || '').trim().toLowerCase();
+
 const normalizeRentalForReporting = (rental) => {
     const reportingPeriod = getReportRentalPeriod(rental);
     const hasReportingOverride = rental.reportingTimeOverride ||
@@ -103,6 +105,7 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
     const [kioskLabelOverrides, setKioskLabelOverrides] = useState(null);
     const [editingLabelIndex, setEditingLabelIndex] = useState(null);
     const chartsRef = useRef(null);
+    const canFilterKioskVersions = !!clientInfo?.isAdmin || String(clientInfo?.role || '').toLowerCase() === 'partner';
     const hasLocationSelection = userMode || selectedLocations.length > 0;
     const hasKioskSelection = selectedKiosks.length > 0;
     const canChooseKiosks = hasLocationSelection;
@@ -193,6 +196,13 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
     useEffect(() => {
         resetFilters();
     }, []);
+
+    useEffect(() => {
+        if (!canFilterKioskVersions) {
+            setShowV1Kiosks(true);
+            setShowV2Kiosks(true);
+        }
+    }, [canFilterKioskVersions]);
 
     // Fetch rental data from Firestore for the selected date range.
     // The App.jsx rentalData is limited to 30 days; this allows arbitrary historical reporting.
@@ -319,11 +329,23 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
         }
     }, [selectedKiosks]);
 
-    const stationToLocationMap = useMemo(() => {
+    const currentKioskLocationById = useMemo(() => {
         const map = new Map();
-        allStationsData.forEach(station => map.set(station.stationid, station.info.location));
+        clientKiosks.forEach(kiosk => {
+            const stationId = String(kiosk.stationid || '').trim();
+            const location = normalizeReportLocation(kiosk.info?.location);
+            if (stationId && location) {
+                map.set(stationId, location);
+            }
+        });
         return map;
-    }, [allStationsData]);
+    }, [clientKiosks]);
+
+    const selectedKioskIds = useMemo(() => new Set(selectedKiosks.map(kioskId => String(kioskId || '').trim())), [selectedKiosks]);
+
+    const selectedLocationKeys = useMemo(() => (
+        new Set(selectedLocations.map(normalizeReportLocation).filter(Boolean))
+    ), [selectedLocations]);
 
     const activeRentalData = uploadedRentalData || fetchedRentalData || rentalData;
 
@@ -349,22 +371,31 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
             const isBeforeEndDate = end ? rentalDate <= end : true;
             if (!isAfterStartDate || !isBeforeEndDate) return false;
 
+            const rentalStationId = String(rental.rentalStationid || '').trim();
+            const rentalLocation = normalizeReportLocation(rental.rentalLocation);
+            const matchesCurrentKioskLocation = () => {
+                // Do not fall back to station metadata; moved kiosks can reuse station IDs.
+                const currentLocation = currentKioskLocationById.get(rentalStationId);
+                if (!currentLocation) return false;
+                return rentalLocation === currentLocation;
+            };
+
             if (selectedKiosks.length > 0) {
-                return selectedKiosks.includes(rental.rentalStationid);
+                if (!selectedKioskIds.has(rentalStationId)) return false;
+                return matchesCurrentKioskLocation();
             }
             if (selectedLocations.length > 0) {
-                // For uploaded data, the location might be directly on the rental object.
-                const rentalLocation = rental.rentalLocation || stationToLocationMap.get(rental.rentalStationid);
-                return selectedLocations.includes(rentalLocation);
+                return Boolean(rentalLocation && selectedLocationKeys.has(rentalLocation));
             }
             // In user mode, restrict to the user's own kiosks to prevent data leakage
             if (userMode) {
-                const clientKioskIds = new Set(clientKiosks.map(k => k.stationid));
-                return clientKioskIds.has(rental.rentalStationid);
+                const clientKioskIds = new Set(clientKiosks.map(k => String(k.stationid || '').trim()));
+                if (!clientKioskIds.has(rentalStationId)) return false;
+                return matchesCurrentKioskLocation();
             }
             return true; // No location or kiosk filter applied (admin/partner)
         }).map(normalizeRentalForReporting);
-    }, [activeRentalData, selectedLocations, selectedKiosks, startDate, endDate, stationToLocationMap, userMode, clientKiosks, reportReady]);
+    }, [activeRentalData, selectedLocations, selectedKiosks, startDate, endDate, currentKioskLocationById, selectedKioskIds, selectedLocationKeys, userMode, clientKiosks, reportReady]);
 
     const originalTotalRentals = filteredRentals.length;
     const adjustedTotalRentals = Math.round(originalTotalRentals * (adjustmentPercentage / 100));
@@ -712,28 +743,30 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                             )}
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">{t('kiosk')}</label>
-                                <div className="mt-1 flex items-center gap-4">
-                                    <div className="flex items-center">
-                                        <input
-                                            id="reporting-show-v1"
-                                            type="checkbox"
-                                            checked={showV1Kiosks}
-                                            onChange={(e) => setShowV1Kiosks(e.target.checked)}
-                                            className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                                        />
-                                        <label htmlFor="reporting-show-v1" className="ml-2 text-sm text-gray-900">V1</label>
+                                {canFilterKioskVersions && (
+                                    <div className="mt-1 flex items-center gap-4">
+                                        <div className="flex items-center">
+                                            <input
+                                                id="reporting-show-v1"
+                                                type="checkbox"
+                                                checked={showV1Kiosks}
+                                                onChange={(e) => setShowV1Kiosks(e.target.checked)}
+                                                className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                            />
+                                            <label htmlFor="reporting-show-v1" className="ml-2 text-sm text-gray-900">V1</label>
+                                        </div>
+                                        <div className="flex items-center">
+                                            <input
+                                                id="reporting-show-v2"
+                                                type="checkbox"
+                                                checked={showV2Kiosks}
+                                                onChange={(e) => setShowV2Kiosks(e.target.checked)}
+                                                className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+                                            />
+                                            <label htmlFor="reporting-show-v2" className="ml-2 text-sm text-gray-900">V2</label>
+                                        </div>
                                     </div>
-                                    <div className="flex items-center">
-                                        <input
-                                            id="reporting-show-v2"
-                                            type="checkbox"
-                                            checked={showV2Kiosks}
-                                            onChange={(e) => setShowV2Kiosks(e.target.checked)}
-                                            className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                                        />
-                                        <label htmlFor="reporting-show-v2" className="ml-2 text-sm text-gray-900">V2</label>
-                                    </div>
-                                </div>
+                                )}
                                 <select multiple size={15} value={selectedKiosks} onChange={e => handleKioskSelectionChange(Array.from(e.target.selectedOptions, option => option.value))} className="mt-1 block w-full border border-gray-300 rounded-md disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed" disabled={!canChooseKiosks}>
                                     {availableKiosksForFilter.map(kiosk => <option key={kiosk.stationid} value={kiosk.stationid}>{kiosk.stationid} - {kiosk.info.place}</option>)}
                                 </select>
