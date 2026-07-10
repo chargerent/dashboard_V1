@@ -1,6 +1,6 @@
 // src/pages/AdminPage.jsx
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { PaintBrushIcon, SparklesIcon } from '@heroicons/react/24/outline';
+import { BanknotesIcon, PaintBrushIcon, SparklesIcon } from '@heroicons/react/24/outline';
 import ConfirmationModal from '../components/UI/ConfirmationModal.jsx';
 import LoadingSpinner from '../components/UI/LoadingSpinner.jsx';
 import ClientAdminCard from './ClientAdminCard.jsx';
@@ -15,6 +15,17 @@ import { collection, getDocs } from 'firebase/firestore';
 // permission keys
 const featuresList = ['rentals', 'details', 'stationid', 'address', 'status', 'reporting', 'lease_revenue', 'rental_counts', 'rental_revenue', 'client_commission', 'rep_commission', 'search', 'media', 'ui_editor', 'binding', 'testing'];
 const commandsList = ['edit', 'lock', 'eject', 'eject_multiple', 'updates', 'connectivity', 'reboot', 'reload', 'audio', 'disable', 'client edit'];
+const paymentAdminEmails = {
+  arthur: 'arthur@charge.rent',
+  george: 'george@charge.rent',
+};
+
+const getContactEmail = (client) => String(client?.contact?.email || client?.contactEmail || '').trim();
+const getCredentialsCcEmail = (client) => {
+  const selectedAdmin = String(client?.paymentAdmin || 'george').trim().toLowerCase();
+  const ccEmail = paymentAdminEmails[selectedAdmin] || paymentAdminEmails.george;
+  return ccEmail.toLowerCase() === getContactEmail(client).toLowerCase() ? '' : ccEmail;
+};
 
 function AdminPage({
   onNavigateToDashboard,
@@ -26,6 +37,7 @@ function AdminPage({
   onNavigateToMedia,
   onNavigateToUiProfiles,
   onNavigateToAiBooths,
+  onNavigateToPayouts,
   currentUser,
 }) {
   const [clients, setClients] = useState([]);
@@ -205,7 +217,7 @@ function AdminPage({
   };
 
   // ---- create ----
-  const handleCreateClient = async ({ username, password, clientId, profile }) => {
+  const handleCreateClient = async ({ username, password, clientId, profile, sendCredentials }) => {
     if (!canManageClients) return;
     setSaveStatus(null);
 
@@ -224,7 +236,7 @@ function AdminPage({
         password,
         clientId,
         profile: stripUnsafeFields(profile),
-        sendCredentials: !!String(profile?.contact?.email || '').trim(),
+        sendCredentials: sendCredentials === true,
       });
       setShowCreateClientForm(false);
       if (result?.credentialsEmailSent) {
@@ -395,6 +407,10 @@ function AdminPage({
             <p className="mt-2 text-sm text-gray-600">
               Enter the password for {credentialsClient.username}. This will set their Firebase login password and email it to their contact email.
             </p>
+            <div className="mt-4 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-700">
+              <p><span className="font-semibold">To:</span> {getContactEmail(credentialsClient) || 'No contact email'}</p>
+              <p><span className="font-semibold">CC:</span> {getCredentialsCcEmail(credentialsClient) || 'None'}</p>
+            </div>
             <label className="mt-4 block text-sm font-medium text-gray-700">Password</label>
             <input
               className="mt-1 block w-full rounded-md border border-gray-300 p-2 shadow-sm"
@@ -455,6 +471,12 @@ function AdminPage({
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
                 </svg>
+              </button>
+            )}
+
+            {isAdmin && (
+              <button onClick={onNavigateToPayouts} className="p-2 rounded-md bg-emerald-100 text-emerald-700 hover:bg-emerald-200" title="Payouts">
+                <BanknotesIcon className="h-6 w-6" />
               </button>
             )}
 

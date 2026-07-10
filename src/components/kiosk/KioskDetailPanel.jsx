@@ -838,13 +838,13 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
 
         return (
             <div
-                className={`relative min-h-[40px] rounded-md border p-0.5 text-left transition-all duration-300 ${style.className} ${style.glow ? 'slot-glow' : ''}`}
+                className={`relative min-h-[52px] rounded-md border p-0.5 text-left transition-all duration-300 ${style.className} ${style.glow ? 'slot-glow' : ''}`}
                 data-kiosk-slot-debug="true"
                 data-kiosk-stationid={kiosk.stationid}
                 data-kiosk-moduleid={module.id}
                 data-kiosk-slotid={slot.position}
             >
-                <div className="flex h-full w-full min-w-0 items-start gap-1.5 rounded-md px-2 py-0.5 pr-7">
+                <div className="grid h-full w-full min-w-0 grid-cols-1 rounded-md px-2 py-1 pr-7">
                     <button
                         type="button"
                         data-kiosk-action="compact slot eject"
@@ -868,22 +868,19 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                             }
                         }}
                         disabled={!canEject || !isOnline || !hasCharger}
-                        className="flex min-w-0 flex-grow items-start gap-1.5 disabled:cursor-not-allowed"
+                        className="flex min-w-0 items-start gap-1.5 text-left disabled:cursor-not-allowed"
                         title={hasCharger ? `SN ${slot.sn}` : `Slot ${displayPosition || slot.position}`}
                     >
-                        <div className="flex w-7 flex-col items-center justify-center pt-0.5">
+                        <div className="flex w-7 shrink-0 flex-col items-center justify-center pt-0.5">
                             <span className="text-[10px] font-mono leading-none text-gray-500">
                                 {String(displayPosition || slot.position).padStart(2, '0')}
                             </span>
                             <StatusIndicator status={slot.sstat} />
                         </div>
-                        <div className="flex min-w-0 flex-col pt-0.5">
+                        <div className="flex min-w-0 flex-col pt-0.5 text-left">
                             <span className="flex items-center gap-1 text-[13px] font-bold leading-none">
                                 <span>{hasCharger ? `${slot.batteryLevel}%` : '—'}</span>
                                 <ChargeStatusIndicator slot={slot} />
-                            </span>
-                            <span className="truncate font-mono text-[9px] leading-tight text-gray-500">
-                                {'\u00A0'}
                             </span>
                         </div>
                     </button>
@@ -895,11 +892,17 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                             data-kiosk-moduleid={module.id}
                             data-kiosk-slotid={slot.position}
                             onClick={(event) => handleNavigateToCharger(event, slot.sn)}
-                            className="absolute right-7 top-1.5 truncate font-mono text-[9px] leading-tight text-sky-700 underline decoration-sky-300 underline-offset-2 hover:text-sky-900"
+                            className="ml-[34px] mt-0.5 block min-w-0 truncate text-left font-mono text-[9px] leading-tight text-sky-700 underline decoration-sky-300 underline-offset-2 hover:text-sky-900"
                             title={`${t('chargers_page_title')}: ${slot.sn}`}
+                            aria-label={`${t('chargers_page_title')}: ${slot.sn}`}
                         >
                             {slot.sn}
                         </button>
+                    )}
+                    {!hasCharger && (
+                        <span className="ml-[34px] mt-0.5 block font-mono text-[9px] leading-tight text-gray-500">
+                            {'\u00A0'}
+                        </span>
                     )}
                 </div>
 
@@ -1087,7 +1090,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                         </div>
                     </div>
 
-                    <div className="grid w-full gap-3 xl:grid-cols-2">
+                    <div className="grid w-full grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-3">
                         <div className="flex flex-col gap-2">
                             {leftColumnIndices.map((groupIndex) => (
                                 <CompactGroupCard key={groupIndex} slotsByPosition={slotsByPosition} groupIndex={groupIndex} />

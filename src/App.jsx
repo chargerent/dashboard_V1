@@ -36,6 +36,7 @@ const TestingPage = lazy(() => import('./pages/TestingPage.jsx'));
 const MediaPage = lazy(() => import('./pages/MediaPage.jsx'));
 const UiProfilesPage = lazy(() => import('./pages/UiProfilesPage.jsx'));
 const AiBoothsPage = lazy(() => import('./pages/AiBoothsPage.jsx'));
+const PayoutsPage = lazy(() => import('./pages/PayoutsPage.jsx'));
 
 function moduleMatchesResponse(module, moduleRef) {
   const moduleId = String(module?.id || '').trim();
@@ -2149,6 +2150,21 @@ function App() {
             onNavigateToMedia={() => setPage('media')}
             onNavigateToUiProfiles={() => setPage('ui-profiles')}
             onNavigateToAiBooths={() => setPage('ai-booths')}
+            onNavigateToPayouts={() => setPage('payouts')}
+            currentUser={clientInfo}
+            t={t}
+          />
+        );
+      case 'payouts':
+        if (!clientInfo.isAdmin) {
+          return dashboard;
+        }
+
+        return (
+          <PayoutsPage
+            onLogout={handleLogout}
+            onNavigateToDashboard={() => setPage('dashboard')}
+            onNavigateToAdmin={() => setPage('admin')}
             currentUser={clientInfo}
             t={t}
           />

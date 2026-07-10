@@ -4,6 +4,22 @@ import { useState, useEffect } from 'react';
 import { EnvelopeIcon } from '@heroicons/react/24/outline';
 import MultiSwitch from '../utils/MultiSwitch';
 
+const REVENUE_MODEL_OPTIONS = [
+    { value: 'lease', label: 'Lease' },
+    { value: 'purchase', label: 'Purchase' },
+];
+
+const PAYMENT_SCHEDULE_OPTIONS = [
+    { value: 'monthly', label: 'Monthly' },
+    { value: 'quarterly', label: 'Quarterly' },
+    { value: 'yearly', label: 'Yearly' },
+];
+
+const PAYMENT_ADMIN_OPTIONS = [
+    { value: 'arthur', label: 'Arthur', email: 'arthur@charge.rent' },
+    { value: 'george', label: 'George', email: 'george@charge.rent' },
+];
+
 const getRole = (account) => {
     const username = String(account?.username || '').trim().toLowerCase();
     const role = String(account?.role || '').trim().toLowerCase();
@@ -12,6 +28,19 @@ const getRole = (account) => {
     if (username === 'chargerent') return 'admin';
     if (account?.partner) return 'partner';
     return 'user';
+};
+
+const normalizeRevenueModel = (value) => (
+    String(value || '').trim().toLowerCase() === 'purchase' ? 'purchase' : 'lease'
+);
+
+const formatOptionLabel = (options, value, fallback = 'N/A') => (
+    options.find((option) => option.value === value)?.label || fallback
+);
+
+const getPaymentAdminLabel = (value) => {
+    const admin = PAYMENT_ADMIN_OPTIONS.find((option) => option.value === value);
+    return admin ? `${admin.label} (${admin.email})` : 'N/A';
 };
 
 const getEffectiveAdminFeatures = (account, featuresList) => {
@@ -107,6 +136,9 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
         const role = getRole(editedData);
         const isAdminRole = role === 'admin';
         const isPartnerRole = role === 'partner';
+        const revenueModel = normalizeRevenueModel(editedData.revShareModel);
+        const showClientPayoutFields = !isAdminRole && !isPartnerRole && revenueModel === 'purchase';
+        const showPayoutFields = isPartnerRole || showClientPayoutFields;
         const allFeatures = isAdminRole
             ? getEffectiveAdminFeatures(editedData, featuresList)
             : { ...Object.fromEntries(featuresList.map(k => [k, false])), ...(editedData.features || {}) };
@@ -140,6 +172,9 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
                                     const nextRole = e.target.value;
                                     onDataChange('role', nextRole);
                                     onDataChange('partner', nextRole === 'partner');
+                                    if (nextRole === 'admin') {
+                                        onDataChange('revShareModel', 'lease');
+                                    }
                                 }}
                                 className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
                             >
@@ -161,10 +196,52 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
                             <label className="block text-sm font-medium text-gray-700">Contact Email</label>
                             <input type="email" value={editedData.contact?.email || ''} onChange={(e) => onDataChange('contact.email', e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
                         </div>
-                        {isPartnerRole && (
+                        {!isAdminRole && !isPartnerRole && (
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Revenue Model</label>
+                                <select
+                                    value={revenueModel}
+                                    onChange={(e) => onDataChange('revShareModel', e.target.value)}
+                                    className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
+                                >
+                                    {REVENUE_MODEL_OPTIONS.map((option) => (
+                                        <option key={option.value} value={option.value}>{option.label}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        )}
+                        {showPayoutFields && (
                             <div className="border-t pt-3">
                                 <label className="block text-sm font-medium text-gray-700">{t('rev_share_percentage')}</label>
                                 <input type="number" value={editedData.commission || ''} onChange={(e) => onDataChange('commission', e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" min="0" max="100" step="0.1" />
+                            </div>
+                        )}
+                        {showPayoutFields && (
+                            <div className="grid grid-cols-1 gap-3 border-t pt-3 sm:grid-cols-2">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Payment Schedule</label>
+                                    <select
+                                        value={editedData.paymentSchedule || 'monthly'}
+                                        onChange={(e) => onDataChange('paymentSchedule', e.target.value)}
+                                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
+                                    >
+                                        {PAYMENT_SCHEDULE_OPTIONS.map((option) => (
+                                            <option key={option.value} value={option.value}>{option.label}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700">Payment Admin</label>
+                                    <select
+                                        value={editedData.paymentAdmin || 'george'}
+                                        onChange={(e) => onDataChange('paymentAdmin', e.target.value)}
+                                        className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
+                                    >
+                                        {PAYMENT_ADMIN_OPTIONS.map((option) => (
+                                            <option key={option.value} value={option.value}>{option.label} - {option.email}</option>
+                                        ))}
+                                    </select>
+                                </div>
                             </div>
                         )}
                         {showActiveToggle && (
@@ -223,6 +300,9 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
         const role = getRole(client);
         const isAdminRole = role === 'admin';
         const isPartnerRole = role === 'partner';
+        const revenueModel = normalizeRevenueModel(client.revShareModel);
+        const showClientPayoutFields = !isAdminRole && !isPartnerRole && revenueModel === 'purchase';
+        const showPayoutFields = isPartnerRole || showClientPayoutFields;
         const allFeatures = isAdminRole
             ? getEffectiveAdminFeatures(client, featuresList)
             : { ...Object.fromEntries((featuresList || []).map(k => [k, false])), ...(client.features || {}) };
@@ -277,6 +357,19 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
                     <div className="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-600">
                         <p><strong>Contact:</strong> {contact.name || 'N/A'}</p>
                         <p><strong>Email:</strong> {contact.email || 'N/A'}</p>
+                        {!isAdminRole && !isPartnerRole && (
+                            <p><strong>Revenue Model:</strong> {formatOptionLabel(REVENUE_MODEL_OPTIONS, revenueModel)}</p>
+                        )}
+                        {isPartnerRole && (
+                            <p><strong>Revenue Model:</strong> Purchase + Lease</p>
+                        )}
+                        {showPayoutFields && (
+                            <>
+                                <p><strong>Rev Share:</strong> {Number(client.revShare ?? client.commission) > 0 ? `${client.revShare ?? client.commission}%` : 'Station %'}</p>
+                                <p><strong>Payment Schedule:</strong> {formatOptionLabel(PAYMENT_SCHEDULE_OPTIONS, client.paymentSchedule || 'monthly')}</p>
+                                <p><strong>Payment Admin:</strong> {getPaymentAdminLabel(client.paymentAdmin || 'george')}</p>
+                            </>
+                        )}
                     </div>
                 </div>
                 {showActiveToggle && (

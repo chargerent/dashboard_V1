@@ -1,5 +1,6 @@
 /* eslint-env node */
 const {onCall, onRequest, HttpsError} = require("firebase-functions/v2/https");
+const {onSchedule} = require("firebase-functions/v2/scheduler");
 const {defineSecret} = require("firebase-functions/params");
 const crypto = require("node:crypto");
 const admin = require("firebase-admin");
@@ -22,6 +23,10 @@ const AUTH_MAPPING_DOMAIN = "auth.charge.rent";
 const DEFAULT_DASHBOARD_LOGIN_URL = "https://chargerentstations.com/portal/";
 const LOGIN_INVITE_FROM_EMAIL = "solutions@charge.rent";
 const LOGIN_INVITE_FROM_NAME = "Chargerent";
+const LOGIN_INVITE_CC_ADMINS = {
+  arthur: "arthur@charge.rent",
+  george: "george@charge.rent",
+};
 const STATION_SEQUENCE_START = 8000;
 const AI_BOOTH_STATION_SEQUENCE_START = 9000;
 const AI_BOOTH_KIOSK_TYPE = "CA36";
@@ -1797,7 +1802,7 @@ function serializeAiBoothIntakeSubmission(snapshot) {
   };
 }
 
-function serializeTimestamp(value) {
+function serializePayoutTimestamp(value) {
   if (value && typeof value.toDate === "function") {
     return value.toDate().toISOString();
   }
@@ -7483,7 +7488,18 @@ function buildLoginInviteMessage({contactName, username, dashboardUrl, loginPass
   return {subject, body, html};
 }
 
-async function sendLoginInviteEmail({to, subject, body, html}) {
+function getLoginInviteCcEmail(profile, contactEmail) {
+  const selectedAdmin = String(profile?.paymentAdmin || "george")
+      .trim()
+      .toLowerCase();
+  const ccEmail = LOGIN_INVITE_CC_ADMINS[selectedAdmin] || LOGIN_INVITE_CC_ADMINS.george;
+  if (ccEmail.toLowerCase() === String(contactEmail || "").trim().toLowerCase()) {
+    return "";
+  }
+  return ccEmail;
+}
+
+async function sendLoginInviteEmail({to, cc, subject, body, html}) {
   const password = String(process.env.GMAIL_APP_PASSWORD || "").trim();
   if (!password) {
     throw new functions.https.HttpsError(
@@ -7515,10 +7531,41 @@ async function sendLoginInviteEmail({to, subject, body, html}) {
   return transporter.sendMail({
     from: `${LOGIN_INVITE_FROM_NAME} <${LOGIN_INVITE_FROM_EMAIL}>`,
     to,
+    cc: cc || undefined,
     subject,
     text: body,
     html,
   });
+}
+
+async function appendClientCredentialEmailLog({username, contactEmail, ccEmail, authState, messageId}) {
+  const normalizedUsername = normalizeUsername(username);
+  if (!normalizedUsername || !isValidUsername(normalizedUsername)) return;
+
+  const sentByUsername = normalizeUsername(authState?.profile?.username);
+  const noteParts = [`Login credentials emailed to ${contactEmail}`];
+  if (ccEmail) noteParts.push(`cc ${ccEmail}`);
+  if (sentByUsername) noteParts.push(`sent by ${sentByUsername}`);
+
+  const ref = db.collection("loginAttempts").doc(normalizedUsername);
+  const snap = await ref.get();
+  const existing = snap.exists ? (snap.data() || {}) : {};
+  const logs = Array.isArray(existing.logs) ? existing.logs : [];
+  const credentialLog = {
+    timestamp: new Date().toISOString(),
+    success: true,
+    note: `${noteParts.join(" · ")}.`,
+    type: "login_credentials_sent",
+    sentTo: contactEmail,
+    sentCc: ccEmail || "",
+    sentByUid: authState?.uid || "",
+    sentByUsername,
+    messageId: String(messageId || ""),
+  };
+
+  await ref.set({
+    logs: [...logs, credentialLog].slice(-50),
+  }, {merge: true});
 }
 
 async function sendLoginInviteImpl(data, authState) {
@@ -7545,6 +7592,7 @@ async function sendLoginInviteImpl(data, authState) {
   }
 
   const authEmail = String(profile.authEmail || `${username}@${AUTH_MAPPING_DOMAIN}`).trim().toLowerCase();
+  const ccEmail = getLoginInviteCcEmail(profile, contactEmail);
   const dashboardUrl = getDashboardLoginUrl();
   const requestedPassword = String(data?.password || "").trim();
   const loginPassword = requestedPassword || generateLoginPassword();
@@ -7564,6 +7612,7 @@ async function sendLoginInviteImpl(data, authState) {
   });
   const emailResult = await sendLoginInviteEmail({
     to: contactEmail,
+    cc: ccEmail,
     subject: message.subject,
     body: message.body,
     html: message.html,
@@ -7574,6 +7623,7 @@ async function sendLoginInviteImpl(data, authState) {
     username,
     authEmail,
     contactEmail,
+    ccEmail,
     sentByUid: authState?.uid || "",
     sentByUsername: normalizeUsername(authState?.profile?.username),
     delivery: "gmail",
@@ -7581,19 +7631,691 @@ async function sendLoginInviteImpl(data, authState) {
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
 
+  try {
+    await appendClientCredentialEmailLog({
+      username,
+      contactEmail,
+      ccEmail,
+      authState,
+      messageId: emailResult?.messageId,
+    });
+  } catch (error) {
+    console.error("Failed to write login credential email client log", {
+      uid,
+      username,
+      message: error?.message || "unknown error",
+    });
+  }
+
   return {
     ok: true,
     uid,
     username,
     contactEmail,
+    ccEmail,
     dashboardUrl,
     delivery: "gmail",
     messageId: String(emailResult?.messageId || ""),
     email: {
       to: contactEmail,
+      cc: ccEmail,
       subject: message.subject,
     },
   };
+}
+
+const PAYOUT_REPORTS_COLLECTION = "payoutReports";
+const PAYOUT_TIMEZONE = "America/Los_Angeles";
+const PAYOUT_ADMIN_EMAILS = {
+  arthur: "arthur@charge.rent",
+  george: "george@charge.rent",
+};
+const PAYOUT_GENERATOR_RUNTIME = {
+  secrets: [GMAIL_APP_PASSWORD],
+  memory: "1GiB",
+  timeoutSeconds: 540,
+};
+const PAYOUT_SCHEDULES = new Set(["monthly", "quarterly", "yearly"]);
+const EXCLUDED_PAYOUT_RENTAL_STATUSES = new Set([
+  "purchased",
+  "purchase-pending",
+  "purchased-pending",
+]);
+const EXCLUDED_PAYOUT_RETURN_TYPES = new Set(["vend-reset"]);
+
+function normalizePayoutSchedule(value) {
+  const schedule = String(value || "monthly").trim().toLowerCase();
+  return PAYOUT_SCHEDULES.has(schedule) ? schedule : "monthly";
+}
+
+function getPayoutAdminEmail(value) {
+  const adminKey = String(value || "george").trim().toLowerCase();
+  return PAYOUT_ADMIN_EMAILS[adminKey] || PAYOUT_ADMIN_EMAILS.george;
+}
+
+function serializeTimestamp(value) {
+  if (!value) return null;
+  if (typeof value.toDate === "function") return value.toDate().toISOString();
+  if (value instanceof Date) return value.toISOString();
+  return value;
+}
+
+function serializePayoutReport(docSnap) {
+  const data = docSnap.data() || {};
+  return {
+    id: docSnap.id,
+    ...data,
+    createdAt: serializePayoutTimestamp(data.createdAt),
+    updatedAt: serializePayoutTimestamp(data.updatedAt),
+    generatedAt: serializePayoutTimestamp(data.generatedAt),
+    sentAt: serializePayoutTimestamp(data.sentAt),
+    approvedAt: serializePayoutTimestamp(data.approvedAt),
+    paidAt: serializePayoutTimestamp(data.paidAt),
+  };
+}
+
+function cents(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function formatMoney(value, symbol = "$") {
+  return `${symbol}${cents(value).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function escapeEmailHtml(value) {
+  return String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+}
+
+function getPreviousMonthPeriod(referenceDate = new Date()) {
+  const year = referenceDate.getUTCFullYear();
+  const month = referenceDate.getUTCMonth();
+  const start = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
+  const end = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
+  return {
+    key: `${start.getUTCFullYear()}-${String(start.getUTCMonth() + 1).padStart(2, "0")}`,
+    label: start.toLocaleString("en-US", {month: "long", year: "numeric", timeZone: "UTC"}),
+    start: start.toISOString(),
+    end: end.toISOString(),
+  };
+}
+
+function getPreviousQuarterPeriod(referenceDate = new Date()) {
+  const currentQuarter = Math.floor(referenceDate.getUTCMonth() / 3);
+  const previousQuarterStartMonth = currentQuarter === 0 ? 9 : (currentQuarter - 1) * 3;
+  const year = currentQuarter === 0 ? referenceDate.getUTCFullYear() - 1 : referenceDate.getUTCFullYear();
+  const start = new Date(Date.UTC(year, previousQuarterStartMonth, 1, 0, 0, 0, 0));
+  const end = new Date(Date.UTC(year, previousQuarterStartMonth + 3, 0, 23, 59, 59, 999));
+  return {
+    key: `${year}-Q${Math.floor(previousQuarterStartMonth / 3) + 1}`,
+    label: `Q${Math.floor(previousQuarterStartMonth / 3) + 1} ${year}`,
+    start: start.toISOString(),
+    end: end.toISOString(),
+  };
+}
+
+function getPreviousYearPeriod(referenceDate = new Date()) {
+  const year = referenceDate.getUTCFullYear() - 1;
+  return {
+    key: String(year),
+    label: String(year),
+    start: new Date(Date.UTC(year, 0, 1, 0, 0, 0, 0)).toISOString(),
+    end: new Date(Date.UTC(year, 11, 31, 23, 59, 59, 999)).toISOString(),
+  };
+}
+
+function getPayoutPeriod(schedule, referenceDate = new Date()) {
+  const normalized = normalizePayoutSchedule(schedule);
+  if (normalized === "quarterly") return getPreviousQuarterPeriod(referenceDate);
+  if (normalized === "yearly") return getPreviousYearPeriod(referenceDate);
+  return getPreviousMonthPeriod(referenceDate);
+}
+
+function shouldRunPayoutSchedule(schedule, referenceDate = new Date()) {
+  const normalized = normalizePayoutSchedule(schedule);
+  const month = referenceDate.getUTCMonth();
+  if (normalized === "monthly") return true;
+  if (normalized === "quarterly") return [0, 3, 6, 9].includes(month);
+  if (normalized === "yearly") return month === 0;
+  return true;
+}
+
+function isReportablePayoutRental(rental) {
+  if (rental?.excludeFromReporting) return false;
+  const status = String(rental?.reportingStatus || rental?.status || "").toLowerCase();
+  const returnType = String(rental?.reportingReturnType || rental?.returnType || "").toLowerCase();
+  return !EXCLUDED_PAYOUT_RENTAL_STATUSES.has(status) && !EXCLUDED_PAYOUT_RETURN_TYPES.has(returnType);
+}
+
+function getPayoutContactEmail(profile) {
+  const contact = isPlainObject(profile?.contact) ? profile.contact : {};
+  return String(contact.email || profile?.contactEmail || "").trim();
+}
+
+function getPayoutContactName(profile) {
+  const contact = isPlainObject(profile?.contact) ? profile.contact : {};
+  return String(contact.name || profile?.username || profile?.clientId || "").trim();
+}
+
+async function sendChargerentEmail({to, cc, subject, body, html}) {
+  return sendLoginInviteEmail({to, cc, subject, body, html});
+}
+
+function buildPayoutEmailHtml({title, intro, rows, footer}) {
+  const rowHtml = rows.map((row) => `
+    <tr>
+      <td style="padding:10px 0;color:#64748b;font-size:14px;">${escapeEmailHtml(row.label)}</td>
+      <td style="padding:10px 0;color:#0f172a;font-size:14px;font-weight:700;text-align:right;">${escapeEmailHtml(row.value)}</td>
+    </tr>
+  `).join("");
+  return `
+<!doctype html>
+<html>
+  <body style="margin:0;background:#f6f8fb;font-family:Arial,sans-serif;color:#0f172a;">
+    <div style="max-width:640px;margin:0 auto;padding:28px 16px;">
+      <div style="background:#0f172a;border-radius:16px 16px 0 0;padding:24px;color:#fff;">
+        <div style="font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#94a3b8;">Chargerent</div>
+        <h1 style="font-size:24px;line-height:1.25;margin:8px 0 0;">${escapeEmailHtml(title)}</h1>
+      </div>
+      <div style="background:#fff;border:1px solid #e2e8f0;border-top:0;border-radius:0 0 16px 16px;padding:24px;">
+        <p style="font-size:15px;line-height:1.6;color:#334155;margin:0 0 18px;">${escapeEmailHtml(intro)}</p>
+        <table style="width:100%;border-collapse:collapse;border-top:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;">
+          ${rowHtml}
+        </table>
+        <p style="font-size:12px;line-height:1.5;color:#64748b;margin:18px 0 0;">${escapeEmailHtml(footer || "This report was generated by the Chargerent dashboard.")}</p>
+      </div>
+    </div>
+  </body>
+</html>`;
+}
+
+function buildLeasePartnerPayoutEmail(report) {
+  const rows = [
+    {label: "Period", value: report.period.label},
+    {label: "Locations", value: String(report.totals.locationCount || 0)},
+    {label: "Lease total", value: formatMoney(report.totals.leaseTotal)},
+    {label: "Partner payout", value: formatMoney(report.totals.partnerShare)},
+  ];
+  return {
+    subject: `Chargerent lease payout report - ${report.period.label}`,
+    body: rows.map((row) => `${row.label}: ${row.value}`).join("\n"),
+    html: buildPayoutEmailHtml({
+      title: "Lease payout is on the way",
+      intro: `Hi ${getPayoutContactName(report.partner) || "there"}, your lease revenue share report is ready.`,
+      rows,
+      footer: "A Chargerent admin has been copied on this payout notice.",
+    }),
+  };
+}
+
+function buildAdminApprovalEmail(report) {
+  const partnerShare = (report.partnerBreakdown || []).reduce((sum, item) => sum + (Number(item.share) || 0), 0);
+  const rows = [
+    {label: "Period", value: report.period.label},
+    {label: "Client", value: report.client?.name || report.client?.clientId || ""},
+    {label: "Total revenue", value: formatMoney(report.totals.totalRevenue)},
+    {label: "Client share", value: formatMoney(report.totals.clientShare)},
+    {label: "Partner share", value: formatMoney(partnerShare)},
+    {label: "Rentals", value: String(report.totals.rentalCount || 0)},
+  ];
+  return {
+    subject: `Approval needed: ${report.client?.name || report.client?.clientId || "client"} payout - ${report.period.label}`,
+    body: rows.map((row) => `${row.label}: ${row.value}`).join("\n"),
+    html: buildPayoutEmailHtml({
+      title: "Payout approval needed",
+      intro: "A purchase/rev-share report is ready for review in the Chargerent admin payout queue.",
+      rows,
+      footer: "Open Admin > Payouts to approve and send this report.",
+    }),
+  };
+}
+
+function buildApprovedClientEmail(report) {
+  const rows = [
+    {label: "Period", value: report.period.label},
+    {label: "Total revenue", value: formatMoney(report.totals.totalRevenue)},
+    {label: "Your share", value: formatMoney(report.totals.clientShare)},
+    {label: "Rentals", value: String(report.totals.rentalCount || 0)},
+  ];
+  return {
+    subject: `Chargerent revenue share report - ${report.period.label}`,
+    body: rows.map((row) => `${row.label}: ${row.value}`).join("\n"),
+    html: buildPayoutEmailHtml({
+      title: "Revenue share is on the way",
+      intro: `Hi ${getPayoutContactName(report.client) || "there"}, your revenue share report has been approved.`,
+      rows,
+    }),
+  };
+}
+
+function buildApprovedPartnerEmail(report, partnerLine) {
+  const rows = [
+    {label: "Period", value: report.period.label},
+    {label: "Client", value: report.client?.name || report.client?.clientId || ""},
+    {label: "Partner payout", value: formatMoney(partnerLine.share)},
+    {label: "Related revenue", value: formatMoney(partnerLine.revenue)},
+    {label: "Rentals", value: String(partnerLine.rentalCount || 0)},
+  ];
+  return {
+    subject: `Chargerent partner payout report - ${report.period.label}`,
+    body: rows.map((row) => `${row.label}: ${row.value}`).join("\n"),
+    html: buildPayoutEmailHtml({
+      title: "Partner payout is on the way",
+      intro: `Hi ${partnerLine.name || "there"}, your partner revenue share report has been approved.`,
+      rows,
+    }),
+  };
+}
+
+async function fetchPayoutUsersAndKiosks() {
+  const [usersSnap, kiosksSnap] = await Promise.all([
+    db.collection("users").get(),
+    db.collection("kiosks").get(),
+  ]);
+  const users = usersSnap.docs.map((docSnap) => ({uid: docSnap.id, ...docSnap.data()}));
+  const kiosks = kiosksSnap.docs.map((docSnap) => ({id: docSnap.id, ...docSnap.data()}));
+  return {users, kiosks};
+}
+
+async function streamPayoutRentalsForPeriod(period, onRental) {
+  await new Promise((resolve, reject) => {
+    const stream = db.collection("rentals")
+        .where("rentalTime", ">=", period.start)
+        .where("rentalTime", "<=", period.end)
+        .stream();
+
+    stream.on("data", (docSnap) => {
+      const rental = {id: docSnap.id, ...docSnap.data()};
+      if (isReportablePayoutRental(rental)) {
+        onRental(rental);
+      }
+    });
+    stream.on("error", reject);
+    stream.on("end", resolve);
+  });
+}
+
+function getProfileMaps(users) {
+  const byClientId = new Map();
+  users.forEach((profile) => {
+    const clientId = String(profile.clientId || "").trim().toUpperCase();
+    if (clientId) byClientId.set(clientId, profile);
+  });
+  return {byClientId};
+}
+
+function createPartnerLeaseReports({users, kiosks, referenceDate, includeAllSchedules = false}) {
+  const reports = [];
+  users.filter((profile) => profile.role === "partner" || profile.partner === true).forEach((partner) => {
+    const schedule = normalizePayoutSchedule(partner.paymentSchedule);
+    if (!includeAllSchedules && !shouldRunPayoutSchedule(schedule, referenceDate)) return;
+    const period = getPayoutPeriod(schedule, referenceDate);
+    const partnerId = String(partner.clientId || "").trim().toUpperCase();
+    if (!partnerId) return;
+    const partnerKiosks = kiosks.filter((kiosk) => (
+      String(kiosk?.info?.rep || "").trim().toUpperCase() === partnerId &&
+      String(kiosk?.pricing?.kioskmode || "").trim().toUpperCase() === "LEASE"
+    ));
+    if (!partnerKiosks.length) return;
+    const rows = partnerKiosks.map((kiosk) => {
+      const leaseAmount = Number(kiosk?.pricing?.leaseamount) || 0;
+      const percent = Number(kiosk?.info?.reppercent) || Number(partner.commission) || 0;
+      return {
+        stationid: kiosk.stationid || "",
+        location: kiosk?.info?.location || kiosk?.info?.place || "",
+        leaseAmount: cents(leaseAmount),
+        percent: cents(percent),
+        share: cents(leaseAmount * (percent / 100)),
+      };
+    });
+    const partnerEmail = getPayoutContactEmail(partner);
+    if (!isValidEmail(partnerEmail)) return;
+    const adminEmail = getPayoutAdminEmail(partner.paymentAdmin);
+    reports.push({
+      id: `lease-partner-${period.key}-${partnerId}`.toLowerCase(),
+      type: "lease_partner",
+      model: "lease",
+      status: "ready_to_send",
+      period,
+      paymentSchedule: schedule,
+      paymentAdmin: String(partner.paymentAdmin || "george").trim().toLowerCase() || "george",
+      adminEmail,
+      partner: {
+        uid: partner.uid || "",
+        clientId: partnerId,
+        name: getPayoutContactName(partner),
+        email: partnerEmail,
+        username: partner.username || "",
+      },
+      totals: {
+        locationCount: rows.length,
+        leaseTotal: cents(rows.reduce((sum, row) => sum + row.leaseAmount, 0)),
+        partnerShare: cents(rows.reduce((sum, row) => sum + row.share, 0)),
+      },
+      lines: rows,
+    });
+  });
+  return reports;
+}
+
+async function createPurchaseApprovalReports({users, kiosks, referenceDate, includeAllSchedules = false}) {
+  const reportGroups = new Map();
+  const {byClientId} = getProfileMaps(users);
+  users.filter((profile) => (
+    profile.role !== "admin" &&
+    profile.role !== "partner" &&
+    profile.partner !== true &&
+    String(profile.revShareModel || "").toLowerCase() === "purchase"
+  )).forEach((client) => {
+    const schedule = normalizePayoutSchedule(client.paymentSchedule);
+    if (!includeAllSchedules && !shouldRunPayoutSchedule(schedule, referenceDate)) return;
+    const period = getPayoutPeriod(schedule, referenceDate);
+    const clientId = String(client.clientId || "").trim().toUpperCase();
+    if (!clientId) return;
+    const purchaseKiosks = kiosks.filter((kiosk) => (
+      String(kiosk?.info?.client || kiosk?.info?.clientId || "").trim().toUpperCase() === clientId &&
+      String(kiosk?.pricing?.kioskmode || "").trim().toUpperCase() !== "LEASE"
+    ));
+    if (!purchaseKiosks.length) return;
+    const stationIds = new Set(purchaseKiosks.map((kiosk) => String(kiosk.stationid || "").trim()).filter(Boolean));
+    const group = reportGroups.get(period.key) || {
+      period,
+      seeds: [],
+      stationToSeed: new Map(),
+    };
+    const seed = {
+      client,
+      clientId,
+      schedule,
+      period,
+      purchaseKiosks,
+      stationIds,
+      totalRevenue: 0,
+      rentalCount: 0,
+      revenueByStation: new Map(),
+      rentalCountByStation: new Map(),
+    };
+    group.seeds.push(seed);
+    stationIds.forEach((stationid) => {
+      group.stationToSeed.set(stationid, seed);
+    });
+    reportGroups.set(period.key, group);
+  });
+
+  for (const group of reportGroups.values()) {
+    await streamPayoutRentalsForPeriod(group.period, (rental) => {
+      const stationid = String(rental.rentalStationid || "").trim();
+      const seed = group.stationToSeed.get(stationid);
+      if (!seed) return;
+
+      const revenue = Number(rental.totalCharged) || 0;
+      seed.totalRevenue += revenue;
+      seed.rentalCount += 1;
+      seed.revenueByStation.set(stationid, (seed.revenueByStation.get(stationid) || 0) + revenue);
+      seed.rentalCountByStation.set(stationid, (seed.rentalCountByStation.get(stationid) || 0) + 1);
+    });
+  }
+
+  const reports = [];
+  for (const group of reportGroups.values()) {
+    group.seeds.forEach((seed) => {
+      const totalRevenue = cents(seed.totalRevenue);
+      if (totalRevenue <= 0 && seed.rentalCount === 0) return;
+
+      const profileClientPercent = Number(seed.client.revShare ?? seed.client.commission) || 0;
+      let clientShare = 0;
+      const stationClientPercents = [];
+      const partnerMap = new Map();
+      seed.purchaseKiosks.forEach((kiosk) => {
+        const stationid = String(kiosk.stationid || "").trim();
+        const stationRevenue = Number(seed.revenueByStation.get(stationid) || 0);
+        const stationClientPercent = profileClientPercent > 0 ?
+          profileClientPercent :
+          (Number(kiosk?.info?.accountpercent) || 0);
+        stationClientPercents.push(stationClientPercent);
+        clientShare += stationRevenue * (stationClientPercent / 100);
+
+        const repId = String(kiosk?.info?.rep || "").trim().toUpperCase();
+        if (!repId) return;
+        const percent = Number(kiosk?.info?.reppercent) || Number(byClientId.get(repId)?.commission) || 0;
+        const existing = partnerMap.get(repId) || {
+          clientId: repId,
+          name: getPayoutContactName(byClientId.get(repId)) || repId,
+          email: getPayoutContactEmail(byClientId.get(repId)),
+          revenue: 0,
+          share: 0,
+          rentalCount: 0,
+          percent,
+        };
+        existing.revenue = cents(existing.revenue + stationRevenue);
+        existing.share = cents(existing.share + (stationRevenue * (percent / 100)));
+        existing.rentalCount += Number(seed.rentalCountByStation.get(stationid) || 0);
+        partnerMap.set(repId, existing);
+      });
+      const uniqueClientPercents = [...new Set(stationClientPercents.map((percent) => cents(percent)))];
+      const displayClientPercent = uniqueClientPercents.length === 1 ? uniqueClientPercents[0] : cents(profileClientPercent);
+
+      const clientEmail = getPayoutContactEmail(seed.client);
+      const adminEmail = getPayoutAdminEmail(seed.client.paymentAdmin);
+      reports.push({
+        id: `purchase-client-${seed.period.key}-${seed.clientId}`.toLowerCase(),
+        type: "purchase_approval",
+        model: "purchase",
+        status: "pending_approval",
+        period: seed.period,
+        paymentSchedule: seed.schedule,
+        paymentAdmin: String(seed.client.paymentAdmin || "george").trim().toLowerCase() || "george",
+        adminEmail,
+        client: {
+          uid: seed.client.uid || "",
+          clientId: seed.clientId,
+          name: getPayoutContactName(seed.client),
+          email: clientEmail,
+          username: seed.client.username || "",
+          percent: displayClientPercent,
+        },
+        totals: {
+          stationCount: seed.purchaseKiosks.length,
+          rentalCount: seed.rentalCount,
+          totalRevenue,
+          clientShare: cents(clientShare),
+        },
+        partnerBreakdown: Array.from(partnerMap.values()).filter((partner) => partner.share > 0),
+        stationids: Array.from(seed.stationIds),
+      });
+    });
+  }
+
+  return reports;
+}
+
+async function saveAndNotifyPayoutReport(report, {autoSendLease = true, notifyAdmin = true} = {}) {
+  const ref = db.collection(PAYOUT_REPORTS_COLLECTION).doc(report.id);
+  const existingSnap = await ref.get();
+  const existing = existingSnap.exists ? existingSnap.data() || {} : {};
+  if (["sent", "approved", "paid"].includes(existing.status)) {
+    return {id: report.id, status: existing.status, skipped: true};
+  }
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  const next = {
+    ...report,
+    createdAt: existing.createdAt || now,
+    updatedAt: now,
+    generatedAt: now,
+  };
+  await ref.set(next, {merge: true});
+
+  if (report.type === "lease_partner" && autoSendLease) {
+    const message = buildLeasePartnerPayoutEmail(report);
+    const emailResult = await sendChargerentEmail({
+      to: report.partner.email,
+      cc: report.adminEmail,
+      subject: message.subject,
+      body: message.body,
+      html: message.html,
+    });
+    await ref.set({
+      status: "sent",
+      delivery: "gmail",
+      messageId: String(emailResult?.messageId || ""),
+      sentAt: now,
+      updatedAt: now,
+    }, {merge: true});
+    return {id: report.id, status: "sent"};
+  }
+
+  if (report.type === "purchase_approval" && notifyAdmin) {
+    const message = buildAdminApprovalEmail(report);
+    const emailResult = await sendChargerentEmail({
+      to: report.adminEmail,
+      subject: message.subject,
+      body: message.body,
+      html: message.html,
+    });
+    await ref.set({
+      adminNotice: {
+        delivery: "gmail",
+        messageId: String(emailResult?.messageId || ""),
+        sentAt: now,
+      },
+      updatedAt: now,
+    }, {merge: true});
+  }
+  return {id: report.id, status: report.status};
+}
+
+async function generatePayoutReportsImpl(data = {}, authState = null) {
+  const referenceDate = data?.referenceDate ? new Date(data.referenceDate) : new Date();
+  const includeAllSchedules = data?.includeAllSchedules === true;
+  const inputs = await fetchPayoutUsersAndKiosks();
+  const purchaseReports = await createPurchaseApprovalReports({
+    ...inputs,
+    referenceDate,
+    includeAllSchedules,
+  });
+  const reports = [
+    ...createPartnerLeaseReports({...inputs, referenceDate, includeAllSchedules}),
+    ...purchaseReports,
+  ];
+  const results = [];
+  for (const report of reports) {
+    results.push(await saveAndNotifyPayoutReport(report, {
+      autoSendLease: data.autoSendLease !== false,
+      notifyAdmin: data.notifyAdmin !== false,
+    }));
+  }
+  return {
+    ok: true,
+    generatedCount: results.length,
+    results,
+    generatedByUid: authState?.uid || "scheduler",
+  };
+}
+
+async function listPayoutReportsImpl(data = {}) {
+  const status = String(data?.status || "").trim();
+  let query = db.collection(PAYOUT_REPORTS_COLLECTION).orderBy("generatedAt", "desc").limit(100);
+  if (status) {
+    query = db.collection(PAYOUT_REPORTS_COLLECTION).where("status", "==", status).limit(100);
+  }
+  const snap = await query.get();
+  const reports = snap.docs.map(serializePayoutReport)
+      .sort((a, b) => String(b.generatedAt || "").localeCompare(String(a.generatedAt || "")));
+  return {ok: true, reports};
+}
+
+async function approvePayoutReportImpl(data, authState) {
+  const reportId = String(data?.reportId || "").trim();
+  if (!reportId) throw new functions.https.HttpsError("invalid-argument", "reportId required");
+  const ref = db.collection(PAYOUT_REPORTS_COLLECTION).doc(reportId);
+  const snap = await ref.get();
+  if (!snap.exists) throw new functions.https.HttpsError("not-found", "Payout report not found");
+  const report = snap.data() || {};
+  if (!["pending_approval", "ready_to_send"].includes(report.status)) {
+    throw new functions.https.HttpsError("failed-precondition", "Only pending reports can be sent");
+  }
+  const adminEmail = report.adminEmail || getPayoutAdminEmail(report.paymentAdmin);
+  const sends = [];
+  if (report.type === "lease_partner") {
+    if (!isValidEmail(report.partner?.email)) {
+      throw new functions.https.HttpsError("failed-precondition", "Partner report is missing a valid email");
+    }
+    const message = buildLeasePartnerPayoutEmail(report);
+    const result = await sendChargerentEmail({
+      to: report.partner.email,
+      cc: adminEmail,
+      subject: message.subject,
+      body: message.body,
+      html: message.html,
+    });
+    sends.push({type: "partner", to: report.partner.email, messageId: String(result?.messageId || "")});
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    await ref.set({
+      status: "sent",
+      approvedAt: now,
+      sentAt: now,
+      approvedByUid: authState?.uid || "",
+      approvedByUsername: normalizeUsername(authState?.profile?.username),
+      sends,
+      updatedAt: now,
+    }, {merge: true});
+    return {ok: true, reportId, sends};
+  }
+  if (isValidEmail(report.client?.email)) {
+    const message = buildApprovedClientEmail(report);
+    const result = await sendChargerentEmail({
+      to: report.client.email,
+      cc: adminEmail,
+      subject: message.subject,
+      body: message.body,
+      html: message.html,
+    });
+    sends.push({type: "client", to: report.client.email, messageId: String(result?.messageId || "")});
+  }
+  for (const partnerLine of report.partnerBreakdown || []) {
+    if (!isValidEmail(partnerLine.email)) continue;
+    const message = buildApprovedPartnerEmail(report, partnerLine);
+    const result = await sendChargerentEmail({
+      to: partnerLine.email,
+      cc: adminEmail,
+      subject: message.subject,
+      body: message.body,
+      html: message.html,
+    });
+    sends.push({type: "partner", to: partnerLine.email, messageId: String(result?.messageId || "")});
+  }
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  await ref.set({
+    status: "sent",
+    approvedAt: now,
+    sentAt: now,
+    approvedByUid: authState?.uid || "",
+    approvedByUsername: normalizeUsername(authState?.profile?.username),
+    sends,
+    updatedAt: now,
+  }, {merge: true});
+  return {ok: true, reportId, sends};
+}
+
+async function markPayoutPaidImpl(data, authState) {
+  const reportId = String(data?.reportId || "").trim();
+  if (!reportId) throw new functions.https.HttpsError("invalid-argument", "reportId required");
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  await db.collection(PAYOUT_REPORTS_COLLECTION).doc(reportId).set({
+    status: "paid",
+    paidAt: now,
+    paidByUid: authState?.uid || "",
+    paidByUsername: normalizeUsername(authState?.profile?.username),
+    updatedAt: now,
+  }, {merge: true});
+  return {ok: true, reportId};
 }
 
 async function trackLoginAttemptImpl(data, req = null) {
@@ -8409,6 +9131,36 @@ exports.admin_sendLoginInvite = functions.runWith({
   return sendLoginInviteImpl(data, authState);
 });
 
+exports.payouts_generateMonthlyReports = functions.runWith(PAYOUT_GENERATOR_RUNTIME).https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  return generatePayoutReportsImpl(data, authState);
+});
+
+exports.payouts_listReports = functions.https.onCall(async (data, context) => {
+  await assertAdminFromContext(context);
+  return listPayoutReportsImpl(data);
+});
+
+exports.payouts_approveAndSend = functions.runWith({
+  secrets: [GMAIL_APP_PASSWORD],
+}).https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  return approvePayoutReportImpl(data, authState);
+});
+
+exports.payouts_markPaid = functions.https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  return markPayoutPaidImpl(data, authState);
+});
+
+exports.payouts_scheduledMonthlyReports = onSchedule({
+  schedule: "0 9 10 * *",
+  timeZone: PAYOUT_TIMEZONE,
+  ...PAYOUT_GENERATOR_RUNTIME,
+}, async () => {
+  await generatePayoutReportsImpl({}, {uid: "scheduler", profile: {username: "scheduler"}});
+});
+
 exports.uiProfile_list = functions.https.onCall(async (data, context) => {
   const authState = await assertCanManageUiProfilesFromContext(context);
   return uiProfileListImpl(authState, data);
@@ -8759,6 +9511,32 @@ exports.admin_httpSendLoginInvite = handleHttpFunction(
     },
     {secrets: [GMAIL_APP_PASSWORD]},
 );
+
+exports.payouts_httpGenerateMonthlyReports = handleHttpFunction(
+    async (data, req) => {
+      const authState = await assertAdmin(req, data);
+      return generatePayoutReportsImpl(data, authState);
+    },
+    PAYOUT_GENERATOR_RUNTIME,
+);
+
+exports.payouts_httpListReports = handleHttpFunction(async (data, req) => {
+  await assertAdmin(req, data);
+  return listPayoutReportsImpl(data);
+});
+
+exports.payouts_httpApproveAndSend = handleHttpFunction(
+    async (data, req) => {
+      const authState = await assertAdmin(req, data);
+      return approvePayoutReportImpl(data, authState);
+    },
+    {secrets: [GMAIL_APP_PASSWORD]},
+);
+
+exports.payouts_httpMarkPaid = handleHttpFunction(async (data, req) => {
+  const authState = await assertAdmin(req, data);
+  return markPayoutPaidImpl(data, authState);
+});
 
 exports.auth_httpTrackAttempt = handleHttpFunction(async (data, req) => (
   trackLoginAttemptImpl(data, req)

@@ -4,6 +4,19 @@ import { EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline';
 import MultiSwitch from "../utils/MultiSwitch";
 
 const AUTH_MAPPING_DOMAIN = "auth.charge.rent";
+const REVENUE_MODEL_OPTIONS = [
+  { value: 'lease', label: 'Lease' },
+  { value: 'purchase', label: 'Purchase' },
+];
+const PAYMENT_SCHEDULE_OPTIONS = [
+  { value: 'monthly', label: 'Monthly' },
+  { value: 'quarterly', label: 'Quarterly' },
+  { value: 'yearly', label: 'Yearly' },
+];
+const PAYMENT_ADMIN_OPTIONS = [
+  { value: 'arthur', label: 'Arthur - arthur@charge.rent' },
+  { value: 'george', label: 'George - george@charge.rent' },
+];
 
 const getEffectiveAdminFeatures = (features, featuresList, username = '') => {
   const normalizedUsername = String(username || '').trim().toLowerCase();
@@ -37,6 +50,9 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
     commands: Object.fromEntries(commandsList.map(k => [k, false])),
     partner: false,
     commission: 0,
+    revShareModel: 'lease',
+    paymentSchedule: 'monthly',
+    paymentAdmin: 'george',
     active: true,
     role: 'user',
   });
@@ -44,8 +60,11 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
   const [openSection, setOpenSection] = useState(null);
   const [formError, setFormError] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
+  const [emailCredentials, setEmailCredentials] = useState(false);
   const isAdminRole = newClient.role === 'admin';
   const isPartnerRole = newClient.role === 'partner';
+  const isPurchaseClient = !isAdminRole && !isPartnerRole && newClient.revShareModel === 'purchase';
+  const showPayoutFields = isPartnerRole || isPurchaseClient;
 
   const normalizeUsername = (u) => String(u || '').trim().toLowerCase();
   const isValidUsername = (u) => /^[a-z0-9._-]+$/.test(u);
@@ -82,6 +101,7 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
         role: value,
         partner: value === 'partner',
         clientId: value === 'admin' ? '' : prev.clientId,
+        revShareModel: value === 'admin' ? 'lease' : prev.revShareModel,
       }));
       return;
     }
@@ -129,7 +149,10 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
       features: { ...newClient.features, defaultlanguage: (newClient.features?.defaultlanguage || 'en').toLowerCase() },
       commands: { ...newClient.commands },
       partner: isPartnerRole,
-      commission: isPartnerRole ? (String(newClient.commission ?? '').trim() || "0") : "0",
+      commission: showPayoutFields ? (String(newClient.commission ?? '').trim() || "0") : "0",
+      revShareModel: isAdminRole || isPartnerRole ? 'lease' : newClient.revShareModel,
+      paymentSchedule: showPayoutFields ? newClient.paymentSchedule : '',
+      paymentAdmin: showPayoutFields ? newClient.paymentAdmin : '',
       active: newClient.active !== false,
       role: newClient.role || 'user',
       authEmail: mappedEmail || undefined
@@ -139,7 +162,8 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
       username: usernameNorm,
       password: newClient.password, // only sent to Cloud Function; NOT stored in Firestore
       clientId: profile.clientId,
-      profile
+      profile,
+      sendCredentials: emailCredentials && !!profile.contact.email,
     });
 
     // Clear password immediately after submit
@@ -254,12 +278,59 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
               className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
           </div>
 
-          {isPartnerRole && (
+          {!isAdminRole && !isPartnerRole && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700">Revenue Model</label>
+              <select name="revShareModel" value={newClient.revShareModel} onChange={handleInputChange}
+                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                {REVENUE_MODEL_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="md:col-span-2">
+            <label className="flex items-center gap-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700">
+              <input
+                checked={emailCredentials}
+                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                onChange={(event) => setEmailCredentials(event.target.checked)}
+                type="checkbox"
+              />
+              Email login credentials after creating this client
+            </label>
+          </div>
+
+          {showPayoutFields && (
             <div className="md:col-span-2 border-t pt-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700">{t('rev_share_percentage')}</label>
                 <input type="number" name="commission" value={newClient.commission || ''} onChange={handleInputChange}
                   className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" min="0" max="100" step="0.1" />
+              </div>
+            </div>
+          )}
+
+          {showPayoutFields && (
+            <div className="md:col-span-2 grid grid-cols-1 gap-4 border-t pt-4 md:grid-cols-2">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Payment Schedule</label>
+                <select name="paymentSchedule" value={newClient.paymentSchedule} onChange={handleInputChange}
+                  className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                  {PAYMENT_SCHEDULE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Payment Admin</label>
+                <select name="paymentAdmin" value={newClient.paymentAdmin} onChange={handleInputChange}
+                  className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
+                  {PAYMENT_ADMIN_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
               </div>
             </div>
           )}

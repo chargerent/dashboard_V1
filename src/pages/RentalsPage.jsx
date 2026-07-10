@@ -1,6 +1,13 @@
 // src/pages/RentalsPage.jsx
 
 import { useState, useMemo } from 'react';
+import {
+    CheckCircleIcon,
+    ChevronDownIcon,
+    ClockIcon,
+    ExclamationTriangleIcon,
+    InformationCircleIcon,
+} from '@heroicons/react/24/outline';
 import { formatDateTime, formatDuration, formatDate } from '../utils/dateFormatter';
 import { normalizeText, textEquals, textIncludes } from '../utils/text';
 import {
@@ -49,6 +56,297 @@ const safeToDate = (timestamp) => {
     return isNaN(d.getTime()) ? null : d;
 };
 
+const firstPresent = (...values) => (
+    values.find(value => value !== null && value !== undefined && String(value).trim() !== '')
+);
+
+const formatLogTime = (timestamp) => {
+    const date = safeToDate(timestamp);
+    return date ? formatDateTime(date.toISOString()) : '';
+};
+
+const humanizeCode = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    return raw
+        .replace(/[_-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .replace(/\b\w/g, character => character.toUpperCase());
+};
+
+const formatDetailParts = (...parts) => parts
+    .filter(part => part !== null && part !== undefined && String(part).trim() !== '')
+    .map(part => String(part));
+
+const hasAttemptSucceeded = (attempt) => (
+    normalizeText(attempt?.reason) === 'dispensed' ||
+    Number(attempt?.exitStatus) === 1
+);
+
+const getAttemptTime = (attempt) => (
+    firstPresent(
+        attempt?.respondedAt,
+        attempt?.responseAt,
+        attempt?.sentAt,
+        attempt?.requestedAt,
+        attempt?.createdAt
+    )
+);
+
+const buildRentalProcessLog = (rental, t) => {
+    const entries = [];
+    const addEntry = ({ title, timestamp, status = 'info', details = [] }) => {
+        const time = safeToDate(timestamp)?.getTime();
+        entries.push({
+            id: `${entries.length}-${title}`,
+            title,
+            timestamp,
+            displayTime: formatLogTime(timestamp),
+            sortTime: Number.isFinite(time) ? time : null,
+            order: entries.length,
+            status,
+            details: formatDetailParts(...details),
+        });
+    };
+
+    const chargerSn = firstPresent(rental.sn, rental.chargerid);
+    const rentalDetails = formatDetailParts(
+        rental.card_last4 ? `${t('card')}: ${rental.card_last4}` : '',
+        chargerSn ? `${t('charger_sn')}: ${chargerSn}` : '',
+        rental.rentalStationid ? `${t('station')}: ${rental.rentalStationid}` : ''
+    );
+
+    addEntry({
+        title: t('rental_created'),
+        timestamp: rental.rentalTime,
+        status: normalizeText(rental.status) === 'pending' ? 'pending' : 'info',
+        details: rentalDetails,
+    });
+
+    const attempts = Array.isArray(rental.vendAttempts) ? rental.vendAttempts : [];
+    attempts.forEach((attempt, index) => {
+        const succeeded = hasAttemptSucceeded(attempt);
+        const attemptNumber = firstPresent(attempt.attemptNumber, index + 1);
+        const requestedSn = firstPresent(attempt.requestedSn, attempt.sn);
+        const responseSn = firstPresent(attempt.responseSn, attempt.batterySN);
+        const reason = humanizeCode(attempt.reason);
+
+        addEntry({
+            title: `${t('attempt')} ${attemptNumber}: ${succeeded ? t('charger_dispensed') : t('dispense_failed')}`,
+            timestamp: getAttemptTime(attempt),
+            status: succeeded ? 'success' : 'error',
+            details: formatDetailParts(
+                requestedSn ? `${t('requested')}: ${requestedSn}` : '',
+                responseSn && String(responseSn) !== String(requestedSn) ? `${t('response')}: ${responseSn}` : '',
+                attempt.stationid ? `${t('station')}: ${attempt.stationid}` : '',
+                attempt.moduleid ? `M: ${attempt.moduleid}` : '',
+                attempt.requestedSlotid != null ? `S: ${attempt.requestedSlotid}` : '',
+                attempt.exitStatus != null ? `${t('exit_status')}: ${attempt.exitStatus}` : '',
+                attempt.solenoidStatus != null ? `${t('solenoid_status')}: ${attempt.solenoidStatus}` : '',
+                reason ? `${t('reason')}: ${reason}` : ''
+            ),
+        });
+    });
+
+    if (attempts.length === 0 && rental.exitStatus != null) {
+        const succeeded = Number(rental.exitStatus) === 1;
+        addEntry({
+            title: succeeded ? t('charger_dispensed') : t('dispense_failed'),
+            timestamp: firstPresent(rental.popupConfirmedAt, rental.vendTime, rental.rentedAt, rental.rentalTime),
+            status: succeeded ? 'success' : 'error',
+            details: formatDetailParts(
+                chargerSn ? `${t('charger_sn')}: ${chargerSn}` : '',
+                rental.exitStatus != null ? `${t('exit_status')}: ${rental.exitStatus}` : '',
+                rental.solenoidStatus != null ? `${t('solenoid_status')}: ${rental.solenoidStatus}` : ''
+            ),
+        });
+    }
+
+    const currentAttempt = rental.currentVendAttempt;
+    if (currentAttempt && normalizeText(rental.status) === 'pending') {
+        addEntry({
+            title: `${t('attempt')} ${firstPresent(currentAttempt.attemptNumber, attempts.length + 1)}: ${t('dispense_requested')}`,
+            timestamp: firstPresent(currentAttempt.sentAt, currentAttempt.createdAt, rental.rentalTime),
+            status: normalizeText(rental.vendState) === 'retrying' ? 'warning' : 'pending',
+            details: formatDetailParts(
+                currentAttempt.sn ? `${t('charger_sn')}: ${currentAttempt.sn}` : '',
+                currentAttempt.moduleid ? `M: ${currentAttempt.moduleid}` : '',
+                currentAttempt.slotid != null ? `S: ${currentAttempt.slotid}` : '',
+                currentAttempt.batteryLevel != null ? `${currentAttempt.batteryLevel}%` : ''
+            ),
+        });
+    } else if (normalizeText(rental.status) === 'pending' && attempts.length === 0 && rental.exitStatus == null) {
+        addEntry({
+            title: t('waiting_for_vend_confirmation'),
+            timestamp: rental.rentalTime,
+            status: 'pending',
+            details: formatDetailParts(
+                rental.rentalModuleid ? `M: ${rental.rentalModuleid}` : '',
+                rental.rentalSlotid != null ? `S: ${rental.rentalSlotid}` : '',
+                rental.rentPower != null ? `${rental.rentPower}%` : ''
+            ),
+        });
+    }
+
+    if (rental.lastVendFailure && attempts.length === 0) {
+        const failure = rental.lastVendFailure;
+        addEntry({
+            title: t('dispense_failed'),
+            timestamp: firstPresent(failure.respondedAt, failure.failedAt, rental.lastUpdate),
+            status: 'error',
+            details: formatDetailParts(
+                failure.requestedSn ? `${t('requested')}: ${failure.requestedSn}` : '',
+                failure.responseSn ? `${t('response')}: ${failure.responseSn}` : '',
+                failure.exitStatus != null ? `${t('exit_status')}: ${failure.exitStatus}` : '',
+                failure.solenoidStatus != null ? `${t('solenoid_status')}: ${failure.solenoidStatus}` : '',
+                firstPresent(failure.reason, rental.lastVendFailureReason)
+                    ? `${t('reason')}: ${humanizeCode(firstPresent(failure.reason, rental.lastVendFailureReason))}`
+                    : ''
+            ),
+        });
+    }
+
+    const finalFailureReason = firstPresent(rental.failureReason, rental.lastVendFailureReason);
+    if (normalizeText(rental.status) === 'vend_failed' || finalFailureReason) {
+        addEntry({
+            title: t('final_vend_failure'),
+            timestamp: firstPresent(rental.failedAt, rental.lastUpdate, rental.rentalTime),
+            status: 'error',
+            details: finalFailureReason ? [`${t('reason')}: ${humanizeCode(finalFailureReason)}`] : [],
+        });
+    }
+
+    if (normalizeText(rental.status) === 'purchased') {
+        addEntry({
+            title: t('purchase_recorded'),
+            timestamp: firstPresent(rental.purchaseTime, rental.purchasedAt, rental.returnTime, rental.rentalTime),
+            status: 'success',
+            details: formatDetailParts(formatRentalChargeAmount(rental)),
+        });
+    }
+
+    if (rental.returnTime) {
+        addEntry({
+            title: t('rental_returned'),
+            timestamp: rental.returnTime,
+            status: 'success',
+            details: formatDetailParts(
+                rental.returnStationid ? `${t('station')}: ${rental.returnStationid}` : '',
+                rental.returnModuleid ? `M: ${rental.returnModuleid}` : '',
+                rental.returnSlotid != null ? `S: ${rental.returnSlotid}` : '',
+                rental.returnType ? humanizeCode(rental.returnType) : ''
+            ),
+        });
+    }
+
+    if (rental.refundStatus) {
+        const status = isSuccessfulRefundStatus(rental.refundStatus) ? 'success' : 'warning';
+        addEntry({
+            title: t('refund_recorded'),
+            timestamp: firstPresent(rental.refundDate, rental.lastUpdate, rental.returnTime),
+            status,
+            details: formatDetailParts(
+                humanizeCode(rental.refundStatus),
+                rental.refundAmount != null
+                    ? `${t('amount')}: ${rental.refundAmount === 'full'
+                        ? t('full_refund')
+                        : `${rental.symbol || ''}${Number(rental.refundAmount)?.toFixed(2)}`}`
+                    : ''
+            ),
+        });
+    }
+
+    return entries.sort((left, right) => {
+        if (left.sortTime !== null && right.sortTime !== null) {
+            return left.sortTime - right.sortTime || left.order - right.order;
+        }
+
+        return left.order - right.order;
+    });
+};
+
+const logStatusStyles = {
+    success: {
+        icon: CheckCircleIcon,
+        iconClass: 'text-green-600',
+        rowClass: 'border-green-100 bg-green-50',
+    },
+    error: {
+        icon: ExclamationTriangleIcon,
+        iconClass: 'text-red-600',
+        rowClass: 'border-red-100 bg-red-50',
+    },
+    warning: {
+        icon: ExclamationTriangleIcon,
+        iconClass: 'text-orange-600',
+        rowClass: 'border-orange-100 bg-orange-50',
+    },
+    pending: {
+        icon: ClockIcon,
+        iconClass: 'text-blue-600',
+        rowClass: 'border-blue-100 bg-blue-50',
+    },
+    info: {
+        icon: InformationCircleIcon,
+        iconClass: 'text-gray-500',
+        rowClass: 'border-gray-100 bg-gray-50',
+    },
+};
+
+const RentalProcessLog = ({ rental, t }) => {
+    const entries = buildRentalProcessLog(rental, t);
+    const errorCount = entries.filter(entry => entry.status === 'error').length;
+
+    return (
+        <details className="mt-4 border-t border-gray-100 pt-3">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-xs font-semibold text-gray-700 [&::-webkit-details-marker]:hidden">
+                <span className="flex items-center gap-2">
+                    <ClockIcon className="h-4 w-4 text-gray-500" />
+                    {t('process_log')}
+                    <span className="text-gray-400 font-normal">
+                        {entries.length} {t(entries.length === 1 ? 'log_entry' : 'log_entries')}
+                    </span>
+                </span>
+                <span className="flex items-center gap-2">
+                    {errorCount > 0 && (
+                        <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-700">
+                            {errorCount} {t(errorCount === 1 ? 'error' : 'errors')}
+                        </span>
+                    )}
+                    <ChevronDownIcon className="h-4 w-4 text-gray-400" />
+                </span>
+            </summary>
+            <div className="mt-3 space-y-2">
+                {entries.map(entry => {
+                    const styles = logStatusStyles[entry.status] || logStatusStyles.info;
+                    const StatusIcon = styles.icon;
+                    return (
+                        <div key={entry.id} className={`rounded-md border px-3 py-2 ${styles.rowClass}`}>
+                            <div className="flex items-start gap-2">
+                                <StatusIcon className={`mt-0.5 h-4 w-4 flex-none ${styles.iconClass}`} />
+                                <div className="min-w-0 flex-1">
+                                    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                                        <p className="text-xs font-semibold text-gray-800">{entry.title}</p>
+                                        {entry.displayTime && (
+                                            <p className="text-[10px] font-medium text-gray-500">{entry.displayTime}</p>
+                                        )}
+                                    </div>
+                                    {entry.details.length > 0 && (
+                                        <p className="mt-1 break-words text-[11px] leading-4 text-gray-600">
+                                            {entry.details.join(' • ')}
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    );
+                })}
+            </div>
+        </details>
+    );
+};
+
 const RentalCard = ({ rental, t, onRefund, onLockClick, canLock }) => {
     const transactionId = String(rental.orderid || '').trim();
     const normalizedRefundStatus = normalizeRefundStatus(rental.refundStatus);
@@ -56,6 +354,7 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock }) => {
                         rental.status === 'purchased' ? 'bg-purple-100 text-purple-800' :
                         rental.status === 'refunded' ? 'bg-green-100 text-green-800' :
                         rental.status === 'pending' ? 'bg-orange-100 text-orange-800' :
+                        rental.status === 'vend_failed' ? 'bg-red-100 text-red-800' :
                         rental.status === 'returned' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800';
 
     const FIVE_MINUTES_IN_MS = 5 * 60 * 1000;
@@ -136,6 +435,7 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock }) => {
                     </div>
                 )}
             </div>
+            <RentalProcessLog rental={rental} t={t} />
             <div className="mt-4 pt-2 border-t border-gray-100 flex justify-between items-center">
                 {rental.refundStatus ? (
                      <div className="text-xs text-gray-600 space-x-2">
@@ -259,7 +559,15 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
                 textIncludes(r.rawid, lowercasedSearch) ||
                 textIncludes(r.transactionid, lowercasedSearch) ||
                 textIncludes(r.transactionId, lowercasedSearch) ||
-                textIncludes(r.paymentSessionId, lowercasedSearch)
+                textIncludes(r.paymentSessionId, lowercasedSearch) ||
+                textIncludes(r.vendState, lowercasedSearch) ||
+                textIncludes(r.failureReason, lowercasedSearch) ||
+                textIncludes(r.lastVendFailureReason, lowercasedSearch) ||
+                (Array.isArray(r.vendAttempts) && r.vendAttempts.some(attempt => (
+                    textIncludes(attempt.reason, lowercasedSearch) ||
+                    textIncludes(attempt.exitStatus, lowercasedSearch) ||
+                    textIncludes(attempt.solenoidStatus, lowercasedSearch)
+                )))
             );
 
             return rentals.sort((a, b) => {
@@ -452,7 +760,7 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
                         </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-4 mt-4">
-                        {['all', 'rented', 'returned', 'purchased', 'refunded', 'pending', 'short_rental'].map(status => (
+                        {['all', 'rented', 'returned', 'purchased', 'refunded', 'pending', 'vend_failed', 'short_rental'].map(status => (
                             <button key={status} onClick={() => handleFilterChange('status', status)}
                                 className={`px-3 py-1 text-sm font-semibold rounded-full transition-colors ${activeFilters.status === status ? 'bg-blue-600 text-white shadow' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>
                                 {t(status)}

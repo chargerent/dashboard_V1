@@ -1,5 +1,21 @@
 import { useRef, useCallback } from 'react';
 
+const interactiveSelector = [
+  'button',
+  'a[href]',
+  'input',
+  'select',
+  'textarea',
+  '[role="button"]',
+  '[data-tap-control]'
+].join(',');
+
+const isInteractiveTarget = (target, container) => {
+  if (!(target instanceof Element)) return false;
+  const interactiveElement = target.closest(interactiveSelector);
+  return Boolean(interactiveElement && container?.contains(interactiveElement));
+};
+
 /**
  * A hook to handle tap vs. scroll on both touch and mouse devices.
  * It uses pointer events to correctly distinguish a tap from a scroll/drag gesture.
@@ -7,8 +23,12 @@ import { useRef, useCallback } from 'react';
 export const useTap = (callback) => {
   const pointerDownPos = useRef({ x: 0, y: 0 });
   const isDragging = useRef(false);
+  const startedOnInteractive = useRef(false);
 
   const handlePointerDown = useCallback((e) => {
+    startedOnInteractive.current = isInteractiveTarget(e.target, e.currentTarget);
+    if (startedOnInteractive.current) return;
+
     // Capture the starting position and reset the dragging flag.
     pointerDownPos.current = { x: e.clientX, y: e.clientY };
     isDragging.current = false;
@@ -17,6 +37,8 @@ export const useTap = (callback) => {
   }, []);
 
   const handlePointerMove = useCallback((e) => {
+    if (startedOnInteractive.current) return;
+
     // If we've already started dragging, no need to check again.
     if (isDragging.current) return;
 
@@ -30,12 +52,19 @@ export const useTap = (callback) => {
   }, []);
 
   const handlePointerUp = useCallback((e) => {
+    if (startedOnInteractive.current || isInteractiveTarget(e.target, e.currentTarget)) {
+      startedOnInteractive.current = false;
+      return;
+    }
+
     // If the interaction was not a drag, it's a tap. Execute the callback.
     if (!isDragging.current) {
       callback(e);
     }
     // Release the pointer capture.
-    e.target.releasePointerCapture(e.pointerId);
+    if (e.target.hasPointerCapture?.(e.pointerId)) {
+      e.target.releasePointerCapture(e.pointerId);
+    }
   }, [callback]);
 
   return {
