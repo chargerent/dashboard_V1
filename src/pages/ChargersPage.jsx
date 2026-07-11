@@ -4,9 +4,251 @@ import { useMemo, useState, useEffect } from 'react';
 import ConfirmationModal from '../components/UI/ConfirmationModal';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
 import { formatDateTime, formatDuration } from '../utils/dateFormatter';
-import { isReturnedRentalStatus } from '../utils/rentals.js';
-import { textEquals, textIncludes, toText } from '../utils/text';
+import { formatRentalChargeAmount, isReturnedRentalStatus, normalizeRefundStatus } from '../utils/rentals.js';
+import { normalizeText, textEquals, textIncludes, toText } from '../utils/text';
 import { isKioskOnline } from '../utils/helpers';
+
+const firstPresent = (...values) => (
+    values.find(value => value !== null && value !== undefined && String(value).trim() !== '')
+);
+
+const humanizeCode = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    return raw
+        .replace(/[_-]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .replace(/\b\w/g, character => character.toUpperCase());
+};
+
+const translateCode = (value, t) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    const translated = t(raw);
+    return translated === raw ? humanizeCode(raw) : translated;
+};
+
+const formatTransactionId = (value) => {
+    const transactionId = String(value || '').trim();
+    if (!transactionId) return '';
+    if (transactionId.length <= 18) return transactionId;
+
+    return `${transactionId.slice(0, 8)}...${transactionId.slice(-6)}`;
+};
+
+const formatCardLast4 = (value) => {
+    const cardLast4 = String(value || '').trim();
+    return cardLast4;
+};
+
+const formatPower = (value) => {
+    if (value === null || value === undefined || value === '') return '';
+
+    const numericPower = Number(value);
+    return Number.isFinite(numericPower) ? `${numericPower}%` : String(value);
+};
+
+const PILL_BASE_CLASS = 'rounded-full px-2 py-0.5 text-[10px] font-semibold';
+const NEUTRAL_PILL_CLASS = `${PILL_BASE_CLASS} border border-gray-200 bg-gray-50 text-gray-600`;
+const SHORT_RENTAL_PILL_CLASS = `${PILL_BASE_CLASS} bg-red-100 text-red-700`;
+const REFUND_PILL_CLASS = `${PILL_BASE_CLASS} bg-emerald-100 text-emerald-800`;
+
+const getRentalStatusClass = (status) => {
+    const normalizedStatus = normalizeText(status);
+
+    if (normalizedStatus === 'rented') return `${PILL_BASE_CLASS} bg-blue-100 text-blue-800`;
+    if (normalizedStatus === 'returned') return `${PILL_BASE_CLASS} bg-green-100 text-green-800`;
+    if (normalizedStatus === 'refunded') return `${PILL_BASE_CLASS} bg-emerald-100 text-emerald-800`;
+    if (normalizedStatus === 'purchased') return `${PILL_BASE_CLASS} bg-purple-100 text-purple-800`;
+    if (normalizedStatus === 'pending') return `${PILL_BASE_CLASS} bg-orange-100 text-orange-800`;
+    if (normalizedStatus === 'vend_failed') return `${PILL_BASE_CLASS} bg-red-100 text-red-800`;
+
+    return NEUTRAL_PILL_CLASS;
+};
+
+const buildStationLabel = (stationId, location, place) => {
+    const primary = [stationId, location].filter(Boolean).join(' - ');
+    return primary || place || '';
+};
+
+const buildSlotDetail = (moduleId, slotId, power) => {
+    const parts = [];
+
+    if (moduleId) parts.push(`M: ${String(moduleId).split('m').pop()}`);
+    if (slotId !== null && slotId !== undefined && slotId !== '') parts.push(`S: ${slotId}`);
+    if (power !== null && power !== undefined && power !== '') parts.push(`@ ${formatPower(power)}`);
+
+    return parts.join(' ');
+};
+
+const buildVendIssueParts = (rental, t) => {
+    const parts = [];
+    const failureReason = firstPresent(rental.failureReason, rental.lastVendFailureReason, rental.lastVendFailure?.reason);
+    const exitStatus = firstPresent(rental.exitStatus, rental.lastVendFailure?.exitStatus);
+    const solenoidStatus = firstPresent(rental.solenoidStatus, rental.lastVendFailure?.solenoidStatus);
+    const requestedSn = firstPresent(rental.lastVendFailure?.requestedSn, rental.currentVendAttempt?.sn);
+    const responseSn = firstPresent(rental.lastVendFailure?.responseSn, rental.currentVendAttempt?.responseSn);
+
+    if (failureReason) parts.push(`${t('reason')}: ${humanizeCode(failureReason)}`);
+    if (exitStatus !== undefined) parts.push(`${t('exit_status')}: ${exitStatus}`);
+    if (solenoidStatus !== undefined) parts.push(`${t('solenoid_status')}: ${solenoidStatus}`);
+    if (requestedSn) parts.push(`${t('requested')}: ${requestedSn}`);
+    if (responseSn && String(responseSn) !== String(requestedSn || '')) parts.push(`${t('response')}: ${responseSn}`);
+
+    return parts;
+};
+
+const enrichRentalForHistory = (rental, stationInfoById) => {
+    const rentalStationInfo = stationInfoById.get(String(rental?.rentalStationid || '')) || {};
+    const returnStationInfo = stationInfoById.get(String(rental?.returnStationid || '')) || {};
+
+    return {
+        ...rental,
+        rentalLocation: firstPresent(rental?.rentalLocation, rentalStationInfo.location),
+        rentalPlace: firstPresent(rental?.rentalPlace, rentalStationInfo.place),
+        returnLocation: firstPresent(rental?.returnLocation, returnStationInfo.location),
+        returnPlace: firstPresent(rental?.returnPlace, returnStationInfo.place),
+    };
+};
+
+const RentalHistoryItem = ({ rental, t, onOpen }) => {
+    const status = normalizeText(rental.status) || 'unknown';
+    const statusLabel = translateCode(status, t);
+    const transactionId = firstPresent(
+        rental.orderid,
+        rental.rawid,
+        rental.transactionid,
+        rental.transactionId,
+        rental.paymentSessionId
+    );
+    const rentalStationLabel = buildStationLabel(rental.rentalStationid, rental.rentalLocation, rental.rentalPlace);
+    const returnStationLabel = rental.returnTime
+        ? buildStationLabel(rental.returnStationid, rental.returnLocation, rental.returnPlace)
+        : t('in_use');
+    const rentalSlotDetail = buildSlotDetail(rental.rentalModuleid, rental.rentalSlotid, rental.rentPower);
+    const returnSlotDetail = rental.returnTime
+        ? buildSlotDetail(rental.returnModuleid, rental.returnSlotid, rental.returnPower)
+        : '';
+    const duration = rental.returnTime ? formatDuration(rental.rentalTime, rental.returnTime) : t('in_use');
+    const shouldShowAmount = isReturnedRentalStatus(rental.status) || status === 'purchased' || Number(rental.totalCharged || rental.buyprice || 0) > 0;
+    const amount = shouldShowAmount ? formatRentalChargeAmount(rental) : '';
+    const returnType = translateCode(rental.returnType, t);
+    const refundStatus = normalizeRefundStatus(rental.refundStatus);
+    const vendIssueParts = buildVendIssueParts(rental, t);
+    const isShortRental = isReturnedRentalStatus(rental.status) && rental.rentalPeriod && rental.rentalPeriod < 5 * 60 * 1000;
+    const attemptsCount = Array.isArray(rental.vendAttempts) ? rental.vendAttempts.length : 0;
+    const cardLast4 = formatCardLast4(rental.card_last4);
+    const rentalTimeLabel = formatDateTime(rental.rentalTime);
+    const returnTimeLabel = rental.returnTime ? formatDateTime(rental.returnTime) : t('in_use');
+    const metadataPills = [
+        { label: returnType, className: NEUTRAL_PILL_CLASS },
+        {
+            label: attemptsCount > 0 ? `${attemptsCount} ${t(attemptsCount === 1 ? 'attempt' : 'attempts')}` : '',
+            className: NEUTRAL_PILL_CLASS,
+        },
+        {
+            label: refundStatus ? `${t('refund_status')}: ${translateCode(refundStatus, t)}` : '',
+            className: REFUND_PILL_CLASS,
+        },
+    ].filter(pill => pill.label);
+
+    return (
+        <div
+            onClick={onOpen}
+            className={`text-xs rounded-md border border-gray-200 bg-white p-3 ${onOpen ? 'cursor-pointer hover:border-gray-400 transition-colors' : ''}`}
+        >
+            <div className="flex items-start justify-between gap-3 border-b border-gray-100 pb-2">
+                <div className="min-w-0">
+                    <p className="truncate font-mono text-sm font-semibold text-gray-900" title={rental.rentalStationid || rentalStationLabel}>
+                        {rental.rentalStationid || rentalStationLabel || t('station')}
+                    </p>
+                    <p className="mt-0.5 truncate font-mono text-[11px] text-gray-500" title={transactionId}>
+                        ID: {formatTransactionId(transactionId) || '—'}
+                    </p>
+                    {cardLast4 && (
+                        <p className="mt-0.5 truncate font-mono text-[11px] text-gray-500">
+                            {t('card')}: {cardLast4}
+                        </p>
+                    )}
+                </div>
+                <div className="flex flex-none flex-col items-end gap-1">
+                    <div className="flex items-center justify-end gap-1.5">
+                        <span className={getRentalStatusClass(status)}>{statusLabel}</span>
+                    </div>
+                    <div className="flex items-center justify-end gap-1.5">
+                        {!isShortRental && (
+                            <span className="text-[10px] font-medium text-gray-500">{duration}</span>
+                        )}
+                        {isShortRental && (
+                            <span className={SHORT_RENTAL_PILL_CLASS}>{t('short_rental')}</span>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            <div className="mt-3 space-y-3">
+                <div>
+                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{t('rented')}</p>
+                        <p className="text-[11px] font-medium text-gray-600">{rentalTimeLabel}</p>
+                    </div>
+                    <p className="mt-0.5 truncate font-semibold text-gray-900" title={rentalStationLabel}>
+                        {rentalStationLabel || '—'}
+                    </p>
+                    {rentalSlotDetail && (
+                        <p className="mt-0.5 text-[11px] text-gray-500">{rentalSlotDetail}</p>
+                    )}
+                    {rental.rentPower != null && (
+                        <p className="mt-1 text-[11px] font-medium text-gray-700">
+                            {t('rent_power')}: {formatPower(rental.rentPower)}
+                        </p>
+                    )}
+                </div>
+
+                <div>
+                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{t('returned')}</p>
+                        <p className="text-[11px] font-medium text-gray-600">{returnTimeLabel}</p>
+                    </div>
+                    <p className="mt-0.5 truncate font-semibold text-gray-900" title={returnStationLabel}>
+                        {returnStationLabel || '—'}
+                    </p>
+                    {(returnSlotDetail || returnType) && (
+                        <p className="mt-0.5 text-[11px] text-gray-500">{returnSlotDetail || returnType}</p>
+                    )}
+                    {rental.returnPower != null && (
+                        <p className="mt-1 text-[11px] font-medium text-gray-700">
+                            {t('return_power')}: {formatPower(rental.returnPower)}
+                        </p>
+                    )}
+                </div>
+            </div>
+
+            {(metadataPills.length > 0 || amount) && (
+                <div className="mt-3 flex flex-wrap items-center justify-end gap-1.5 border-t border-gray-100 pt-2">
+                    {metadataPills.map(({ label, className }, index) => (
+                        <span
+                            key={`${label}-${index}`}
+                            className={className}
+                        >
+                            {label}
+                        </span>
+                    ))}
+                    <span className="ml-1 font-mono text-sm font-semibold text-gray-900">{amount || '—'}</span>
+                </div>
+            )}
+
+            {vendIssueParts.length > 0 && (
+                <div className="mt-2 border-t border-gray-100 pt-2 text-[10px] leading-4 text-gray-600">
+                    {vendIssueParts.join(' | ')}
+                </div>
+            )}
+
+        </div>
+    );
+};
 
 const ChargerCard = ({ charger, t, onCommand, onNavigateToRentals, onNavigateToDashboard }) => {
     const [showRentals, setShowRentals] = useState(false);
@@ -111,31 +353,14 @@ const ChargerCard = ({ charger, t, onCommand, onNavigateToRentals, onNavigateToD
                         </svg>
                     </button>
                     {showRentals && (
-                        <div className="mt-2 max-h-52 overflow-y-auto space-y-1.5">
-                            {charger.rentals.map(rental => (
-                                <div
-                                    key={rental.rawid}
-                                    onClick={() => onNavigateToRentals && onNavigateToRentals(charger.sn)}
-                                    className={`text-xs bg-gray-50 rounded-md p-2 border border-gray-100 ${onNavigateToRentals ? 'cursor-pointer hover:bg-blue-50 hover:border-blue-200 transition-colors' : ''}`}
-                                >
-                                    <div className="flex justify-between items-center">
-                                        <span className="text-gray-600">{formatDateTime(rental.rentalTime)}</span>
-                                        {rental.returnPower != null ? (
-                                            <span className={`font-semibold ${rental.returnPower >= 80 ? 'text-green-600' : rental.returnPower >= 40 ? 'text-yellow-600' : 'text-red-500'}`}>
-                                                {rental.returnPower}%
-                                            </span>
-                                        ) : rental.returnTime ? (
-                                            <span className="text-gray-400">—</span>
-                                        ) : (
-                                            <span className="text-blue-500 font-semibold">In Use</span>
-                                        )}
-                                    </div>
-                                    <div className="text-gray-500 mt-0.5">
-                                        {rental.returnTime
-                                            ? formatDuration(rental.rentalTime, rental.returnTime)
-                                            : '—'}
-                                    </div>
-                                </div>
+                        <div className="mt-2 max-h-96 overflow-y-auto space-y-2 pr-1">
+                            {charger.rentals.map((rental, index) => (
+                                <RentalHistoryItem
+                                    key={rental.rawid || rental.orderid || `${rental.rentalTime}-${index}`}
+                                    rental={rental}
+                                    t={t}
+                                    onOpen={onNavigateToRentals ? () => onNavigateToRentals(charger.sn) : null}
+                                />
                             ))}
                         </div>
                     )}
@@ -217,6 +442,15 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
             return [];
         }
         const chargerMap = new Map(); // Using a Map to ensure each charger SN is unique.
+        const stationInfoById = new Map(
+            (kioskData || []).map(kiosk => [
+                String(kiosk?.stationid || ''),
+                {
+                    location: kiosk?.info?.location || '',
+                    place: kiosk?.info?.place || '',
+                },
+            ])
+        );
 
         // 1. Create a map of all chargers currently in any kiosk for quick lookup.
         const kioskChargerLocations = new Map();
@@ -265,9 +499,10 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
             }
 
             // Sort by time descending to easily find the latest status
-            const sortedRentals = [...clientRentals].sort((a, b) => new Date(b.rentalTime) - new Date(a.rentalTime));
+            const enrichedRentals = clientRentals.map(rental => enrichRentalForHistory(rental, stationInfoById));
+            const sortedRentals = [...enrichedRentals].sort((a, b) => new Date(b.rentalTime) - new Date(a.rentalTime));
 
-            for (const rental of clientRentals) {
+            for (const rental of enrichedRentals) {
                 const chargerSn = toText(rental.sn);
                 if (!chargerSn) continue;
 

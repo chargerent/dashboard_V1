@@ -174,6 +174,13 @@ export const hasNonZeroChargerId = (value) => {
     return !!normalizedValue && !/^0+$/.test(normalizedValue);
 };
 
+const legacySlotReadChargerId = (slotData) => {
+    const readsId = slotData?.readsId;
+    if (readsId === false) return false;
+    if (typeof readsId === 'string' && readsId.trim().toLowerCase() === 'false') return false;
+    return true;
+};
+
 export const getChargingCurrentMa = (slot) => {
     const rawValue = slot?.chargingCurrent ?? slot?.chargeCurrent ?? slot?.cstate ?? 0;
 
@@ -341,8 +348,9 @@ export const normalizeKioskData = (kiosks) => {
 
                 slots = slotSource.map(([key, slotData]) => {
                     const position = parseInt(key.replace('slot', ''), 10);
-                    const hasCharger = slotData && slotData.cid && slotData.cid !== '0000000000' && slotData.cid !== '0';
-                    const isSstatError = slotData.sstat === '0F' && (!slotData.cid || slotData.cid === '0000000000');
+                    const readsChargerId = legacySlotReadChargerId(slotData);
+                    const hasCharger = slotData && readsChargerId && hasNonZeroChargerId(slotData.cid);
+                    const isSstatError = slotData?.sstat === '0F' && (!readsChargerId || !hasNonZeroChargerId(slotData.cid));
                     const cmos = hasCharger ? slotData.cmos : null;
                     const chargingCurrent = hasCharger ? parseInt(slotData.cstate, 10) : 0;
                     return {
@@ -363,6 +371,7 @@ export const normalizeKioskData = (kiosks) => {
             const lastUpdated = module.lastUpdated || kiosk.timestamp;
             return {
                 id: module.id,
+                modtype: module?.modtype ?? module?.modType ?? null,
                 lastUpdated,
                 slots,
                 output: module.output,

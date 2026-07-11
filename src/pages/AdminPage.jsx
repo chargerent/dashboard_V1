@@ -601,7 +601,7 @@ function AdminPage({
               <div className="mx-auto max-w-2xl rounded-xl bg-white p-8 shadow-md">
                 <h2 className="text-xl font-semibold text-gray-900">Media tools are enabled for this account.</h2>
                 <p className="mt-2 text-sm text-gray-600">
-                  Open the Media Library from the header to upload content and assign playlists to eligible CK48 stations.
+                  Open the Media Library from the header to upload content and assign playlists to eligible CT8 and CK48 stations.
                 </p>
                 <div className="mt-6">
                   <button

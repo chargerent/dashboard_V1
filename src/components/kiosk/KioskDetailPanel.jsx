@@ -4,6 +4,7 @@ import React, { useMemo, useCallback, useEffect } from 'react';
 import KioskControlPanel from './KioskControlPanel';
 import {
     getKioskPowerThreshold,
+    hasNonZeroChargerId,
     isChargeStatusError,
     isKioskOnline,
     isModuleOnline,
@@ -55,7 +56,7 @@ const moduleIdsMatch = (left, right) => {
 };
 
 const DEFAULT_LOCKED_SLOT_CLASSES = 'border-red-500 bg-red-100 text-red-800';
-const OTHER_REASON_LOCKED_SLOT_CLASSES = 'border-purple-800 bg-purple-900 text-white';
+const PURPLE_LOCKED_SLOT_CLASSES = 'border-purple-400 bg-purple-100 text-purple-800';
 
 const normalizeLockReason = (reason) => (
     String(reason || '')
@@ -65,20 +66,30 @@ const normalizeLockReason = (reason) => (
         .replace(/\s+/g, ' ')
 );
 
-const isStandardReturnLockReason = (reason) => {
+const isPurpleLockReason = (reason) => {
     const normalizedReason = normalizeLockReason(reason);
-    return normalizedReason === 'fast return' ||
-        normalizedReason === '5 min return' ||
-        normalizedReason === '5 minute return' ||
-        normalizedReason === '5 minutes return' ||
-        normalizedReason === '2 short returns under 5 minutes in 30 days';
+    return normalizedReason === 'broken charger suspected: 2 consecutive returns between 1 and 5 minutes' ||
+        normalizedReason.startsWith('never dispensed:');
 };
 
 const getLockedSlotClasses = (slot) => (
-    isStandardReturnLockReason(slot?.lockReason)
-        ? DEFAULT_LOCKED_SLOT_CLASSES
-        : OTHER_REASON_LOCKED_SLOT_CLASSES
+    isPurpleLockReason(slot?.lockReason)
+        ? PURPLE_LOCKED_SLOT_CLASSES
+        : DEFAULT_LOCKED_SLOT_CLASSES
 );
+
+const slotHasDisplayableCharger = (slot) => (
+    hasNonZeroChargerId(slot?.sn) || slot?.isSstatError === true
+);
+
+const getModuleTypeOutlineClass = (module) => {
+    const modtype = String(module?.modtype ?? '').trim().padStart(2, '0');
+
+    if (modtype === '01') return 'ring-2 ring-gray-400';
+    if (modtype === '03') return 'ring-2 ring-black';
+
+    return '';
+};
 
 const getFirmwareSessionMillis = (session) => {
     if (!session) return 0;
@@ -315,6 +326,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     const moduleIds = useMemo(() => (
         moduleEntries.map((entry) => entry.moduleId)
     ), [moduleEntries]);
+    const showModuleIdCards = isV2Kiosk && moduleIds.length > 0 && !showInlineModuleIds;
     const formatChargeRate = useCallback((rate) => {
         const numericRate = Number(rate);
         if (!Number.isFinite(numericRate) || numericRate <= 0) {
@@ -363,15 +375,13 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                 const activeChargingSlots = Array.isArray(module?.slots)
                     ? module.slots.filter((slot) => (
                         slot &&
-                        slot.sn &&
-                        slot.sn !== 0 &&
+                        hasNonZeroChargerId(slot.sn) &&
                         isSlotActivelyCharging(slot)
                     ))
                     : [];
                 const hasReadyCharger = Array.isArray(module?.slots) && module.slots.some((slot) => (
                     slot &&
-                    slot.sn &&
-                    slot.sn !== 0 &&
+                    hasNonZeroChargerId(slot.sn) &&
                     typeof slot.batteryLevel === 'number' &&
                     slot.batteryLevel >= chargeReadyThreshold
                 ));
@@ -446,7 +456,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         const slotLooksEmpty = !slot || (
             !slot.isSstatError && (
                 slot.sstat === '0C' ||
-                Number(slot?.sn ?? 0) === 0 ||
+                !hasNonZeroChargerId(slot?.sn) ||
                 (Number.isFinite(numericStatus) && numericStatus === 0)
             )
         );
@@ -551,7 +561,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     const SlotButton = React.memo(function SlotButton({ slot, module, style }) {
         const canEject = clientInfo.commands.eject;
         const canLock = clientInfo.commands.lock;
-        const hasCharger = (slot.sstat && slot.sstat !== '0C') || slot.isSstatError;
+        const hasCharger = slotHasDisplayableCharger(slot);
         const ejectDisabledReason = !canEject ? 'permission' : !isOnline ? 'offline' : !hasCharger ? 'empty' : '';
         const lockDisabledReason = !isOnline ? 'offline' : '';
 
@@ -662,7 +672,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     });
 
     const Module = ({ module, reverseOrder = false, className = '' }) => (
-        <div className={`${module.output === false ? 'bg-red-100' : 'bg-white'} p-2 rounded-lg shadow-inner ${className}`}>
+        <div className={`${module.output === false ? 'bg-red-100' : 'bg-white'} p-2 rounded-lg shadow-inner ${getModuleTypeOutlineClass(module)} ${className}`}>
             <div className="flex flex-col gap-1">
                 {module.slots.slice().sort((a, b) => reverseOrder ? b.position - a.position : a.position - b.position).map(slot => {
                     const style = getSlotStyle(slot, module);
@@ -779,6 +789,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     };
 
     const slotOrderInCompactGroup = [2, 0, 3, 1];
+    const ct8SlotOrder = [3, 2, 1, 0];
 
     const buildCompactSlotMap = (modules = []) => {
         const rawEntries = [];
@@ -830,7 +841,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
 
         const { slot, module, displayPosition } = entry;
         const style = getSlotStyle(slot, module);
-        const hasCharger = (slot.sstat && slot.sstat !== '0C') || slot.isSstatError;
+        const hasCharger = slotHasDisplayableCharger(slot);
         const canEject = clientInfo.commands.eject;
         const canLock = clientInfo.commands.lock;
         const ejectDisabledReason = !canEject ? 'permission' : !isOnline ? 'offline' : !hasCharger ? 'empty' : '';
@@ -844,7 +855,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                 data-kiosk-moduleid={module.id}
                 data-kiosk-slotid={slot.position}
             >
-                <div className="grid h-full w-full min-w-0 grid-cols-1 rounded-md px-2 py-1 pr-7">
+                <div className="grid h-full w-full min-w-0 grid-cols-1 rounded-md px-1.5 py-1">
                     <button
                         type="button"
                         data-kiosk-action="compact slot eject"
@@ -868,20 +879,20 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                             }
                         }}
                         disabled={!canEject || !isOnline || !hasCharger}
-                        className="flex min-w-0 items-start gap-1.5 text-left disabled:cursor-not-allowed"
+                        className="grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-1.5 text-left disabled:cursor-not-allowed"
                         title={hasCharger ? `SN ${slot.sn}` : `Slot ${displayPosition || slot.position}`}
                     >
-                        <div className="flex w-7 shrink-0 flex-col items-center justify-center pt-0.5">
+                        <div className="flex min-w-[22px] shrink-0 flex-col items-start justify-start pt-0.5">
                             <span className="text-[10px] font-mono leading-none text-gray-500">
                                 {String(displayPosition || slot.position).padStart(2, '0')}
                             </span>
                             <StatusIndicator status={slot.sstat} />
                         </div>
-                        <div className="flex min-w-0 flex-col pt-0.5 text-left">
-                            <span className="flex items-center gap-1 text-[13px] font-bold leading-none">
-                                <span>{hasCharger ? `${slot.batteryLevel}%` : '—'}</span>
-                                <ChargeStatusIndicator slot={slot} />
+                        <div className="flex min-w-0 items-start justify-end gap-0.5 pt-0.5 text-right">
+                            <span className="whitespace-nowrap text-[11px] font-bold leading-none">
+                                {hasCharger ? `${slot.batteryLevel}%` : '—'}
                             </span>
+                            <ChargeStatusIndicator slot={slot} />
                         </div>
                     </button>
                     {hasCharger && (
@@ -892,7 +903,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                             data-kiosk-moduleid={module.id}
                             data-kiosk-slotid={slot.position}
                             onClick={(event) => handleNavigateToCharger(event, slot.sn)}
-                            className="ml-[34px] mt-0.5 block min-w-0 truncate text-left font-mono text-[9px] leading-tight text-sky-700 underline decoration-sky-300 underline-offset-2 hover:text-sky-900"
+                            className="mt-0.5 block w-full min-w-0 truncate pr-5 text-left font-mono text-[8px] leading-tight text-sky-700 underline decoration-sky-300 underline-offset-2 hover:text-sky-900"
                             title={`${t('chargers_page_title')}: ${slot.sn}`}
                             aria-label={`${t('chargers_page_title')}: ${slot.sn}`}
                         >
@@ -900,7 +911,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                         </button>
                     )}
                     {!hasCharger && (
-                        <span className="ml-[34px] mt-0.5 block font-mono text-[9px] leading-tight text-gray-500">
+                        <span className="mt-0.5 block w-full pr-5 font-mono text-[9px] leading-tight text-gray-500">
                             {'\u00A0'}
                         </span>
                     )}
@@ -944,11 +955,11 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         );
     };
 
-    const CompactGroupCard = ({ slotsByPosition, groupIndex }) => (
+    const CompactGroupCard = ({ slotsByPosition, groupIndex, slotOrder = slotOrderInCompactGroup }) => (
         <div className="bg-white p-1 rounded-lg shadow-inner">
             <div className="grid grid-cols-2 gap-1">
-                {slotOrderInCompactGroup.map((slotOrder, index) => {
-                    const position = groupIndex * 4 + slotOrder + 1;
+                {slotOrder.map((slotOffset, index) => {
+                    const position = groupIndex * 4 + slotOffset + 1;
                     return <CompactGridSlot key={`${groupIndex}-${index}`} entry={slotsByPosition.get(position)} />;
                 })}
             </div>
@@ -998,13 +1009,18 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
 
         return (
             <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
-                <div className="w-full max-w-xl space-y-3">
+                <div className="w-full max-w-lg space-y-3">
                     <CompactTowerHeader />
-                    <div className="grid grid-cols-[minmax(0,1fr)_minmax(128px,0.72fr)] items-start gap-3">
+                    <div className="grid grid-cols-[minmax(92px,126px)_minmax(210px,1fr)] items-stretch gap-2 sm:grid-cols-[minmax(92px,126px)_minmax(210px,1fr)]">
                         <CompactPortraitScreen label="16IN" />
-                        <div className="flex flex-col gap-2 pt-1">
+                        <div className="flex h-full flex-col justify-between gap-2">
                             {[0, 1].map((groupIndex) => (
-                                <CompactGroupCard key={groupIndex} slotsByPosition={slotsByPosition} groupIndex={groupIndex} />
+                                <CompactGroupCard
+                                    key={groupIndex}
+                                    slotsByPosition={slotsByPosition}
+                                    groupIndex={groupIndex}
+                                    slotOrder={ct8SlotOrder}
+                                />
                             ))}
                         </div>
                     </div>
@@ -1215,7 +1231,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                         <KioskControlPanel kiosk={kiosk} t={t} onCommand={onCommand} serverUiVersion={serverUiVersion} serverFlowVersion={serverFlowVersion} clientInfo={clientInfo} isOnline={isOnline} disabled={!isOnline} />
                     </div>
                 )}
-                {moduleIds.length > 0 && !showInlineModuleIds && (
+                {showModuleIdCards && (
                     <div className="w-full rounded-lg bg-white shadow-sm">
                         <div className="flex flex-wrap items-center gap-2 border-b border-gray-200 px-4 py-3 text-sm font-semibold text-gray-700">
                             <span>{t('module_view')}:</span>

@@ -291,6 +291,7 @@ const DEFAULT_MEDIA_OPTIONS = {
   playlist: [],
   loop: true,
 };
+const MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set(["CT8", "CK48"]);
 const NEW_KIOSK_TYPES = new Set(["CT3", "CT4", "CT8", "CT12", "CK48"]);
 const BOUND_KIOSK_TYPE_CONFIG = Object.freeze({
   CT3: {modules: 1, slots: 3},
@@ -315,6 +316,15 @@ const COUNTRY_PREFIXES = {
 
 function isPlainObject(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function getKioskHardwareType(kiosk) {
+  return String(kiosk?.hardware?.type || "").trim().toUpperCase();
+}
+
+function isMediaConfigurableKiosk(kiosk) {
+  return isNewSchemaKioskDocument(kiosk) &&
+    MEDIA_CONFIGURABLE_KIOSK_TYPES.has(getKioskHardwareType(kiosk));
 }
 
 function mergeLocalizedMarketingValue(value, defaults) {
@@ -3825,9 +3835,8 @@ async function mediaAssignPlaylistImpl(data, authState) {
       return;
     }
 
-    if (!isNewSchemaKioskDocument(kiosk) ||
-        String(kiosk?.hardware?.type || "").trim().toUpperCase() !== "CK48") {
-      failures.push({stationid, reason: "Only V2 CK48 kiosks are supported"});
+    if (!isMediaConfigurableKiosk(kiosk)) {
+      failures.push({stationid, reason: "Only V2 CT8 or CK48 kiosks are supported"});
       return;
     }
 
@@ -3852,7 +3861,7 @@ async function mediaAssignPlaylistImpl(data, authState) {
       loop,
       assetIds,
       playlist,
-      targetType: "CK48",
+      targetType: getKioskHardwareType(entry.kiosk),
       updatedAt: timestamp,
       updatedByUid: authState.uid,
       updatedByUsername: normalizeUsername(authState.profile?.username),

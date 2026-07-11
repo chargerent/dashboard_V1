@@ -122,6 +122,25 @@ function slotLooksEmpty(slot) {
   );
 }
 
+function getSlotDedupQuality(slot) {
+  if (!slot) return 0;
+
+  const chargerSn = String(slot?.sn ?? '').trim();
+  if (!chargerSn || /^0+$/.test(chargerSn)) return 0;
+
+  const batteryLevel = Number(slot?.batteryLevel);
+  const sstat = String(slot?.sstat || '').trim().toUpperCase();
+  let quality = 10;
+
+  if (sstat === '0F') quality += 20;
+  if (sstat === '0E') quality -= 10;
+  if (slotLooksEmpty(slot)) quality -= 20;
+  if (Number.isFinite(batteryLevel) && batteryLevel > 0) quality += 10;
+  if (slot?.isSstatError) quality -= 5;
+
+  return quality;
+}
+
 function createCommandRequestId(action, stationid, moduleid) {
   const prefix = String(action || 'command').replace(/\s+/g, '-').toLowerCase();
   const targetStation = String(stationid || 'unknown').trim() || 'unknown';
@@ -605,6 +624,13 @@ function RouteLoadingState() {
       <div className="text-xl font-semibold text-gray-700">Loading page...</div>
     </div>
   );
+}
+
+function normalizeNavigationSearch(value = '') {
+  if (value == null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return '';
 }
 
 function App() {
@@ -1295,6 +1321,7 @@ function App() {
             slotIndex,
             kioskOnline,
             kioskTimestamp,
+            slotQuality: getSlotDedupQuality(slot),
           };
 
           if (!existing) {
@@ -1304,7 +1331,15 @@ function App() {
 
           const shouldReplace = (
             (candidate.kioskOnline && !existing.kioskOnline) ||
-            (candidate.kioskOnline === existing.kioskOnline && candidate.kioskTimestamp > existing.kioskTimestamp)
+            (
+              candidate.kioskOnline === existing.kioskOnline &&
+              candidate.slotQuality > existing.slotQuality
+            ) ||
+            (
+              candidate.kioskOnline === existing.kioskOnline &&
+              candidate.slotQuality === existing.slotQuality &&
+              candidate.kioskTimestamp > existing.kioskTimestamp
+            )
           );
 
           if (shouldReplace) {
@@ -2065,7 +2100,7 @@ function App() {
       onNavigateToBinding={() => setPage('binding')}
       onNavigateToRentals={() => setPage('rentals')}
       onNavigateToChargers={(searchTerm = '') => {
-        setChargerSearchTerm(String(searchTerm || ''));
+        setChargerSearchTerm(normalizeNavigationSearch(searchTerm));
         setPage('chargers');
       }}
       initialSearch={dashboardSearchTerm}
@@ -2270,7 +2305,7 @@ function App() {
         return (
           <ChargersPage
             onNavigateToDashboard={(searchTerm = '') => {
-              setDashboardSearchTerm(String(searchTerm || ''));
+              setDashboardSearchTerm(normalizeNavigationSearch(searchTerm));
               setPage('dashboard');
             }}
             rentalData={rentalData}

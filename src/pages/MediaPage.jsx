@@ -4,7 +4,7 @@ import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
 import ConfirmationModal from '../components/UI/ConfirmationModal.jsx';
 import LoadingSpinner from '../components/UI/LoadingSpinner.jsx';
 import { callFunctionWithAuth } from '../utils/callableRequest.js';
-import { filterStationsForClient } from '../utils/helpers.js';
+import { filterStationsForClient, isNewSchemaKiosk } from '../utils/helpers.js';
 
 const ALL_LOCATIONS_TAG = 'All Locations';
 const UNTAGGED_FILTER_VALUE = '__UNTAGGED__';
@@ -12,6 +12,9 @@ const UNTAGGED_FILTER_LABEL = 'Untagged';
 const MEDIA_LIST_TIMEOUT_MS = 45000;
 const MEDIA_UPLOAD_URL_TIMEOUT_MS = 45000;
 const MEDIA_FINALIZE_TIMEOUT_MS = 120000;
+const MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set(['CT8', 'CK48']);
+const MEDIA_CONFIGURABLE_KIOSK_LABEL = 'CT8 or CK48';
+const MEDIA_CONFIGURABLE_BADGE_FALLBACK = 'CT8/CK48';
 
 function isPdfFile(fileOrAsset) {
   return String(fileOrAsset?.type || fileOrAsset?.contentType || '').trim().toLowerCase() === 'application/pdf';
@@ -77,6 +80,10 @@ function getKioskClientTag(kiosk) {
 
 function getKioskLocationTag(kiosk) {
   return String(kiosk?.info?.location || '').trim();
+}
+
+function getKioskHardwareType(kiosk) {
+  return String(kiosk?.hardware?.type || '').trim().toUpperCase();
 }
 
 function normalizeTagKey(value) {
@@ -481,8 +488,10 @@ export default function MediaPage({
 
   const eligibleKiosks = useMemo(() => (
     filterStationsForClient(allStationsData, currentUser)
-      .filter((kiosk) => kiosk?.isNewSchema === true)
-      .filter((kiosk) => String(kiosk?.hardware?.type || '').trim().toUpperCase() === 'CK48')
+      .filter((kiosk) => (
+        isNewSchemaKiosk(kiosk) &&
+        MEDIA_CONFIGURABLE_KIOSK_TYPES.has(getKioskHardwareType(kiosk))
+      ))
       .sort((left, right) => String(left.stationid || '').localeCompare(String(right.stationid || '')))
   ), [allStationsData, currentUser]);
 
@@ -735,7 +744,7 @@ export default function MediaPage({
     }
 
     if (uploadClientOptions.length === 0) {
-      return 'No eligible CK48 clients were found for tagging uploads.';
+      return `No eligible ${MEDIA_CONFIGURABLE_KIOSK_LABEL} clients were found for tagging uploads.`;
     }
 
     return null;
@@ -1106,7 +1115,7 @@ export default function MediaPage({
     }
 
     if (selectedStationIds.length === 0) {
-      setStatus({ state: 'error', message: 'Select at least one CK48 station first.' });
+      setStatus({ state: 'error', message: `Select at least one ${MEDIA_CONFIGURABLE_KIOSK_LABEL} station first.` });
       return;
     }
 
@@ -1137,7 +1146,7 @@ export default function MediaPage({
 
   const handleClearMedia = async () => {
     if (selectedStationIds.length === 0) {
-      setStatus({ state: 'error', message: 'Select at least one CK48 station first.' });
+      setStatus({ state: 'error', message: `Select at least one ${MEDIA_CONFIGURABLE_KIOSK_LABEL} station first.` });
       return;
     }
 
@@ -1230,7 +1239,7 @@ export default function MediaPage({
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Upload Media</h2>
                 <p className="mt-1 text-sm text-gray-600">
-                  Upload images, videos, or PDFs to Firebase Storage for CK48 station playlists.
+                  Upload images, videos, or PDFs to Firebase Storage for CT8 and CK48 station playlists.
                 </p>
                 <p className="mt-1 text-xs text-gray-500">
                   Upload scope: {uploadVisibility === 'global' ? 'Global library' : 'Your client library'}
@@ -1512,7 +1521,7 @@ export default function MediaPage({
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Target Stations</h2>
                 <p className="mt-1 text-sm text-gray-600">
-                  Select stations to assign assets to. Offline CK48 kiosks will load their assigned media when they come back online.
+                  Select stations to assign assets to. Offline CT8 and CK48 kiosks will load their assigned media when they come back online.
                 </p>
               </div>
               <div className="text-right text-xs text-gray-500">
@@ -1540,7 +1549,7 @@ export default function MediaPage({
 
             {eligibleKiosks.length === 0 ? (
               <div className="mt-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-6 text-sm text-gray-500">
-                No CK48 stations were found for this account.
+                No CT8 or CK48 stations were found for this account.
               </div>
             ) : (
               <div className="mt-4 max-h-[32rem] space-y-3 overflow-y-auto pr-1">
@@ -1579,7 +1588,7 @@ export default function MediaPage({
                               </p>
                             </div>
                             <span className="rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-gray-600">
-                              {kiosk.hardware?.type || 'CK48'}
+                              {getKioskHardwareType(kiosk) || MEDIA_CONFIGURABLE_BADGE_FALLBACK}
                             </span>
                           </div>
                           <p className="mt-2 truncate text-xs text-gray-600" title={currentPlaylistLabel}>
