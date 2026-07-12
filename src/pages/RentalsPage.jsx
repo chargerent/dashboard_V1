@@ -18,6 +18,7 @@ import {
     isSuccessfulRefundStatus,
     normalizeRefundStatus,
 } from '../utils/rentals.js';
+import { isV2Kiosk } from '../utils/helpers.js';
 import RefundModal from '../components/UI/RefundModal.jsx';
 import ConfirmationModal from '../components/UI/ConfirmationModal.jsx';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
@@ -26,17 +27,29 @@ const RENTALS_PER_PAGE = 30;
 
 const resolveRefundTransactionId = (rental) => (
     String(
-        rental?.rawid ||
-        rental?.paymentSessionId ||
+        rental?.orderid ||
         rental?.transactionid ||
         rental?.transactionId ||
-        rental?.orderid ||
+        rental?.paymentSessionId ||
+        rental?.rawid ||
         ''
     ).trim()
 );
 
 const resolveRefundGateway = (rental, station) => (
     String(rental?.gateway || station?.hardware?.gateway || '').trim()
+);
+
+const resolveDisplayTransactionId = (rental) => (
+    String(
+        firstPresent(
+            rental?.orderid,
+            rental?.rawid,
+            rental?.transactionid,
+            rental?.transactionId,
+            rental?.paymentSessionId
+        ) || ''
+    ).trim()
 );
 
 const formatTransactionId = (value) => {
@@ -60,6 +73,38 @@ const firstPresent = (...values) => (
     values.find(value => value !== null && value !== undefined && String(value).trim() !== '')
 );
 
+const copyToClipboard = async (value) => {
+    const text = String(value || '').trim();
+    if (!text) return false;
+
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        try {
+            await navigator.clipboard.writeText(text);
+            return true;
+        } catch {
+            // Fall through to the textarea fallback below.
+        }
+    }
+
+    if (typeof document === 'undefined') return false;
+
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.setAttribute('readonly', '');
+    textArea.style.position = 'fixed';
+    textArea.style.top = '-9999px';
+    document.body.appendChild(textArea);
+    textArea.select();
+
+    try {
+        return document.execCommand('copy');
+    } catch {
+        return false;
+    } finally {
+        document.body.removeChild(textArea);
+    }
+};
+
 const formatLogTime = (timestamp) => {
     const date = safeToDate(timestamp);
     return date ? formatDateTime(date.toISOString()) : '';
@@ -79,6 +124,93 @@ const formatDetailParts = (...parts) => parts
     .filter(part => part !== null && part !== undefined && String(part).trim() !== '')
     .map(part => String(part));
 
+const formatCentsAmount = (cents, symbol = '$') => {
+    const value = Number(cents);
+    if (!Number.isFinite(value)) return '';
+    return `${symbol || '$'}${(value / 100).toFixed(2)}`;
+};
+
+const resolveProcessEventTitle = (entry, t) => {
+    const event = normalizeText(firstPresent(entry?.event, entry?.type, entry?.title));
+    const action = humanizeCode(firstPresent(entry?.action, entry?.paymentAction));
+
+    if (event === 'apollo-authorization-created') return 'Apollo authorization created';
+    if (event === 'apollo-payment-action-queued') return `Apollo ${action || 'payment'} queued`;
+    if (event === 'apollo-payment-route-missing') return `Apollo ${action || 'payment'} route missing`;
+    if (event === 'apollo-cancel-verified' || event === 'apollo-authorization-cancelled') return 'Apollo authorization cancelled';
+    if (event === 'apollo-cancel-retry-needed') return 'Apollo cancel retry scheduled';
+    if (event === 'apollo-cancel-failed' || event === 'apollo-authorization-cancel-retry-failed') return 'Apollo cancel failed';
+    if (event === 'apollo-commit-confirmed') return 'Apollo commit confirmed';
+    if (event === 'apollo-commit-failed') return 'Apollo commit failed';
+    if (event === 'physical-return-after-purchase') return 'Physical return after purchase';
+
+    return humanizeCode(firstPresent(entry?.title, entry?.event, entry?.type)) || t('process_log');
+};
+
+const resolveProcessEventStatus = (entry) => {
+    const status = normalizeText(firstPresent(entry?.status, entry?.paymentActionStatus));
+    const event = normalizeText(firstPresent(entry?.event, entry?.type, entry?.title));
+
+    if (
+        status.includes('fail') ||
+        status.includes('error') ||
+        status.includes('missing') ||
+        event.includes('fail') ||
+        event.includes('error') ||
+        event.includes('missing')
+    ) {
+        return 'error';
+    }
+
+    if (
+        status.includes('retry') ||
+        status.includes('pending') ||
+        event.includes('retry')
+    ) {
+        return 'warning';
+    }
+
+    if (status.includes('queued') || event.includes('queued') || event.includes('sent')) {
+        return 'pending';
+    }
+
+    if (
+        status.includes('cancelled') ||
+        status.includes('committed') ||
+        status.includes('confirmed') ||
+        event.includes('verified') ||
+        event.includes('confirmed') ||
+        event.includes('cancelled')
+    ) {
+        return 'success';
+    }
+
+    return 'info';
+};
+
+const buildBackendProcessDetails = (entry, rental, t) => {
+    const amountCents = firstPresent(entry?.amountCents, entry?.authorizedAmountCents, entry?.finalAmountCents);
+    const hostReference = firstPresent(
+        entry?.authorizationHostReference,
+        entry?.aprivaHostTransactionId,
+        entry?.host_transaction_id
+    );
+
+    return formatDetailParts(
+        entry?.action ? `${t('actions')}: ${humanizeCode(entry.action)}` : '',
+        entry?.status ? `${t('status')}: ${humanizeCode(entry.status)}` : '',
+        entry?.state ? `State: ${entry.state}` : '',
+        entry?.result ? `Result: ${entry.result}` : '',
+        amountCents != null ? `${t('amount')}: ${formatCentsAmount(amountCents, rental.symbol)}` : '',
+        entry?.statusCode != null ? `HTTP: ${entry.statusCode}` : '',
+        entry?.lookupStatusCode != null ? `Lookup: ${entry.lookupStatusCode}` : '',
+        entry?.terminalsn ? `Terminal: ${entry.terminalsn}` : '',
+        entry?.rawid ? `Session: ${formatTransactionId(entry.rawid)}` : '',
+        hostReference ? `Host ref: ${hostReference}` : '',
+        entry?.note || entry?.reason || ''
+    );
+};
+
 const hasAttemptSucceeded = (attempt) => (
     normalizeText(attempt?.reason) === 'dispensed' ||
     Number(attempt?.exitStatus) === 1
@@ -96,6 +228,10 @@ const getAttemptTime = (attempt) => (
 
 const buildRentalProcessLog = (rental, t) => {
     const entries = [];
+    const backendProcessLog = Array.isArray(rental.processLog) ? rental.processLog : [];
+    const hasBackendEvent = (eventName) => backendProcessLog.some(entry => (
+        normalizeText(entry?.event) === eventName
+    ));
     const addEntry = ({ title, timestamp, status = 'info', details = [] }) => {
         const time = safeToDate(timestamp)?.getTime();
         entries.push({
@@ -123,6 +259,25 @@ const buildRentalProcessLog = (rental, t) => {
         status: normalizeText(rental.status) === 'pending' ? 'pending' : 'info',
         details: rentalDetails,
     });
+
+    const authorizationReference = firstPresent(
+        rental.authorizationHostReference,
+        rental.aprivaHostTransactionId,
+        rental.host_transaction_id
+    );
+    if ((authorizationReference || rental.authorizedAmountCents || rental.terminalTxnId) && !hasBackendEvent('apollo-authorization-created')) {
+        addEntry({
+            title: 'Apollo authorization created',
+            timestamp: firstPresent(rental.paymentAuthorizedAt, rental.rentalTime),
+            status: 'info',
+            details: formatDetailParts(
+                authorizationReference ? `Host ref: ${authorizationReference}` : '',
+                rental.terminalTxnId ? `Terminal txn: ${rental.terminalTxnId}` : '',
+                rental.authorizedAmountCents != null ? `${t('amount')}: ${formatCentsAmount(rental.authorizedAmountCents, rental.symbol)}` : '',
+                rental.paymentTerminalSn || rental.terminalsn ? `Terminal: ${firstPresent(rental.paymentTerminalSn, rental.terminalsn)}` : ''
+            ),
+        });
+    }
 
     const attempts = Array.isArray(rental.vendAttempts) ? rental.vendAttempts : [];
     attempts.forEach((attempt, index) => {
@@ -207,8 +362,22 @@ const buildRentalProcessLog = (rental, t) => {
         });
     }
 
+    const rentalStatus = normalizeText(rental.status);
+    const hasSuccessfulVend = (
+        attempts.some(hasAttemptSucceeded) ||
+        (attempts.length === 0 && Number(rental.exitStatus) === 1)
+    );
+    const hasCompletedVend = (
+        hasSuccessfulVend ||
+        rentalStatus === 'rented' ||
+        rentalStatus === 'purchased' ||
+        isReturnedRentalStatus(rental.status) ||
+        Boolean(rental.returnTime)
+    );
     const finalFailureReason = firstPresent(rental.failureReason, rental.lastVendFailureReason);
-    if (normalizeText(rental.status) === 'vend_failed' || finalFailureReason) {
+    const shouldShowFinalFailure = rentalStatus === 'vend_failed' || (finalFailureReason && !hasCompletedVend);
+
+    if (shouldShowFinalFailure) {
         addEntry({
             title: t('final_vend_failure'),
             timestamp: firstPresent(rental.failedAt, rental.lastUpdate, rental.rentalTime),
@@ -256,6 +425,65 @@ const buildRentalProcessLog = (rental, t) => {
             ),
         });
     }
+
+    if (rental.paymentAction && !hasBackendEvent('apollo-payment-action-queued')) {
+        addEntry({
+            title: `Apollo ${humanizeCode(rental.paymentAction)} queued`,
+            timestamp: firstPresent(rental.paymentActionQueuedAt, rental.returnTime, rental.paymentUpdatedAt),
+            status: normalizeText(rental.paymentActionStatus) === 'queued' ? 'pending' : resolveProcessEventStatus({
+                status: rental.paymentActionStatus,
+                event: `apollo-${rental.paymentAction}`,
+            }),
+            details: formatDetailParts(
+                rental.paymentActionReason ? `${t('reason')}: ${humanizeCode(rental.paymentActionReason)}` : '',
+                rental.paymentActionStatus ? `${t('status')}: ${humanizeCode(rental.paymentActionStatus)}` : '',
+                rental.paymentAmountCents != null ? `${t('amount')}: ${formatCentsAmount(rental.paymentAmountCents, rental.symbol)}` : '',
+                rental.paymentTerminalSn || rental.terminalsn ? `Terminal: ${firstPresent(rental.paymentTerminalSn, rental.terminalsn)}` : '',
+                rental.paymentSessionId || rental.rawid ? `Session: ${formatTransactionId(firstPresent(rental.paymentSessionId, rental.rawid))}` : ''
+            ),
+        });
+    }
+
+    const hasCancelEvent = backendProcessLog.some(entry => normalizeText(entry?.event).includes('cancel'));
+    if ((rental.cpsCancelStatusCode || rental.cpsCancelLookupStatusCode || rental.cpsCancelState) && !hasCancelEvent) {
+        addEntry({
+            title: rental.cpsCancelConfirmed ? 'Apollo authorization cancelled' : 'Apollo cancel failed',
+            timestamp: firstPresent(rental.cpsCancelVerifiedAt, rental.paymentUpdatedAt, rental.cpsCancelLastAttemptAt),
+            status: rental.cpsCancelConfirmed ? 'success' : 'error',
+            details: formatDetailParts(
+                rental.cpsCancelState ? `State: ${rental.cpsCancelState}` : '',
+                rental.cpsCancelResult ? `Result: ${rental.cpsCancelResult}` : '',
+                rental.cpsCancelStatusCode != null ? `HTTP: ${rental.cpsCancelStatusCode}` : '',
+                rental.cpsCancelLookupStatusCode != null ? `Lookup: ${rental.cpsCancelLookupStatusCode}` : '',
+                rental.paymentActionError || ''
+            ),
+        });
+    }
+
+    const hasCommitEvent = backendProcessLog.some(entry => normalizeText(entry?.event).includes('commit'));
+    if ((rental.cpsCommitStatusCode || rental.cpsCommitState) && !hasCommitEvent) {
+        addEntry({
+            title: rental.cpsCommitConfirmed ? 'Apollo commit confirmed' : 'Apollo commit failed',
+            timestamp: firstPresent(rental.cpsCommitResponseAt, rental.paymentUpdatedAt, rental.purchaseCompletedAt),
+            status: rental.cpsCommitConfirmed ? 'success' : 'error',
+            details: formatDetailParts(
+                rental.cpsCommitState ? `State: ${rental.cpsCommitState}` : '',
+                rental.cpsCommitResult ? `Result: ${rental.cpsCommitResult}` : '',
+                rental.cpsCommitStatusCode != null ? `HTTP: ${rental.cpsCommitStatusCode}` : '',
+                rental.paymentAmountCents != null ? `${t('amount')}: ${formatCentsAmount(rental.paymentAmountCents, rental.symbol)}` : '',
+                rental.paymentActionError || ''
+            ),
+        });
+    }
+
+    backendProcessLog.forEach((entry) => {
+        addEntry({
+            title: resolveProcessEventTitle(entry, t),
+            timestamp: firstPresent(entry?.timestamp, entry?.time, entry?.createdAt, rental.paymentUpdatedAt, rental.lastUpdate),
+            status: resolveProcessEventStatus(entry),
+            details: buildBackendProcessDetails(entry, rental, t),
+        });
+    });
 
     return entries.sort((left, right) => {
         if (left.sortTime !== null && right.sortTime !== null) {
@@ -347,8 +575,10 @@ const RentalProcessLog = ({ rental, t }) => {
     );
 };
 
-const RentalCard = ({ rental, t, onRefund, onLockClick, canLock }) => {
-    const transactionId = String(rental.orderid || '').trim();
+const RentalCard = ({ rental, t, onRefund, onLockClick, canLock, onNavigateToChargers }) => {
+    const [copiedTransaction, setCopiedTransaction] = useState(false);
+    const transactionId = resolveDisplayTransactionId(rental);
+    const chargerId = String(firstPresent(rental.sn, rental.chargerid) || '').trim();
     const normalizedRefundStatus = normalizeRefundStatus(rental.refundStatus);
     const statusClass = rental.status === 'rented' ? 'bg-blue-100 text-blue-800' :
                         rental.status === 'purchased' ? 'bg-purple-100 text-purple-800' :
@@ -366,6 +596,23 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock }) => {
                               'text-gray-700';
 
     const lockButtonColor = rental.isLocked ? 'text-red-600 bg-red-100' : 'text-gray-400 hover:text-red-600 hover:bg-red-100';
+
+    const handleCopyTransactionId = async () => {
+        if (!transactionId) return;
+
+        const didCopy = await copyToClipboard(transactionId);
+        if (!didCopy) return;
+
+        setCopiedTransaction(true);
+        if (typeof window !== 'undefined') {
+            window.setTimeout(() => setCopiedTransaction(false), 1400);
+        }
+    };
+
+    const handleChargerClick = () => {
+        if (!chargerId || !onNavigateToChargers) return;
+        onNavigateToChargers(chargerId);
+    };
 
     return (
         <div className={`${cardBgClass} shadow-md rounded-lg p-4 flex flex-col justify-between`}>
@@ -385,13 +632,32 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock }) => {
             <div className="mt-4 grid grid-cols-3 gap-x-4 gap-y-2 text-xs">
                 <div>
                     <p className="text-gray-500">{t('order_id')}</p>
-                    <p className="font-mono text-gray-800 truncate" title={transactionId}>
+                    <button
+                        type="button"
+                        onClick={handleCopyTransactionId}
+                        disabled={!transactionId}
+                        className={`block max-w-full truncate text-left font-mono transition-colors disabled:cursor-default disabled:text-gray-800 disabled:hover:no-underline ${copiedTransaction ? 'text-green-700' : 'text-blue-700 hover:text-blue-900 hover:underline'}`}
+                        title={transactionId ? `${copiedTransaction ? t('copied_transaction_id') : t('copy_transaction_id')}: ${transactionId}` : ''}
+                        aria-label={transactionId ? `${t('copy_transaction_id')}: ${transactionId}` : t('order_id')}
+                    >
                         {formatTransactionId(transactionId)}
-                    </p>
+                    </button>
                 </div>
                 <div>
                     <p className="text-gray-500">{t('charger_sn')}</p>
-                    <p className="font-mono text-gray-800">{rental.sn}</p>
+                    {chargerId && onNavigateToChargers ? (
+                        <button
+                            type="button"
+                            onClick={handleChargerClick}
+                            className="block max-w-full truncate text-left font-mono text-blue-700 transition-colors hover:text-blue-900 hover:underline"
+                            title={`${t('open_charger')}: ${chargerId}`}
+                            aria-label={`${t('open_charger')}: ${chargerId}`}
+                        >
+                            {chargerId}
+                        </button>
+                    ) : (
+                        <p className="font-mono text-gray-800 truncate" title={chargerId}>{chargerId}</p>
+                    )}
                 </div>
                 <div>
                     <p className="text-gray-500">{t('card')}</p>
@@ -481,9 +747,9 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock }) => {
     );
 };
 
-export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalData, allStationsData, t, language, setLanguage, onLogout, onCommand, commandStatus, setCommandStatus, referenceTime }) {
-    const [activeFilters, setActiveFilters] = useState({ period: 'today', status: 'all', returnType: 'all' });
-    const [searchTerm, setSearchTerm] = useState('');
+export default function RentalsPage({ onNavigateToDashboard, onNavigateToChargers, clientInfo, rentalData, allStationsData, t, language, setLanguage, onLogout, onCommand, commandStatus, setCommandStatus, referenceTime, initialPeriod = 'today', initialStationIds = [], initialSearch = '' }) {
+    const [activeFilters, setActiveFilters] = useState({ period: initialPeriod, status: 'all', returnType: 'all', version: 'all' });
+    const [searchTerm, setSearchTerm] = useState(initialSearch);
     const [currentPage, setCurrentPage] = useState(1);
     const [showRefundModal, setShowRefundModal] = useState(false);
     const [rentalToRefund, setRentalToRefund] = useState(null);
@@ -518,13 +784,16 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
                 clientId: station.info?.client,
                 rep: station.info?.rep,
                 location: station.info?.location,
-                place: station.info?.place
+                place: station.info?.place,
+                version: isV2Kiosk(station) ? 'v2' : 'v1',
             });
         });
 
         let rentals = (rentalData || []).map(rental => {
-            const chargerLocation = chargerLocations.get(String(rental.sn));
+            const chargerId = firstPresent(rental.sn, rental.chargerid);
+            const chargerLocation = chargerLocations.get(String(chargerId || ''));
             const stationInfo = stationToClientMap.get(rental.rentalStationid);
+            const stationVersion = stationInfo?.version || (isV2Kiosk({ stationid: rental.rentalStationid }) ? 'v2' : 'v1');
             return {
                 ...rental, // Keep original rental data
                 // Enrich with station info, but don't overwrite existing rental fields
@@ -534,6 +803,7 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
                 isLocked: chargerLocation?.isLocked || false,
                 rentalLocation: rental.rentalLocation || stationInfo?.location,
                 rentalPlace: rental.rentalPlace || stationInfo?.place,
+                stationVersion,
             };
         });
 
@@ -543,6 +813,15 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
             } else {
                 rentals = rentals.filter(r => textEquals(r.clientId, clientInfo.clientId));
             }
+        }
+
+        if (initialStationIds.length > 0) {
+            const scopedStationIds = new Set(initialStationIds.map(stationId => String(stationId)));
+            rentals = rentals.filter(rental => scopedStationIds.has(String(rental.rentalStationid)));
+        }
+
+        if (activeFilters.version && activeFilters.version !== 'all') {
+            rentals = rentals.filter(r => r.stationVersion === activeFilters.version);
         }
 
         const lowercasedSearch = normalizeText(searchTerm);
@@ -555,6 +834,7 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
                 textIncludes(r.rentalStationid, lowercasedSearch) ||
                 textIncludes(r.card_last4, lowercasedSearch) ||
                 textIncludes(r.sn, lowercasedSearch) ||
+                textIncludes(r.chargerid, lowercasedSearch) ||
                 textIncludes(r.orderid, lowercasedSearch) ||
                 textIncludes(r.rawid, lowercasedSearch) ||
                 textIncludes(r.transactionid, lowercasedSearch) ||
@@ -629,7 +909,7 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
             return bTime - aTime;
         });
 
-    }, [rentalData, allStationsData, clientInfo, activeFilters, searchTerm, referenceTime, chargerLocations]);
+    }, [rentalData, allStationsData, clientInfo, activeFilters, searchTerm, referenceTime, chargerLocations, initialStationIds]);
 
     const totalPages = Math.max(1, Math.ceil(filteredRentals.length / RENTALS_PER_PAGE));
     const visiblePage = Math.min(currentPage, totalPages);
@@ -670,7 +950,7 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
             const transactionid = resolveRefundTransactionId(rentalToRefund);
             // The onCommand function expects a different structure for refunds.
             // The 6th argument is used for the refund payload, which includes the transactionid.
-            onCommand(rentalToRefund.rentalStationid, 'refund', null, null, null, { transactionid, amount, gateway });
+            onCommand(rentalToRefund.rentalStationid, 'refund', null, null, null, { transactionid, orderId: transactionid, amount, gateway });
             setCommandStatus({ state: 'sending', message: t('sending_command') });
         }
         setShowRefundModal(false);
@@ -775,6 +1055,14 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
                             </button>
                         ))}
                     </div>
+                    <div className="flex flex-wrap items-center gap-4 mt-4 border-t pt-4">
+                        {['all', 'v1', 'v2'].map(version => (
+                            <button key={version} onClick={() => handleFilterChange('version', version)}
+                                className={`px-3 py-1 text-sm font-semibold rounded-full transition-colors ${activeFilters.version === version ? 'bg-blue-600 text-white shadow' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>
+                                {version === 'all' ? t('all') : version.toUpperCase()}
+                            </button>
+                        ))}
+                    </div>
 
                     <div className="relative mt-4">
                         <input
@@ -830,7 +1118,8 @@ export default function RentalsPage({ onNavigateToDashboard, clientInfo, rentalD
                                 rental={rental} t={t} 
                                 onRefund={clientInfo?.features?.rentals ? handleRefundClick : null}
                                 onLockClick={() => handleLockClick(rental)}
-                                canLock={canLock} />;
+                                canLock={canLock}
+                                onNavigateToChargers={onNavigateToChargers} />;
                         })
                     ) : (
                         <div className="col-span-full text-center text-gray-500 mt-10 bg-white p-8 rounded-lg shadow-md">

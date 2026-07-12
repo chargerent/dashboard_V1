@@ -72,9 +72,11 @@ function RentalStats({ rentalData, clientInfo, referenceTime, stationId, kiosks,
             if (onClick) onClick();
         };
         return (
-            <div 
-                className={`bg-gray-100 p-2 rounded-md text-center ${onClick ? 'cursor-pointer hover:bg-gray-200 transition-colors' : 'cursor-default'}`}
+            <button
+                type="button"
+                className={`w-full bg-gray-100 p-2 rounded-md text-center ${onClick ? 'cursor-pointer hover:bg-gray-200 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500' : 'cursor-default'}`}
                 onClick={handleClick}
+                disabled={!onClick}
             >
                 {(clientInfo?.features?.rental_counts || clientInfo?.isAdmin) && (
                     <p className={`${valueClass} font-bold text-gray-700 leading-tight`}>{count}</p>
@@ -88,7 +90,7 @@ function RentalStats({ rentalData, clientInfo, referenceTime, stationId, kiosks,
                     </p>
                 )}
                 <p className="text-xs text-gray-500 mt-1">{t(period)}</p>
-            </div>
+            </button>
         );
     };
 

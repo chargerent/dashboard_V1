@@ -739,7 +739,7 @@ return (
                                 rentalData={enrichedRentalData}
                                 clientInfo={clientInfo}
                                 referenceTime={latestTimestamp}
-                                onShowRentalDetails={(kioskId, period) => handleShowRentalDetails(kioskId, period)}
+                                onShowRentalDetails={onNavigateToRentals}
                                 activeFilters={activeFilters}
                                 leaseRevenue={totalLeaseRevenue}
                                 t={t}
@@ -760,7 +760,10 @@ return (
                                             rentalData={enrichedRentalData}
                                             referenceTime={latestTimestamp}
                                             t={t}
-                                            onShowRentalDetails={(kioskId, period) => handleShowRentalDetails(kioskId, period)}
+                                            onShowRentalDetails={(period) => onNavigateToRentals({
+                                                period,
+                                                stationIds: kiosks.map(kiosk => kiosk.stationid),
+                                            })}
                                         />
                                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                                             {kiosks.map(kiosk => {
@@ -777,7 +780,7 @@ return (
                                                         clientInfo.features.details && isExpanded && <KioskDetailPanel kiosk={kiosk} isVisible={true} onSlotClick={handleSlotClick} onLockSlot={handleLockSlotClick} pendingSlots={pendingSlots} ejectingSlots={ejectingSlots} failedEjectSlots={failedEjectSlots} lockingSlots={lockingSlots} t={t} onCommand={handleGeneralCommand} onNavigateToChargers={onNavigateToChargers} clientInfo={clientInfo} mockNow={latestTimestamp} serverFlowVersion={serverFlowVersion} serverUiVersion={serverUiVersion} firmwareUpdateSessions={firmwareUpdateSessions} />
                                                     )}
                                                     {rentalDetailView?.kioskId === kiosk.stationid && (
-                                                        <RentalDetailView kiosk={kiosk} period={rentalDetailView.period} rentalData={enrichedRentalData} onClose={() => setRentalDetailView(null)} onCommand={handleGeneralCommand} t={t} />
+                                                        <RentalDetailView kiosk={kiosk} period={rentalDetailView.period} rentalData={enrichedRentalData} onClose={() => setRentalDetailView(null)} onCommand={handleGeneralCommand} onNavigateToRental={(searchTerm) => onNavigateToRentals({ searchTerm })} t={t} />
                                                     )}
                                                 </div>
                                             )})}

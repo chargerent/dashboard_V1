@@ -269,6 +269,9 @@ export const translations = {
         rentals_page_title: "Rental Management",
         rentals_search_placeholder: "Search by Location, Station ID, Card, or Charger SN...",
         order_id: "Transaction ID",
+        copy_transaction_id: "Copy transaction ID",
+        copied_transaction_id: "Copied transaction ID",
+        open_charger: "Open charger",
         charger_sn: "Charger SN",
         rental: "Rental",
         return: "Return", // This key already exists, which is great.
@@ -282,6 +285,7 @@ export const translations = {
         pending: "Pending", // Removed 'lost'
         purchased: "Purchased",
         vend_failed: "Vend Failed",
+        status: "Status",
         station: "Station",
         process_log: "Process Log",
         log_entry: "entry",
@@ -776,6 +780,9 @@ export const translations = {
         rentals_page_title: "Gestion des locations", // This seems to be a duplicate key, but I'll update the one that's relevant.
         rentals_search_placeholder: "Rechercher par Lieu, ID de Station, Carte, ou NS du chargeur...",
         order_id: "ID de Transaction",
+        copy_transaction_id: "Copier l'ID de transaction",
+        copied_transaction_id: "ID de transaction copié",
+        open_charger: "Ouvrir le chargeur",
         charger_sn: "NS du chargeur",
         rental: "Location",
         return: "Retour", // This key already exists, which is great.
@@ -789,6 +796,7 @@ export const translations = {
         pending: "En attente", // Removed 'lost'
         purchased: "Acheté",
         vend_failed: "Distribution échouée",
+        status: "Statut",
         station: "Station",
         process_log: "Journal",
         log_entry: "entrée",

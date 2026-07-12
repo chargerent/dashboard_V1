@@ -645,6 +645,9 @@ function App() {
   const [page, setPage] = useState('dashboard'); // 'dashboard', 'admin', 'media', 'binding', 'templates', 'kiosk-editor', 'rentals', 'chargers', 'provision', 'reporting', 'analytics', 'testing'
   const [dashboardSearchTerm, setDashboardSearchTerm] = useState('');
   const [chargerSearchTerm, setChargerSearchTerm] = useState('');
+  const [rentalsInitialPeriod, setRentalsInitialPeriod] = useState('today');
+  const [rentalsInitialStationIds, setRentalsInitialStationIds] = useState([]);
+  const [rentalsInitialSearch, setRentalsInitialSearch] = useState('');
   const [rentalData, setRentalData] = useState([]);
   const [commandStatus, setCommandStatus] = useState(null);
   const [firestoreError, setFirestoreError] = useState(null);
@@ -1470,7 +1473,34 @@ function App() {
     return false;
   }, [clientInfo?.username, getCommandStatusVisibility]);
 
+  const getFreshCommandToken = useCallback(async () => {
+    if (!auth.currentUser) {
+      throw new Error('Not signed in');
+    }
+
+    const currentToken = localStorage.getItem('dashboardToken') || token || '';
+    const freshToken = await auth.currentUser.getIdToken(shouldRefreshAuthToken(currentToken));
+
+    if (freshToken && freshToken !== currentToken) {
+      localStorage.setItem('dashboardToken', freshToken);
+      setToken(freshToken);
+    }
+
+    return freshToken || currentToken;
+  }, [token]);
+
   const onCommand = useCallback(async (stationid, action, moduleid = null, provisionid = null, uiVersion = null, details = null) => {
+    let commandToken = '';
+    try {
+      commandToken = await getFreshCommandToken();
+    } catch (error) {
+      setCommandStatus({
+        state: 'error',
+        message: error?.message ? `${t('command_failed')} ${error.message}` : t('command_failed'),
+      });
+      return;
+    }
+
     const targetKiosk = stationid
       ? allStationsData.find((kiosk) => kiosk.stationid === stationid)
       : null;
@@ -1523,7 +1553,7 @@ function App() {
       });
       commandSocket.send(JSON.stringify({
         type: 'command',
-        token,
+        token: commandToken,
         data: commandData,
       }));
       ignoredKiosksRef.current = { ...ignoredKiosksRef.current, [stationid]: Date.now() + 30000 };
@@ -1743,7 +1773,7 @@ function App() {
 
       const message = {
         type: 'command',
-        token: token,
+        token: commandToken,
         data: commandData
       };
 
@@ -1772,7 +1802,7 @@ function App() {
     } else {
       setCommandStatus({ state: 'error', message: t('connection_lost') });
     }
-  }, [allStationsData, debugEjectUi, rememberOutgoingCommandScope, token, t]);
+  }, [allStationsData, debugEjectUi, getFreshCommandToken, rememberOutgoingCommandScope, t]);
 
   // ---------------------------------------------
   // WebSocket connect (FULL HANDLER INCLUDED)
@@ -2098,7 +2128,15 @@ function App() {
       onNavigateToAdmin={() => setPage('admin')}
       onNavigateToAiBooths={() => setPage('ai-booths')}
       onNavigateToBinding={() => setPage('binding')}
-      onNavigateToRentals={() => setPage('rentals')}
+      onNavigateToRentals={(selection = 'today') => {
+        const period = typeof selection === 'string' ? selection : selection?.period;
+        const stationIds = Array.isArray(selection?.stationIds) ? selection.stationIds : [];
+        const searchTerm = typeof selection?.searchTerm === 'string' ? selection.searchTerm : '';
+        setRentalsInitialPeriod(['today', '7days', '30days'].includes(period) ? period : 'today');
+        setRentalsInitialStationIds(stationIds);
+        setRentalsInitialSearch(searchTerm);
+        setPage('rentals');
+      }}
       onNavigateToChargers={(searchTerm = '') => {
         setChargerSearchTerm(normalizeNavigationSearch(searchTerm));
         setPage('chargers');
@@ -2288,6 +2326,10 @@ function App() {
           <RentalsPage
             onNavigateToProvisionPage={() => setPage('provision')}
             onNavigateToDashboard={() => setPage('dashboard')}
+            onNavigateToChargers={(searchTerm = '') => {
+              setChargerSearchTerm(normalizeNavigationSearch(searchTerm));
+              setPage('chargers');
+            }}
             clientInfo={clientInfo}
             rentalData={rentalData}
             allStationsData={dedupedStationsData}
@@ -2299,6 +2341,9 @@ function App() {
             commandStatus={commandStatus}
             setCommandStatus={setCommandStatus}
             referenceTime={latestTimestamp}
+            initialPeriod={rentalsInitialPeriod}
+            initialStationIds={rentalsInitialStationIds}
+            initialSearch={rentalsInitialSearch}
           />
         );
       case 'chargers':

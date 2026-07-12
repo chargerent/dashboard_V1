@@ -12,6 +12,8 @@ const firstPresent = (...values) => (
     values.find(value => value !== null && value !== undefined && String(value).trim() !== '')
 );
 
+const getRentalChargerId = (rental) => toText(firstPresent(rental?.sn, rental?.chargerid));
+
 const humanizeCode = (value) => {
     const raw = String(value || '').trim();
     if (!raw) return '';
@@ -503,7 +505,7 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
             const sortedRentals = [...enrichedRentals].sort((a, b) => new Date(b.rentalTime) - new Date(a.rentalTime));
 
             for (const rental of enrichedRentals) {
-                const chargerSn = toText(rental.sn);
+                const chargerSn = getRentalChargerId(rental);
                 if (!chargerSn) continue;
 
                 if (!chargerMap.has(chargerSn)) {
@@ -531,7 +533,7 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
             
             // 2. Determine last rental info for all chargers
             for (const rental of sortedRentals) {
-                const chargerSn = toText(rental.sn);
+                const chargerSn = getRentalChargerId(rental);
                 if (!chargerSn) continue;
                 const charger = chargerMap.get(chargerSn);
                 

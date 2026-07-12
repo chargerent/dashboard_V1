@@ -4,7 +4,16 @@ import { formatDateTime, formatDuration } from '../../utils/dateFormatter';
 import { formatRentalChargeAmount } from '../../utils/rentals.js';
 import RefundModal from '../UI/RefundModal';
 
-export default function RentalDetailView({ kiosk, period, rentalData, onClose, t, onCommand }) {
+const getRentalNavigationId = (rental) => String(
+    rental?.orderid ||
+    rental?.rawid ||
+    rental?.transactionid ||
+    rental?.transactionId ||
+    rental?.paymentSessionId ||
+    ''
+).trim();
+
+export default function RentalDetailView({ kiosk, period, rentalData, onClose, t, onCommand, onNavigateToRental }) {
     const [showRefundModal, setShowRefundModal] = useState(false);
     const [selectedRental, setSelectedRental] = useState(null);
 
@@ -63,8 +72,27 @@ export default function RentalDetailView({ kiosk, period, rentalData, onClose, t
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-gray-200">
-                                {rentalsForKiosk.map((rental, index) => (
-                                    <tr key={`${rental.orderid}-${index}`}>
+                                {rentalsForKiosk.map((rental, index) => {
+                                    const navigationId = getRentalNavigationId(rental);
+                                    const handleRentalClick = () => {
+                                        if (navigationId && onNavigateToRental) onNavigateToRental(navigationId);
+                                    };
+
+                                    return (
+                                    <tr
+                                        key={`${rental.orderid}-${index}`}
+                                        onClick={handleRentalClick}
+                                        onKeyDown={(event) => {
+                                            if (event.key === 'Enter' || event.key === ' ') {
+                                                event.preventDefault();
+                                                handleRentalClick();
+                                            }
+                                        }}
+                                        role={navigationId && onNavigateToRental ? 'button' : undefined}
+                                        tabIndex={navigationId && onNavigateToRental ? 0 : undefined}
+                                        className={navigationId && onNavigateToRental ? 'cursor-pointer transition-colors hover:bg-blue-50 focus:bg-blue-50 focus:outline-none' : ''}
+                                        title={navigationId && onNavigateToRental ? t('rentals_page_title') : undefined}
+                                    >
                                         <td className="px-2 py-2 whitespace-nowrap">
                                             <div className="font-mono text-gray-800">{rental.card_last4}</div>
                                             <div className="text-gray-500 text-[10px]">{rental.sn}</div>
@@ -84,7 +112,8 @@ export default function RentalDetailView({ kiosk, period, rentalData, onClose, t
                                             </div>
                                         </td>
                                     </tr>
-                                ))}
+                                    );
+                                })}
                             </tbody>
                         </table>
                     ) : <p className="text-center text-gray-500 py-4">{t('no_rentals_period')}</p>}
