@@ -383,14 +383,37 @@ function buildScopedKioskQuery(kiosksCollectionRef, clientInfo) {
   };
 }
 
-function buildScopedRentalQueries(rentalsCollectionRef, stationIds) {
-  return chunkValues(stationIds).map((stationIdChunk) => ({
-    key: stationIdChunk.join('|'),
-    stationIds: stationIdChunk,
-    queryRef: stationIdChunk.length === 1
-      ? query(rentalsCollectionRef, where('rentalStationid', '==', stationIdChunk[0]))
-      : query(rentalsCollectionRef, where('rentalStationid', 'in', stationIdChunk)),
-  }));
+function buildScopedRentalQueries(rentalsCollectionRef, stationIds, dateThreshold) {
+  return chunkValues(stationIds).flatMap((stationIdChunk) => {
+    const stationScope = stationIdChunk.length === 1
+      ? where('rentalStationid', '==', stationIdChunk[0])
+      : where('rentalStationid', 'in', stationIdChunk);
+    const scopeKey = stationIdChunk.join('|');
+
+    return [
+      {
+        key: `rental-time:${scopeKey}`,
+        stationIds: stationIdChunk,
+        queryRef: query(
+          rentalsCollectionRef,
+          stationScope,
+          where('rentalTime', '>=', dateThreshold)
+        ),
+      },
+      {
+        // Compatibility path for vend failures created by legacy/backend writers
+        // before they have a canonical rentalTime. This is also server-bounded.
+        key: `vend-failed:${scopeKey}`,
+        stationIds: stationIdChunk,
+        queryRef: query(
+          rentalsCollectionRef,
+          stationScope,
+          where('status', '==', 'vend_failed'),
+          where('failedAt', '>=', dateThreshold)
+        ),
+      },
+    ];
+  });
 }
 
 function getRentalWindowTimestampMs(rental) {
@@ -1163,12 +1186,17 @@ function App() {
             queryRef: query(rentalsCollectionRef, where('rentalTime', '>=', dateThreshold)),
           },
           {
-            key: 'vend_failed',
+            // Keep legacy failures visible without listening to all history.
+            key: 'vend_failed_without_rental_time',
             stationIds: [],
-            queryRef: query(rentalsCollectionRef, where('status', '==', 'vend_failed')),
+            queryRef: query(
+              rentalsCollectionRef,
+              where('status', '==', 'vend_failed'),
+              where('failedAt', '>=', dateThreshold)
+            ),
           },
         ]
-      : buildScopedRentalQueries(rentalsCollectionRef, effectiveRentalStationIds);
+      : buildScopedRentalQueries(rentalsCollectionRef, effectiveRentalStationIds, dateThreshold);
     const rentalSnapshotsByQuery = new Map();
 
     startupListenerRef.current.rentalsLogged = false;
