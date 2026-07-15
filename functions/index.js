@@ -7068,9 +7068,34 @@ function cleanUiProfileName(value) {
   return String(value || "").trim().slice(0, 120);
 }
 
+function uiProfileDocRecency(docSnap) {
+  const data = docSnap.data() || {};
+  const updatedAt = data.updatedAt;
+  if (updatedAt && typeof updatedAt.toMillis === "function") {
+    return updatedAt.toMillis();
+  }
+  const parsedUpdatedAt = Date.parse(String(updatedAt || ""));
+  return Number.isFinite(parsedUpdatedAt) ? parsedUpdatedAt : Number(data.version || 0);
+}
+
+function selectCanonicalUiProfileDoc(docs) {
+  return [...docs].sort((left, right) => uiProfileDocRecency(right) - uiProfileDocRecency(left))[0] || null;
+}
+
 function normalizeUiProfileStatus(value) {
   const status = String(value || "draft").trim().toLowerCase();
   return ["draft", "published", "archived"].includes(status) ? status : "draft";
+}
+
+function normalizeUiProfilePin(value, fieldLabel) {
+  const pin = String(value || "").trim();
+  if (pin && !/^[1-5]{5}$/.test(pin)) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        `${fieldLabel} must contain exactly five digits from 1 to 5`,
+    );
+  }
+  return pin;
 }
 
 function serializeUiProfileDoc(docSnap) {
@@ -7081,6 +7106,10 @@ function serializeUiProfileDoc(docSnap) {
     clientId: String(data.clientId || "").trim().toUpperCase(),
     status: normalizeUiProfileStatus(data.status),
     version: Number(data.version || 1),
+    admin: {
+      userpassword: String(data.admin?.userpassword || ""),
+      adminpassword: String(data.admin?.adminpassword || ""),
+    },
     ui: clonePlain(data.ui) || {},
     languages: clonePlain(data.languages) || {},
     createdAt: serializeFirestoreTimestamp(data.createdAt),
@@ -7112,7 +7141,10 @@ function buildUiProfileSnapshot(profile) {
       primary,
       secondary,
     },
-    languages: clonePlain(profile.languages) || {},
+    languages: {
+      ...(clonePlain(profile.languages) || {}),
+      active: ui.languages?.active !== false,
+    },
     profileAppliedAt: new Date().toISOString(),
   };
 }
@@ -7128,22 +7160,27 @@ async function uiProfileListImpl(authState) {
   }
 
   const snap = await query.get();
-  const profiles = snap.docs
+  const manageableProfiles = snap.docs
       .map(serializeUiProfileDoc)
       .filter((profile) => canManageUiProfileClient(authState, profile.clientId));
+  const profilesByClient = new Map();
+  manageableProfiles.forEach((profile) => {
+    const clientId = String(profile.clientId || "").trim().toUpperCase();
+    if (!clientId) return;
+    const current = profilesByClient.get(clientId);
+    const profileUpdatedAt = Date.parse(String(profile.updatedAt || ""));
+    const currentUpdatedAt = Date.parse(String(current?.updatedAt || ""));
+    const profileRecency = Number.isFinite(profileUpdatedAt) ? profileUpdatedAt : Number(profile.version || 0);
+    const currentRecency = Number.isFinite(currentUpdatedAt) ? currentUpdatedAt : Number(current?.version || 0);
+    if (!current || profileRecency > currentRecency) profilesByClient.set(clientId, profile);
+  });
 
-  return {profiles};
+  return {profiles: [...profilesByClient.values()]};
 }
 
 async function uiProfileUpsertImpl(data, authState) {
   const source = clonePlain(data?.profile) || {};
-  const requestedId = normalizeUiProfileId(source.id || source.profileId);
-  const fallbackId = normalizeUiProfileId(`${source.clientId || getAuthClientId(authState)}-${source.name || "kiosk-ui"}`);
-  const profileId = requestedId || fallbackId || db.collection(UI_PROFILES_COLLECTION).doc().id;
-  const profileRef = db.collection(UI_PROFILES_COLLECTION).doc(profileId);
-  const existingSnap = await profileRef.get();
-  const existing = existingSnap.exists ? existingSnap.data() || {} : {};
-  const clientId = String(source.clientId || existing.clientId || getAuthClientId(authState)).trim().toUpperCase();
+  const clientId = String(source.clientId || getAuthClientId(authState)).trim().toUpperCase();
 
   if (!clientId) {
     throw new functions.https.HttpsError("invalid-argument", "clientId required");
@@ -7153,7 +7190,30 @@ async function uiProfileUpsertImpl(data, authState) {
     throw new functions.https.HttpsError("permission-denied", "Not allowed to edit this UI profile");
   }
 
-  const name = cleanUiProfileName(source.name || existing.name || `${clientId} Kiosk UI`);
+  const profileCollection = db.collection(UI_PROFILES_COLLECTION);
+  const requestedId = normalizeUiProfileId(source.id || source.profileId);
+  const requestedSnap = requestedId ? await profileCollection.doc(requestedId).get() : null;
+  const requestedClientId = requestedSnap?.exists
+    ? String(requestedSnap.data()?.clientId || "").trim().toUpperCase()
+    : "";
+  const clientProfilesSnap = await profileCollection.where("clientId", "==", clientId).get();
+  const canonicalSnap = selectCanonicalUiProfileDoc(clientProfilesSnap.docs)
+    || (requestedSnap?.exists && requestedClientId === clientId ? requestedSnap : null);
+  const profileId = canonicalSnap?.id || normalizeUiProfileId(clientId);
+  const profileRef = profileCollection.doc(profileId);
+  const existingSnap = canonicalSnap || await profileRef.get();
+  const existing = existingSnap.exists ? existingSnap.data() || {} : {};
+  const name = cleanUiProfileName(`${clientId} Kiosk UI`);
+  const sourceAdmin = isPlainObject(source.admin) ? source.admin : {};
+  const existingAdmin = isPlainObject(existing.admin) ? existing.admin : {};
+  const userpassword = normalizeUiProfilePin(
+      sourceAdmin.userpassword || existingAdmin.userpassword,
+      "User PIN",
+  );
+  const adminpassword = normalizeUiProfilePin(
+      sourceAdmin.adminpassword || existingAdmin.adminpassword,
+      "Admin PIN",
+  );
   const nextVersion = Math.max(1, Number(existing.version || 0) + 1);
   const timestamp = admin.firestore.FieldValue.serverTimestamp();
   const profileData = {
@@ -7161,6 +7221,7 @@ async function uiProfileUpsertImpl(data, authState) {
     clientId,
     status: normalizeUiProfileStatus(source.status || existing.status),
     version: nextVersion,
+    admin: {userpassword, adminpassword},
     ui: clonePlain(source.ui) || {},
     languages: clonePlain(source.languages) || {},
     updatedAt: timestamp,
@@ -7230,6 +7291,9 @@ async function uiProfileApplyImpl(data, authState) {
   }
 
   const uiSnapshot = buildUiProfileSnapshot(profile);
+  const profileAdmin = isPlainObject(profile.admin) ? profile.admin : {};
+  const userpassword = normalizeUiProfilePin(profileAdmin.userpassword, "User PIN");
+  const adminpassword = normalizeUiProfilePin(profileAdmin.adminpassword, "Admin PIN");
   const updatedKiosks = [];
   let batch = db.batch();
   let writesInBatch = 0;
@@ -7254,13 +7318,22 @@ async function uiProfileApplyImpl(data, authState) {
       uiProfileId: profile.id,
       updatedAt: new Date().toISOString(),
     };
+    const adminUpdate = {};
+    if (userpassword) adminUpdate.userpassword = userpassword;
+    if (adminpassword) adminUpdate.adminpassword = adminpassword;
+    if (Object.keys(adminUpdate).length) {
+      nextKiosk.admin = {...clonePlain(kiosk.admin), ...adminUpdate};
+    }
 
-    batch.set(docSnap.ref, {
+    const kioskUpdate = {
       ui: uiSnapshot,
       uiProfileId: profile.id,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedBy: normalizeUsername(authState.profile?.username),
-    }, {merge: true});
+    };
+    if (adminUpdate.userpassword) kioskUpdate["admin.userpassword"] = adminUpdate.userpassword;
+    if (adminUpdate.adminpassword) kioskUpdate["admin.adminpassword"] = adminUpdate.adminpassword;
+    batch.update(docSnap.ref, kioskUpdate);
     writesInBatch += 1;
     updatedKiosks.push(nextKiosk);
 

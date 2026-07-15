@@ -1,0 +1,256 @@
+[
+  {
+    "id": "ui_profile_backend_tab",
+    "type": "tab",
+    "label": "UI profile backend",
+    "disabled": false,
+    "info": "Resolves a kiosk station to its client's active UI profile. Required environment variables: UI_PROFILE_RESOLVE_URL, UI_PROFILE_ACK_URL, UI_PROFILE_API_TOKEN, MQTT_HOST, MQTT_PORT."
+  },
+  {
+    "id": "ui_profile_request_in",
+    "type": "mqtt in",
+    "z": "ui_profile_backend_tab",
+    "name": "UI profile requests",
+    "topic": "req/+/ui-profile",
+    "qos": "1",
+    "datatype": "json",
+    "broker": "ui_profile_mqtt_broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 160,
+    "y": 140,
+    "wires": [
+      [
+        "ui_profile_prepare_resolve"
+      ]
+    ]
+  },
+  {
+    "id": "ui_profile_prepare_resolve",
+    "type": "function",
+    "z": "ui_profile_backend_tab",
+    "name": "Validate request + prepare lookup",
+    "func": "const topic = String(msg.topic || \"\");\nconst match = /^req\\/([^/]+)\\/ui-profile$/.exec(topic);\n\nif (!match) {\n    node.warn(\"Ignoring malformed UI profile topic: \" + topic);\n    return null;\n}\n\nconst stationid = String(match[1] || \"\").trim();\nif (!stationid || !/^[A-Za-z0-9._-]{1,120}$/.test(stationid)) {\n    node.warn(\"Ignoring invalid station id\");\n    return null;\n}\n\nconst request = msg.payload && typeof msg.payload === \"object\"\n    ? msg.payload\n    : {};\nconst resolveUrl = env.get(\"UI_PROFILE_RESOLVE_URL\");\nconst token = env.get(\"UI_PROFILE_API_TOKEN\");\n\nif (!resolveUrl || !token) {\n    node.error(\"UI_PROFILE_RESOLVE_URL or UI_PROFILE_API_TOKEN is not configured\", msg);\n    return null;\n}\n\nmsg.stationid = stationid;\nmsg.responseTopic = \"res/\" + stationid + \"/ui-profile\";\nmsg.profileRequest = {\n    currentProfileId: String(request.currentProfileId || \"\"),\n    currentProfileVersion: Number(request.currentProfileVersion || 0),\n    currentProfileHash: String(request.currentProfileHash || \"\")\n};\nmsg.method = \"POST\";\nmsg.url = resolveUrl;\nmsg.headers = {\n    \"content-type\": \"application/json\",\n    \"authorization\": \"Bearer \" + token\n};\nmsg.payload = JSON.stringify({\n    stationid,\n    currentProfileId: msg.profileRequest.currentProfileId,\n    currentProfileVersion: msg.profileRequest.currentProfileVersion,\n    currentProfileHash: msg.profileRequest.currentProfileHash\n});\n\nnode.status({ fill: \"blue\", shape: \"dot\", text: \"lookup \" + stationid });\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 430,
+    "y": 140,
+    "wires": [
+      [
+        "ui_profile_resolve_http"
+      ]
+    ]
+  },
+  {
+    "id": "ui_profile_resolve_http",
+    "type": "http request",
+    "z": "ui_profile_backend_tab",
+    "name": "Resolve station active profile",
+    "method": "use",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": true,
+    "headers": [],
+    "x": 710,
+    "y": 140,
+    "wires": [
+      [
+        "ui_profile_format_response"
+      ]
+    ]
+  },
+  {
+    "id": "ui_profile_format_response",
+    "type": "function",
+    "z": "ui_profile_backend_tab",
+    "name": "Return update or current",
+    "func": "const stationid = String(msg.stationid || \"\");\nconst request = msg.profileRequest || {};\nlet body = msg.payload;\n\nif (typeof body === \"string\") {\n    try { body = JSON.parse(body); } catch (error) { body = {}; }\n}\n\n// Supports both a direct HTTP response and a Firebase-style { result: ... } response.\nconst resolved = body && typeof body === \"object\"\n    ? (body.result || body.data || body)\n    : {};\nconst profileId = String(resolved.profileId || resolved.id || \"\");\nconst profileVersion = Number(resolved.profileVersion || resolved.version || 0);\nconst profileHash = String(resolved.profileHash || resolved.hash || \"\");\nconst colors = resolved.colors || resolved.ui?.colors;\nconst languages = resolved.languages;\n\nmsg.topic = msg.responseTopic || (\"res/\" + stationid + \"/ui-profile\");\nmsg.qos = 1;\nmsg.retain = false;\n\nif (Number(msg.statusCode || 200) >= 400 || resolved.ok === false) {\n    msg.payload = {\n        status: \"error\",\n        code: String(resolved.code || \"profile_lookup_failed\"),\n        message: String(resolved.message || \"Could not resolve active UI profile\")\n    };\n    node.status({ fill: \"red\", shape: \"ring\", text: stationid + \" lookup failed\" });\n    return msg;\n}\n\nif (!profileId || !profileVersion) {\n    msg.payload = {\n        status: \"error\",\n        code: \"no_active_profile\",\n        message: \"No active UI profile is assigned to this kiosk client\"\n    };\n    node.status({ fill: \"yellow\", shape: \"ring\", text: stationid + \" no profile\" });\n    return msg;\n}\n\nconst isCurrent =\n    request.currentProfileId === profileId &&\n    Number(request.currentProfileVersion || 0) === profileVersion &&\n    (!profileHash || request.currentProfileHash === profileHash);\n\nif (isCurrent) {\n    msg.payload = {\n        status: \"current\",\n        profileId,\n        profileVersion,\n        profileHash\n    };\n    node.status({ fill: \"green\", shape: \"dot\", text: stationid + \" current v\" + profileVersion });\n    return msg;\n}\n\nif (!colors || !languages) {\n    msg.payload = {\n        status: \"error\",\n        code: \"invalid_profile_payload\",\n        message: \"Resolved profile is missing colors or languages\"\n    };\n    node.status({ fill: \"red\", shape: \"ring\", text: stationid + \" invalid profile\" });\n    return msg;\n}\n\nmsg.payload = {\n    status: \"update\",\n    profileId,\n    profileVersion,\n    profileHash,\n    colors: {\n        bcolor1: String(colors.bcolor1 || \"#078B8C\").toUpperCase(),\n        bcolor2: String(colors.bcolor2 || \"#131E3A\").toUpperCase()\n    },\n    languages\n};\nnode.status({ fill: \"green\", shape: \"dot\", text: stationid + \" update v\" + profileVersion });\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 980,
+    "y": 140,
+    "wires": [
+      [
+        "ui_profile_response_out"
+      ]
+    ]
+  },
+  {
+    "id": "ui_profile_response_out",
+    "type": "mqtt out",
+    "z": "ui_profile_backend_tab",
+    "name": "UI profile response",
+    "topic": "",
+    "qos": "",
+    "retain": "",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "ui_profile_mqtt_broker",
+    "x": 1240,
+    "y": 140,
+    "wires": []
+  },
+  {
+    "id": "ui_profile_ack_in",
+    "type": "mqtt in",
+    "z": "ui_profile_backend_tab",
+    "name": "UI profile acknowledgements",
+    "topic": "ack/+/ui-profile",
+    "qos": "1",
+    "datatype": "json",
+    "broker": "ui_profile_mqtt_broker",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 180,
+    "y": 280,
+    "wires": [
+      [
+        "ui_profile_prepare_ack"
+      ]
+    ]
+  },
+  {
+    "id": "ui_profile_prepare_ack",
+    "type": "function",
+    "z": "ui_profile_backend_tab",
+    "name": "Validate + prepare acknowledgement",
+    "func": "const topic = String(msg.topic || \"\");\nconst match = /^ack\\/([^/]+)\\/ui-profile$/.exec(topic);\nif (!match) return null;\n\nconst stationid = String(match[1] || \"\").trim();\nconst ack = msg.payload && typeof msg.payload === \"object\"\n    ? msg.payload\n    : {};\nconst ackUrl = env.get(\"UI_PROFILE_ACK_URL\");\nconst token = env.get(\"UI_PROFILE_API_TOKEN\");\n\nif (!ackUrl || !token || !stationid) {\n    node.error(\"UI profile acknowledgement endpoint is not configured\", msg);\n    return null;\n}\n\nmsg.method = \"POST\";\nmsg.url = ackUrl;\nmsg.headers = {\n    \"content-type\": \"application/json\",\n    \"authorization\": \"Bearer \" + token\n};\nmsg.payload = JSON.stringify({\n    stationid,\n    profileId: String(ack.profileId || \"\"),\n    profileVersion: Number(ack.profileVersion || 0),\n    profileHash: String(ack.profileHash || \"\"),\n    status: String(ack.status || \"applied\"),\n    appliedAt: String(ack.appliedAt || new Date().toISOString()),\n    error: String(ack.error || \"\")\n});\nnode.status({ fill: \"blue\", shape: \"dot\", text: \"ack \" + stationid });\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 470,
+    "y": 280,
+    "wires": [
+      [
+        "ui_profile_ack_http"
+      ]
+    ]
+  },
+  {
+    "id": "ui_profile_ack_http",
+    "type": "http request",
+    "z": "ui_profile_backend_tab",
+    "name": "Record applied profile",
+    "method": "use",
+    "ret": "obj",
+    "paytoqs": "ignore",
+    "url": "",
+    "tls": "",
+    "persist": false,
+    "proxy": "",
+    "insecureHTTPParser": false,
+    "authType": "",
+    "senderr": true,
+    "headers": [],
+    "x": 750,
+    "y": 280,
+    "wires": [
+      [
+        "ui_profile_ack_status"
+      ]
+    ]
+  },
+  {
+    "id": "ui_profile_ack_status",
+    "type": "function",
+    "z": "ui_profile_backend_tab",
+    "name": "Acknowledgement status",
+    "func": "if (Number(msg.statusCode || 200) >= 400) {\n    node.status({ fill: \"red\", shape: \"ring\", text: \"ack failed\" });\n    node.warn(msg.payload);\n    return null;\n}\nnode.status({ fill: \"green\", shape: \"dot\", text: \"ack saved\" });\nreturn null;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 1010,
+    "y": 280,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "ui_profile_backend_catch",
+    "type": "catch",
+    "z": "ui_profile_backend_tab",
+    "name": "UI profile backend errors",
+    "scope": [
+      "ui_profile_resolve_http",
+      "ui_profile_ack_http"
+    ],
+    "uncaught": false,
+    "x": 180,
+    "y": 380,
+    "wires": [
+      [
+        "ui_profile_backend_error_debug"
+      ]
+    ]
+  },
+  {
+    "id": "ui_profile_backend_error_debug",
+    "type": "debug",
+    "z": "ui_profile_backend_tab",
+    "name": "UI profile backend error",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 470,
+    "y": 380,
+    "wires": []
+  },
+  {
+    "id": "ui_profile_mqtt_broker",
+    "type": "mqtt-broker",
+    "name": "UI profile broker",
+    "broker": "${MQTT_HOST}",
+    "port": "${MQTT_PORT}",
+    "clientid": "ui-profile-backend",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "autoUnsubscribe": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closeQos": "0",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willPayload": "",
+    "willMsg": {}
+  }
+]

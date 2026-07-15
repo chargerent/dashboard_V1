@@ -570,12 +570,7 @@ function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVe
                         </div>
                         <div className="grid grid-cols-2 gap-x-8 gap-y-4 mt-4 pt-4 border-t">
                             <FormToggle label="Screensaver" name="screensaver.active" checked={formData.ui?.screensaver?.active} section="ui" onDataChange={onDataChange} />
-                            <FormToggle label="Show Map" name="map.active" checked={formData.ui?.map?.active} section="ui" onDataChange={onDataChange} />
-                            <FormToggle label="Show Terms" name="terms.active" checked={formData.ui?.terms?.active} section="ui" onDataChange={onDataChange} />
-                            <FormToggle label="Show Languages" name="languages.active" checked={formData.ui?.languages?.active} section="ui" onDataChange={onDataChange} />
-                            <FormToggle label="Show Information" name="information.active" checked={formData.ui?.information?.active} section="ui" onDataChange={onDataChange} />
                             <FormToggle label="Enable Coupons" name="coupons.active" checked={formData.ui?.coupons?.active} section="ui" onDataChange={onDataChange} />
-                            <FormToggle label="Enable Receipt" name="receipt.active" checked={formData.ui?.receipt?.active} section="ui" onDataChange={onDataChange} />
                             <FormToggle label="Enable Reminder" name="reminder.active" checked={formData.ui?.reminder?.active} section="ui" onDataChange={onDataChange} />
                             <FormInput label="Reminder Delay (min)" name="reminder.delay" value={formData.ui?.reminder?.delay} section="ui" onDataChange={onDataChange} />
                             <FormToggle label="Reminder includes Receipt" name="reminder.receipt" checked={formData.ui?.reminder?.receipt} section="ui" onDataChange={onDataChange} />

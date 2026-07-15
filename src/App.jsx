@@ -393,9 +393,24 @@ function buildScopedRentalQueries(rentalsCollectionRef, stationIds) {
   }));
 }
 
+function getRentalWindowTimestampMs(rental) {
+  const rawTimestamp = (
+    rental?.rentalTime ||
+    rental?.failedAt ||
+    rental?.lastUpdate ||
+    rental?.returnTime ||
+    rental?.purchaseTime ||
+    rental?.purchasedAt ||
+    rental?.refundDate ||
+    ''
+  );
+  const timestampMs = Date.parse(String(rawTimestamp));
+  return Number.isFinite(timestampMs) ? timestampMs : null;
+}
+
 function rentalIsWithinWindow(rental, dateThresholdMs) {
-  const rentalTimeMs = Date.parse(String(rental?.rentalTime || ''));
-  return Number.isFinite(rentalTimeMs) && rentalTimeMs >= dateThresholdMs;
+  const timestampMs = getRentalWindowTimestampMs(rental);
+  return timestampMs !== null && timestampMs >= dateThresholdMs;
 }
 
 function waitForOpenWebSocket(socket, timeoutMs = COMMAND_SOCKET_OPEN_TIMEOUT_MS) {
@@ -1141,11 +1156,18 @@ function App() {
     }
 
     const rentalQuerySpecs = listenerIsAdmin
-      ? [{
-          key: 'all',
-          stationIds: [],
-          queryRef: query(rentalsCollectionRef, where('rentalTime', '>=', dateThreshold)),
-        }]
+      ? [
+          {
+            key: 'all',
+            stationIds: [],
+            queryRef: query(rentalsCollectionRef, where('rentalTime', '>=', dateThreshold)),
+          },
+          {
+            key: 'vend_failed',
+            stationIds: [],
+            queryRef: query(rentalsCollectionRef, where('status', '==', 'vend_failed')),
+          },
+        ]
       : buildScopedRentalQueries(rentalsCollectionRef, effectiveRentalStationIds);
     const rentalSnapshotsByQuery = new Map();
 
@@ -1154,9 +1176,7 @@ function App() {
     const unsubscribeRentals = rentalQuerySpecs.map((querySpec) => (
       onSnapshot(querySpec.queryRef, (querySnapshot) => {
         const rawRentals = querySnapshot.docs.map(docSnap => ({ rawid: docSnap.id, ...docSnap.data() }));
-        const rentals = listenerIsAdmin
-          ? rawRentals
-          : rawRentals.filter((rental) => rentalIsWithinWindow(rental, dateThresholdMs));
+        const rentals = rawRentals.filter((rental) => rentalIsWithinWindow(rental, dateThresholdMs));
         setFirestoreError(null);
 
         rentalSnapshotsByQuery.set(querySpec.key, rentals);
@@ -1166,7 +1186,13 @@ function App() {
           return;
         }
 
-        const combinedRentals = Array.from(rentalSnapshotsByQuery.values()).flat();
+        const combinedRentals = Array.from(
+          new Map(
+            Array.from(rentalSnapshotsByQuery.values())
+              .flat()
+              .map(rental => [rental.rawid || rental.orderid, rental])
+          ).values()
+        );
         setRentalData(combinedRentals);
 
         if (!startupListenerRef.current.rentalsLogged) {
@@ -2250,9 +2276,11 @@ function App() {
         return (
           <UiProfilesPage
             onLogout={handleLogout}
+            onNavigateToDashboard={() => setPage('dashboard')}
             onNavigateToAdmin={() => setPage('admin')}
             currentUser={clientInfo}
             allStationsData={dedupedStationsData}
+            referenceTime={latestTimestamp}
             onCommand={onCommand}
             t={t}
           />
@@ -2325,7 +2353,10 @@ function App() {
         return (
           <RentalsPage
             onNavigateToProvisionPage={() => setPage('provision')}
-            onNavigateToDashboard={() => setPage('dashboard')}
+            onNavigateToDashboard={(searchTerm = '') => {
+              setDashboardSearchTerm(normalizeNavigationSearch(searchTerm));
+              setPage('dashboard');
+            }}
             onNavigateToChargers={(searchTerm = '') => {
               setChargerSearchTerm(normalizeNavigationSearch(searchTerm));
               setPage('chargers');

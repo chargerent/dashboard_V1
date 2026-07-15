@@ -349,6 +349,205 @@ export const DEFAULT_KIOSK_LANGUAGES = {
   },
 };
 
+const LOCALE_META = {
+  en: { code: 'en', name: 'English', urlLanguage: 'english' },
+  fr: { code: 'fr', name: 'Français', urlLanguage: 'fr' },
+  es: { code: 'es', name: 'Español', urlLanguage: 'spanish' },
+};
+
+const SUPPORT_PREFIX = {
+  en: 'Need help? Please call:',
+  fr: 'Besoin d’aide ? Veuillez appeler :',
+  es: '¿Necesita ayuda? Llame al:',
+};
+
+const PRICING_COPY = {
+  en: {
+    plans: {
+      PURCHASE_MIXED_DAILY: {
+        within: '{amount} if returned within {hours} hours',
+        sameDay: '{amount} if returned the same day',
+        notReturned: '{amount} if not returned',
+        deposit: 'A deposit of {amount} is collected when renting',
+      },
+      LEASE_SIMPLE_DAILY: {
+        first: 'Free for the first 24 hours',
+        additional: '{amount} for each additional 24-hour period',
+        notReturned: '{amount} if not returned after {days} days',
+        deposit: 'A deposit of {amount} is collected when renting',
+      },
+    },
+    common: { integratedCables: 'Integrated cables', cableTypes: 'Lightning · USB-C · Micro-USB' },
+    payment: {
+      instructionsByGateway: {
+        PAYTERP68: 'To pay, use a bank card or phone on the contactless terminal.',
+        DEFAULT: 'Follow the instructions shown by the payment service.',
+      },
+      termsByGatewayOption: {
+        FULLPRICE: [
+          'I accept the {amount} deposit, applicable rental charges, and the Terms and Conditions.',
+          'The deposit is refunded upon return, less applicable rental charges.',
+        ],
+        INITIALPRICE: [
+          'I accept the applicable rental charges and the Terms and Conditions.',
+          'The final charge depends on the rental duration.',
+        ],
+      },
+    },
+    unavailable: 'Pricing is unavailable. Please contact support.',
+  },
+  fr: {
+    plans: {
+      PURCHASE_MIXED_DAILY: {
+        within: '{amount} si restituée sous {hours} h',
+        sameDay: '{amount} si restituée dans la journée',
+        notReturned: '{amount} si non restituée',
+        deposit: 'Caution de {amount} prélevée à la location',
+      },
+      LEASE_SIMPLE_DAILY: {
+        first: 'Gratuit pendant les premières 24 h',
+        additional: '{amount} par période supplémentaire de 24 h',
+        notReturned: '{amount} si non restituée après {days} jours',
+        deposit: 'Caution de {amount} prélevée à la location',
+      },
+    },
+    common: { integratedCables: 'Câbles intégrés', cableTypes: 'Lightning · USB-C · Micro-USB' },
+    payment: {
+      instructionsByGateway: {
+        PAYTERP68: 'Pour payer, utilisez une carte bancaire ou un téléphone sur le terminal sans contact.',
+        DEFAULT: 'Suivez les instructions affichées par le service de paiement.',
+      },
+      termsByGatewayOption: {
+        FULLPRICE: [
+          'J’accepte la caution de {amount}, les frais de location applicables et les Conditions Générales.',
+          'Caution remboursée lors de la restitution, moins les frais de location applicables.',
+        ],
+        INITIALPRICE: [
+          'J’accepte les frais de location applicables et les Conditions Générales.',
+          'Le montant final dépend de la durée de location.',
+        ],
+      },
+    },
+    unavailable: 'Tarification indisponible. Veuillez contacter l’assistance.',
+  },
+  es: {
+    plans: {
+      PURCHASE_MIXED_DAILY: {
+        within: '{amount} si se devuelve en un plazo de {hours} horas',
+        sameDay: '{amount} si se devuelve el mismo día',
+        notReturned: '{amount} si no se devuelve',
+        deposit: 'Se cobra un depósito de {amount} al alquilar',
+      },
+      LEASE_SIMPLE_DAILY: {
+        first: 'Gratis durante las primeras 24 horas',
+        additional: '{amount} por cada período adicional de 24 horas',
+        notReturned: '{amount} si no se devuelve después de {days} días',
+        deposit: 'Se cobra un depósito de {amount} al alquilar',
+      },
+    },
+    common: { integratedCables: 'Cables integrados', cableTypes: 'Lightning · USB-C · Micro-USB' },
+    payment: {
+      instructionsByGateway: {
+        PAYTERP68: 'Para pagar, use una tarjeta bancaria o un teléfono en el terminal sin contacto.',
+        DEFAULT: 'Siga las instrucciones mostradas por el servicio de pago.',
+      },
+      termsByGatewayOption: {
+        FULLPRICE: [
+          'Acepto el depósito de {amount}, los cargos de alquiler aplicables y las Condiciones Generales.',
+          'El depósito se reembolsa al devolver el cargador, menos los cargos de alquiler aplicables.',
+        ],
+        INITIALPRICE: [
+          'Acepto los cargos de alquiler aplicables y las Condiciones Generales.',
+          'El cargo final depende de la duración del alquiler.',
+        ],
+      },
+    },
+    unavailable: 'La tarifa no está disponible. Comuníquese con soporte.',
+  },
+};
+
+function legacyLocaleToV2(language, locale) {
+  const source = language || {};
+  const map = source.mapspage || {};
+  return {
+    meta: LOCALE_META[locale],
+    support: { helpPrefix: SUPPORT_PREFIX[locale] },
+    terminals: {
+      PAYTERP68: {
+        start: source.payter?.start || '',
+        takeCharger: source.payter?.takecharger || '',
+        returned: source.payter?.returned || '',
+        wait: source.payter?.wait || '',
+        soldOut: source.payter?.soldout || '',
+      },
+    },
+    screens: {
+      start: {
+        startButton: source.startpage?.startbutton || '',
+        termsButton: source.startpage?.termsbutton || '',
+        languageButton: source.startpage?.languagebutton || '',
+      },
+      rentReturn: {
+        question: source.rentpage?.infotext || '',
+        rentButton: source.rentpage?.rentbutton || '',
+        returnButton: source.rentpage?.returnbutton || '',
+        soldOut: source.rentpage?.soldout || '',
+      },
+      howItWorks: {
+        rentTitle: source.hiw?.renttitle || '',
+        rentText: source.hiw?.renttext || '',
+        chargeTitle: source.hiw?.chargetitle || '',
+        chargeText: source.hiw?.chargetext || '',
+        returnTitle: source.hiw?.returntitle || '',
+        returnText: source.hiw?.returntext || '',
+      },
+      returnInfo: {
+        title: source.returnpage?.returntitle || '',
+        text: source.returnpage?.returntext || '',
+        confirmation: source.returnpage?.confirmationtext || '',
+      },
+      rentalComplete: {
+        title: source.thankyoupage?.thankyoutitle || '',
+        text: source.thankyoupage?.thankyoutext || '',
+        detail: source.thankyoupage?.thankyoutext2 || '',
+      },
+      returnComplete: {
+        returnText: source.returntypage?.return || '',
+        thankYou: source.returntypage?.ty || '',
+      },
+      wait: { message: typeof source.wait === 'string' ? source.wait : '' },
+      receipt: { message: source.receiptpage?.text || '' },
+      error: { message: source.errorpage?.text || '' },
+      declined: { message: source.declinedpage?.text || '' },
+      outOfOrder: { message: source.ooopage?.text || '' },
+      terms: { line1: source.termspage?.text1 || '', line2: source.termspage?.text2 || '' },
+      map: {
+        title: map.title || '',
+        stationLocations: map.text || '',
+        walkingDirections: map.text1 || map.text2 || '',
+        liveAvailability: map.text3 || (map.text1 ? map.text2 : '') || '',
+      },
+    },
+    pricing: PRICING_COPY[locale],
+  };
+}
+
+export const DEFAULT_KIOSK_LANGUAGES_V2 = {
+  schemaVersion: 2,
+  defaultLocale: 'en',
+  supportedLocales: ['en', 'fr', 'es'],
+  support: {
+    phoneByMarket: {
+      EUR: '+33 1 89 71 17 16',
+      US: '818.996.9991',
+      CAN: '647.560.8200',
+    },
+  },
+  locales: Object.fromEntries(
+    KIOSK_PROFILE_LANGUAGES.map(({ key }) => [key, legacyLocaleToV2(DEFAULT_KIOSK_LANGUAGES[key], key)]),
+  ),
+};
+
 const isPlainObject = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
 
 export function deepMerge(base, override) {
@@ -369,22 +568,47 @@ export function cloneProfileValue(value) {
   return JSON.parse(JSON.stringify(value || {}));
 }
 
+export function normalizeKioskLanguages(value) {
+  const source = isPlainObject(value) ? value : {};
+  if (isPlainObject(source.locales)) {
+    return deepMerge(DEFAULT_KIOSK_LANGUAGES_V2, source);
+  }
+
+  const legacyLocales = Object.fromEntries(
+    KIOSK_PROFILE_LANGUAGES.map(({ key }) => [
+      key,
+      legacyLocaleToV2(deepMerge(DEFAULT_KIOSK_LANGUAGES[key], source[key] || {}), key),
+    ]),
+  );
+
+  return deepMerge(DEFAULT_KIOSK_LANGUAGES_V2, { locales: legacyLocales });
+}
+
 export function createDefaultKioskUiProfile(clientId = '') {
   const normalizedClientId = String(clientId || '').trim().toUpperCase();
+  const profileId = normalizedClientId
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 120);
   return {
-    id: '',
-    name: normalizedClientId ? `${normalizedClientId} Default` : 'Default Kiosk UI',
+    id: profileId,
+    name: normalizedClientId ? `${normalizedClientId} Kiosk UI` : 'Default Kiosk UI',
     clientId: normalizedClientId,
     status: 'draft',
     version: 1,
+    admin: {
+      userpassword: '',
+      adminpassword: '',
+    },
     ui: cloneProfileValue(DEFAULT_KIOSK_UI),
-    languages: cloneProfileValue(DEFAULT_KIOSK_LANGUAGES),
+    languages: cloneProfileValue(DEFAULT_KIOSK_LANGUAGES_V2),
   };
 }
 
 export function resolveKioskUiSnapshot(profile) {
   const ui = deepMerge(DEFAULT_KIOSK_UI, profile?.ui || {});
-  const languages = deepMerge(DEFAULT_KIOSK_LANGUAGES, profile?.languages || {});
+  const languages = normalizeKioskLanguages(profile?.languages);
   const profileId = String(profile?.id || profile?.profileId || ui.profileId || '').trim();
   const profileVersion = Number(profile?.version || ui.profileVersion || 1);
 
@@ -393,13 +617,22 @@ export function resolveKioskUiSnapshot(profile) {
     profileId,
     profileName: String(profile?.name || ui.profileName || '').trim(),
     profileVersion: Number.isFinite(profileVersion) ? profileVersion : 1,
-    languages,
+    languages: {
+      ...languages,
+      active: ui.languages?.active !== false,
+    },
   };
 }
 
 export function flattenLanguageFields(value, prefix = '') {
   if (typeof value === 'string' || typeof value === 'number') {
     return [{ path: prefix, value: String(value ?? '') }];
+  }
+
+  if (Array.isArray(value)) {
+    return value.flatMap((child, index) => (
+      flattenLanguageFields(child, prefix ? `${prefix}.${index}` : String(index))
+    ));
   }
 
   if (!isPlainObject(value)) {
@@ -422,9 +655,9 @@ export function setNestedValue(source, path, value) {
   const keys = String(path || '').split('.').filter(Boolean);
   let cursor = next;
 
-  keys.slice(0, -1).forEach((key) => {
-    if (!isPlainObject(cursor[key])) {
-      cursor[key] = {};
+  keys.slice(0, -1).forEach((key, index) => {
+    if (!isPlainObject(cursor[key]) && !Array.isArray(cursor[key])) {
+      cursor[key] = /^\d+$/.test(keys[index + 1]) ? [] : {};
     }
     cursor = cursor[key];
   });

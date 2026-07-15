@@ -60,6 +60,10 @@ const formatTransactionId = (value) => {
     return `${transactionId.slice(0, 12)}...${transactionId.slice(-8)}`;
 };
 
+const normalizeRentalStatusKey = (status) => (
+    normalizeText(status).replace(/[-\s]+/g, '_')
+);
+
 // Safely turn Firestore TS / string / ms into Date
 const safeToDate = (timestamp) => {
     if (!timestamp) return null;
@@ -71,6 +75,22 @@ const safeToDate = (timestamp) => {
 
 const firstPresent = (...values) => (
     values.find(value => value !== null && value !== undefined && String(value).trim() !== '')
+);
+
+const getRentalActivityTimestamp = (rental) => (
+    firstPresent(
+        rental?.rentalTime,
+        rental?.failedAt,
+        rental?.lastUpdate,
+        rental?.returnTime,
+        rental?.purchaseTime,
+        rental?.purchasedAt,
+        rental?.refundDate
+    )
+);
+
+const getRentalActivityDate = (rental) => (
+    safeToDate(getRentalActivityTimestamp(rental))
 );
 
 const copyToClipboard = async (value) => {
@@ -283,9 +303,11 @@ const buildRentalProcessLog = (rental, t) => {
     attempts.forEach((attempt, index) => {
         const succeeded = hasAttemptSucceeded(attempt);
         const attemptNumber = firstPresent(attempt.attemptNumber, index + 1);
-        const requestedSn = firstPresent(attempt.requestedSn, attempt.sn);
+        const requestedSn = firstPresent(attempt.requestedSn, attempt.sn, attempt.chargerid);
         const responseSn = firstPresent(attempt.responseSn, attempt.batterySN);
-        const reason = humanizeCode(attempt.reason);
+        const moduleId = firstPresent(attempt.moduleid, attempt.module, attempt.requestedModuleid);
+        const slotId = firstPresent(attempt.requestedSlotid, attempt.slotid, attempt.slot);
+        const reason = humanizeCode(firstPresent(attempt.reason, attempt.status));
 
         addEntry({
             title: `${t('attempt')} ${attemptNumber}: ${succeeded ? t('charger_dispensed') : t('dispense_failed')}`,
@@ -295,8 +317,8 @@ const buildRentalProcessLog = (rental, t) => {
                 requestedSn ? `${t('requested')}: ${requestedSn}` : '',
                 responseSn && String(responseSn) !== String(requestedSn) ? `${t('response')}: ${responseSn}` : '',
                 attempt.stationid ? `${t('station')}: ${attempt.stationid}` : '',
-                attempt.moduleid ? `M: ${attempt.moduleid}` : '',
-                attempt.requestedSlotid != null ? `S: ${attempt.requestedSlotid}` : '',
+                moduleId ? `M: ${moduleId}` : '',
+                slotId != null ? `S: ${slotId}` : '',
                 attempt.exitStatus != null ? `${t('exit_status')}: ${attempt.exitStatus}` : '',
                 attempt.solenoidStatus != null ? `${t('solenoid_status')}: ${attempt.solenoidStatus}` : '',
                 reason ? `${t('reason')}: ${reason}` : ''
@@ -362,7 +384,7 @@ const buildRentalProcessLog = (rental, t) => {
         });
     }
 
-    const rentalStatus = normalizeText(rental.status);
+    const rentalStatus = normalizeRentalStatusKey(rental.status);
     const hasSuccessfulVend = (
         attempts.some(hasAttemptSucceeded) ||
         (attempts.length === 0 && Number(rental.exitStatus) === 1)
@@ -494,6 +516,10 @@ const buildRentalProcessLog = (rental, t) => {
     });
 };
 
+const hasRentalLogError = (rental) => (
+    buildRentalProcessLog(rental, key => key).some(entry => entry.status === 'error')
+);
+
 const logStatusStyles = {
     success: {
         icon: CheckCircleIcon,
@@ -575,17 +601,19 @@ const RentalProcessLog = ({ rental, t }) => {
     );
 };
 
-const RentalCard = ({ rental, t, onRefund, onLockClick, canLock, onNavigateToChargers }) => {
+const RentalCard = ({ rental, t, onRefund, onLockClick, canLock, onNavigateToChargers, onNavigateToDashboard }) => {
     const [copiedTransaction, setCopiedTransaction] = useState(false);
     const transactionId = resolveDisplayTransactionId(rental);
     const chargerId = String(firstPresent(rental.sn, rental.chargerid) || '').trim();
+    const rentalActivityTimestamp = getRentalActivityTimestamp(rental);
     const normalizedRefundStatus = normalizeRefundStatus(rental.refundStatus);
-    const statusClass = rental.status === 'rented' ? 'bg-blue-100 text-blue-800' :
-                        rental.status === 'purchased' ? 'bg-purple-100 text-purple-800' :
-                        rental.status === 'refunded' ? 'bg-green-100 text-green-800' :
-                        rental.status === 'pending' ? 'bg-orange-100 text-orange-800' :
-                        rental.status === 'vend_failed' ? 'bg-red-100 text-red-800' :
-                        rental.status === 'returned' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800';
+    const rentalStatusKey = normalizeRentalStatusKey(rental.status);
+    const statusClass = rentalStatusKey === 'rented' ? 'bg-blue-100 text-blue-800' :
+                        rentalStatusKey === 'purchased' ? 'bg-purple-100 text-purple-800' :
+                        rentalStatusKey === 'refunded' ? 'bg-green-100 text-green-800' :
+                        rentalStatusKey === 'pending' ? 'bg-orange-100 text-orange-800' :
+                        rentalStatusKey === 'vend_failed' ? 'bg-red-100 text-red-800' :
+                        rentalStatusKey === 'returned' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800';
 
     const FIVE_MINUTES_IN_MS = 5 * 60 * 1000;
     const isShortRental = isReturnedRentalStatus(rental.status) && rental.rentalPeriod && rental.rentalPeriod < FIVE_MINUTES_IN_MS;
@@ -614,18 +642,32 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock, onNavigateToCha
         onNavigateToChargers(chargerId);
     };
 
+    const handleStationClick = () => {
+        if (!rental.rentalStationid || !onNavigateToDashboard) return;
+        onNavigateToDashboard(rental.rentalStationid);
+    };
+
     return (
         <div className={`${cardBgClass} shadow-md rounded-lg p-4 flex flex-col justify-between`}>
             <div className="flex justify-between items-start">
                 <div>
                     <h3 className="font-bold text-sm text-gray-800 truncate" title={`${rental.rentalStationid} - ${rental.rentalLocation}`}>
-                        {rental.rentalStationid} - {rental.rentalLocation}
+                        <button
+                            type="button"
+                            onClick={handleStationClick}
+                            className="text-blue-700 transition-colors hover:text-blue-900 hover:underline"
+                            title={`${t('go_to_kiosk')}: ${rental.rentalStationid}`}
+                            aria-label={`${t('go_to_kiosk')}: ${rental.rentalStationid}`}
+                        >
+                            {rental.rentalStationid}
+                        </button>
+                        {' - '}{rental.rentalLocation}
                     </h3>
                     <p className="text-xs text-gray-500">{rental.rentalPlace || ' '}</p>
                 </div>
                 <div className="flex items-center gap-2">
                     <div className={`px-2 py-1 text-xs font-semibold rounded-full ${statusClass}`}>
-                        {t(rental.status)}
+                        {t(rentalStatusKey || rental.status)}
                     </div>
                 </div>
             </div>
@@ -665,7 +707,7 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock, onNavigateToCha
                 </div>
                 <div>
                     <p className="text-gray-500">{t('rental')}</p>
-                    <p className="text-gray-800">{formatDateTime(rental.rentalTime)}</p>
+                    <p className="text-gray-800">{formatDateTime(rentalActivityTimestamp)}</p>
                     {rental.rentalModuleid && rental.rentalSlotid && (
                         <p className="text-gray-600 text-[10px]">
                             M: {rental.rentalModuleid} S: {rental.rentalSlotid} @ {rental.rentPower}%
@@ -688,7 +730,7 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock, onNavigateToCha
                 <div>
                     <p className="text-gray-500">{t('amount')}</p>
                     <p className="font-mono text-base font-bold text-gray-800">
-                        {(isReturnedRentalStatus(rental.status) || rental.status === 'purchased')
+                        {(isReturnedRentalStatus(rental.status) || rentalStatusKey === 'purchased')
                             ? formatRentalChargeAmount(rental)
                             : ''}
                     </p>
@@ -825,9 +867,20 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
         }
 
         const lowercasedSearch = normalizeText(searchTerm);
+        const isCardLast4Search = /^\d{4}$/.test(lowercasedSearch);
 
         // Search is an override: once a query is entered, ignore period/status/return-type filters.
         if (lowercasedSearch) {
+            if (isCardLast4Search) {
+                rentals = rentals.filter(r => textEquals(r.card_last4, lowercasedSearch));
+
+                return rentals.sort((a, b) => {
+                    const bTime = getRentalActivityDate(b)?.getTime() ?? 0;
+                    const aTime = getRentalActivityDate(a)?.getTime() ?? 0;
+                    return bTime - aTime;
+                });
+            }
+
             rentals = rentals.filter(r =>
                 textIncludes(r.rentalLocation, lowercasedSearch) ||
                 textIncludes(r.rentalPlace, lowercasedSearch) ||
@@ -835,11 +888,6 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
                 textIncludes(r.card_last4, lowercasedSearch) ||
                 textIncludes(r.sn, lowercasedSearch) ||
                 textIncludes(r.chargerid, lowercasedSearch) ||
-                textIncludes(r.orderid, lowercasedSearch) ||
-                textIncludes(r.rawid, lowercasedSearch) ||
-                textIncludes(r.transactionid, lowercasedSearch) ||
-                textIncludes(r.transactionId, lowercasedSearch) ||
-                textIncludes(r.paymentSessionId, lowercasedSearch) ||
                 textIncludes(r.vendState, lowercasedSearch) ||
                 textIncludes(r.failureReason, lowercasedSearch) ||
                 textIncludes(r.lastVendFailureReason, lowercasedSearch) ||
@@ -851,8 +899,8 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
             );
 
             return rentals.sort((a, b) => {
-                const bTime = safeToDate(b.rentalTime)?.getTime() ?? 0;
-                const aTime = safeToDate(a.rentalTime)?.getTime() ?? 0;
+                const bTime = getRentalActivityDate(b)?.getTime() ?? 0;
+                const aTime = getRentalActivityDate(a)?.getTime() ?? 0;
                 return bTime - aTime;
             });
         }
@@ -882,8 +930,7 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
         }
 
         rentals = rentals.filter(r => {
-            if (!r.rentalTime) return false;
-            const rentalDate = safeToDate(r.rentalTime);
+            const rentalDate = getRentalActivityDate(r);
             return rentalDate && rentalDate >= startDate;
         });
 
@@ -893,8 +940,10 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
             rentals = rentals.filter(r => isReturnedRentalStatus(r.status) && r.rentalPeriod && r.rentalPeriod < FIVE_MINUTES_IN_MS);
         } else if (activeFilters.status === 'refunded') {
             rentals = rentals.filter(isRefundedRental);
+        } else if (activeFilters.status === 'error') {
+            rentals = rentals.filter(hasRentalLogError);
         } else if (activeFilters.status !== 'all') {
-            rentals = rentals.filter(r => r.status === activeFilters.status);
+            rentals = rentals.filter(r => normalizeRentalStatusKey(r.status) === activeFilters.status);
         }
 
         // Filter by returnType
@@ -904,8 +953,8 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
 
         // Sort by most recent
         return rentals.sort((a, b) => {
-            const bTime = safeToDate(b.rentalTime)?.getTime() ?? 0;
-            const aTime = safeToDate(a.rentalTime)?.getTime() ?? 0;
+            const bTime = getRentalActivityDate(b)?.getTime() ?? 0;
+            const aTime = getRentalActivityDate(a)?.getTime() ?? 0;
             return bTime - aTime;
         });
 
@@ -1040,10 +1089,14 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
                         </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-4 mt-4">
-                        {['all', 'rented', 'returned', 'purchased', 'refunded', 'pending', 'vend_failed', 'short_rental'].map(status => (
+                        {['all', 'rented', 'returned', 'purchased', 'refunded', 'pending', 'vend_failed', 'short_rental', 'error'].map(status => (
                             <button key={status} onClick={() => handleFilterChange('status', status)}
-                                className={`px-3 py-1 text-sm font-semibold rounded-full transition-colors ${activeFilters.status === status ? 'bg-blue-600 text-white shadow' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}>
-                                {t(status)}
+                                className={`px-3 py-1 text-sm font-semibold rounded-full transition-colors ${
+                                    activeFilters.status === status
+                                        ? (status === 'error' ? 'bg-red-600 text-white shadow' : 'bg-blue-600 text-white shadow')
+                                        : (status === 'error' ? 'bg-red-50 text-red-700 hover:bg-red-100 border border-red-100' : 'bg-gray-200 text-gray-700 hover:bg-gray-300')
+                                }`}>
+                                {status === 'error' ? t('log_errors_filter') : t(status)}
                             </button>
                         ))}
                     </div>
@@ -1114,12 +1167,13 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
                         paginatedRentals.map(rental => {
                             const canLock = clientInfo?.commands?.lock && isReturnedRentalStatus(rental.status) && rental.location;
                             return <RentalCard 
-                                key={`${rental.orderid}-${rental.status}-${rental.rentalTime}`} 
+                                key={`${rental.orderid}-${rental.status}-${getRentalActivityTimestamp(rental)}`}
                                 rental={rental} t={t} 
                                 onRefund={clientInfo?.features?.rentals ? handleRefundClick : null}
                                 onLockClick={() => handleLockClick(rental)}
                                 canLock={canLock}
-                                onNavigateToChargers={onNavigateToChargers} />;
+                                onNavigateToChargers={onNavigateToChargers}
+                                onNavigateToDashboard={onNavigateToDashboard} />;
                         })
                     ) : (
                         <div className="col-span-full text-center text-gray-500 mt-10 bg-white p-8 rounded-lg shadow-md">

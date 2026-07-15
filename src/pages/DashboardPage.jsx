@@ -88,6 +88,8 @@ const getDisconnectedModules = (kiosk, referenceTime) => {
 };
 
 const buildStationStatusIssues = (kiosk, referenceTime) => {
+    if (!isStationProvisioned(kiosk)) return [];
+
     const issues = [];
 
     if (!isKioskOnline(kiosk, referenceTime)) {
@@ -336,8 +338,14 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     
     const preFilteredKiosks = useMemo(() => {
         // If a search term is present, we start with all client stations and ignore other filters.
-        if (debouncedSearchTerm && (clientInfo.features.search || isAdminUser || !!statusFocusedKioskId)) {
+        if (debouncedSearchTerm && (clientInfo.features.search || isAdminUser || !!statusFocusedKioskId || !!initialSearch)) {
             const lowercasedSearch = debouncedSearchTerm.toLowerCase();
+
+            // Navigation from another page passes a station ID and should resolve to that kiosk only.
+            if (initialSearch && lowercasedSearch === String(initialSearch).trim().toLowerCase()) {
+                return clientStations.filter(k => k.stationid.toLowerCase() === lowercasedSearch);
+            }
+
             return clientStations.filter(k => 
                 k.info.location?.toLowerCase().includes(lowercasedSearch) ||
                 k.stationid.toLowerCase().includes(lowercasedSearch) ||
@@ -383,19 +391,23 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
         }
 
         return kiosks;
-    }, [clientStations, debouncedSearchTerm, showActiveOnly, showV1, showV2, activeFilters, latestTimestamp, clientInfo, statusFocusedKioskId, isAdminUser]);
+    }, [clientStations, debouncedSearchTerm, showActiveOnly, showV1, showV2, activeFilters, latestTimestamp, clientInfo, statusFocusedKioskId, isAdminUser, initialSearch]);
     
-            const offlineKioskCount = useMemo(() => {
-        return preFilteredKiosks.filter(kiosk => !isKioskOnline(kiosk, latestTimestamp)).length;
-    }, [preFilteredKiosks, latestTimestamp]);
+    const alertEligibleKiosks = useMemo(() => (
+        preFilteredKiosks.filter(isStationProvisioned)
+    ), [preFilteredKiosks]);
+
+    const offlineKioskCount = useMemo(() => {
+        return alertEligibleKiosks.filter(kiosk => !isKioskOnline(kiosk, latestTimestamp)).length;
+    }, [alertEligibleKiosks, latestTimestamp]);
 
     const soldOutKioskCount = useMemo(() => {
-        return preFilteredKiosks.filter(kiosk => kiosk.count === 0).length;
-    }, [preFilteredKiosks]);
+        return alertEligibleKiosks.filter(kiosk => kiosk.count === 0).length;
+    }, [alertEligibleKiosks]);
 
     const disconnectedKioskCount = useMemo(() => {
-        return preFilteredKiosks.filter(kiosk => getDisconnectedModules(kiosk, latestTimestamp).length > 0).length;
-    }, [preFilteredKiosks, latestTimestamp]);
+        return alertEligibleKiosks.filter(kiosk => getDisconnectedModules(kiosk, latestTimestamp).length > 0).length;
+    }, [alertEligibleKiosks, latestTimestamp]);
 
     const totalLeaseRevenue = useMemo(() => {
         if (!clientInfo?.features?.lease_revenue) return 0;
@@ -420,11 +432,11 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
                 return statusFilters.every(filter => {
                     switch(filter) {
                         case 'offline':
-                            return kiosks.some(k => !isKioskOnline(k, latestTimestamp));
+                            return kiosks.some(k => isStationProvisioned(k) && !isKioskOnline(k, latestTimestamp));
                         case 'soldout':
-                            return kiosks.some(k => k.count === 0);
+                            return kiosks.some(k => isStationProvisioned(k) && k.count === 0);
                         case 'disconnected':
-                            return kiosks.some(k => getDisconnectedModules(k, latestTimestamp).length > 0);
+                            return kiosks.some(k => isStationProvisioned(k) && getDisconnectedModules(k, latestTimestamp).length > 0);
                         default:
                             return true;
                     }
@@ -613,7 +625,7 @@ return (
         <SoldOutKiosksModal
             isOpen={showSoldOutModal}
             onClose={() => setShowSoldOutModal(false)}
-            soldOutKiosks={preFilteredKiosks.filter(kiosk => kiosk.count === 0)}
+            soldOutKiosks={alertEligibleKiosks.filter(kiosk => kiosk.count === 0)}
             t={t}
         />
         <CommandStatusToast status={commandStatus} onDismiss={() => setCommandStatus(null)} />

@@ -9,6 +9,17 @@ const FilterButton = ({ filterKey, isActive, onClick, children, className = '' }
     </button>
 );
 
+const TogglePill = ({ isActive, onClick, children }) => (
+    <button
+        type="button"
+        aria-pressed={isActive}
+        onClick={() => onClick(!isActive)}
+        className={`px-3 py-1 text-sm font-semibold rounded-full transition-colors ${isActive ? 'bg-blue-600 text-white shadow' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}`}
+    >
+        {children}
+    </button>
+);
+
 const DisneyIcon = () => (
     <svg width="26" height="26" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" aria-hidden="true">
         <circle cx="7" cy="7" r="4.2" fill="currentColor" />
@@ -122,37 +133,12 @@ export default function FilterPanel({ activeFilters, onFilterChange, showActiveO
                 </div>
             </div>
             <div className="flex items-center gap-4 mt-3 pt-3 border-t border-gray-100">
-                <div className="flex items-center">
-                    <input
-                        id="active-only"
-                        type="checkbox"
-                        checked={showActiveOnly}
-                        onChange={(e) => onShowActiveOnlyChange(e.target.checked)}
-                        className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                    />
-                    <label htmlFor="active-only" className="ml-2 text-sm text-gray-900">{t('active')}</label>
-                </div>
+                <TogglePill isActive={showActiveOnly} onClick={onShowActiveOnlyChange}>
+                    {t('active')}
+                </TogglePill>
                 <div className="h-4 border-l border-gray-300"></div>
-                <div className="flex items-center">
-                    <input
-                        id="show-v1"
-                        type="checkbox"
-                        checked={showV1}
-                        onChange={(e) => onShowV1Change(e.target.checked)}
-                        className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                    />
-                    <label htmlFor="show-v1" className="ml-2 text-sm text-gray-900">V1</label>
-                </div>
-                <div className="flex items-center">
-                    <input
-                        id="show-v2"
-                        type="checkbox"
-                        checked={showV2}
-                        onChange={(e) => onShowV2Change(e.target.checked)}
-                        className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                    />
-                    <label htmlFor="show-v2" className="ml-2 text-sm text-gray-900">V2</label>
-                </div>
+                <TogglePill isActive={showV1} onClick={onShowV1Change}>V1</TogglePill>
+                <TogglePill isActive={showV2} onClick={onShowV2Change}>V2</TogglePill>
             </div>
         </div>
     );
