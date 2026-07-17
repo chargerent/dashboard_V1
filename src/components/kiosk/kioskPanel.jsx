@@ -104,8 +104,9 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                                     : hasHeartbeatOutput
                                         ? module.heartbeatOutput === true
                                         : module.output === true;
-                                const moduleFw = String(module.FW ?? '').trim();
-                                const showModuleFw = moduleFw === '1' || moduleFw === '2';
+                                const parsedModuleFw = Number(String(module.FW ?? '').trim());
+                                const showModuleFw = parsedModuleFw === 1 || parsedModuleFw === 2;
+                                const moduleFw = showModuleFw ? String(parsedModuleFw) : '';
                                 const moduleStatus = outputOk ? t('online') : t('offline');
                                 const moduleTitle = `${module.id}: ${moduleStatus}${showModuleFw ? `, FW ${moduleFw}` : ''}`;
 
