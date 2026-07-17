@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
+    "test:kiosk-updates": "node --test scripts/kiosk-command-responses.test.mjs",
     "preview": "vite preview",
     "sync:mergin-map": "node ./scripts/sync-mergin-course-map.mjs"
   },

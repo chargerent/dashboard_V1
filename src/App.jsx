@@ -15,6 +15,13 @@ import {
   isSuccessfulRefundStatus,
   rentalMatchesRefundConfirmation,
 } from './utils/rentals.js';
+import {
+  getCommandResponseAdminId,
+  getCommandResponseRequestIds,
+  getMatchingLegacyCommandScope,
+  getMatchingOutgoingCommandScope,
+  parseKioskSoftwareUpdateResponse,
+} from './utils/kioskCommandResponses.js';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 // 🔥 firebase-config must export BOTH db and auth
@@ -147,51 +154,6 @@ function createCommandRequestId(action, stationid, moduleid) {
   const targetModule = String(moduleid || 'na').trim() || 'na';
   const randomSegment = Math.random().toString(36).slice(2, 10);
   return `${prefix}-${targetStation}-${targetModule}-${Date.now()}-${randomSegment}`;
-}
-
-function normalizeCommandScopeId(value) {
-  if (value === null || value === undefined) return '';
-  if (typeof value === 'object') {
-    return normalizeCommandScopeId(value.id || value.socketId || value.socketid || value.sessionId || value.sessionid);
-  }
-  return String(value).trim();
-}
-
-function collectCommandScopeIds(source, fields) {
-  if (!source || typeof source !== 'object') return [];
-
-  return fields
-    .map((field) => normalizeCommandScopeId(source[field]))
-    .filter(Boolean);
-}
-
-function getCommandResponseRequestIds(data) {
-  const requestIdFields = ['requestId', 'requestid', 'commandRequestId', 'bulkRequestId', 'parentRequestId'];
-  const sources = [data, data?.payload, data?.data, data?.command].filter(Boolean);
-  return [...new Set(sources.flatMap((source) => collectCommandScopeIds(source, requestIdFields)))];
-}
-
-function getCommandResponseAdminId(data) {
-  const adminFields = ['admin', '_session', 'socketId', 'socketid', 'sessionId', 'sessionid', 'clientSocketId'];
-  const sources = [data, data?.payload, data?.data, data?.command].filter(Boolean);
-  const [adminId = ''] = sources.flatMap((source) => collectCommandScopeIds(source, adminFields));
-  return adminId;
-}
-
-function getMatchingOutgoingCommandScope(scopes, requestIds) {
-  for (const requestId of requestIds) {
-    if (scopes.has(requestId)) {
-      return scopes.get(requestId);
-    }
-
-    for (const [outgoingRequestId, scope] of scopes.entries()) {
-      if (requestId.startsWith(`${outgoingRequestId}-`)) {
-        return scope;
-      }
-    }
-  }
-
-  return null;
 }
 
 function getKioskRecencyTimestamp(kiosk) {
@@ -815,6 +777,8 @@ function App() {
 
   const handleLogout = useCallback(async () => {
     cancelDeferredAdminRentalLoad();
+    outgoingCommandScopesRef.current.clear();
+    currentSocketSessionIdRef.current = '';
     try {
       await signOut(auth);
     } catch {
@@ -880,6 +844,8 @@ function App() {
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (!user) {
+        outgoingCommandScopesRef.current.clear();
+        currentSocketSessionIdRef.current = '';
         localStorage.removeItem('dashboardToken');
         setToken(null);
         setClientInfo(null);
@@ -1445,7 +1411,7 @@ function App() {
   }, []);
 
   const rememberOutgoingCommandScope = useCallback((requestId, metadata = {}) => {
-    const normalizedRequestId = normalizeCommandScopeId(requestId);
+    const normalizedRequestId = String(requestId || '').trim();
     if (!normalizedRequestId) return;
 
     const now = Date.now();
@@ -1472,23 +1438,31 @@ function App() {
 
     const requestIds = getCommandResponseRequestIds(data);
     const adminId = getCommandResponseAdminId(data);
-    const matchingScope = getMatchingOutgoingCommandScope(outgoingCommandScopesRef.current, requestIds);
+    const requestScope = getMatchingOutgoingCommandScope(outgoingCommandScopesRef.current, requestIds);
+    const currentSocketSessionId = currentSocketSessionIdRef.current;
+    const hasConflictingKnownAdmin = Boolean(
+      !requestScope && adminId && currentSocketSessionId && adminId !== currentSocketSessionId
+    );
+    const legacyScope = requestScope || hasConflictingKnownAdmin
+      ? null
+      : getMatchingLegacyCommandScope(outgoingCommandScopesRef.current, data);
+    const matchingScope = requestScope || legacyScope;
 
     if (matchingScope) {
-      if (adminId && !currentSocketSessionIdRef.current) {
+      if (adminId && (requestScope || !currentSocketSessionId)) {
         currentSocketSessionIdRef.current = adminId;
       }
       return {
         shouldShow: true,
-        reason: 'matching-request',
+        reason: requestScope ? 'matching-request' : 'matching-legacy-command',
         requestIds,
         adminId,
         matchedRequestId: matchingScope.requestId,
       };
     }
 
-    const currentSocketSessionId = currentSocketSessionIdRef.current;
-    if (adminId && currentSocketSessionId && adminId === currentSocketSessionId) {
+    const knownSocketSessionId = currentSocketSessionIdRef.current;
+    if (adminId && knownSocketSessionId && adminId === knownSocketSessionId) {
       return {
         shouldShow: true,
         reason: 'matching-admin',
@@ -1604,6 +1578,8 @@ function App() {
         action: 'uichange',
         stationid,
         moduleid,
+        provisionid,
+        version: uiVersion,
       });
       commandSocket.send(JSON.stringify({
         type: 'command',
@@ -1835,6 +1811,8 @@ function App() {
         action,
         stationid,
         moduleid,
+        provisionid,
+        version: uiVersion,
       });
       commandSocket.send(JSON.stringify(message));
       console.log('[WS Send]', message);
@@ -1849,8 +1827,15 @@ function App() {
         );
       }
 
-      console.log(`[2. IGNORE] Ignoring Firestore updates for ${stationid} for 30s.`);
-      ignoredKiosksRef.current = { ...ignoredKiosksRef.current, [stationid]: Date.now() + 30000 };
+      const shouldIgnoreKioskSnapshot = action !== 'update flow' && action !== 'update ui';
+      if (shouldIgnoreKioskSnapshot) {
+        console.log(`[2. IGNORE] Ignoring Firestore updates for ${stationid} for 30s.`);
+        ignoredKiosksRef.current = { ...ignoredKiosksRef.current, [stationid]: Date.now() + 30000 };
+      } else {
+        const nextIgnoredKiosks = { ...ignoredKiosksRef.current };
+        delete nextIgnoredKiosks[stationid];
+        ignoredKiosksRef.current = nextIgnoredKiosks;
+      }
 
       setCommandStatus({ state: 'sending', message: t('sending_command') });
     } else {
@@ -1875,6 +1860,7 @@ function App() {
       if (ws.current && (ws.current.readyState === WebSocket.OPEN || ws.current.readyState === WebSocket.CONNECTING)) {
         return;
       }
+      currentSocketSessionIdRef.current = '';
       const socket = new WebSocket(`wss://chargerentstations.com/ws/commands?token=${token}`);
       ws.current = socket;
 
@@ -1884,6 +1870,8 @@ function App() {
           console.log('[WS Receive]', data);
 
           const refundStatus = data.refund_status || data.status;
+          const flowUpdateResponse = parseKioskSoftwareUpdateResponse(data, 'flow');
+          const uiUpdateResponse = parseKioskSoftwareUpdateResponse(data, 'ui');
 
           if (data.action === 'refund' && (isSuccessfulRefundStatus(refundStatus) || isPendingRefundStatus(refundStatus)) && (data.orderId || data.transactionid)) {
             setRentalData(prevData =>
@@ -1895,7 +1883,43 @@ function App() {
             );
           }
 
-          if (data.action === 'ngrok connect' || data.action === 'ngrok disconnect' || data.action === 'ssh connect' || data.action === 'ssh disconnect') {
+          if (flowUpdateResponse) {
+            setScopedCommandStatus(data, {
+              state: flowUpdateResponse.state,
+              message: flowUpdateResponse.message || t('sending_command'),
+            });
+
+            if (flowUpdateResponse.complete) {
+              const responseStationId = flowUpdateResponse.stationid.toLowerCase();
+              setAllStationsData((prevKiosks) =>
+                prevKiosks.map((station) =>
+                  String(station.stationid || '').toLowerCase() === responseStationId
+                    ? { ...station, fversion: flowUpdateResponse.version }
+                    : station
+                )
+              );
+            }
+          } else if (uiUpdateResponse) {
+            setScopedCommandStatus(data, {
+              state: uiUpdateResponse.state,
+              message: uiUpdateResponse.message || t('sending_command'),
+            });
+
+            if (uiUpdateResponse.complete) {
+              const responseStationId = uiUpdateResponse.stationid.toLowerCase();
+              setAllStationsData((prevKiosks) =>
+                prevKiosks.map((station) =>
+                  String(station.stationid || '').toLowerCase() === responseStationId
+                    ? {
+                        ...station,
+                        ui: { ...(station.ui || {}), version: uiUpdateResponse.version },
+                        uiVersion: uiUpdateResponse.version,
+                      }
+                    : station
+                )
+              );
+            }
+          } else if (data.action === 'ngrok connect' || data.action === 'ngrok disconnect' || data.action === 'ssh connect' || data.action === 'ssh disconnect') {
             const isSuccess = data.status == 1;
             const shouldShowCommandStatus = setScopedCommandStatus(data, { state: isSuccess ? 'success' : 'error', message: data.status_en || (isSuccess ? t('command_success') : t('command_failed')) });
             if (isSuccess) {
@@ -2072,36 +2096,6 @@ function App() {
           } else if (data.action === 'hotspot' && data.stationid) {
             const isSuccess = data.status === 1;
             setScopedCommandStatus(data, { state: isSuccess ? 'success' : 'error', message: data.status_en || (isSuccess ? t('command_successful') : t('command_failed')) });
-          } else if (data.status_en && data.status_en.includes('flow for kiosk')) {
-            const messageParts = data.status_en.split(' ');
-            const kioskId = messageParts[3];
-            const newFlowVersion = messageParts.slice(8).join(' ');
-
-            if (kioskId && newFlowVersion) {
-              setAllStationsData(prevKiosks =>
-                prevKiosks.map(station =>
-                  station.stationid === kioskId
-                    ? { ...station, fversion: newFlowVersion }
-                    : station
-                )
-              );
-              setScopedCommandStatus(data, { state: 'success', message: data.status_en });
-            }
-          } else if (data.status_en && data.status_en.includes('UI for kiosk')) {
-            const messageParts = data.status_en.split(' ');
-            const kioskId = messageParts[3];
-            const newUiVersion = messageParts.slice(8).join(' ');
-
-            if (kioskId && newUiVersion) {
-              setAllStationsData(prevKiosks =>
-                prevKiosks.map(station =>
-                  station.stationid === kioskId
-                    ? { ...station, uiVersion: newUiVersion }
-                    : station
-                )
-              );
-              setScopedCommandStatus(data, { state: 'success', message: data.status_en });
-            }
           } else if (data.action && data.action.includes('change')) {
             const statusValue = data.statuscode ?? data.status;
             const isSuccess = Number(statusValue) === 1 || statusValue === 'success' || statusValue === 'accepted';

@@ -288,6 +288,8 @@ export const normalizeKioskData = (kiosks) => {
 
         const normalizedModules = modulesSource.map(module => {
             let slots = [];
+            const rawModuleFw = String(module?.FW ?? '').trim();
+            const moduleFw = rawModuleFw === '1' || rawModuleFw === '2' ? Number(rawModuleFw) : null;
             const moduleSoftwareVersion = Number(module?.softwareVersion ?? 0);
             const moduleHardwareVersion = Number(module?.hardwareVersion ?? 0);
             const rawModuleTemperature = Number(module?.temperature ?? module?.temp);
@@ -378,6 +380,7 @@ export const normalizeKioskData = (kiosks) => {
                 heartbeatOutput: module.heartbeatOutput,
                 heartbeat: module.heartbeat,
                 chargeMetrics: module.chargeMetrics || null,
+                FW: moduleFw,
                 softwareVersion: Number.isFinite(moduleSoftwareVersion) ? moduleSoftwareVersion : 0,
                 hardwareVersion: Number.isFinite(moduleHardwareVersion) ? moduleHardwareVersion : 0,
                 firmwareVersion: moduleFirmwareVersion,

@@ -132,7 +132,7 @@ function KioskControlPanel({ kiosk, t, onCommand, serverUiVersion, serverFlowVer
     const flowSubLabel = () => {
         const kioskV = getDisplayVersion(kiosk.fversion);
         const serverV = getDisplayVersion(serverFlowVersion);
-        if (kioskV && serverV) return `${kioskV} → ${serverV}`;
+        if (kioskV && serverV) return kioskV === serverV ? kioskV : `${kioskV} → ${serverV}`;
         return kioskV || serverV || '';
     };
 
@@ -236,7 +236,7 @@ function KioskControlPanel({ kiosk, t, onCommand, serverUiVersion, serverFlowVer
                 
                 {clientInfo.commands.updates && !isV2 && (
                     <>
-                        <ControlButton debugAction="update flow" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'update flow', null, kiosk.provisionid)} disabled={disabled} label={t('update_flow')} subLabel={flowSubLabel()} className="bg-blue-100 hover:bg-blue-200 text-blue-800" />
+                        <ControlButton debugAction="update flow" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'update flow', null, kiosk.provisionid, serverFlowVersion)} disabled={disabled} label={t('update_flow')} subLabel={flowSubLabel()} className="bg-blue-100 hover:bg-blue-200 text-blue-800" />
                         <ControlButton debugAction="update ui" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'update ui', null, kiosk.provisionid, serverUiVersion)} disabled={disabled} label={t('update_ui')} subLabel={uiSubLabel()} className="bg-blue-100 hover:bg-blue-200 text-blue-800" />
                     </>
                 )}

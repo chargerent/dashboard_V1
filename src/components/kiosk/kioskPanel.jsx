@@ -104,7 +104,27 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                                     : hasHeartbeatOutput
                                         ? module.heartbeatOutput === true
                                         : module.output === true;
-                                return <HeartIcon key={module.id} className={`h-3 w-3 ${outputOk ? 'text-green-500' : 'text-red-500'}`} />;
+                                const moduleFw = String(module.FW ?? '').trim();
+                                const showModuleFw = moduleFw === '1' || moduleFw === '2';
+                                const moduleStatus = outputOk ? t('online') : t('offline');
+                                const moduleTitle = `${module.id}: ${moduleStatus}${showModuleFw ? `, FW ${moduleFw}` : ''}`;
+
+                                return (
+                                    <span
+                                        key={module.id}
+                                        className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center"
+                                        title={moduleTitle}
+                                        aria-label={moduleTitle}
+                                        role="img"
+                                    >
+                                        <HeartIcon aria-hidden="true" className={`h-4 w-4 ${outputOk ? 'text-green-500' : 'text-red-500'}`} />
+                                        {showModuleFw && (
+                                            <span aria-hidden="true" className="pointer-events-none absolute inset-0 flex items-center justify-center pt-px text-[9px] font-black leading-none text-gray-950">
+                                                {moduleFw}
+                                            </span>
+                                        )}
+                                    </span>
+                                );
                             })}
                         </div>
                         <div className="flex flex-col items-center">

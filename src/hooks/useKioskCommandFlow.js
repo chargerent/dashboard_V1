@@ -315,6 +315,10 @@ export default function useKioskCommandFlow({
     } else if (action === 'reboot module') {
       confirmationText = `${t('reboot_module_confirmation')} ${moduleid}?`;
       commandDetailsPayload.slotid = moduleid;
+    } else if (action === 'update flow' && uiVersion) {
+      confirmationText = t('update_flow_confirmation').replace('{version}', uiVersion);
+    } else if (action === 'update ui' && uiVersion) {
+      confirmationText = t('update_ui_confirmation').replace('{version}', uiVersion);
     } else if (action === 'update module') {
       if (typeof onFirmwareUpdateRequest === 'function' && isV2Kiosk(targetKiosk)) {
         onFirmwareUpdateRequest({

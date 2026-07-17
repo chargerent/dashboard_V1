@@ -990,7 +990,7 @@
         "t": "set",
         "p": "payload",
         "pt": "msg",
-        "to": "{\t   \"action\":\"updateflow\",\t   \"provisionid\":$$.command.provisionid,\t   \"admin\":$$._session.id}",
+        "to": "{\t   \"action\":\"updateflow\",\t   \"stationid\":$$.command.stationid,\t   \"provisionid\":$$.command.provisionid,\t   \"version\":$$.command.version,\t   \"requestId\":$$.command.requestId,\t   \"admin\":$$._session.id}",
         "tot": "jsonata"
       },
       {
@@ -1043,7 +1043,7 @@
         "t": "set",
         "p": "payload",
         "pt": "msg",
-        "to": "{\t   \"action\":\"updateui\",\t   \"provisionid\":$$.command.provisionid,\t   \"version\":$$.command.uiVersion,\t   \"admin\":$$._session\t}",
+        "to": "{\t   \"action\":\"updateui\",\t   \"stationid\":$$.command.stationid,\t   \"provisionid\":$$.command.provisionid,\t   \"version\":$$.command.version,\t   \"requestId\":$$.command.requestId,\t   \"admin\":$$._session.id\t}",
         "tot": "jsonata"
       },
       {

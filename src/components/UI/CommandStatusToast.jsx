@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 
 function CommandStatusToast({ status, onDismiss }) {
     const timerRef = useRef(null);
+    const dismissTimerRef = useRef(null);
+    const onDismissRef = useRef(onDismiss);
     const styles = {
         sending: { bg: 'bg-gray-500', icon: '...' },
         success: { bg: 'bg-green-500', icon: '✓' },
@@ -11,6 +13,10 @@ function CommandStatusToast({ status, onDismiss }) {
         pending: { bg: 'bg-orange-500', icon: '...' },
     };
     const [isVisible, setIsVisible] = useState(false);
+
+    useEffect(() => {
+        onDismissRef.current = onDismiss;
+    }, [onDismiss]);
 
     // Default to 'sending' style if the state is unknown
     const currentStyle = styles[status?.state] || styles.sending;
@@ -20,6 +26,9 @@ function CommandStatusToast({ status, onDismiss }) {
         if (timerRef.current) {
             clearTimeout(timerRef.current);
         }
+        if (dismissTimerRef.current) {
+            clearTimeout(dismissTimerRef.current);
+        }
 
         if (status) {
             setIsVisible(true);
@@ -27,14 +36,17 @@ function CommandStatusToast({ status, onDismiss }) {
             timerRef.current = setTimeout(() => {
                 setIsVisible(false);
                 // Allow for the fade-out animation before fully dismissing
-                setTimeout(onDismiss, 300);
+                dismissTimerRef.current = setTimeout(() => onDismissRef.current?.(), 300);
             }, 5000);
         } else {
             setIsVisible(false);
         }
 
         // Cleanup function to clear the timer if the component unmounts
-        return () => clearTimeout(timerRef.current);
+        return () => {
+            clearTimeout(timerRef.current);
+            clearTimeout(dismissTimerRef.current);
+        };
     }, [status]); // Rerun effect only when status object reference changes
 
     // Don't render anything if there is no status
