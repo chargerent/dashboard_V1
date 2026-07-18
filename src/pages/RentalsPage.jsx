@@ -52,6 +52,19 @@ const resolveDisplayTransactionId = (rental) => (
     ).trim()
 );
 
+const resolveCopyTransactionId = (rental) => (
+    String(
+        firstPresent(
+            rental?.transactionid,
+            rental?.transactionId,
+            rental?.paymentSessionId,
+            rental?.rawid,
+            rental?.paymentIntentId,
+            rental?.orderid
+        ) || ''
+    ).trim()
+);
+
 const formatTransactionId = (value) => {
     const transactionId = String(value || '').trim();
 
@@ -242,7 +255,8 @@ const getAttemptTime = (attempt) => (
         attempt?.responseAt,
         attempt?.sentAt,
         attempt?.requestedAt,
-        attempt?.createdAt
+        attempt?.createdAt,
+        attempt?.at
     )
 );
 
@@ -267,15 +281,24 @@ const buildRentalProcessLog = (rental, t) => {
     };
 
     const chargerSn = firstPresent(rental.sn, rental.chargerid);
+    const displayTransactionId = resolveDisplayTransactionId(rental);
+    const fullTransactionId = resolveCopyTransactionId(rental);
     const rentalDetails = formatDetailParts(
+        fullTransactionId ? `${t('order_id')}: ${fullTransactionId}` : '',
         rental.card_last4 ? `${t('card')}: ${rental.card_last4}` : '',
         chargerSn ? `${t('charger_sn')}: ${chargerSn}` : '',
-        rental.rentalStationid ? `${t('station')}: ${rental.rentalStationid}` : ''
+        rental.rentalStationid ? `${t('station')}: ${rental.rentalStationid}` : '',
+        rental.rentalModuleid ? `M: ${rental.rentalModuleid}` : '',
+        rental.rentalSlotid != null ? `S: ${rental.rentalSlotid}` : '',
+        rental.rentPower != null ? `${rental.rentPower}%` : '',
+        rental.gateway ? `Gateway: ${rental.gateway}` : '',
+        rental.paymentStatus ? `Payment: ${humanizeCode(rental.paymentStatus)}` : '',
+        displayTransactionId && fullTransactionId && displayTransactionId !== fullTransactionId ? `Short ID: ${displayTransactionId}` : ''
     );
 
     addEntry({
         title: t('rental_created'),
-        timestamp: rental.rentalTime,
+        timestamp: firstPresent(rental.rentalTime, rental.failedAt, rental.lastUpdate),
         status: normalizeText(rental.status) === 'pending' ? 'pending' : 'info',
         details: rentalDetails,
     });
@@ -427,6 +450,20 @@ const buildRentalProcessLog = (rental, t) => {
                 rental.returnModuleid ? `M: ${rental.returnModuleid}` : '',
                 rental.returnSlotid != null ? `S: ${rental.returnSlotid}` : '',
                 rental.returnType ? humanizeCode(rental.returnType) : ''
+            ),
+        });
+    }
+
+    if (rentalStatus === 'rented' && !rental.returnTime) {
+        addEntry({
+            title: t('in_use'),
+            timestamp: firstPresent(rental.lastUpdate, rental.rentalTime),
+            status: 'pending',
+            details: formatDetailParts(
+                rental.rentalStationid ? `${t('station')}: ${rental.rentalStationid}` : '',
+                rental.rentalModuleid ? `M: ${rental.rentalModuleid}` : '',
+                rental.rentalSlotid != null ? `S: ${rental.rentalSlotid}` : '',
+                chargerSn ? `${t('charger_sn')}: ${chargerSn}` : ''
             ),
         });
     }
@@ -603,7 +640,8 @@ const RentalProcessLog = ({ rental, t }) => {
 
 const RentalCard = ({ rental, t, onRefund, onLockClick, canLock, onNavigateToChargers, onNavigateToDashboard }) => {
     const [copiedTransaction, setCopiedTransaction] = useState(false);
-    const transactionId = resolveDisplayTransactionId(rental);
+    const displayTransactionId = resolveDisplayTransactionId(rental);
+    const copyTransactionId = resolveCopyTransactionId(rental);
     const chargerId = String(firstPresent(rental.sn, rental.chargerid) || '').trim();
     const rentalActivityTimestamp = getRentalActivityTimestamp(rental);
     const normalizedRefundStatus = normalizeRefundStatus(rental.refundStatus);
@@ -626,9 +664,9 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock, onNavigateToCha
     const lockButtonColor = rental.isLocked ? 'text-red-600 bg-red-100' : 'text-gray-400 hover:text-red-600 hover:bg-red-100';
 
     const handleCopyTransactionId = async () => {
-        if (!transactionId) return;
+        if (!copyTransactionId) return;
 
-        const didCopy = await copyToClipboard(transactionId);
+        const didCopy = await copyToClipboard(copyTransactionId);
         if (!didCopy) return;
 
         setCopiedTransaction(true);
@@ -677,12 +715,12 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock, onNavigateToCha
                     <button
                         type="button"
                         onClick={handleCopyTransactionId}
-                        disabled={!transactionId}
+                        disabled={!copyTransactionId}
                         className={`block max-w-full truncate text-left font-mono transition-colors disabled:cursor-default disabled:text-gray-800 disabled:hover:no-underline ${copiedTransaction ? 'text-green-700' : 'text-blue-700 hover:text-blue-900 hover:underline'}`}
-                        title={transactionId ? `${copiedTransaction ? t('copied_transaction_id') : t('copy_transaction_id')}: ${transactionId}` : ''}
-                        aria-label={transactionId ? `${t('copy_transaction_id')}: ${transactionId}` : t('order_id')}
+                        title={copyTransactionId ? `${copiedTransaction ? t('copied_transaction_id') : t('copy_transaction_id')}: ${copyTransactionId}` : ''}
+                        aria-label={copyTransactionId ? `${t('copy_transaction_id')}: ${copyTransactionId}` : t('order_id')}
                     >
-                        {formatTransactionId(transactionId)}
+                        {formatTransactionId(displayTransactionId || copyTransactionId)}
                     </button>
                 </div>
                 <div>

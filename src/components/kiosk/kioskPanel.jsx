@@ -113,14 +113,14 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                                 return (
                                     <span
                                         key={module.id}
-                                        className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center"
+                                        className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center"
                                         title={moduleTitle}
                                         aria-label={moduleTitle}
                                         role="img"
                                     >
-                                        <HeartIcon aria-hidden="true" className={`h-4 w-4 ${outputOk ? 'text-green-500' : 'text-red-500'}`} />
+                                        <HeartIcon aria-hidden="true" className={`h-5 w-5 ${outputOk ? 'text-green-700' : 'text-red-700'}`} />
                                         {showModuleFw && (
-                                            <span aria-hidden="true" className="pointer-events-none absolute inset-0 flex items-center justify-center pt-px text-[9px] font-black leading-none text-gray-950">
+                                            <span aria-hidden="true" className="pointer-events-none absolute inset-0 flex items-center justify-center pt-px text-[11px] font-black leading-none text-white">
                                                 {moduleFw}
                                             </span>
                                         )}
