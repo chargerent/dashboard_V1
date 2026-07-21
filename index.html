@@ -11,14 +11,11 @@
             background-color: #f0f2f5;
         }
         .detail-panel-enter {
-            max-height: 0;
-            opacity: 0;
-            overflow: hidden;
-            transition: max-height 0.7s ease-in-out, opacity 0.5s ease-in-out, margin-top 0.3s ease-in-out;
+            opacity: 1;
+            overflow: visible;
+            overflow-anchor: none;
         }
         .detail-panel-enter-active {
-            max-height: 3500px;
-            opacity: 1;
             margin-top: 1rem;
         }
         .slot-glow {
@@ -26,7 +23,7 @@
         }
         @keyframes pulse-orange {
             0% { box-shadow: 0 0 0 0 rgba(251, 146, 60, 0.7); }
-            70% { box-shadow: 0 0 0 10px rgba(251, 146, 60, 0); }
+            70% { box-shadow: 0 0 0 4px rgba(251, 146, 60, 0); }
             100% { box-shadow: 0 0 0 0 rgba(251, 146, 60, 0); }
         }
         .slot-lock-glow {
@@ -34,7 +31,7 @@
         }
         @keyframes pulse-red {
             0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
-            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            70% { box-shadow: 0 0 0 4px rgba(239, 68, 68, 0); }
             100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
         }
         .loader {
@@ -48,6 +45,13 @@
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .slot-glow,
+            .slot-lock-glow,
+            .loader {
+                animation: none;
+            }
         }
     </style>
 </head>

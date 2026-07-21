@@ -1,12 +1,11 @@
 // src/components/kiosk/KioskPanel.jsx
 
-import { useMemo, useCallback } from 'react';
+import { memo, useMemo, useCallback } from 'react';
 import { HeartIcon } from '@heroicons/react/24/solid';
 import { isKioskOnline, getKioskPowerThreshold, isModuleOnline, isNewSchemaKiosk, isSlotActivelyCharging } from '../../utils/helpers';
 import { formatDateTime } from '../../utils/dateFormatter';
 import RentalStats from '../Dashboard/RentalStats';
 import GatewayIcon from './GatewayIcon';
-import { useTap } from './useTap';
 
 function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rentalData, clientInfo, t, onCommand, onShowRentalDetails }) {
     const isOnline = isKioskOnline(kiosk, mockNow);
@@ -62,15 +61,23 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
         }
     }, [canExpand, onToggle, kiosk.stationid]);
 
-    const tapHandlers = useTap(handleToggle);
+    const handleCardClick = useCallback((event) => {
+        if (!canExpand) return;
+        const interactiveTarget = event.target instanceof Element
+            ? event.target.closest('button, a[href], input, select, textarea, [role="button"], [data-tap-control]')
+            : null;
+        if (interactiveTarget && interactiveTarget !== event.currentTarget) return;
+        handleToggle();
+    }, [canExpand, handleToggle]);
+
+    const handleShowRentalPeriod = useCallback((period) => {
+        onShowRentalDetails(kiosk.stationid, period);
+    }, [kiosk.stationid, onShowRentalDetails]);
     
     return (
-        <div 
-            onPointerDown={tapHandlers.onPointerDown}
-            onPointerMove={tapHandlers.onPointerMove}
-            onPointerUp={tapHandlers.onPointerUp}
-            style={tapHandlers.style}
-            className={`${kiosk.count === 0 ? 'bg-purple-50' : 'bg-white'} shadow-md flex flex-col justify-between transition-all duration-300 rounded-lg ${isExpanded && canExpand ? 'ring-2 ring-blue-500' : ''} ${!isOnline ? 'border-red-400 border-2' : ''} ${canExpand ? 'cursor-pointer' : 'cursor-default'}`}>
+        <div
+            onClick={handleCardClick}
+            className={`${kiosk.count === 0 ? 'bg-purple-50' : 'bg-white'} shadow-md flex flex-col justify-between transition-shadow duration-200 rounded-lg ${isExpanded && canExpand ? 'ring-2 ring-blue-500' : ''} ${!isOnline ? 'border-red-400 border-2' : ''} ${canExpand ? 'cursor-pointer' : 'cursor-default'}`}>
             <div 
                 className="p-4"
             >
@@ -113,12 +120,12 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                                 return (
                                     <span
                                         key={module.id}
-                                        className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center"
+                                        className="relative inline-flex h-6 w-6 shrink-0 items-center justify-center"
                                         title={moduleTitle}
                                         aria-label={moduleTitle}
                                         role="img"
                                     >
-                                        <HeartIcon aria-hidden="true" className={`h-5 w-5 ${outputOk ? 'text-green-700' : 'text-red-700'}`} />
+                                        <HeartIcon aria-hidden="true" className={`h-6 w-6 ${outputOk ? 'text-green-700' : 'text-red-700'}`} />
                                         {showModuleFw && (
                                             <span aria-hidden="true" className="pointer-events-none absolute inset-0 flex items-center justify-center pt-px text-[11px] font-black leading-none text-white">
                                                 {moduleFw}
@@ -140,7 +147,15 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                             )}
                         </div>
                         {canExpand && (
-                            <button onClick={(e) => e.stopPropagation()}>
+                            <button
+                                type="button"
+                                aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${kiosk.stationid}`}
+                                aria-expanded={isExpanded}
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    handleToggle();
+                                }}
+                            >
                                 <svg className={`w-4 h-4 text-gray-400 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                             </button>
                         )}
@@ -183,14 +198,14 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                     </div>
                 )}
                 {clientInfo.features.rentals && (
-                    <div className={`mt-4 ${isOnline ? 'border-t' : ''} pt-4`} onPointerDown={(e) => e.stopPropagation()}>
+                    <div className={`mt-4 ${isOnline ? 'border-t' : ''} pt-4`}>
                         <RentalStats 
                             rentalData={rentalData} 
                             clientInfo={clientInfo}
                             stationId={kiosk.stationid} 
                             referenceTime={mockNow}
                             t={t}
-                            onShowRentalDetails={(period) => onShowRentalDetails(kiosk.stationid, period)}
+                            onShowRentalDetails={handleShowRentalPeriod}
                         />
                     </div>
                 )}
@@ -237,4 +252,4 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
     );
 };
 
-export default KioskPanel;
+export default memo(KioskPanel);

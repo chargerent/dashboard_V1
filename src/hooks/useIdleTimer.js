@@ -19,6 +19,20 @@ export const useIdleTimer = ({
 
     const idleTimer = useRef(null);
     const logoutTimer = useRef(null);
+    const countdownTimer = useRef(null);
+    const onIdleRef = useRef(onIdle);
+    const onLogoutRef = useRef(onLogout);
+    const warningVisibleRef = useRef(showWarning);
+    const lastActivityResetRef = useRef(0);
+
+    useEffect(() => {
+        onIdleRef.current = onIdle;
+        onLogoutRef.current = onLogout;
+    }, [onIdle, onLogout]);
+
+    useEffect(() => {
+        warningVisibleRef.current = showWarning;
+    }, [showWarning]);
 
     const reset = useCallback(() => {
         // Clear all existing timers
@@ -26,15 +40,17 @@ export const useIdleTimer = ({
         clearTimeout(logoutTimer.current);
         
         // Reset state
-        setShowWarning(false);
-        setCountdown(safePromptTimeout / 1000);
+        setShowWarning(previous => previous ? false : previous);
+        setCountdown(previous => previous === Math.ceil(safePromptTimeout / 1000)
+            ? previous
+            : Math.ceil(safePromptTimeout / 1000));
         
         // Start the main idle timer
         idleTimer.current = setTimeout(() => {
             setShowWarning(true);
-            onIdle();
+            onIdleRef.current();
         }, idleTimeout);
-    }, [idleTimeout, onIdle, safePromptTimeout]);
+    }, [idleTimeout, safePromptTimeout]);
 
     const handleStay = useCallback(() => {
         reset();
@@ -42,24 +58,39 @@ export const useIdleTimer = ({
 
     // Set up event listeners for user activity
     useEffect(() => {
-        const activityEvents = ['mousemove', 'mousedown', 'keypress', 'scroll', 'touchstart'];
-        activityEvents.forEach(event => window.addEventListener(event, reset));
+        const activityEvents = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart'];
+        const handleActivity = () => {
+            const now = Date.now();
+            if (!warningVisibleRef.current && now - lastActivityResetRef.current < 1_000) return;
+            lastActivityResetRef.current = now;
+            reset();
+        };
+        activityEvents.forEach(event => window.addEventListener(event, handleActivity, { passive: true }));
         reset(); // Initial setup
 
         return () => {
-            activityEvents.forEach(event => window.removeEventListener(event, reset));
+            activityEvents.forEach(event => window.removeEventListener(event, handleActivity));
             clearTimeout(idleTimer.current);
             clearTimeout(logoutTimer.current);
+            clearInterval(countdownTimer.current);
         };
     }, [reset]);
 
     // Countdown timer when warning is shown
     useEffect(() => {
         if (showWarning) {
-            logoutTimer.current = setTimeout(onLogout, safePromptTimeout);
+            const deadline = Date.now() + safePromptTimeout;
+            setCountdown(Math.ceil(safePromptTimeout / 1000));
+            countdownTimer.current = setInterval(() => {
+                setCountdown(Math.max(0, Math.ceil((deadline - Date.now()) / 1000)));
+            }, 1_000);
+            logoutTimer.current = setTimeout(() => onLogoutRef.current(), safePromptTimeout);
         }
-        return () => clearTimeout(logoutTimer.current);
-    }, [showWarning, onLogout, safePromptTimeout]);
+        return () => {
+            clearTimeout(logoutTimer.current);
+            clearInterval(countdownTimer.current);
+        };
+    }, [showWarning, safePromptTimeout]);
 
     return { showWarning, handleStay, countdown };
 };

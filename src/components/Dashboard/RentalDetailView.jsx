@@ -2,6 +2,7 @@
 import { useMemo, useState } from 'react';
 import { formatDateTime, formatDuration } from '../../utils/dateFormatter';
 import { formatRentalChargeAmount } from '../../utils/rentals.js';
+import CardBrandIcon from '../UI/CardBrandIcon.jsx';
 import RefundModal from '../UI/RefundModal';
 
 const getRentalNavigationId = (rental) => String(
@@ -94,7 +95,10 @@ export default function RentalDetailView({ kiosk, period, rentalData, onClose, t
                                         title={navigationId && onNavigateToRental ? t('rentals_page_title') : undefined}
                                     >
                                         <td className="px-2 py-2 whitespace-nowrap">
-                                            <div className="font-mono text-gray-800">{rental.card_last4}</div>
+                                            <div className="flex items-center gap-1.5">
+                                                <span className="font-mono text-gray-800">{rental.card_last4}</span>
+                                                <CardBrandIcon rental={rental} />
+                                            </div>
                                             <div className="text-gray-500 text-[10px]">{rental.sn}</div>
                                         </td>
                                         <td className="px-2 py-2 whitespace-nowrap">

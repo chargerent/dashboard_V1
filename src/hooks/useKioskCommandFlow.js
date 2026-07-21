@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getKioskPowerThreshold, isV2Kiosk } from '../utils/helpers';
 import { logKioskInteraction } from '../utils/kioskInteractionDebug';
 
@@ -32,6 +32,11 @@ export default function useKioskCommandFlow({
 }) {
   const [commandDetails, setCommandDetails] = useState(null);
   const [commandModalOpen, setCommandModalOpen] = useState(false);
+  const stationsRef = useRef(allStationsData);
+
+  useEffect(() => {
+    stationsRef.current = allStationsData;
+  }, [allStationsData]);
 
   useEffect(() => {
     logKioskInteraction('command-modal-state', {
@@ -42,7 +47,7 @@ export default function useKioskCommandFlow({
 
   const handleSlotClick = useCallback((stationid, moduleid, slotid) => {
     const confirmationText = `${t('eject_confirmation')} ${slotid}?`;
-    const targetKiosk = allStationsData.find((kiosk) => kiosk.stationid === stationid);
+    const targetKiosk = stationsRef.current.find((kiosk) => kiosk.stationid === stationid);
     const targetModule = targetKiosk?.modules?.find((module) => module.id === moduleid);
     const targetSlot = targetModule?.slots?.find((slot) => slot.position === slotid);
     const chargerid = Number(targetSlot?.sn || 0);
@@ -67,12 +72,12 @@ export default function useKioskCommandFlow({
       confirmationText,
     });
     setCommandModalOpen(true);
-  }, [allStationsData, t]);
+  }, [t]);
 
   const handleLockSlotClick = useCallback((stationid, moduleid, slotid, isCurrentlyLocked) => {
     const action = isCurrentlyLocked ? 'unlock slot' : 'lock slot';
     const confirmationText = `${isCurrentlyLocked ? t('unlock_confirmation') : t('lock_confirmation')} ${slotid}?`;
-    const targetKiosk = allStationsData.find((kiosk) => kiosk.stationid === stationid);
+    const targetKiosk = stationsRef.current.find((kiosk) => kiosk.stationid === stationid);
 
     let lockReason = '';
     if (isCurrentlyLocked) {
@@ -96,7 +101,7 @@ export default function useKioskCommandFlow({
 
     setCommandDetails({ stationid, moduleid, slotid, action, confirmationText, lockReason });
     setCommandModalOpen(true);
-  }, [allStationsData, t]);
+  }, [t]);
 
   const handleSendCommand = useCallback((confirmationResult = null) => {
     logKioskInteraction('command-modal-confirmed', {
@@ -117,7 +122,7 @@ export default function useKioskCommandFlow({
     }
 
     if (action.startsWith('eject') || action === 'rent' || action === 'vend') {
-      const targetKiosk = allStationsData.find((kiosk) => kiosk.stationid === stationid);
+      const targetKiosk = stationsRef.current.find((kiosk) => kiosk.stationid === stationid);
       if (!targetKiosk) {
         return;
       }
@@ -232,10 +237,10 @@ export default function useKioskCommandFlow({
     };
 
     onCommand(commandDetails.stationid, commandDetails.action, commandDetails.moduleid, commandDetails.provisionid, commandDetails.uiVersion, details);
-  }, [allStationsData, commandDetails, manageIgnoredKiosk, onCommand, setEjectingSlots]);
+  }, [commandDetails, manageIgnoredKiosk, onCommand, setEjectingSlots]);
 
   const handleKioskSave = useCallback((stationid, section, data, autoGeocode) => {
-    const targetKiosk = allStationsData.find((kiosk) => kiosk.stationid === stationid);
+    const targetKiosk = stationsRef.current.find((kiosk) => kiosk.stationid === stationid);
     const normalizedStatus = String(targetKiosk?.status || '').trim().toLowerCase();
     const showProvisionStatusCheckbox = isV2Kiosk(targetKiosk) && (
       normalizedStatus === 'pending' || normalizedStatus === 'provisioned'
@@ -274,11 +279,11 @@ export default function useKioskCommandFlow({
       } : null,
     });
     setCommandModalOpen(true);
-  }, [allStationsData, t]);
+  }, [t]);
 
   const handleGeneralCommand = useCallback((stationid, action, moduleid = null, provisionid = null, uiVersion = null, details = null) => {
     let confirmationText = `Are you sure you want to ${action}?`;
-    const targetKiosk = allStationsData.find((kiosk) => kiosk.stationid === stationid);
+    const targetKiosk = stationsRef.current.find((kiosk) => kiosk.stationid === stationid);
     const commandDetailsPayload = { stationid, action, moduleid, provisionid, uiVersion, ...details };
 
     logKioskInteraction('general-command-handler-received', {
@@ -348,7 +353,7 @@ export default function useKioskCommandFlow({
     commandDetailsPayload.confirmationText = confirmationText;
     setCommandDetails(commandDetailsPayload);
     setCommandModalOpen(true);
-  }, [allStationsData, onCommand, onFirmwareUpdateRequest, t]);
+  }, [onCommand, onFirmwareUpdateRequest, t]);
 
   return {
     commandDetails,

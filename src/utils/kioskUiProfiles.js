@@ -22,6 +22,24 @@ export const KIOSK_PROFILE_SCREENS = [
   { key: 'mapspage', label: 'Map' },
 ];
 
+const RETURN_COMPLETE_DEPOSIT_NOTICE = {
+  en: [
+    'Your deposit will be released automatically.',
+    'Any applicable rental fees will be deducted.',
+    'Processing times may vary depending on your bank.',
+  ],
+  fr: [
+    'Votre caution sera remboursée automatiquement.',
+    'Les frais de location applicables seront déduits.',
+    'Le délai de traitement dépend de votre banque.',
+  ],
+  es: [
+    'Su depósito se liberará automáticamente.',
+    'Se deducirán las tarifas de alquiler aplicables.',
+    'El tiempo de procesamiento depende de su banco.',
+  ],
+};
+
 export const DEFAULT_KIOSK_UI = {
   version: '',
   profileId: '',
@@ -514,6 +532,7 @@ function legacyLocaleToV2(language, locale) {
       returnComplete: {
         returnText: source.returntypage?.return || '',
         thankYou: source.returntypage?.ty || '',
+        depositNotice: RETURN_COMPLETE_DEPOSIT_NOTICE[locale],
       },
       wait: { message: typeof source.wait === 'string' ? source.wait : '' },
       receipt: { message: source.receiptpage?.text || '' },

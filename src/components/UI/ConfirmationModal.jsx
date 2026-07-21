@@ -1,11 +1,13 @@
 // src/components/UI/ConfirmationModal.jsx
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { logKioskInteraction } from '../../utils/kioskInteractionDebug';
+import ModalPortal from './ModalPortal';
 
 function ConfirmationModal({ isOpen, onClose, onConfirm, details, t }) {
     const [reason, setReason] = useState('');
     const [checkboxValue, setCheckboxValue] = useState(false);
+    const dialogRef = useRef(null);
     
     useEffect(() => {
         if (isOpen) {
@@ -13,6 +15,27 @@ function ConfirmationModal({ isOpen, onClose, onConfirm, details, t }) {
             setCheckboxValue(Boolean(details?.checkbox?.checked));
         }
     }, [details, isOpen]);
+
+    useEffect(() => {
+        if (!isOpen) return undefined;
+
+        const previouslyFocused = document.activeElement;
+        const dialog = dialogRef.current;
+        const focusTarget = dialog?.querySelector('input:not(:disabled), button:not(:disabled), [href]');
+        focusTarget?.focus({ preventScroll: true });
+
+        const handleKeyDown = (event) => {
+            if (event.key === 'Escape') onClose();
+        };
+        document.addEventListener('keydown', handleKeyDown);
+
+        return () => {
+            document.removeEventListener('keydown', handleKeyDown);
+            if (previouslyFocused instanceof HTMLElement) {
+                previouslyFocused.focus({ preventScroll: true });
+            }
+        };
+    }, [isOpen, onClose]);
 
     useEffect(() => {
         logKioskInteraction('confirmation-modal-render-state', {
@@ -49,9 +72,10 @@ function ConfirmationModal({ isOpen, onClose, onConfirm, details, t }) {
     if (!isOpen) return null;
 
     return (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white p-6 rounded-lg shadow-xl max-w-md w-full">
-                <h2 className="text-lg font-bold mb-4">{details?.title || t('confirm_action')}</h2>
+        <ModalPortal>
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4" role="presentation">
+            <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="confirmation-modal-title" className="bg-white p-6 rounded-lg shadow-xl max-w-md w-full">
+                <h2 id="confirmation-modal-title" className="text-lg font-bold mb-4">{details?.title || t('confirm_action')}</h2>
                 <p className="text-gray-600 mb-6">{details?.confirmationText}</p>
                 
                 {details?.data && (
@@ -101,15 +125,16 @@ function ConfirmationModal({ isOpen, onClose, onConfirm, details, t }) {
                 )}
 
                 <div className="flex justify-end gap-4 mt-6">
-                    <button onClick={onClose} className="bg-gray-300 text-gray-800 font-semibold py-2 px-6 rounded-md hover:bg-gray-400">
+                    <button type="button" onClick={onClose} className="bg-gray-300 text-gray-800 font-semibold py-2 px-6 rounded-md hover:bg-gray-400">
                         {t('cancel')}
                     </button>
-                    <button onClick={handleConfirm} className="bg-blue-600 text-white font-semibold py-2 px-6 rounded-md hover:bg-blue-700">
+                    <button type="button" onClick={handleConfirm} className="bg-blue-600 text-white font-semibold py-2 px-6 rounded-md hover:bg-blue-700">
                         {t('confirm')}
                     </button>
                 </div>
             </div>
         </div>
+        </ModalPortal>
     )
 }
 

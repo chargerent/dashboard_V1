@@ -22,7 +22,7 @@ const ControlButton = ({ icon, label, subLabel, onClick, className = '', status,
             onClick();
         }}
         disabled={disabled}
-        className={`relative flex flex-col items-center justify-center gap-1 p-2 rounded-lg transition-colors duration-200 ${className} disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed`}
+        className={`relative flex min-h-11 flex-col items-center justify-center gap-1 p-2 rounded-lg transition-colors duration-200 ${className} disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed`}
     >
         {status !== undefined && (
             <span className={`absolute top-1 right-1 w-2 h-2 rounded-full ${
@@ -62,10 +62,13 @@ const getKioskAudioVolume = (kiosk) => {
     return DEFAULT_AUDIO_VOLUME;
 };
 
-const getDisplayVersion = (version) => (
-    typeof version === 'string' && version.trim()
-        ? version.trim().split(' ')[0]
-        : null
+const getDisplayVersion = (version) => {
+    const normalizedVersion = String(version ?? '').trim();
+    return normalizedVersion ? normalizedVersion.split(' ')[0] : null;
+};
+
+const formatVersionSubLabel = (kioskVersion, serverVersion) => (
+    `KV: ${getDisplayVersion(kioskVersion) || '--'} | SV: ${getDisplayVersion(serverVersion) || '--'}`
 );
 
 const V2AudioControl = ({ kiosk, t, onCommand, disabled }) => {
@@ -107,7 +110,7 @@ const V2AudioControl = ({ kiosk, t, onCommand, disabled }) => {
                                 requestVolume(preset.volume);
                             }}
                             disabled={disabled}
-                            className={`flex h-9 min-w-0 items-center justify-center gap-1 rounded-md px-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400 ${
+                            className={`flex h-11 min-w-0 items-center justify-center gap-1 rounded-md px-2 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400 ${
                                 isActive
                                     ? 'bg-sky-700 text-white shadow-sm'
                                     : 'bg-white text-sky-800 shadow-sm hover:bg-sky-100'
@@ -129,25 +132,9 @@ function KioskControlPanel({ kiosk, t, onCommand, serverUiVersion, serverFlowVer
     const isV2 = V2_TYPES.includes(kiosk.hardware?.type);
     const canControlAudio = isV2 && clientInfo.commands.audio;
     const debugContext = { stationid: kiosk.stationid, source: 'KioskControlPanel' };
-    const flowSubLabel = () => {
-        const kioskV = getDisplayVersion(kiosk.fversion);
-        const serverV = getDisplayVersion(serverFlowVersion);
-        if (kioskV && serverV) return kioskV === serverV ? kioskV : `${kioskV} → ${serverV}`;
-        return kioskV || serverV || '';
-    };
+    const flowSubLabel = () => formatVersionSubLabel(kiosk.fversion, serverFlowVersion);
 
-    const uiSubLabel = () => {
-        const kioskV = getDisplayVersion(kiosk.ui?.version || kiosk.uiVersion);
-        const serverV = getDisplayVersion(serverUiVersion);
-        const serverFlowV = getDisplayVersion(serverFlowVersion);
-        const uiVersionText = kioskV && serverV ? `${kioskV} → ${serverV}` : kioskV || serverV || '';
-
-        if (!isV2 && serverFlowV) {
-            return uiVersionText ? `${uiVersionText} | Flow ${serverFlowV}` : `Flow ${serverFlowV}`;
-        }
-
-        return uiVersionText;
-    };
+    const uiSubLabel = () => formatVersionSubLabel(kiosk.ui?.version || kiosk.uiVersion, serverUiVersion);
 
     const ejectCounts = useMemo(() => {
         const fullThreshold = getKioskPowerThreshold(kiosk);
@@ -197,7 +184,7 @@ function KioskControlPanel({ kiosk, t, onCommand, serverUiVersion, serverFlowVer
                 {clientInfo.commands.connectivity && !isV2 && (
                     <>
                         <ControlButton debugAction={kiosk.ngrok ? 'ngrok disconnect' : 'ngrok connect'} debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, kiosk.ngrok ? 'ngrok disconnect' : 'ngrok connect')} disabled={disabled} status={kiosk.ngrok} label={t('ngrok')} className="bg-yellow-100 hover:bg-yellow-200 text-yellow-800" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>} />
-                        <ControlButton debugAction={kiosk.ssh ? 'ssh disconnect' : 'ssh connect'} debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, kiosk.ssh ? 'ssh disconnect' : 'ssh connect')} disabled={disabled} status={kiosk.ssh} label={t('ssh')} className="bg-yellow-100 hover:bg-yellow-200 text-yellow-800" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" /></svg>} />
+                        <ControlButton debugAction={kiosk.ssh ? 'ssh disconnect' : 'ssh connect'} debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, kiosk.ssh ? 'ssh disconnect' : 'ssh connect', null, kiosk.provisionid)} disabled={disabled} status={kiosk.ssh} label={t('ssh')} className="bg-yellow-100 hover:bg-yellow-200 text-yellow-800" icon={<svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 9l4-4 4 4m0 6l-4 4-4-4" /></svg>} />
                         <ControlButton
                             onClick={() => onCommand(kiosk.stationid, 'hotspot')}
                             debugAction="hotspot"

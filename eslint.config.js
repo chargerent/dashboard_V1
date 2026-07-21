@@ -18,7 +18,7 @@ export default [
   // Frontend (React/Vite)
   // -------------------------
   {
-    files: ["src/**/*.{js,jsx}", "public/firebase-messaging-sw.js"],
+    files: ["src/**/*.{js,jsx}", "tests/**/*.{js,jsx}", "public/firebase-messaging-sw.js"],
     languageOptions: {
       parserOptions: {
         ecmaFeatures: { jsx: true },
@@ -36,7 +36,7 @@ export default [
     },
   },
   {
-    files: ["src/**/*.{js,jsx}", "public/firebase-messaging-sw.js"],
+    files: ["src/**/*.{js,jsx}", "tests/fixtures/**/*.{js,jsx}", "public/firebase-messaging-sw.js"],
     ...pluginReactConfig,
     settings: {
       react: {
@@ -53,7 +53,7 @@ export default [
     },
   },
   {
-    files: ["src/**/*.{js,jsx}", "public/firebase-messaging-sw.js"],
+    files: ["src/**/*.{js,jsx}", "tests/fixtures/**/*.{js,jsx}", "public/firebase-messaging-sw.js"],
     plugins: {
       "react-hooks": pluginReactHooks,
       "react-refresh": pluginReactRefresh,
@@ -66,6 +66,12 @@ export default [
       "react-hooks/set-state-in-effect": "off",
       "react-hooks/static-components": "off",
       "react-refresh/only-export-components": "warn",
+    },
+  },
+  {
+    files: ["tests/fixtures/**/*.{js,jsx}"],
+    rules: {
+      "react-refresh/only-export-components": "off",
     },
   },
 

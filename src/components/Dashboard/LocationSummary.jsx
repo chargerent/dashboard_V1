@@ -1,11 +1,11 @@
 // src/components/Dashboard/LocationSummary.jsx
 
-import { useMemo } from 'react';
+import { memo, useCallback, useMemo } from 'react';
 import { getKioskInfoAddress, getKioskPowerThreshold, isKioskOnline } from '../../utils/helpers';
 import RentalStats from './RentalStats';
 
 // Helper component for progress bars
-const RectangularProgress = ({ percentage, color, value, label, subLabel }) => {
+const RectangularProgress = memo(function RectangularProgress({ percentage, color, value, label, subLabel }) {
     return (
         <div className="flex flex-col w-full bg-gray-50 p-3 rounded-lg border border-gray-200">
             <div className="flex justify-between items-baseline mb-1">
@@ -15,27 +15,28 @@ const RectangularProgress = ({ percentage, color, value, label, subLabel }) => {
             <div className="w-full bg-gray-200 rounded-full h-2">
                 <div 
                     className="h-2 rounded-full" 
-                    style={{ width: `${percentage}%`, backgroundColor: color, transition: 'width 0.5s ease-in-out' }}
+                    style={{ width: `${percentage}%`, backgroundColor: color }}
                 ></div>
             </div>
             {subLabel && <p className="text-xs text-gray-500 mt-1 text-right">{subLabel}</p>}
         </div>
     );
-};
+});
 
 // Helper component for simple stat displays
-const StatDisplay = ({ value, label }) => (
+const StatDisplay = memo(function StatDisplay({ value, label }) {
+    return (
     <div className="flex flex-col w-full bg-gray-50 p-3 rounded-lg border border-gray-200">
         <div className="flex justify-between items-baseline">
             <span className="text-sm font-semibold text-gray-700">{label}</span>
             <span className="text-2xl font-bold text-gray-800">{value}</span>
         </div>
     </div>
-);
+    );
+});
 
-// Combined Commission Stats component, styled like RentalStats
-const CommissionStats = ({ clientInfo, accountMTD, accountYTD, repMTD, repYTD, showAccount, showRep, t }) => {
-    const StatBox = ({ title, revenue, period }) => (
+const CommissionStatBox = memo(function CommissionStatBox({ title, revenue, period }) {
+    return (
         <div className="flex flex-col justify-start text-center md:text-left">
             <h3 className="font-bold text-gray-800 mb-2 text-base">{title} ({period})</h3>
             <div className="bg-gray-100 p-2 rounded-md text-center">
@@ -44,19 +45,22 @@ const CommissionStats = ({ clientInfo, accountMTD, accountYTD, repMTD, repYTD, s
             </div>
         </div>
     );
+});
 
+// Combined Commission Stats component, styled like RentalStats
+const CommissionStats = ({ clientInfo, accountMTD, accountYTD, repMTD, repYTD, showAccount, showRep, t }) => {
     return (
         <div className="grid grid-cols-2 gap-4">
-            {showAccount && <StatBox title={t('client_commission_short')} revenue={accountMTD} period="MTD" />}
-            {showAccount && clientInfo.isAdmin && <StatBox title={t('client_commission_short')} revenue={accountYTD} period="YTD" />}
+            {showAccount && <CommissionStatBox title={t('client_commission_short')} revenue={accountMTD} period="MTD" />}
+            {showAccount && clientInfo.isAdmin && <CommissionStatBox title={t('client_commission_short')} revenue={accountYTD} period="YTD" />}
             
-            {showRep && <StatBox title={t('rep_commission_short')} revenue={repMTD} period="MTD" />}
-            {showRep && clientInfo.isAdmin && <StatBox title={t('rep_commission_short')} revenue={repYTD} period="YTD" />}
+            {showRep && <CommissionStatBox title={t('rep_commission_short')} revenue={repMTD} period="MTD" />}
+            {showRep && clientInfo.isAdmin && <CommissionStatBox title={t('rep_commission_short')} revenue={repYTD} period="YTD" />}
         </div>
     );
 };
 
-function LocationSummary({ location, kiosks, _chargerThreshold, clientInfo, rentalData, referenceTime, t, onShowRentalDetails }) {
+function LocationSummary({ location, kiosks, _chargerThreshold, clientInfo, rentalData, referenceTime, t, onNavigateToRentals }) {
     const clientRevShare = useMemo(() => {
         const value = Number(clientInfo?.revShare ?? clientInfo?.commission);
         return Number.isFinite(value) ? value : 0;
@@ -79,33 +83,47 @@ function LocationSummary({ location, kiosks, _chargerThreshold, clientInfo, rent
             });
         });
         
-        const stationIdsInLocation = new Set(kiosks.map(k => k.stationid));        
-        let locationRentals = (rentalData || []);
-        
-        if (!clientInfo.isAdmin) {
-            if (clientInfo.role === 'partner') {
-                locationRentals = locationRentals.filter(r => r.repId?.toLowerCase() === clientInfo.clientId?.toLowerCase());
-            } else {
-                locationRentals = locationRentals.filter(r => r.clientId === clientInfo.clientId);
-            }
-        }
-        locationRentals = locationRentals.filter(r => stationIdsInLocation.has(r.rentalStationid));
-        const rentedChargers = locationRentals.filter(r => r.status === 'rented').length;
-        const missingChargers = locationRentals.filter(r => r.status === 'lost').length;
-        
+        const stationIdsInLocation = new Set(kiosks.map(k => k.stationid));
         const now = new Date(referenceTime.endsWith('Z') ? referenceTime : referenceTime + 'Z');
         const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
         const yearStart = new Date(now.getFullYear(), 0, 1);
+        const nowMillis = now.getTime();
+        const monthStartMillis = monthStart.getTime();
+        const yearStartMillis = yearStart.getTime();
+        const accountClientId = String(clientInfo.clientId || '').toLowerCase();
+        const locationRentals = [];
+        const mtdRevenueByStation = new Map();
+        const ytdRevenueByStation = new Map();
+        let rentedChargers = 0;
+        let missingChargers = 0;
 
-        const rentalsInDateRange = (rentals, start, end) =>
-            rentals.filter(r => {
-                if (!r.rentalTime) return false;
-                const rentalDate = new Date(r.rentalTime.endsWith('Z') ? r.rentalTime : r.rentalTime + 'Z');
-                return rentalDate >= start && rentalDate <= end;
-            });
+        (rentalData || []).forEach((rental) => {
+            if (!stationIdsInLocation.has(rental.rentalStationid)) return;
+            if (!clientInfo.isAdmin) {
+                const belongsToClient = clientInfo.role === 'partner'
+                    ? String(rental.repId || '').toLowerCase() === accountClientId
+                    : rental.clientId === clientInfo.clientId;
+                if (!belongsToClient) return;
+            }
 
-        const mtdRentals = rentalsInDateRange(locationRentals, monthStart, now);
-        const ytdRentals = rentalsInDateRange(locationRentals, yearStart, now);
+            locationRentals.push(rental);
+            if (rental.status === 'rented') rentedChargers += 1;
+            if (rental.status === 'lost') missingChargers += 1;
+            if (!rental.rentalTime) return;
+
+            const normalizedRentalTime = rental.rentalTime.endsWith('Z')
+                ? rental.rentalTime
+                : `${rental.rentalTime}Z`;
+            const rentalMillis = Date.parse(normalizedRentalTime);
+            if (!Number.isFinite(rentalMillis) || rentalMillis > nowMillis || rentalMillis < yearStartMillis) return;
+
+            const revenue = Number(rental.totalCharged) || 0;
+            const stationid = rental.rentalStationid;
+            ytdRevenueByStation.set(stationid, (ytdRevenueByStation.get(stationid) || 0) + revenue);
+            if (rentalMillis >= monthStartMillis) {
+                mtdRevenueByStation.set(stationid, (mtdRevenueByStation.get(stationid) || 0) + revenue);
+            }
+        });
 
         let accountCommissionMTD = 0;
         let repCommissionMTD = 0;
@@ -114,8 +132,8 @@ function LocationSummary({ location, kiosks, _chargerThreshold, clientInfo, rent
 
         kiosks.forEach(kiosk => {
             const isLeaseKiosk = kiosk.pricing?.kioskmode === 'LEASE';
-            const kioskMtdRevenue = mtdRentals.filter(r => r.rentalStationid === kiosk.stationid).reduce((acc, r) => acc + (r.totalCharged || 0), 0);
-            const kioskYtdRevenue = ytdRentals.filter(r => r.rentalStationid === kiosk.stationid).reduce((acc, r) => acc + (r.totalCharged || 0), 0);
+            const kioskMtdRevenue = mtdRevenueByStation.get(kiosk.stationid) || 0;
+            const kioskYtdRevenue = ytdRevenueByStation.get(kiosk.stationid) || 0;
 
             const accountPercent = (!clientInfo.isAdmin && clientInfo.role !== 'partner')
                 ? clientRevShare
@@ -170,6 +188,10 @@ function LocationSummary({ location, kiosks, _chargerThreshold, clientInfo, rent
     }, [chargerFullPercent]);
     
     const canShowRentalInfo = clientInfo.features.rentals || clientInfo.features.lease_revenue || clientInfo.features.rental_counts || clientInfo.features.rental_revenue;
+    const stationIds = useMemo(() => kiosks.map(kiosk => kiosk.stationid), [kiosks]);
+    const handleShowRentalDetails = useCallback((period) => {
+        onNavigateToRentals?.({ period, stationIds });
+    }, [onNavigateToRentals, stationIds]);
 
     const showAccountCommission = clientInfo.isAdmin
         ? kiosks.some(k => Number(k.info.accountpercent) > 0)
@@ -223,7 +245,7 @@ function LocationSummary({ location, kiosks, _chargerThreshold, clientInfo, rent
                             repLeaseCommission={summary.repLeaseCommission}
                             kiosks={kiosks}
                             t={t}
-                            onShowRentalDetails={onShowRentalDetails}
+                            onShowRentalDetails={handleShowRentalDetails}
                         />
                     </div>
                     {(showAccountCommission || showRepCommission) && (
@@ -246,4 +268,4 @@ function LocationSummary({ location, kiosks, _chargerThreshold, clientInfo, rent
     );
 };
 
-export default LocationSummary;
+export default memo(LocationSummary);

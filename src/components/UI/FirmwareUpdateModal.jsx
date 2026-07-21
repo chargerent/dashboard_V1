@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { callFunctionWithAuth } from '../../utils/callableRequest';
+import ModalPortal from './ModalPortal';
 
 const FIRMWARE_TARGETS = [
   { value: '12B', label: '12B' },
@@ -169,10 +170,11 @@ export default function FirmwareUpdateModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
-      <div className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
+    <ModalPortal>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black bg-opacity-50 p-4" role="presentation">
+      <div role="dialog" aria-modal="true" aria-labelledby="firmware-modal-title" className="w-full max-w-lg rounded-lg bg-white p-6 shadow-xl">
         <div className="mb-5">
-          <h2 className="text-lg font-bold text-gray-900">{labels.title}</h2>
+          <h2 id="firmware-modal-title" className="text-lg font-bold text-gray-900">{labels.title}</h2>
           <p className="mt-1 text-sm text-gray-600">
             {details?.stationid} / {details?.moduleid}
           </p>
@@ -227,7 +229,7 @@ export default function FirmwareUpdateModal({
                 <span>{progress}%</span>
               </div>
               <div className="h-2 overflow-hidden rounded-full bg-blue-100">
-                <div className="h-full bg-blue-600 transition-all" style={{ width: `${progress}%` }} />
+                <div className="h-full bg-blue-600 transition-[width]" style={{ width: `${progress}%` }} />
               </div>
             </div>
           )}
@@ -259,5 +261,6 @@ export default function FirmwareUpdateModal({
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

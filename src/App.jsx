@@ -398,6 +398,15 @@ function rentalIsWithinWindow(rental, dateThresholdMs) {
   return timestampMs !== null && timestampMs >= dateThresholdMs;
 }
 
+function mapRentalDoc(docSnap) {
+  const data = docSnap.data();
+  return {
+    ...data,
+    rawid: data?.rawid || docSnap.id,
+    documentId: docSnap.id,
+  };
+}
+
 function waitForOpenWebSocket(socket, timeoutMs = COMMAND_SOCKET_OPEN_TIMEOUT_MS) {
   if (!socket) return Promise.resolve(null);
   if (socket.readyState === WebSocket.OPEN) return Promise.resolve(socket);
@@ -432,6 +441,22 @@ function waitForOpenWebSocket(socket, timeoutMs = COMMAND_SOCKET_OPEN_TIMEOUT_MS
     socket.addEventListener('close', handleClose);
     socket.addEventListener('error', handleClose);
   });
+}
+
+function getVersionText(value) {
+  const versionText = String(value ?? '').trim();
+  return versionText || '';
+}
+
+function getFirstVersionText(source, fieldNames) {
+  if (!source || typeof source !== 'object') return '';
+
+  for (const fieldName of fieldNames) {
+    const versionText = getVersionText(source[fieldName]);
+    if (versionText) return versionText;
+  }
+
+  return '';
 }
 
 function buildClientInfoFromProfile(profile, uid) {
@@ -538,8 +563,8 @@ function buildClientInfoFromProfile(profile, uid) {
     revShare: commission,
     isAdmin,
     role,
-    serverFlowVersion: profile.serverFlowVersion,
-    serverUiVersion: profile.serverUiVersion
+    serverFlowVersion: getFirstVersionText(profile, ['serverFlowVersion', 'serverFversion']),
+    serverUiVersion: getFirstVersionText(profile, ['serverUiVersion', 'serverUIVersion'])
   };
 }
 
@@ -669,9 +694,11 @@ function App() {
   const currentSocketSessionIdRef = useRef('');
   const startupListenerRef = useRef({ kiosksLogged: false, rentalsLogged: false });
   const adminRentalLoadHandleRef = useRef(null);
+  const dataOwnerUidRef = useRef('');
 
   const [lockingSlots, setLockingSlots] = useState([]);
   const [allStationsData, setAllStationsData] = useState([]);
+  const allStationsDataRef = useRef(allStationsData);
   const [ngrokInfo, setNgrokInfo] = useState(null);
   const [kiosksReady, setKiosksReady] = useState(false);
   const [adminRentalsReady, setAdminRentalsReady] = useState(false);
@@ -680,6 +707,10 @@ function App() {
     scopeType: 'pending',
     stationIds: [],
   });
+
+  useEffect(() => {
+    allStationsDataRef.current = allStationsData;
+  }, [allStationsData]);
   const debugEjectUi = useCallback((message, payload) => {
     if (typeof window === 'undefined') return;
 
@@ -808,16 +839,15 @@ function App() {
     ejectingSlotsRef.current = ejectingSlots;
   }, [ejectingSlots]);
 
-  const { showWarning, handleStay } = useIdleTimer({
-    onIdle: () => {}, // The hook now returns showWarning, so onIdle can be empty
+  const { showWarning, handleStay, countdown: sessionCountdown } = useIdleTimer({
     onLogout: handleLogout,
     idleTimeout: 1000 * 60 * 14, // 14 minutes
     promptTimeout: 1000 * 60 * 1, // 1 minute
   });
 
-  const handleStayLoggedIn = () => {
+  const handleStayLoggedIn = useCallback(() => {
     handleStay();
-  };
+  }, [handleStay]);
 
   const onNavigateToAnalytics = useCallback((initialData = null) => {
     setAnalyticsInitialData(initialData);
@@ -844,6 +874,7 @@ function App() {
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (!user) {
+        dataOwnerUidRef.current = '';
         outgoingCommandScopesRef.current.clear();
         currentSocketSessionIdRef.current = '';
         localStorage.removeItem('dashboardToken');
@@ -909,29 +940,46 @@ function App() {
   useEffect(() => {
     if (!hasAuthToken || !auth.currentUser) return;
 
-    const flowVersionRef = doc(db, 'server', 'flow_current');
-    const unsubscribeFlowVersion = onSnapshot(flowVersionRef, (snapshot) => {
-      const firestoreFlowVersion = snapshot.data()?.fversion;
+    const subscribeServerVersion = ({ docId, fields, stateKey, label }) => (
+      onSnapshot(doc(db, 'server', docId), (snapshot) => {
+        const nextVersion = getFirstVersionText(snapshot.data(), fields);
 
-      if (typeof firestoreFlowVersion !== 'string' || !firestoreFlowVersion.trim()) {
-        return;
-      }
-
-      setClientInfo((prev) => {
-        if (!prev || prev.serverFlowVersion === firestoreFlowVersion) {
-          return prev;
+        if (!nextVersion) {
+          return;
         }
 
-        return {
-          ...prev,
-          serverFlowVersion: firestoreFlowVersion,
-        };
-      });
-    }, (error) => {
-      console.warn('Unable to subscribe to server flow version:', error);
+        setClientInfo((prev) => {
+          if (!prev || prev[stateKey] === nextVersion) {
+            return prev;
+          }
+
+          return {
+            ...prev,
+            [stateKey]: nextVersion,
+          };
+        });
+      }, (error) => {
+        console.warn(`Unable to subscribe to ${label}:`, error);
+      })
+    );
+
+    const unsubscribeFlowVersion = subscribeServerVersion({
+      docId: 'flow_current',
+      fields: ['fversion', 'flowVersion', 'flowversion', 'version'],
+      stateKey: 'serverFlowVersion',
+      label: 'server flow version',
+    });
+    const unsubscribeUiVersion = subscribeServerVersion({
+      docId: 'ui_current',
+      fields: ['uiVersion', 'uiversion', 'version'],
+      stateKey: 'serverUiVersion',
+      label: 'server UI version',
     });
 
-    return () => unsubscribeFlowVersion();
+    return () => {
+      unsubscribeFlowVersion();
+      unsubscribeUiVersion();
+    };
   }, [hasAuthToken]);
 
   // Effect to handle token expiration when tab/PWA becomes visible again
@@ -1038,10 +1086,16 @@ function App() {
     // ✅ Require actual firebase session too
     if (!hasAuthToken || !auth.currentUser || !listenerClientInfo) return;
 
+    const ownerChanged = Boolean(dataOwnerUidRef.current && dataOwnerUidRef.current !== listenerUid);
+    dataOwnerUidRef.current = listenerUid;
+
     cancelDeferredAdminRentalLoad();
     setAdminRentalsReady(false);
-    setKiosksReady(false);
-    setRentalData([]);
+    if (ownerChanged) {
+      setAllStationsData([]);
+      setRentalData([]);
+      setKiosksReady(false);
+    }
     setRentalScope({
       ready: false,
       scopeType: listenerIsAdmin ? 'all' : 'pending',
@@ -1050,6 +1104,11 @@ function App() {
     startupListenerRef.current = { kiosksLogged: false, rentalsLogged: false };
     const kiosksCollectionRef = collection(db, 'kiosks');
     const kioskScope = buildScopedKioskQuery(kiosksCollectionRef, listenerClientInfo);
+    const normalizedKiosksById = new Map(
+      allStationsDataRef.current.map(station => [station.stationid, station])
+    );
+    let latestStationIdsInSnapshot = [];
+    let kioskPublishTimer = null;
 
     if (!kioskScope.queryRef) {
       setAllStationsData([]);
@@ -1058,14 +1117,36 @@ function App() {
       return undefined;
     }
 
+    const publishKioskSnapshot = () => {
+      kioskPublishTimer = null;
+      setAllStationsData(prevStations => {
+        const nextStations = latestStationIdsInSnapshot
+          .map(stationid => normalizedKiosksById.get(stationid))
+          .filter(Boolean);
+        const isUnchanged = (
+          nextStations.length === prevStations.length &&
+          nextStations.every((station, index) => station === prevStations[index])
+        );
+
+        return isUnchanged ? prevStations : nextStations;
+      });
+      setKiosksReady(true);
+    };
+
+    const scheduleKioskPublish = () => {
+      if (kioskPublishTimer) return;
+      kioskPublishTimer = setTimeout(publishKioskSnapshot, 100);
+    };
+
     // Step 1: Real-time listener for raw Kiosk Data from Firestore
     const unsubscribeKiosks = onSnapshot(kioskScope.queryRef, (querySnapshot) => {
       const shouldLogFirstKioskSnapshot = !startupListenerRef.current.kiosksLogged;
       const now = Date.now();
-      const firestoreKiosksData = querySnapshot.docs.map(docSnap => ({ stationid: docSnap.id, ...docSnap.data() }));
+      const stationIdsInSnapshot = querySnapshot.docs.map(docSnap => docSnap.id);
+      const changedKioskDocs = querySnapshot.docChanges();
+      latestStationIdsInSnapshot = stationIdsInSnapshot;
 
       setFirestoreError(null); // Clear error on new data
-      setKiosksReady(true);
       if (shouldLogFirstKioskSnapshot) {
         startupListenerRef.current.kiosksLogged = true;
       }
@@ -1076,7 +1157,7 @@ function App() {
 
       const nextRentalStationIds = listenerIsAdmin
         ? []
-        : uniqueSortedValues(firestoreKiosksData.map((kiosk) => kiosk.stationid));
+        : uniqueSortedValues(stationIdsInSnapshot);
       setRentalScope((prevScope) => {
         const nextScope = {
           ready: !listenerIsAdmin,
@@ -1091,18 +1172,29 @@ function App() {
         ) ? prevScope : nextScope;
       });
 
-      // Filter out updates for ignored kiosks.
-      setAllStationsData(prevStations => {
-        const prevStationsMap = new Map(prevStations.map(s => [s.stationid, s]));
-        const newStations = firestoreKiosksData.map(kiosk => {
-          const ignoreUntil = ignoredKiosksRef.current[kiosk.stationid];
-          if (ignoreUntil && now < ignoreUntil) {
-            return prevStationsMap.get(kiosk.stationid) || normalizeKioskData([kiosk])[0];
+      // Normalize only changed documents and preserve object identity for every unchanged kiosk.
+      changedKioskDocs.forEach(change => {
+        const stationid = change.doc.id;
+        if (change.type === 'removed') {
+          normalizedKiosksById.delete(stationid);
+          return;
+        }
+
+        const ignoreUntil = ignoredKiosksRef.current[stationid];
+        if (ignoreUntil && now < ignoreUntil) {
+          const locallyUpdatedStation = allStationsDataRef.current.find(
+            station => station.stationid === stationid
+          );
+          if (locallyUpdatedStation) {
+            normalizedKiosksById.set(stationid, locallyUpdatedStation);
           }
-          return normalizeKioskData([kiosk])[0];
-        });
-        return newStations;
+          return;
+        }
+
+        const rawKiosk = { stationid, ...change.doc.data() };
+        normalizedKiosksById.set(stationid, normalizeKioskData([rawKiosk])[0]);
       });
+      scheduleKioskPublish();
 
     }, (error) => {
       setKiosksReady(true);
@@ -1112,6 +1204,7 @@ function App() {
 
     return () => {
       cancelDeferredAdminRentalLoad();
+      if (kioskPublishTimer) clearTimeout(kioskPublishTimer);
       unsubscribeKiosks();
     };
   }, [
@@ -1164,30 +1257,62 @@ function App() {
         ]
       : buildScopedRentalQueries(rentalsCollectionRef, effectiveRentalStationIds, dateThreshold);
     const rentalSnapshotsByQuery = new Map();
+    let publishTimer = null;
+
+    const publishCombinedRentals = () => {
+      publishTimer = null;
+      const combinedRentalsById = new Map();
+
+      rentalSnapshotsByQuery.forEach(rentalsById => {
+        rentalsById.forEach(rental => {
+          combinedRentalsById.set(rental.rawid || rental.orderid, rental);
+        });
+      });
+
+      const combinedRentals = Array.from(combinedRentalsById.values());
+      setRentalData(prevRentals => {
+        const isUnchanged = (
+          combinedRentals.length === prevRentals.length &&
+          combinedRentals.every((rental, index) => rental === prevRentals[index])
+        );
+        return isUnchanged ? prevRentals : combinedRentals;
+      });
+    };
+
+    const scheduleRentalPublish = () => {
+      if (publishTimer) return;
+      publishTimer = setTimeout(publishCombinedRentals, 100);
+    };
 
     startupListenerRef.current.rentalsLogged = false;
 
     const unsubscribeRentals = rentalQuerySpecs.map((querySpec) => (
       onSnapshot(querySpec.queryRef, (querySnapshot) => {
-        const rawRentals = querySnapshot.docs.map(docSnap => ({ rawid: docSnap.id, ...docSnap.data() }));
-        const rentals = rawRentals.filter((rental) => rentalIsWithinWindow(rental, dateThresholdMs));
         setFirestoreError(null);
 
-        rentalSnapshotsByQuery.set(querySpec.key, rentals);
+        const rentalsById = rentalSnapshotsByQuery.get(querySpec.key) || new Map();
+        querySnapshot.docChanges().forEach(change => {
+          const documentId = change.doc.id;
+          if (change.type === 'removed') {
+            rentalsById.delete(documentId);
+            return;
+          }
+
+          const rental = mapRentalDoc(change.doc);
+          if (rentalIsWithinWindow(rental, dateThresholdMs)) {
+            rentalsById.set(documentId, rental);
+          } else {
+            rentalsById.delete(documentId);
+          }
+        });
+        rentalSnapshotsByQuery.set(querySpec.key, rentalsById);
 
         const hasAllInitialSnapshots = rentalSnapshotsByQuery.size === rentalQuerySpecs.length;
         if (!hasAllInitialSnapshots && !startupListenerRef.current.rentalsLogged) {
           return;
         }
 
-        const combinedRentals = Array.from(
-          new Map(
-            Array.from(rentalSnapshotsByQuery.values())
-              .flat()
-              .map(rental => [rental.rawid || rental.orderid, rental])
-          ).values()
-        );
-        setRentalData(combinedRentals);
+        scheduleRentalPublish();
 
         if (!startupListenerRef.current.rentalsLogged) {
           startupListenerRef.current.rentalsLogged = true;
@@ -1199,6 +1324,7 @@ function App() {
     ));
 
     return () => {
+      if (publishTimer) clearTimeout(publishTimer);
       unsubscribeRentals.forEach((unsubscribe) => unsubscribe());
     };
   }, [
@@ -1372,13 +1498,17 @@ function App() {
       });
     });
 
-    return allStationsData.map((kiosk, kioskIndex) => ({
-      ...kiosk,
-      modules: (kiosk.modules || []).map((module, moduleIndex) => ({
-        ...module,
-        slots: (module.slots || []).map((slot, slotIndex) => {
+    return allStationsData.map((kiosk, kioskIndex) => {
+      const modules = kiosk.modules || [];
+      let nextModules = null;
+
+      modules.forEach((module, moduleIndex) => {
+        const slots = module.slots || [];
+        let nextSlots = null;
+
+        slots.forEach((slot, slotIndex) => {
           const chargerSn = String(slot?.sn || '').trim();
-          if (!chargerSn || chargerSn === '0') return slot;
+          if (!chargerSn || chargerSn === '0') return;
 
           const winner = winningLocations.get(chargerSn);
           const isWinner = winner &&
@@ -1386,10 +1516,20 @@ function App() {
             winner.moduleIndex === moduleIndex &&
             winner.slotIndex === slotIndex;
 
-          return isWinner ? slot : clearDerivedSlot(slot);
-        }),
-      })),
-    }));
+          if (!isWinner) {
+            if (!nextSlots) nextSlots = slots.slice();
+            nextSlots[slotIndex] = clearDerivedSlot(slot);
+          }
+        });
+
+        if (nextSlots) {
+          if (!nextModules) nextModules = modules.slice();
+          nextModules[moduleIndex] = { ...module, slots: nextSlots };
+        }
+      });
+
+      return nextModules ? { ...kiosk, modules: nextModules } : kiosk;
+    });
   }, [allStationsData, latestTimestamp]);
 
   const manageIgnoredKiosk = useCallback((kioskId, shouldIgnore) => {
@@ -1530,7 +1670,7 @@ function App() {
     }
 
     const targetKiosk = stationid
-      ? allStationsData.find((kiosk) => kiosk.stationid === stationid)
+      ? allStationsDataRef.current.find((kiosk) => kiosk.stationid === stationid)
       : null;
     const targetIsV2Kiosk = isV2Kiosk(targetKiosk);
     const kioskType = String(targetKiosk?.hardware?.type || '').trim();
@@ -1841,7 +1981,7 @@ function App() {
     } else {
       setCommandStatus({ state: 'error', message: t('connection_lost') });
     }
-  }, [allStationsData, debugEjectUi, getFreshCommandToken, rememberOutgoingCommandScope, t]);
+  }, [debugEjectUi, getFreshCommandToken, rememberOutgoingCommandScope, t]);
 
   // ---------------------------------------------
   // WebSocket connect (FULL HANDLER INCLUDED)
@@ -2219,6 +2359,9 @@ function App() {
       ignoredKiosksRef={ignoredKiosksRef}
       manageIgnoredKiosk={manageIgnoredKiosk}
       kiosksReady={kiosksReady}
+      sessionWarningOpen={showWarning}
+      sessionCountdown={sessionCountdown}
+      onStayLoggedIn={handleStayLoggedIn}
     />
   );
 
@@ -2514,10 +2657,10 @@ function App() {
   return (
     <>
       <InactivityModal
-        isOpen={showWarning}
+        isOpen={showWarning && page !== 'dashboard'}
         onStay={handleStayLoggedIn}
         onLogout={handleLogout}
-        countdown={60}
+        countdown={sessionCountdown}
         t={t}
       />
       <ErrorBoundary>

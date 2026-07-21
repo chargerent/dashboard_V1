@@ -1,12 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ArrowPathIcon,
   ArrowRightOnRectangleIcon,
+  BoltIcon,
   ChevronRightIcon,
+  CreditCardIcon,
   HomeIcon,
   LockClosedIcon,
+  MapPinIcon,
   MagnifyingGlassIcon,
   PaintBrushIcon,
 } from '@heroicons/react/24/outline';
+import {
+  CheckCircleIcon,
+  ExclamationTriangleIcon,
+} from '@heroicons/react/24/solid';
 import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
 import LoadingSpinner from '../components/UI/LoadingSpinner.jsx';
 import { callFunctionWithAuth } from '../utils/callableRequest.js';
@@ -68,11 +76,27 @@ const PREVIEW_SCREENS = [
   { key: 'start', label: 'Start' },
   { key: 'rentReturn', label: 'Rent / Return' },
   { key: 'howItWorks', label: 'How it works' },
-  { key: 'returnInfo', label: 'Return' },
-  { key: 'rentalComplete', label: 'Complete' },
+  { key: 'returnInfo', label: 'Return instructions' },
+  { key: 'rentalComplete', label: 'Rental complete' },
+  { key: 'returnComplete', label: 'Return complete' },
+  { key: 'payment', label: 'Payment' },
+  { key: 'wait', label: 'Please wait' },
+  { key: 'receipt', label: 'Receipt' },
   { key: 'terms', label: 'Terms' },
-  { key: 'error', label: 'Error' },
+  { key: 'map', label: 'Map' },
+  { key: 'error', label: 'Transaction error' },
+  { key: 'declined', label: 'Card declined' },
+  { key: 'outOfOrder', label: 'Out of order' },
 ];
+
+const SECTION_PREVIEW_SCREEN = {
+  purchasePricing: 'start',
+  leasePricing: 'start',
+  pricingCommon: 'start',
+  pricingUnavailable: 'start',
+  terminal: 'payment',
+  support: 'start',
+};
 
 function normalizeClientId(value) {
   return String(value || '').trim().toUpperCase();
@@ -117,6 +141,7 @@ function humanizeField(path) {
     INITIALPRICE: 'Initial price option',
     0: 'Line 1',
     1: 'Line 2',
+    2: 'Line 3',
   };
   if (labels[leaf]) return labels[leaf];
   return leaf
@@ -264,6 +289,27 @@ function QrPlaceholder({ color }) {
   );
 }
 
+function PreviewCancelButton() {
+  return <PreviewButton color="#DC2626" small>cancel</PreviewButton>;
+}
+
+function PreviewWarningGraphic() {
+  return (
+    <div className="flex min-h-28 items-center justify-center rounded-xl bg-white p-3 shadow-sm">
+      <ExclamationTriangleIcon className="h-24 w-24 text-red-600" />
+    </div>
+  );
+}
+
+function PreviewInstructionGraphic({ type }) {
+  const Icon = type === 'charge' ? BoltIcon : ArrowRightOnRectangleIcon;
+  return (
+    <div className="flex min-h-24 items-center justify-center rounded-xl bg-white p-3 shadow-sm">
+      <Icon className={`h-16 w-16 text-slate-900 ${type === 'return' ? 'rotate-180' : ''}`} strokeWidth={1.5} />
+    </div>
+  );
+}
+
 function KioskPreview({ profile, language, previewScreen, onPreviewScreenChange, onButtonToggle }) {
   const snapshot = resolveKioskUiSnapshot(profile);
   const copy = snapshot.languages?.locales?.[language] || {};
@@ -285,45 +331,107 @@ function KioskPreview({ profile, language, previewScreen, onPreviewScreenChange,
     switch (previewScreen) {
       case 'rentReturn':
         return <>
-          <div className="rounded-xl bg-white p-5 text-center text-xl font-extrabold shadow-sm">{screens.rentReturn?.question}</div>
+          <div className="rounded-xl bg-white p-5 text-center text-2xl font-extrabold shadow-sm">{screens.rentReturn?.question}</div>
           <PreviewButton color={primary}>{screens.rentReturn?.rentButton}</PreviewButton>
           <PreviewButton color={secondary}>{screens.rentReturn?.returnButton}</PreviewButton>
-          <PreviewButton color="#DC2626" small>cancel</PreviewButton>
+          <PreviewCancelButton />
         </>;
       case 'howItWorks':
         return <>
           {[
-            [screens.howItWorks?.rentTitle, screens.howItWorks?.rentText],
-            [screens.howItWorks?.chargeTitle, screens.howItWorks?.chargeText],
-            [screens.howItWorks?.returnTitle, screens.howItWorks?.returnText],
-          ].map(([title, text]) => <div key={title} className="rounded-xl bg-white p-3 text-center shadow-sm"><div className="font-extrabold">{title}</div><div className="mt-1 text-[11px] leading-4 text-slate-600">{text}</div></div>)}
+            ['rent', screens.howItWorks?.rentTitle, screens.howItWorks?.rentText],
+            ['charge', screens.howItWorks?.chargeTitle, screens.howItWorks?.chargeText],
+            ['return', screens.howItWorks?.returnTitle, screens.howItWorks?.returnText],
+          ].map(([type, title, text]) => <div key={type} className="grid grid-cols-[2fr_1fr] gap-2"><div className="flex min-h-24 flex-col justify-center rounded-xl bg-white p-3 text-center shadow-sm"><div className="font-extrabold">{title}</div><hr className="my-2 border-0 border-t border-slate-400" /><div className="text-[11px] leading-4 text-slate-700">{text}</div></div><PreviewInstructionGraphic type={type} /></div>)}
           <div className="text-center text-[10px] font-semibold text-slate-600">{supportText}</div>
-          <PreviewButton color="#DC2626" small>cancel</PreviewButton>
+          <PreviewCancelButton />
         </>;
       case 'returnInfo':
         return <>
           <div className="text-center text-[10px] font-semibold text-slate-600">{supportText}</div>
-          <div className="rounded-xl bg-white p-5 text-center shadow-sm"><div className="text-xl font-extrabold">{screens.returnInfo?.title}</div><div className="mt-3 text-sm font-semibold">{screens.returnInfo?.text}</div></div>
+          <div className="rounded-xl bg-white p-5 text-center shadow-sm"><div className="text-xl font-extrabold">{screens.returnInfo?.title}</div><hr className="my-3 border-0 border-t border-slate-400" /><div className="text-sm font-bold">{screens.returnInfo?.text}</div></div>
+          <PreviewInstructionGraphic type="return" />
           <div className="rounded-xl bg-white p-4 text-center text-xs font-semibold shadow-sm">{screens.returnInfo?.confirmation}</div>
-          <PreviewButton color="#DC2626" small>cancel</PreviewButton>
+          <PreviewCancelButton />
         </>;
       case 'rentalComplete':
         return <>
-          <div className="rounded-xl bg-white p-5 text-center shadow-sm"><div className="text-2xl font-extrabold">{screens.rentalComplete?.title}</div><div className="mt-3 font-bold">{screens.rentalComplete?.text}</div></div>
+          <div className="rounded-xl bg-white p-5 text-center shadow-sm"><div className="text-2xl font-extrabold">{screens.rentalComplete?.title}</div><hr className="my-3 border-0 border-t border-slate-400" /><div className="font-bold">{screens.rentalComplete?.text}</div></div>
+          <PreviewInstructionGraphic type="rent" />
           <div className="rounded-xl bg-white p-4 text-center text-xs font-semibold leading-5 shadow-sm">{screens.rentalComplete?.detail}</div>
-          <PreviewButton color={secondary} small visible={buttonVisibility.receipt}>receipt</PreviewButton>
-          <PreviewButton color="#DC2626" small>cancel</PreviewButton>
+          <div className="grid grid-cols-2 gap-2"><PreviewButton color={secondary} small visible={buttonVisibility.receipt}><span className="inline-flex items-center gap-1"><CreditCardIcon className="h-4 w-4" />receipt</span></PreviewButton><PreviewCancelButton /></div>
+        </>;
+      case 'returnComplete':
+        return <>
+          <div className="text-center text-[10px] font-semibold text-slate-600">{supportText}</div>
+          <div className="flex min-h-72 flex-col rounded-xl bg-white px-4 py-3 text-center shadow-sm">
+            <div className="flex min-h-0 flex-1 items-center justify-center">
+              <div className="w-full">
+                <CheckCircleIcon className="mx-auto h-28 w-28" style={{ color: primary }} />
+                <hr className="my-5 w-full border-0 border-t border-slate-400" />
+                <div className="text-2xl font-extrabold leading-tight">{screens.returnComplete?.returnText}</div>
+                <div className="mt-1 text-2xl font-extrabold leading-tight">{screens.returnComplete?.thankYou}</div>
+              </div>
+            </div>
+            <div className="w-full shrink-0 pb-1 pt-3 text-[10px] font-medium leading-[1.4]">
+              {(screens.returnComplete?.depositNotice || []).map((line, index) => <div key={`${index}-${line}`}>{line}</div>)}
+            </div>
+          </div>
+          <PreviewCancelButton />
+        </>;
+      case 'payment':
+        return <>
+          <div className="text-center text-[10px] font-semibold text-slate-600">{supportText}</div>
+          <div className="rounded-xl bg-white p-4 text-center text-lg font-extrabold shadow-sm">{copy.pricing?.payment?.instructionsByGateway?.PAYTERP68}</div>
+          <div className="rounded-xl bg-white p-4 text-center text-xs font-bold leading-5 shadow-sm">
+            <div>{copy.pricing?.plans?.LEASE_SIMPLE_DAILY?.first}</div>
+            <div className="mt-2">{copy.pricing?.plans?.LEASE_SIMPLE_DAILY?.additional}</div>
+            <hr className="my-3 border-0 border-t-2 border-slate-400" />
+            <div>{copy.pricing?.common?.integratedCables}</div>
+            <div className="mt-1 text-[10px]">{copy.pricing?.common?.cableTypes}</div>
+          </div>
+          <div className="rounded-xl bg-white p-3 text-center text-[10px] font-bold leading-4 shadow-sm">{copy.pricing?.payment?.termsByGatewayOption?.INITIALPRICE?.map((term) => <div key={term}>{term}</div>)}</div>
+          <PreviewCancelButton />
+        </>;
+      case 'wait':
+        return <>
+          <div className="flex min-h-52 items-center justify-center rounded-xl bg-white p-5 shadow-sm"><ArrowPathIcon className="h-28 w-28 animate-spin text-slate-300" /></div>
+          <div className="rounded-xl bg-white p-5 text-center text-xl font-bold text-slate-500 shadow-sm">{screens.wait?.message}</div>
+        </>;
+      case 'receipt':
+        return <>
+          <div className="rounded-xl bg-white p-5 shadow-sm"><QrPlaceholder color={secondary} /></div>
+          <div className="rounded-xl bg-white p-5 text-center text-xl font-extrabold shadow-sm">{screens.receipt?.message}</div>
+          <PreviewCancelButton />
         </>;
       case 'terms':
         return <>
-          <div className="rounded-xl bg-white p-5 text-center shadow-sm"><div className="text-lg font-extrabold">{screens.terms?.line1}</div><div className="mt-2 text-sm font-bold">{screens.terms?.line2}</div></div>
+          <div className="rounded-xl bg-white p-5 text-center shadow-sm"><div className="text-lg font-extrabold">{screens.terms?.line1}</div><div className="mt-1 text-lg font-extrabold">{screens.terms?.line2}</div></div>
           <QrPlaceholder color={secondary} />
-          <PreviewButton color="#DC2626" small>cancel</PreviewButton>
+          <PreviewCancelButton />
+        </>;
+      case 'map':
+        return <>
+          <div className="rounded-xl bg-white p-5 text-center shadow-sm"><div className="text-xl font-extrabold">{screens.map?.title}</div><hr className="my-3 border-0 border-t border-slate-400" /><div className="space-y-1 text-sm font-bold"><div>{screens.map?.stationLocations}</div><div>{screens.map?.walkingDirections}</div><div>{screens.map?.liveAvailability}</div></div></div>
+          <div className="flex min-h-36 items-center justify-center rounded-xl bg-white p-4 shadow-sm"><MapPinIcon className="h-16 w-16" style={{ color: secondary }} /></div>
+          <PreviewCancelButton />
         </>;
       case 'error':
         return <>
           <div className="rounded-xl bg-white p-6 text-center text-xl font-extrabold shadow-sm">{screens.error?.message}</div>
-          <PreviewButton color="#DC2626" small>cancel</PreviewButton>
+          <PreviewWarningGraphic />
+          <PreviewCancelButton />
+        </>;
+      case 'declined':
+        return <>
+          <div className="rounded-xl bg-white p-6 text-center text-xl font-extrabold shadow-sm">{screens.declined?.message}</div>
+          <PreviewWarningGraphic />
+          <PreviewCancelButton />
+        </>;
+      case 'outOfOrder':
+        return <>
+          <div className="rounded-xl bg-white p-6 text-center text-xl font-extrabold shadow-sm">{screens.outOfOrder?.message}</div>
+          <PreviewWarningGraphic />
         </>;
       case 'start':
       default:
@@ -332,6 +440,8 @@ function KioskPreview({ profile, language, previewScreen, onPreviewScreenChange,
           <div className="rounded-xl bg-white p-5 text-center shadow-sm">
             <div className="font-extrabold">{copy.pricing?.plans?.LEASE_SIMPLE_DAILY?.first}</div>
             <div className="mt-2 text-xs leading-5 text-slate-600">{copy.pricing?.plans?.LEASE_SIMPLE_DAILY?.additional}</div>
+            <div className="mt-2 text-xs leading-5 text-slate-600">{copy.pricing?.plans?.LEASE_SIMPLE_DAILY?.notReturned}</div>
+            <hr className="my-3 border-0 border-t-2 border-slate-400" />
             <div className="mt-3 text-xs font-semibold">{copy.pricing?.common?.integratedCables}</div>
             <div className="text-[10px] text-slate-500">{copy.pricing?.common?.cableTypes}</div>
           </div>
@@ -718,7 +828,7 @@ export default function UiProfilesPage({
               </div>
               <div className="grid gap-5 md:grid-cols-[190px_minmax(0,1fr)]">
                 <nav className="max-h-[670px] space-y-1 overflow-y-auto pr-1">
-                  {CONTENT_SECTIONS.map((section) => <button key={section.key} type="button" onClick={() => { setSelectedSection(section.key); if (PREVIEW_SCREENS.some((screen) => screen.key === section.key)) setPreviewScreen(section.key); }} className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm font-medium ${selectedSection === section.key ? 'bg-cyan-50 text-cyan-800' : 'text-slate-600 hover:bg-slate-50'}`}><span>{section.label}</span>{selectedSection === section.key && <ChevronRightIcon className="h-4 w-4" />}</button>)}
+                  {CONTENT_SECTIONS.map((section) => <button key={section.key} type="button" onClick={() => { const nextPreviewScreen = SECTION_PREVIEW_SCREEN[section.key] || section.key; setSelectedSection(section.key); if (PREVIEW_SCREENS.some((screen) => screen.key === nextPreviewScreen)) setPreviewScreen(nextPreviewScreen); }} className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm font-medium ${selectedSection === section.key ? 'bg-cyan-50 text-cyan-800' : 'text-slate-600 hover:bg-slate-50'}`}><span>{section.label}</span>{selectedSection === section.key && <ChevronRightIcon className="h-4 w-4" />}</button>)}
                 </nav>
                 <div className="min-w-0">
                   <div className="mb-4 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">

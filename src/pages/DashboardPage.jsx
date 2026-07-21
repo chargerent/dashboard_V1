@@ -1,5 +1,6 @@
 // src/pages/DashboardPage.jsx
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect } from 'react';
+import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import { collection, limit, onSnapshot, orderBy, query } from 'firebase/firestore';
 import FilterPanel from '../components/Dashboard/FilterPanel';
 import KioskPanel from '../components/kiosk/kioskPanel';
@@ -10,11 +11,10 @@ import NgrokModal from '../components/UI/NgrokModal';
 import LoadingSpinner from '../components/UI/LoadingSpinner';
 import InitialStatusPage from '../components/UI/InitialStatusPage';
 import SoldOutKiosksModal from '../components/UI/SoldOutKiosksModal.jsx';
-import TimeoutWarningModal from '../components/UI/TimeoutWarningModal';
 import FirmwareUpdateModal from '../components/UI/FirmwareUpdateModal.jsx';
+import InactivityModal from '../components/InactivityModal';
 import { filterStationsForClient, isKioskOnline, isKioskActive, isModuleOnline, isNewSchemaKiosk, isStationProvisioned } from '../utils/helpers';
 import GlobalRentalActivity from '../components/Dashboard/GlobalRentalActivity';
-import { useIdleTimer } from '../hooks/useIdleTimer';
 import LocationSummary from '../components/Dashboard/LocationSummary';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
 import RentalDetailView from '../components/Dashboard/RentalDetailView';
@@ -26,6 +26,8 @@ import { VERSION as DASHBOARD_VERSION } from '../version';
 
 const EMPTY_RENTALS = Object.freeze([]);
 const FIRMWARE_UPDATE_SESSION_VISIBLE_MS = 24 * 60 * 60 * 1000;
+const MOBILE_KIOSK_PREVIEW_LIMIT = 4;
+const DESKTOP_KIOSK_PREVIEW_LIMIT = 8;
 const COUNTRY_ORDER = { CA: 1, FR: 2, US: 3 };
 const STATUS_BUTTON_CLASSES = {
     offline: 'bg-red-100 text-red-700 hover:bg-red-200',
@@ -41,6 +43,22 @@ const STATUS_BADGE_CLASSES = {
 };
 
 const getCountrySortOrder = (country) => COUNTRY_ORDER[(country || 'ZZ').toUpperCase()] || 99;
+
+const useCompactDashboardLayout = () => {
+    const [isCompact, setIsCompact] = useState(() => (
+        typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches
+    ));
+
+    useEffect(() => {
+        const mediaQuery = window.matchMedia('(max-width: 639px)');
+        const handleChange = (event) => setIsCompact(event.matches);
+        setIsCompact(mediaQuery.matches);
+        mediaQuery.addEventListener('change', handleChange);
+        return () => mediaQuery.removeEventListener('change', handleChange);
+    }, []);
+
+    return isCompact;
+};
 
 const normalizeFirmwareSessionPart = (value, fallback = 'na') => {
     const normalized = String(value || '').trim().replace(/[^a-z0-9._-]+/gi, '-').replace(/^-+|-+$/g, '');
@@ -112,7 +130,7 @@ const buildStationStatusIssues = (kiosk, referenceTime) => {
     return issues;
 };
 
-export default function DashboardPage({ _token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToAiBooths, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToReporting, onNavigateToTesting, rentalData, allStationsData, _setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, _setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, _ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, _setNgrokInfo, manageIgnoredKiosk, kiosksReady, initialSearch = '' }) {
+export default function DashboardPage({ _token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToAiBooths, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToReporting, onNavigateToTesting, rentalData, allStationsData, _setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, _setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, _ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, _setNgrokInfo, manageIgnoredKiosk, kiosksReady, initialSearch = '', sessionWarningOpen = false, sessionCountdown = 60, onStayLoggedIn }) {
     const [loading, setLoading] = useState(!kiosksReady);
     const [error] = useState(null);
     const [expandedKioskId, setExpandedKioskId] = useState(null);
@@ -131,6 +149,10 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     const [statusFocusedKioskId, setStatusFocusedKioskId] = useState('');
     const [firmwareUpdateDetails, setFirmwareUpdateDetails] = useState(null);
     const [firmwareUpdateSessions, setFirmwareUpdateSessions] = useState([]);
+    const [expandedLocations, setExpandedLocations] = useState(() => new Set());
+    const isCompactDashboard = useCompactDashboardLayout();
+    const visibleStationsData = allStationsData || [];
+    const isShowingRetainedStations = !kiosksReady && visibleStationsData.length > 0;
     const isAdminUser = !!clientInfo?.isAdmin;
     const hasStatusAccess = clientInfo?.features?.status === true;
     const hasReportingAccess = clientInfo?.features?.reporting === true || isAdminUser;
@@ -211,7 +233,6 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
         );
     }, [firmwareUpdateDetails, onCommand]);
 
-    const { showWarning, handleStay } = useIdleTimer({ onLogout, idleTimeout: 540000, warningTimeout: 60000 });
     const {
         commandDetails,
         commandModalOpen,
@@ -222,7 +243,7 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
         handleSendCommand,
         handleSlotClick,
     } = useKioskCommandFlow({
-        allStationsData,
+        allStationsData: visibleStationsData,
         setEjectingSlots,
         manageIgnoredKiosk,
         onCommand,
@@ -247,17 +268,17 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
         setSearchTerm(initialSearch);
         setStatusFocusedKioskId('');
     }, [initialSearch]);
-    const handleToggleDetails = (stationid) => {
+    const handleToggleDetails = useCallback((stationid) => {
         setEditingKioskId(null); 
         setRentalDetailView(null);
         setExpandedKioskId(prevId => (prevId === stationid ? null : stationid));
-    };
+    }, []);
 
-    const handleToggleEditMode = (stationid) => {
+    const handleToggleEditMode = useCallback((stationid) => {
         setExpandedKioskId(null);
         setEditingKioskId(prevId => (prevId === stationid ? null : stationid));
         setRentalDetailView(null);
-    };
+    }, []);
 
     // Effect to manage ignoring kiosk updates while editing
     useEffect(() => {
@@ -271,7 +292,7 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
         };
     }, [editingKioskId, manageIgnoredKiosk]);
 
-    const handleShowRentalDetails = (kioskId, period) => {
+    const handleShowRentalDetails = useCallback((kioskId, period) => {
         setExpandedKioskId(null);
         setEditingKioskId(null);
         setRentalDetailView(prev => {
@@ -279,25 +300,19 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
             if (prev && prev.kioskId === kioskId && prev.period === period) return null;
             return { kioskId, period };
         });
-    };
+    }, []);
 
     const clientStations = useMemo(() => {
-        return filterStationsForClient(allStationsData, clientInfo);
-    }, [allStationsData, clientInfo]);
+        return filterStationsForClient(visibleStationsData, clientInfo);
+    }, [visibleStationsData, clientInfo]);
 
-    const latestTimestamp = useMemo(() => {
-        if (!allStationsData || allStationsData.length === 0) {
-            return new Date().toISOString();
-        }
-        const latestStation = allStationsData.reduce((latest, current) => {
-            if (!current || !current.lastUpdated) return latest;
-            if (!latest) return current;
-            const latestDate = new Date(latest.lastUpdated.endsWith('Z') ? latest.lastUpdated : latest.lastUpdated + 'Z');
-            const currentDate = new Date(current.lastUpdated.endsWith('Z') ? current.lastUpdated : current.lastUpdated + 'Z');
-            return currentDate > latestDate ? current : latest;
-        }, null);
-        return latestStation ? latestStation.lastUpdated : new Date().toISOString();
-    }, [allStationsData]);
+    const [latestTimestamp, setLatestTimestamp] = useState(() => new Date().toISOString());
+
+    useEffect(() => {
+        const updateReferenceTime = () => setLatestTimestamp(new Date().toISOString());
+        const timer = window.setInterval(updateReferenceTime, 30_000);
+        return () => window.clearInterval(timer);
+    }, []);
 
     const initialStatusStations = useMemo(() => {
         const provisionedStations = clientStations.filter(isStationProvisioned);
@@ -444,22 +459,19 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
             });
         }
 
+        allEntries.forEach(([_location, kiosks]) => {
+            kiosks.sort((a, b) => a.stationid.localeCompare(b.stationid));
+        });
+        allEntries.sort(([_locationA, kiosksA], [_locationB, kiosksB]) => {
+            const orderA = getCountrySortOrder(kiosksA[0]?.info.country);
+            const orderB = getCountrySortOrder(kiosksB[0]?.info.country);
+            if (orderA !== orderB) return orderA - orderB;
+            return kiosksA[0].stationid.localeCompare(kiosksB[0].stationid);
+        });
+
         return allEntries;
 
     }, [preFilteredKiosks, activeFilters, latestTimestamp]);
-
-    // 1. Sort kiosks within each location group by stationid
-    for (const [_location, kiosks] of filteredLocations) {
-        kiosks.sort((a, b) => a.stationid.localeCompare(b.stationid));
-    }
-
-    // 2. Sort the location groups themselves by country, then by the first stationid in the group
-    filteredLocations.sort(([_locationA, kiosksA], [_locationB, kiosksB]) => {
-        const orderA = getCountrySortOrder(kiosksA[0]?.info.country);
-        const orderB = getCountrySortOrder(kiosksB[0]?.info.country);
-        if (orderA !== orderB) return orderA - orderB;
-        return kiosksA[0].stationid.localeCompare(kiosksB[0].stationid);
-    });
 
     // Reset page to 1 if filters change and current page becomes invalid
     useEffect(() => {
@@ -472,8 +484,8 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     }, [filteredLocations]);
 
     const kioskToEdit = useMemo(() => {
-        return editingKioskId ? allStationsData.find(k => k.stationid === editingKioskId) : null;
-    }, [editingKioskId, allStationsData]);
+        return editingKioskId ? visibleStationsData.find(k => k.stationid === editingKioskId) : null;
+    }, [editingKioskId, visibleStationsData]);
     
     useEffect(() => {
         if (!loading && hasStatusAccess && !initialStatusCheck && initialStatusStations.length > 0) {
@@ -556,18 +568,58 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
         return filteredLocations.slice(startIndex, startIndex + ITEMS_PER_PAGE);
     }, [filteredLocations, currentPage]);
 
-    const stationInfoForEnrichment = useMemo(() => {
-        return (allStationsData || []).map(s => ({ stationid: s.stationid, client: s.info.client, rep: s.info.rep }));
-    }, [allStationsData]);
+    const locationListRef = useRef(null);
+    const [locationListOffset, setLocationListOffset] = useState(0);
+    const getLocationKey = useCallback((index) => paginatedLocations[index]?.[0] || index, [paginatedLocations]);
+    const locationVirtualizer = useWindowVirtualizer({
+        count: paginatedLocations.length,
+        estimateSize: () => isCompactDashboard ? 2_300 : 1_300,
+        getItemKey: getLocationKey,
+        overscan: 0,
+        scrollMargin: locationListOffset,
+    });
+
+    useLayoutEffect(() => {
+        const locationList = locationListRef.current;
+        if (!locationList) return undefined;
+
+        const updateOffset = () => {
+            const nextOffset = locationList.getBoundingClientRect().top + window.scrollY;
+            setLocationListOffset(previous => previous === nextOffset ? previous : nextOffset);
+        };
+        updateOffset();
+        window.addEventListener('resize', updateOffset, { passive: true });
+        return () => window.removeEventListener('resize', updateOffset);
+    }, [paginatedLocations.length]);
+
+    const toggleLocationExpansion = useCallback((location) => {
+        setExpandedLocations((previous) => {
+            const next = new Set(previous);
+            if (next.has(location)) next.delete(location);
+            else next.add(location);
+            return next;
+        });
+    }, []);
+
+    const stationInfoSignature = useMemo(() => (
+        visibleStationsData
+            .map(station => `${station.stationid}:${station.info.client || ''}:${station.info.rep || ''}`)
+            .join('|')
+    ), [visibleStationsData]);
+
+    const stationInfoForEnrichment = useMemo(() => new Map(
+        visibleStationsData.map(station => [
+            station.stationid,
+            { client: station.info.client, rep: station.info.rep },
+        ])
+    // The signature intentionally prevents heartbeat-only station changes from rebuilding this map.
+    ), [stationInfoSignature]);
 
     const enrichedRentalData = useMemo(() => {
-        const stationToClientMap = new Map();
-        stationInfoForEnrichment.forEach(station => {
-            stationToClientMap.set(station.stationid, { client: station.client, rep: station.rep });
-        });
         const enriched = (rentalData || []).map(rental => ({
             ...rental,
-            clientId: stationToClientMap.get(rental.rentalStationid)?.client || rental.clientId, repId: stationToClientMap.get(rental.rentalStationid)?.rep || rental.repId
+            clientId: stationInfoForEnrichment.get(rental.rentalStationid)?.client || rental.clientId,
+            repId: stationInfoForEnrichment.get(rental.rentalStationid)?.rep || rental.repId,
         }));
         return enriched;
     }, [rentalData, stationInfoForEnrichment]);
@@ -589,6 +641,21 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
         return groupedRentals;
     }, [enrichedRentalData]);
 
+    const filteredStationIdsKey = useMemo(() => (
+        filteredKiosksForGlobalStats.map(kiosk => kiosk.stationid).join('\u001f')
+    ), [filteredKiosksForGlobalStats]);
+    const filteredRentalDataForGlobalStats = useMemo(() => (
+        filteredStationIdsKey
+            ? filteredStationIdsKey.split('\u001f').flatMap(stationid => rentalsByStationId.get(stationid) || EMPTY_RENTALS)
+            : EMPTY_RENTALS
+    ), [filteredStationIdsKey, rentalsByStationId]);
+    const rentalsByLocation = useMemo(() => new Map(
+        filteredLocations.map(([location, kiosks]) => [
+            location,
+            kiosks.flatMap(kiosk => rentalsByStationId.get(kiosk.stationid) || EMPTY_RENTALS),
+        ])
+    ), [filteredLocations, rentalsByStationId]);
+
     const statusKiosksByCountry = useMemo(() => {
         return stationStatusRows.reduce((acc, row) => {
             const { kiosk } = row;
@@ -601,33 +668,46 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
 
 return (
     <div>
-        <ConfirmationModal 
-            isOpen={commandModalOpen} 
-            onClose={() => setCommandModalOpen(false)}
-            onConfirm={handleSendCommand}
-            details={commandDetails}
-            t={t}
-        />
-        <FirmwareUpdateModal
-            isOpen={Boolean(firmwareUpdateDetails)}
-            details={firmwareUpdateDetails}
-            onClose={() => setFirmwareUpdateDetails(null)}
-            onFirmwareReady={handleFirmwareReady}
-            setCommandStatus={setCommandStatus}
-            t={t}
-        />
-        <NgrokModal
-            isOpen={ngrokModalOpen}
-            onClose={() => setNgrokModalOpen(false)}
-            info={ngrokInfo}
-            t={t}
-        />
-        <SoldOutKiosksModal
-            isOpen={showSoldOutModal}
-            onClose={() => setShowSoldOutModal(false)}
-            soldOutKiosks={alertEligibleKiosks.filter(kiosk => kiosk.count === 0)}
-            t={t}
-        />
+        {commandModalOpen ? (
+            <ConfirmationModal
+                isOpen
+                onClose={() => setCommandModalOpen(false)}
+                onConfirm={handleSendCommand}
+                details={commandDetails}
+                t={t}
+            />
+        ) : firmwareUpdateDetails ? (
+            <FirmwareUpdateModal
+                isOpen
+                details={firmwareUpdateDetails}
+                onClose={() => setFirmwareUpdateDetails(null)}
+                onFirmwareReady={handleFirmwareReady}
+                setCommandStatus={setCommandStatus}
+                t={t}
+            />
+        ) : ngrokModalOpen ? (
+            <NgrokModal
+                isOpen
+                onClose={() => setNgrokModalOpen(false)}
+                info={ngrokInfo}
+                t={t}
+            />
+        ) : showSoldOutModal ? (
+            <SoldOutKiosksModal
+                isOpen
+                onClose={() => setShowSoldOutModal(false)}
+                soldOutKiosks={alertEligibleKiosks.filter(kiosk => kiosk.count === 0)}
+                t={t}
+            />
+        ) : sessionWarningOpen ? (
+            <InactivityModal
+                isOpen
+                onStay={onStayLoggedIn}
+                onLogout={onLogout}
+                countdown={sessionCountdown}
+                t={t}
+            />
+        ) : null}
         <CommandStatusToast status={commandStatus} onDismiss={() => setCommandStatus(null)} />
         <div className="min-h-screen bg-gray-100">
             {showInitialStatus ? (
@@ -639,8 +719,6 @@ return (
                 />
             ) : (
                 <>
-
-            {showWarning && <TimeoutWarningModal onStay={handleStay} onLogout={onLogout} />}
             <header className="bg-white shadow-sm">
                 <div className="max-w-screen-2xl mx-auto py-3 px-3 sm:px-4 lg:px-6">
                     <div className="flex items-center justify-between gap-3 border-b border-gray-100 pb-3">
@@ -715,15 +793,22 @@ return (
                 </div>
             </header>
             <main className="max-w-screen-2xl mx-auto py-6 sm:px-4 lg:px-6">
-                {loading ? (
+                {loading && visibleStationsData.length === 0 ? (
                     <LoadingSpinner t={t} />
-                ) : firestoreError ? (
-                    <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6" role="alert">
-                        <p className="font-bold">{t('connection_error_title')}</p>
-                        <p>{firestoreError}</p>
-                    </div>
-            ) : (
+                ) : (
                 <>
+                        {firestoreError && (
+                            <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6" role="alert">
+                                <p className="font-bold">{t('connection_error_title')}</p>
+                                <p>{firestoreError}</p>
+                                {visibleStationsData.length > 0 && <p className="mt-1 text-sm">Showing the last successfully loaded dashboard data.</p>}
+                            </div>
+                        )}
+                        {isShowingRetainedStations && !firestoreError && (
+                            <div className="bg-amber-50 border-l-4 border-amber-400 text-amber-800 p-3 mb-6" role="status">
+                                Reconnecting… showing the last successfully loaded dashboard data.
+                            </div>
+                        )}
                         {error && <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">{error}</div>}
                         {(clientInfo.features.rentals || clientInfo.features.search || isAdminUser || !!statusFocusedKioskId) && (
                             <FilterPanel
@@ -747,8 +832,7 @@ return (
                         )}
                         {(clientInfo.features.rentals || isAdminUser) && (
                             <GlobalRentalActivity
-                                kiosks={filteredKiosksForGlobalStats}
-                                rentalData={enrichedRentalData}
+                                rentalData={filteredRentalDataForGlobalStats}
                                 clientInfo={clientInfo}
                                 referenceTime={latestTimestamp}
                                 onShowRentalDetails={onNavigateToRentals}
@@ -758,27 +842,42 @@ return (
                             />
                         )}
 
-                        {allStationsData.length === 0 && loading ? (
+                        {visibleStationsData.length === 0 && loading ? (
                             <LoadingSpinner t={t} />
                         ) : paginatedLocations.length > 0 ? (
                             <>
-                                {paginatedLocations.map(([location, kiosks]) => (
-                                    <div key={location} className="mb-12">
+                                <div
+                                    ref={locationListRef}
+                                    className="relative w-full"
+                                    style={{ height: `${locationVirtualizer.getTotalSize()}px` }}
+                                >
+                                {locationVirtualizer.getVirtualItems().map((virtualLocation) => {
+                                    const [location, kiosks] = paginatedLocations[virtualLocation.index];
+                                    const previewLimit = isCompactDashboard ? MOBILE_KIOSK_PREVIEW_LIMIT : DESKTOP_KIOSK_PREVIEW_LIMIT;
+                                    const isLocationExpanded = expandedLocations.has(location);
+                                    const visibleKiosks = isLocationExpanded ? kiosks : kiosks.slice(0, previewLimit);
+                                    const hiddenKioskCount = kiosks.length - visibleKiosks.length;
+
+                                    return (
+                                    <div
+                                        key={virtualLocation.key}
+                                        data-index={virtualLocation.index}
+                                        ref={locationVirtualizer.measureElement}
+                                        className="absolute left-0 top-0 w-full pb-12"
+                                        style={{ transform: `translateY(${virtualLocation.start - locationListOffset}px)` }}
+                                    >
                                         <LocationSummary 
                                             location={location} 
                                             kiosks={kiosks} 
                                             chargerThreshold={0.25} 
                                             clientInfo={clientInfo}
-                                            rentalData={enrichedRentalData}
+                                            rentalData={rentalsByLocation.get(location) || EMPTY_RENTALS}
                                             referenceTime={latestTimestamp}
                                             t={t}
-                                            onShowRentalDetails={(period) => onNavigateToRentals({
-                                                period,
-                                                stationIds: kiosks.map(kiosk => kiosk.stationid),
-                                            })}
+                                            onNavigateToRentals={onNavigateToRentals}
                                         />
                                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                                            {kiosks.map(kiosk => {
+                                            {visibleKiosks.map(kiosk => {
                                                 const isExpanded = expandedKioskId === kiosk.stationid;
                                                 const isEditing = editingKioskId === kiosk.stationid;
                                                 const stationRentalData = rentalsByStationId.get(kiosk.stationid) || EMPTY_RENTALS;
@@ -797,8 +896,21 @@ return (
                                                 </div>
                                             )})}
                                         </div>
+                                        {kiosks.length > previewLimit && (
+                                            <div className="mt-4 flex justify-center">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => toggleLocationExpansion(location)}
+                                                    className="min-h-11 rounded-md border border-blue-200 bg-white px-4 py-2 text-sm font-semibold text-blue-700 shadow-sm hover:bg-blue-50"
+                                                >
+                                                    {isLocationExpanded ? 'Show fewer kiosks' : `Show ${hiddenKioskCount} more kiosk${hiddenKioskCount === 1 ? '' : 's'}`}
+                                                </button>
+                                            </div>
+                                        )}
                                     </div>
-                                ))}
+                                    );
+                                })}
+                                </div>
                                 <PaginationControls currentPage={currentPage} totalPages={Math.ceil(filteredLocations.length / ITEMS_PER_PAGE)} onPageChange={setCurrentPage} />
                             </>
                         ) : (

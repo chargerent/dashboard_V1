@@ -286,6 +286,7 @@ export const translations = {
         refunded: "Refunded",
         pending: "Pending", // Removed 'lost'
         purchased: "Purchased",
+        declined: "Declined",
         vend_failed: "Vend Failed",
         status: "Status",
         station: "Station",
@@ -296,6 +297,7 @@ export const translations = {
         error: "error",
         errors: "errors",
         rental_created: "Rental created",
+        payment_declined: "Payment declined",
         dispense_requested: "Dispense requested",
         waiting_for_vend_confirmation: "Waiting for vend confirmation",
         attempt: "Attempt",
@@ -800,6 +802,7 @@ export const translations = {
         refunded: "Remboursé",
         pending: "En attente", // Removed 'lost'
         purchased: "Acheté",
+        declined: "Refusée",
         vend_failed: "Distribution échouée",
         status: "Statut",
         station: "Station",
@@ -810,6 +813,7 @@ export const translations = {
         error: "erreur",
         errors: "erreurs",
         rental_created: "Location créée",
+        payment_declined: "Paiement refusé",
         dispense_requested: "Distribution demandée",
         waiting_for_vend_confirmation: "En attente de confirmation",
         attempt: "Tentative",

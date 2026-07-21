@@ -22,6 +22,7 @@ import { isV2Kiosk } from '../utils/helpers.js';
 import RefundModal from '../components/UI/RefundModal.jsx';
 import ConfirmationModal from '../components/UI/ConfirmationModal.jsx';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
+import CardBrandIcon from '../components/UI/CardBrandIcon.jsx';
 
 const RENTALS_PER_PAGE = 30;
 
@@ -41,28 +42,50 @@ const resolveRefundGateway = (rental, station) => (
 );
 
 const resolveDisplayTransactionId = (rental) => (
-    String(
-        firstPresent(
-            rental?.orderid,
-            rental?.rawid,
-            rental?.transactionid,
-            rental?.transactionId,
-            rental?.paymentSessionId
-        ) || ''
-    ).trim()
+    String((
+        normalizeRentalStatusKey(rental?.status) === 'declined'
+            ? firstPresent(
+                rental?.rawid,
+                rental?.documentId,
+                rental?.paymentAttemptId,
+                rental?.transactionid,
+                rental?.transactionId,
+                rental?.paymentSessionId,
+                rental?.orderid
+            )
+            : firstPresent(
+                rental?.orderid,
+                rental?.rawid,
+                rental?.documentId,
+                rental?.transactionid,
+                rental?.transactionId,
+                rental?.paymentSessionId
+            )
+    ) || '').trim()
 );
 
 const resolveCopyTransactionId = (rental) => (
-    String(
-        firstPresent(
-            rental?.transactionid,
-            rental?.transactionId,
-            rental?.paymentSessionId,
-            rental?.rawid,
-            rental?.paymentIntentId,
-            rental?.orderid
-        ) || ''
-    ).trim()
+    String((
+        normalizeRentalStatusKey(rental?.status) === 'declined'
+            ? firstPresent(
+                rental?.rawid,
+                rental?.documentId,
+                rental?.paymentAttemptId,
+                rental?.transactionid,
+                rental?.transactionId,
+                rental?.paymentSessionId,
+                rental?.orderid
+            )
+            : firstPresent(
+                rental?.transactionid,
+                rental?.transactionId,
+                rental?.paymentSessionId,
+                rental?.rawid,
+                rental?.documentId,
+                rental?.paymentIntentId,
+                rental?.orderid
+            )
+    ) || '').trim()
 );
 
 const formatTransactionId = (value) => {
@@ -283,23 +306,28 @@ const buildRentalProcessLog = (rental, t) => {
     const chargerSn = firstPresent(rental.sn, rental.chargerid);
     const displayTransactionId = resolveDisplayTransactionId(rental);
     const fullTransactionId = resolveCopyTransactionId(rental);
+    const initialStatus = normalizeRentalStatusKey(rental.status);
+    const isDeclined = initialStatus === 'declined';
     const rentalDetails = formatDetailParts(
         fullTransactionId ? `${t('order_id')}: ${fullTransactionId}` : '',
+        isDeclined && rental.paymentAttemptId ? `Payment attempt: ${rental.paymentAttemptId}` : '',
         rental.card_last4 ? `${t('card')}: ${rental.card_last4}` : '',
-        chargerSn ? `${t('charger_sn')}: ${chargerSn}` : '',
+        !isDeclined && chargerSn ? `${t('charger_sn')}: ${chargerSn}` : '',
         rental.rentalStationid ? `${t('station')}: ${rental.rentalStationid}` : '',
-        rental.rentalModuleid ? `M: ${rental.rentalModuleid}` : '',
-        rental.rentalSlotid != null ? `S: ${rental.rentalSlotid}` : '',
-        rental.rentPower != null ? `${rental.rentPower}%` : '',
+        !isDeclined && rental.rentalModuleid ? `M: ${rental.rentalModuleid}` : '',
+        !isDeclined && rental.rentalSlotid != null ? `S: ${rental.rentalSlotid}` : '',
+        !isDeclined && rental.rentPower != null ? `${rental.rentPower}%` : '',
         rental.gateway ? `Gateway: ${rental.gateway}` : '',
         rental.paymentStatus ? `Payment: ${humanizeCode(rental.paymentStatus)}` : '',
         displayTransactionId && fullTransactionId && displayTransactionId !== fullTransactionId ? `Short ID: ${displayTransactionId}` : ''
     );
 
     addEntry({
-        title: t('rental_created'),
-        timestamp: firstPresent(rental.rentalTime, rental.failedAt, rental.lastUpdate),
-        status: normalizeText(rental.status) === 'pending' ? 'pending' : 'info',
+        title: initialStatus === 'declined' ? t('payment_declined') : t('rental_created'),
+        timestamp: initialStatus === 'declined'
+            ? firstPresent(rental.declinedAt, rental.rentalTime, rental.lastUpdate)
+            : firstPresent(rental.rentalTime, rental.failedAt, rental.lastUpdate),
+        status: initialStatus === 'pending' ? 'pending' : 'info',
         details: rentalDetails,
     });
 
@@ -646,10 +674,12 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock, onNavigateToCha
     const rentalActivityTimestamp = getRentalActivityTimestamp(rental);
     const normalizedRefundStatus = normalizeRefundStatus(rental.refundStatus);
     const rentalStatusKey = normalizeRentalStatusKey(rental.status);
+    const isDeclined = rentalStatusKey === 'declined';
     const statusClass = rentalStatusKey === 'rented' ? 'bg-blue-100 text-blue-800' :
                         rentalStatusKey === 'purchased' ? 'bg-purple-100 text-purple-800' :
                         rentalStatusKey === 'refunded' ? 'bg-green-100 text-green-800' :
                         rentalStatusKey === 'pending' ? 'bg-orange-100 text-orange-800' :
+                        rentalStatusKey === 'declined' ? 'bg-gray-100 text-gray-800' :
                         rentalStatusKey === 'vend_failed' ? 'bg-red-100 text-red-800' :
                         rentalStatusKey === 'returned' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800';
 
@@ -723,48 +753,57 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock, onNavigateToCha
                         {formatTransactionId(displayTransactionId || copyTransactionId)}
                     </button>
                 </div>
-                <div>
-                    <p className="text-gray-500">{t('charger_sn')}</p>
-                    {chargerId && onNavigateToChargers ? (
-                        <button
-                            type="button"
-                            onClick={handleChargerClick}
-                            className="block max-w-full truncate text-left font-mono text-blue-700 transition-colors hover:text-blue-900 hover:underline"
-                            title={`${t('open_charger')}: ${chargerId}`}
-                            aria-label={`${t('open_charger')}: ${chargerId}`}
-                        >
-                            {chargerId}
-                        </button>
-                    ) : (
-                        <p className="font-mono text-gray-800 truncate" title={chargerId}>{chargerId}</p>
-                    )}
-                </div>
+                {!isDeclined && (
+                    <div>
+                        <p className="text-gray-500">{t('charger_sn')}</p>
+                        {chargerId && onNavigateToChargers ? (
+                            <button
+                                type="button"
+                                onClick={handleChargerClick}
+                                className="block max-w-full truncate text-left font-mono text-blue-700 transition-colors hover:text-blue-900 hover:underline"
+                                title={`${t('open_charger')}: ${chargerId}`}
+                                aria-label={`${t('open_charger')}: ${chargerId}`}
+                            >
+                                {chargerId}
+                            </button>
+                        ) : (
+                            <p className="font-mono text-gray-800 truncate" title={chargerId}>{chargerId}</p>
+                        )}
+                    </div>
+                )}
                 <div>
                     <p className="text-gray-500">{t('card')}</p>
-                    <p className="font-mono text-gray-800">{rental.card_last4}</p>
+                    <div className="flex min-w-0 items-center gap-1.5">
+                        <p className="truncate font-mono text-gray-800">{rental.card_last4}</p>
+                        <CardBrandIcon rental={rental} />
+                    </div>
                 </div>
                 <div>
                     <p className="text-gray-500">{t('rental')}</p>
                     <p className="text-gray-800">{formatDateTime(rentalActivityTimestamp)}</p>
-                    {rental.rentalModuleid && rental.rentalSlotid && (
+                    {!isDeclined && rental.rentalModuleid && rental.rentalSlotid && (
                         <p className="text-gray-600 text-[10px]">
                             M: {rental.rentalModuleid} S: {rental.rentalSlotid} @ {rental.rentPower}%
                         </p>
                     )}
                 </div>
-                <div>
-                    <p className="text-gray-500">{t('return')}</p>
-                    <p className="text-gray-800">{rental.returnTime ? formatDateTime(rental.returnTime) : 'In Use'}</p>
-                    {rental.returnModuleid && rental.returnSlotid && (
-                        <p className="text-gray-600 text-[10px]">
-                            M: {rental.returnModuleid} S: {rental.returnSlotid} @ {rental.returnPower}%
-                        </p>
-                    )}
-                </div>
-                <div>
-                    <p className="text-gray-500">{t('period')}</p>
-                    <p className="text-gray-800">{formatDuration(rental.rentalTime, rental.returnTime)}</p>
-                </div>
+                {!isDeclined && (
+                    <>
+                        <div>
+                            <p className="text-gray-500">{t('return')}</p>
+                            <p className="text-gray-800">{rental.returnTime ? formatDateTime(rental.returnTime) : 'In Use'}</p>
+                            {rental.returnModuleid && rental.returnSlotid && (
+                                <p className="text-gray-600 text-[10px]">
+                                    M: {rental.returnModuleid} S: {rental.returnSlotid} @ {rental.returnPower}%
+                                </p>
+                            )}
+                        </div>
+                        <div>
+                            <p className="text-gray-500">{t('period')}</p>
+                            <p className="text-gray-800">{formatDuration(rental.rentalTime, rental.returnTime)}</p>
+                        </div>
+                    </>
+                )}
                 <div>
                     <p className="text-gray-500">{t('amount')}</p>
                     <p className="font-mono text-base font-bold text-gray-800">
@@ -828,7 +867,7 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock, onNavigateToCha
 };
 
 export default function RentalsPage({ onNavigateToDashboard, onNavigateToChargers, clientInfo, rentalData, allStationsData, t, language, setLanguage, onLogout, onCommand, commandStatus, setCommandStatus, referenceTime, initialPeriod = 'today', initialStationIds = [], initialSearch = '' }) {
-    const [activeFilters, setActiveFilters] = useState({ period: initialPeriod, status: 'all', returnType: 'all', version: 'all' });
+    const [activeFilters, setActiveFilters] = useState({ period: initialPeriod, status: 'all', returnType: 'all', version: 'all', gateway: 'all' });
     const [searchTerm, setSearchTerm] = useState(initialSearch);
     const [currentPage, setCurrentPage] = useState(1);
     const [showRefundModal, setShowRefundModal] = useState(false);
@@ -902,6 +941,10 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
 
         if (activeFilters.version && activeFilters.version !== 'all') {
             rentals = rentals.filter(r => r.stationVersion === activeFilters.version);
+        }
+
+        if (activeFilters.gateway && activeFilters.gateway !== 'all') {
+            rentals = rentals.filter(r => normalizeText(r.gateway) === activeFilters.gateway);
         }
 
         const lowercasedSearch = normalizeText(searchTerm);
@@ -1127,14 +1170,21 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
                         </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-4 mt-4">
-                        {['all', 'rented', 'returned', 'purchased', 'refunded', 'pending', 'vend_failed', 'short_rental', 'error'].map(status => (
-                            <button key={status} onClick={() => handleFilterChange('status', status)}
+                        {['all', 'rented', 'returned', 'purchased', 'refunded', 'pending', 'declined', 'vend_failed', 'short_rental', 'error', 'uid'].map(status => (
+                            <button key={status} onClick={() => {
+                                if (status === 'uid') {
+                                    handleFilterChange('gateway', activeFilters.gateway === 'uid' ? 'all' : 'uid');
+                                    return;
+                                }
+
+                                handleFilterChange('status', status);
+                            }}
                                 className={`px-3 py-1 text-sm font-semibold rounded-full transition-colors ${
-                                    activeFilters.status === status
+                                    (status === 'uid' ? activeFilters.gateway === 'uid' : activeFilters.status === status)
                                         ? (status === 'error' ? 'bg-red-600 text-white shadow' : 'bg-blue-600 text-white shadow')
                                         : (status === 'error' ? 'bg-red-50 text-red-700 hover:bg-red-100 border border-red-100' : 'bg-gray-200 text-gray-700 hover:bg-gray-300')
                                 }`}>
-                                {status === 'error' ? t('log_errors_filter') : t(status)}
+                                {status === 'error' ? t('log_errors_filter') : status === 'uid' ? 'UID' : t(status)}
                             </button>
                         ))}
                     </div>
@@ -1154,7 +1204,6 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
                             </button>
                         ))}
                     </div>
-
                     <div className="relative mt-4">
                         <input
                             type="text"

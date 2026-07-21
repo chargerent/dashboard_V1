@@ -1,5 +1,7 @@
 // src/components/UI/NgrokModal.jsx
 
+import ModalPortal from './ModalPortal';
+
 function NgrokModal({ isOpen, onClose, info, t }) {
     if (!isOpen) return null;
     
@@ -8,9 +10,10 @@ function NgrokModal({ isOpen, onClose, info, t }) {
     const uiUrl = `https://${info?.kioskId}.ngrok.io/ui`;
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white p-6 rounded-lg shadow-xl max-w-sm mx-auto">
-                <h2 className="text-lg font-bold mb-4 text-center">{t('ngrok_connected')}</h2>
+        <ModalPortal>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100] p-4" role="presentation">
+            <div role="dialog" aria-modal="true" aria-labelledby="ngrok-modal-title" className="bg-white p-6 rounded-lg shadow-xl max-w-sm mx-auto">
+                <h2 id="ngrok-modal-title" className="text-lg font-bold mb-4 text-center">{t('ngrok_connected')}</h2>
                 <p className="text-gray-600 mb-6 text-center">
                     {info?.message}
                 </p>
@@ -31,12 +34,13 @@ function NgrokModal({ isOpen, onClose, info, t }) {
                     >{t('ngrok_ui')}</a>
                 </div>
                 <div className="mt-6 text-center">
-                        <button onClick={onClose} className="bg-gray-300 text-gray-800 font-semibold py-2 px-6 rounded-md hover:bg-gray-400">
+                        <button type="button" onClick={onClose} className="bg-gray-300 text-gray-800 font-semibold py-2 px-6 rounded-md hover:bg-gray-400">
                             {t('close')}
                         </button>
                 </div>
             </div>
         </div>
+        </ModalPortal>
     );
 }
 

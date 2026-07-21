@@ -65,6 +65,18 @@ export default defineConfig(({ command }) => ({
     outDir: resolve(dirname(fileURLToPath(import.meta.url)), 'dist/portal'),
     emptyOutDir: true,
     assetsDir: 'assets',
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('/firebase/') || id.includes('/@firebase/')) return 'firebase-vendor'
+          if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/scheduler/')) return 'react-vendor'
+          if (id.includes('/@tanstack/react-virtual/') || id.includes('/@tanstack/virtual-core/')) return 'virtualization-vendor'
+          if (id.includes('/@heroicons/')) return 'icons-vendor'
+          return undefined
+        },
+      },
+    },
   },
 
   // ✅ Proxy setup for Node-RED APIs and WebSockets

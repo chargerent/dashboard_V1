@@ -1,6 +1,6 @@
 // src/components/kiosk/KioskDetailPanel.jsx
 
-import React, { useMemo, useCallback, useEffect } from 'react';
+import { memo, useMemo, useCallback, useEffect } from 'react';
 import KioskControlPanel from './KioskControlPanel';
 import {
     getKioskPowerThreshold,
@@ -69,6 +69,7 @@ const normalizeLockReason = (reason) => (
 const isPurpleLockReason = (reason) => {
     const normalizedReason = normalizeLockReason(reason);
     return normalizedReason === 'broken charger suspected: 2 consecutive returns between 1 and 5 minutes' ||
+        normalizedReason.startsWith('auto locked after verified motor error; charger remained present') ||
         normalizedReason.startsWith('never dispensed:');
 };
 
@@ -496,7 +497,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         return { className, glow: isCharging };
     }, [chargeReadyThreshold, ejectingSet, hasFailedEject, lockingSet, pendingSet, stationId]);
 
-    const ModuleControls = ({ module }) => {
+    const renderModuleControls = (module) => {
         const canEjectModule = clientInfo.commands.eject;
         const canRebootModule = !isV2Kiosk && clientInfo.commands.reboot;
 
@@ -558,7 +559,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         );
     };
     
-    const SlotButton = React.memo(function SlotButton({ slot, module, style }) {
+    const renderSlotButton = (slot, module, style, key) => {
         const canEject = clientInfo.commands.eject;
         const canLock = clientInfo.commands.lock;
         const hasCharger = slotHasDisplayableCharger(slot);
@@ -567,7 +568,8 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
 
         return (
             <div
-                className={`relative flex items-stretch p-0.5 rounded-md border transition-all duration-300 text-left ${style.className} ${style.glow ? 'slot-glow' : ''}`}
+                key={key}
+                className={`relative flex items-stretch p-0.5 rounded-md border transition-colors duration-200 text-left ${style.className} ${style.glow ? 'slot-glow' : ''}`}
                 data-kiosk-slot-debug="true"
                 data-kiosk-stationid={stationId}
                 data-kiosk-moduleid={module.id}
@@ -669,21 +671,21 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                 )}
             </div>
         );
-    });
+    };
 
-    const Module = ({ module, reverseOrder = false, className = '' }) => (
+    const renderModule = (module, { reverseOrder = false, className = '' } = {}) => (
         <div className={`${module.output === false ? 'bg-red-100' : 'bg-white'} p-2 rounded-lg shadow-inner ${getModuleTypeOutlineClass(module)} ${className}`}>
             <div className="flex flex-col gap-1">
                 {module.slots.slice().sort((a, b) => reverseOrder ? b.position - a.position : a.position - b.position).map(slot => {
                     const style = getSlotStyle(slot, module);
-                    return <SlotButton key={slot.position} slot={slot} module={module} style={style} />
+                    return renderSlotButton(slot, module, style, slot.position);
                 })}
             </div>
-            <ModuleControls module={module} />
+            {renderModuleControls(module)}
         </div>
     );
 
-    const PaymentTerminal = () => (
+    const renderPaymentTerminal = () => (
         <div className="bg-gray-800 text-white p-4 h-auto flex flex-col justify-center rounded-lg shadow-lg">
             <div className="text-left w-full px-2">
                 <p className="text-xs text-gray-400">UI Mode</p>
@@ -696,7 +698,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         </div>
     );
 
-    const CompactTowerHeader = () => {
+    const renderCompactTowerHeader = () => {
         const qrFallback = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(
             `<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220" viewBox="0 0 220 220">
                 <rect width="220" height="220" rx="18" fill="#f3f4f6"/>
@@ -781,8 +783,8 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         return (
             <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
                 <div className="w-full flex flex-col gap-3">
-                    <CompactTowerHeader />
-                    {kiosk.modules[0] && <Module module={kiosk.modules[0]} className="w-full" />}
+                    {renderCompactTowerHeader()}
+                    {kiosk.modules[0] && renderModule(kiosk.modules[0], { className: 'w-full' })}
                 </div>
             </div>
         );
@@ -834,9 +836,9 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         };
     };
 
-    const CompactGridSlot = ({ entry }) => {
+    const renderCompactGridSlot = (entry, key) => {
         if (!entry?.slot || !entry?.module) {
-            return <div className="min-h-[40px] rounded-md border border-gray-300 bg-gray-100" />;
+            return <div key={key} className="min-h-[40px] rounded-md border border-gray-300 bg-gray-100" />;
         }
 
         const { slot, module, displayPosition } = entry;
@@ -849,7 +851,8 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
 
         return (
             <div
-                className={`relative min-h-[52px] rounded-md border p-0.5 text-left transition-all duration-300 ${style.className} ${style.glow ? 'slot-glow' : ''}`}
+                key={key}
+                className={`relative min-h-[52px] rounded-md border p-0.5 text-left transition-colors duration-200 ${style.className} ${style.glow ? 'slot-glow' : ''}`}
                 data-kiosk-slot-debug="true"
                 data-kiosk-stationid={kiosk.stationid}
                 data-kiosk-moduleid={module.id}
@@ -955,12 +958,12 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         );
     };
 
-    const CompactGroupCard = ({ slotsByPosition, groupIndex, slotOrder = slotOrderInCompactGroup }) => (
-        <div className="bg-white p-1 rounded-lg shadow-inner">
+    const renderCompactGroupCard = (slotsByPosition, groupIndex, slotOrder = slotOrderInCompactGroup) => (
+        <div key={groupIndex} className="bg-white p-1 rounded-lg shadow-inner">
             <div className="grid grid-cols-2 gap-1">
                 {slotOrder.map((slotOffset, index) => {
                     const position = groupIndex * 4 + slotOffset + 1;
-                    return <CompactGridSlot key={`${groupIndex}-${index}`} entry={slotsByPosition.get(position)} />;
+                    return renderCompactGridSlot(slotsByPosition.get(position), `${groupIndex}-${index}`);
                 })}
             </div>
         </div>
@@ -973,11 +976,11 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         return (
             <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
                 <div className="w-full max-w-md flex flex-col gap-3">
-                    <CompactTowerHeader />
+                    {renderCompactTowerHeader()}
 
                     <div className="flex flex-col gap-2">
                         {Array.from({ length: groupCount }, (_, groupIndex) => (
-                            <CompactGroupCard key={groupIndex} slotsByPosition={slotsByPosition} groupIndex={groupIndex} />
+                            renderCompactGroupCard(slotsByPosition, groupIndex)
                         ))}
                     </div>
                 </div>
@@ -985,7 +988,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         );
     };
 
-    const CompactPortraitScreen = ({ label = '16IN' }) => (
+    const renderCompactPortraitScreen = (label = '16IN') => (
         <div className="overflow-hidden rounded-lg bg-gray-950 shadow-lg ring-1 ring-gray-800">
             <div className="flex w-full flex-col justify-between p-3 text-white" style={{ aspectRatio: '9 / 16' }}>
                 <div>
@@ -1010,17 +1013,12 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         return (
             <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
                 <div className="w-full max-w-lg space-y-3">
-                    <CompactTowerHeader />
+                    {renderCompactTowerHeader()}
                     <div className="grid grid-cols-[minmax(92px,126px)_minmax(210px,1fr)] items-stretch gap-2 sm:grid-cols-[minmax(92px,126px)_minmax(210px,1fr)]">
-                        <CompactPortraitScreen label="16IN" />
+                        {renderCompactPortraitScreen('16IN')}
                         <div className="flex h-full flex-col justify-between gap-2">
                             {[0, 1].map((groupIndex) => (
-                                <CompactGroupCard
-                                    key={groupIndex}
-                                    slotsByPosition={slotsByPosition}
-                                    groupIndex={groupIndex}
-                                    slotOrder={ct8SlotOrder}
-                                />
+                                renderCompactGroupCard(slotsByPosition, groupIndex, ct8SlotOrder)
                             ))}
                         </div>
                     </div>
@@ -1098,7 +1096,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         return (
             <div className="p-1.5 flex flex-col items-center gap-2.5">
                 <div className="w-full space-y-2.5">
-                    <CompactTowerHeader />
+                    {renderCompactTowerHeader()}
 
                     <div className="mx-auto w-full max-w-sm overflow-hidden rounded-lg bg-black shadow-lg">
                         <div className="w-full" style={{ aspectRatio: '9 / 16' }}>
@@ -1109,12 +1107,12 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                     <div className="grid w-full grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-3">
                         <div className="flex flex-col gap-2">
                             {leftColumnIndices.map((groupIndex) => (
-                                <CompactGroupCard key={groupIndex} slotsByPosition={slotsByPosition} groupIndex={groupIndex} />
+                                renderCompactGroupCard(slotsByPosition, groupIndex)
                             ))}
                         </div>
                         <div className="flex flex-col gap-2">
                             {rightColumnIndices.map((groupIndex) => (
-                                <CompactGroupCard key={groupIndex} slotsByPosition={slotsByPosition} groupIndex={groupIndex} />
+                                renderCompactGroupCard(slotsByPosition, groupIndex)
                             ))}
                         </div>
                     </div>
@@ -1127,8 +1125,8 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         return (
             <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
                 <div className="w-full flex flex-col gap-3">
-                    {kiosk.modules[0] && <Module module={kiosk.modules[0]} />}
-                    <PaymentTerminal />
+                    {kiosk.modules[0] && renderModule(kiosk.modules[0])}
+                    {renderPaymentTerminal()}
                 </div>
             </div>
         );
@@ -1138,9 +1136,9 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         return (
         <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
             <div className="w-full flex flex-col gap-3">
-                <PaymentTerminal />
-                {kiosk.modules[0] && <Module module={kiosk.modules[0]} reverseOrder={true} />}
-                {kiosk.modules[1] && <Module module={kiosk.modules[1]} reverseOrder={true} />}
+                {renderPaymentTerminal()}
+                {kiosk.modules[0] && renderModule(kiosk.modules[0], { reverseOrder: true })}
+                {kiosk.modules[1] && renderModule(kiosk.modules[1], { reverseOrder: true })}
             </div>
         </div>
     )};
@@ -1149,10 +1147,10 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         return (
         <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
             <div className="w-full flex flex-col gap-3">
-                {kiosk.modules[0] && <Module module={kiosk.modules[0]} reverseOrder={true} />}
-                <PaymentTerminal />
-                {kiosk.modules[1] && <Module module={kiosk.modules[1]} reverseOrder={true} />}
-                {kiosk.modules[2] && <Module module={kiosk.modules[2]} reverseOrder={true} />}
+                {kiosk.modules[0] && renderModule(kiosk.modules[0], { reverseOrder: true })}
+                {renderPaymentTerminal()}
+                {kiosk.modules[1] && renderModule(kiosk.modules[1], { reverseOrder: true })}
+                {kiosk.modules[2] && renderModule(kiosk.modules[2], { reverseOrder: true })}
             </div>
         </div>
     )};
@@ -1177,13 +1175,13 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                     </div>
                 </div>
                 <div className="w-full grid grid-cols-2 gap-2">
-                    {kiosk.modules[1] && <Module module={kiosk.modules[1]} reverseOrder={true} />}
-                    {kiosk.modules[0] && <Module module={kiosk.modules[0]} reverseOrder={true} />}
+                    {kiosk.modules[1] && renderModule(kiosk.modules[1], { reverseOrder: true })}
+                    {kiosk.modules[0] && renderModule(kiosk.modules[0], { reverseOrder: true })}
                 </div>
                 <div className="w-full grid grid-cols-3 gap-2">
-                    {kiosk.modules[2] && <Module module={kiosk.modules[2]} reverseOrder={true} />}
-                    {kiosk.modules[3] && <Module module={kiosk.modules[3]} reverseOrder={true} />}
-                    {kiosk.modules[4] && <Module module={kiosk.modules[4]} reverseOrder={true} />}
+                    {kiosk.modules[2] && renderModule(kiosk.modules[2], { reverseOrder: true })}
+                    {kiosk.modules[3] && renderModule(kiosk.modules[3], { reverseOrder: true })}
+                    {kiosk.modules[4] && renderModule(kiosk.modules[4], { reverseOrder: true })}
                 </div>
             </div>
         );
@@ -1290,4 +1288,4 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     );
 };
 
-export default KioskDetailPanel;
+export default memo(KioskDetailPanel);
