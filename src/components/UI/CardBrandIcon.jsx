@@ -1,12 +1,11 @@
-import visaIcon from 'payment-icons/min/flat/visa.svg';
-import mastercardIcon from 'payment-icons/min/flat/mastercard.svg';
-import amexIcon from 'payment-icons/min/flat/amex.svg';
-import discoverIcon from 'payment-icons/min/flat/discover.svg';
-import maestroIcon from 'payment-icons/min/flat/maestro.svg';
-import dinersIcon from 'payment-icons/min/flat/diners.svg';
-import jcbIcon from 'payment-icons/min/flat/jcb.svg';
-import unionpayIcon from 'payment-icons/min/flat/unionpay.svg';
-import defaultCardIcon from 'payment-icons/min/flat/default.svg';
+import amexIcon from '../../assets/nucleo-credit-cards/amex.svg';
+import dinersIcon from '../../assets/nucleo-credit-cards/diners.svg';
+import discoverIcon from '../../assets/nucleo-credit-cards/discover.svg';
+import jcbIcon from '../../assets/nucleo-credit-cards/jcb.svg';
+import maestroIcon from '../../assets/nucleo-credit-cards/maestro.svg';
+import mastercardIcon from '../../assets/nucleo-credit-cards/mastercard.svg';
+import unionpayIcon from '../../assets/nucleo-credit-cards/unionpay.svg';
+import visaIcon from '../../assets/nucleo-credit-cards/visa.svg';
 import { getCardBrandDisplay } from '../../utils/cardBrand.js';
 
 const CARD_ICON_SRC = {
@@ -18,20 +17,20 @@ const CARD_ICON_SRC = {
     diners: dinersIcon,
     jcb: jcbIcon,
     unionpay: unionpayIcon,
-    interac: defaultCardIcon,
-    generic: defaultCardIcon,
 };
 
 export default function CardBrandIcon({ rental, className = '' }) {
     const brand = getCardBrandDisplay(rental);
-    const src = CARD_ICON_SRC[brand.key] || defaultCardIcon;
+    const src = CARD_ICON_SRC[brand.key];
+
+    if (!src) return null;
 
     return (
         <img
             src={src}
             alt={brand.title}
             title={brand.title}
-            className={`h-5 w-8 shrink-0 rounded-sm object-contain grayscale ${className}`}
+            className={`h-7 w-12 shrink-0 object-contain ${className}`}
             loading="lazy"
         />
     );
