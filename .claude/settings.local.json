@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep:*)",
+      "Bash(python3:*)",
+      "Bash(node:*)",
+      "Bash(wc -l \"/Users/georgegazelian/Downloads/flows \\(9\\).json\")"
+    ]
+  }
+}

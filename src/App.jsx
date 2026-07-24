@@ -9,6 +9,7 @@ import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage.jsx';
 import { isKioskOnline, isNewSchemaKiosk, isV2Kiosk, normalizeKioskData, normalizeKioskInfoForSchema } from './utils/helpers.js';
 import { callFunctionWithAuth } from './utils/callableRequest.js';
+import { getFirestoreKioskStationId } from './utils/firestoreStationId.js';
 import {
   applyRefundConfirmationToRental,
   isPendingRefundStatus,
@@ -1142,7 +1143,7 @@ function App() {
     const unsubscribeKiosks = onSnapshot(kioskScope.queryRef, (querySnapshot) => {
       const shouldLogFirstKioskSnapshot = !startupListenerRef.current.kiosksLogged;
       const now = Date.now();
-      const stationIdsInSnapshot = querySnapshot.docs.map(docSnap => docSnap.id);
+      const stationIdsInSnapshot = querySnapshot.docs.map(getFirestoreKioskStationId);
       const changedKioskDocs = querySnapshot.docChanges();
       latestStationIdsInSnapshot = stationIdsInSnapshot;
 
@@ -1174,7 +1175,7 @@ function App() {
 
       // Normalize only changed documents and preserve object identity for every unchanged kiosk.
       changedKioskDocs.forEach(change => {
-        const stationid = change.doc.id;
+        const stationid = getFirestoreKioskStationId(change.doc);
         if (change.type === 'removed') {
           normalizedKiosksById.delete(stationid);
           return;

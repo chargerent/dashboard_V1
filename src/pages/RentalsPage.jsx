@@ -675,6 +675,9 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock, onNavigateToCha
     const normalizedRefundStatus = normalizeRefundStatus(rental.refundStatus);
     const rentalStatusKey = normalizeRentalStatusKey(rental.status);
     const isDeclined = rentalStatusKey === 'declined';
+    const returnTimeLabel = rental.returnTime
+        ? formatDateTime(rental.returnTime)
+        : (rentalStatusKey === 'vend_failed' ? 'N/A' : t('in_use'));
     const statusClass = rentalStatusKey === 'rented' ? 'bg-blue-100 text-blue-800' :
                         rentalStatusKey === 'purchased' ? 'bg-purple-100 text-purple-800' :
                         rentalStatusKey === 'refunded' ? 'bg-green-100 text-green-800' :
@@ -791,7 +794,7 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock, onNavigateToCha
                     <>
                         <div>
                             <p className="text-gray-500">{t('return')}</p>
-                            <p className="text-gray-800">{rental.returnTime ? formatDateTime(rental.returnTime) : 'In Use'}</p>
+                            <p className="text-gray-800">{returnTimeLabel}</p>
                             {rental.returnModuleid && rental.returnSlotid && (
                                 <p className="text-gray-600 text-[10px]">
                                     M: {rental.returnModuleid} S: {rental.returnSlotid} @ {rental.returnPower}%
