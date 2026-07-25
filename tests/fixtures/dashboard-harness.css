@@ -18,6 +18,16 @@ body {
   animation: harness-pulse-orange 2s infinite;
 }
 
+.slot-charging-glow {
+  animation: harness-pulse-yellow 1.6s infinite;
+  box-shadow: 0 0 8px 3px rgb(234 179 8 / 55%);
+}
+
+@keyframes harness-pulse-yellow {
+  0%, 100% { box-shadow: 0 0 5px 2px rgb(234 179 8 / 50%); }
+  50% { box-shadow: 0 0 12px 5px rgb(250 204 21 / 85%); }
+}
+
 @keyframes harness-pulse-orange {
   0% { box-shadow: 0 0 0 0 rgb(251 146 60 / 70%); }
   70% { box-shadow: 0 0 0 4px rgb(251 146 60 / 0%); }

@@ -486,6 +486,14 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         }
 
         const isCharging = isSlotActivelyCharging(slot);
+
+        if (isCharging) {
+            return {
+                className: 'border-yellow-500 bg-yellow-200 text-yellow-900',
+                glow: true,
+            };
+        }
+
         let className = '';
 
         if (slot.batteryLevel >= chargeReadyThreshold) {
@@ -494,7 +502,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
             className = 'border-orange-400 bg-orange-100 text-orange-800';
         }
 
-        return { className, glow: isCharging };
+        return { className, glow: false };
     }, [chargeReadyThreshold, ejectingSet, hasFailedEject, lockingSet, pendingSet, stationId]);
 
     const renderModuleControls = (module) => {
@@ -569,7 +577,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         return (
             <div
                 key={key}
-                className={`relative flex items-stretch p-0.5 rounded-md border transition-colors duration-200 text-left ${style.className} ${style.glow ? 'slot-glow' : ''}`}
+                className={`relative flex items-stretch p-0.5 rounded-md border transition-colors duration-200 text-left ${style.className} ${style.glow ? 'slot-charging-glow' : ''}`}
                 data-kiosk-slot-debug="true"
                 data-kiosk-stationid={stationId}
                 data-kiosk-moduleid={module.id}
@@ -852,7 +860,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         return (
             <div
                 key={key}
-                className={`relative min-h-[52px] rounded-md border p-0.5 text-left transition-colors duration-200 ${style.className} ${style.glow ? 'slot-glow' : ''}`}
+                className={`relative min-h-[52px] rounded-md border p-0.5 text-left transition-colors duration-200 ${style.className} ${style.glow ? 'slot-charging-glow' : ''}`}
                 data-kiosk-slot-debug="true"
                 data-kiosk-stationid={kiosk.stationid}
                 data-kiosk-moduleid={module.id}
