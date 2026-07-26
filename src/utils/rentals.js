@@ -1,4 +1,4 @@
-import { normalizeText } from './text';
+import { normalizeText } from './text.js';
 
 const SUCCESSFUL_REFUND_STATUSES = new Set(['approved', 'refunded', 'succeeded']);
 const PENDING_REFUND_STATUSES = new Set(['pending']);

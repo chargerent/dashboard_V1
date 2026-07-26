@@ -19,8 +19,10 @@ existing 30-day raw-rental listener as a safe fallback.
 Dashboard cards subscribe to the summary collection. Raw global rental
 listeners are loaded only while Chargers, Analytics, or Testing is open.
 Rentals uses bounded page-owned queries (50 documents, default seven days) and
-direct exact searches. A kiosk rental drill-down navigates to Rentals with its
-station and period scope.
+direct exact searches. Status, gateway, and return-type filters are included in
+the bounded Firestore query before pagination; computed filters continue through
+bounded pages until they have enough matching rentals. A kiosk rental drill-down
+navigates to Rentals with its station and period scope.
 
 ## Release order
 

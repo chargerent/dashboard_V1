@@ -29,6 +29,11 @@ import {
     isSuccessfulRefundStatus,
     normalizeRefundStatus,
 } from '../utils/rentals.js';
+import {
+    buildRentalFilterQueryStreams,
+    rentalHasLogError,
+    rentalMatchesActiveFilters,
+} from '../utils/rentalQueryFilters.js';
 import { isV2Kiosk } from '../utils/helpers.js';
 import { db } from '../firebase-config';
 import RefundModal from '../components/UI/RefundModal.jsx';
@@ -38,6 +43,8 @@ import CardBrandIcon from '../components/UI/CardBrandIcon.jsx';
 
 const RENTALS_PER_PAGE = 30;
 const RENTAL_QUERY_BATCH_SIZE = 50;
+const RENTAL_FILTER_MATCH_TARGET = RENTALS_PER_PAGE;
+const RENTAL_FILTER_MAX_QUERY_ROUNDS = 40;
 const FIRESTORE_IN_QUERY_LIMIT = 30;
 const RENTAL_SEARCH_DEBOUNCE_MS = 400;
 const RENTAL_SEARCH_RESULT_LIMIT = 50;
@@ -684,10 +691,6 @@ const buildRentalProcessLog = (rental, t) => {
     });
 };
 
-const hasRentalLogError = (rental) => (
-    buildRentalProcessLog(rental, key => key).some(entry => entry.status === 'error')
-);
-
 const logStatusStyles = {
     success: {
         icon: CheckCircleIcon,
@@ -1015,6 +1018,12 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
     const stationScopeChunks = useMemo(() => (
         isGlobalAdminScope ? [] : chunkValues(scopedStationIds)
     ), [isGlobalAdminScope, scopedStationIds]);
+    const stationVersionById = useMemo(() => new Map(
+        (allStationsData || []).map(station => [
+            String(station.stationid || ''),
+            isV2Kiosk(station) ? 'v2' : 'v1',
+        ])
+    ), [allStationsData]);
 
     useEffect(() => {
         const timer = window.setTimeout(() => {
@@ -1052,40 +1061,98 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
                     key: stationIds.join('|'),
                     stationIds,
                 }));
-            const snapshots = await withRentalQueryTimeout(Promise.all(scopes.map(({ key, stationIds }) => {
-                const constraints = [];
-                if (stationIds.length === 1) {
-                    constraints.push(where('rentalStationid', '==', stationIds[0]));
-                } else if (stationIds.length > 1) {
-                    constraints.push(where('rentalStationid', 'in', stationIds));
-                }
-                constraints.push(where('rentalTime', '>=', periodStart));
-                const cursor = reset ? null : periodCursorsRef.current.get(key);
-                constraints.push(orderBy('rentalTime', 'desc'));
-                if (cursor) constraints.push(startAfter(cursor));
-                constraints.push(limit(RENTAL_QUERY_BATCH_SIZE));
-                return getDocs(query(rentalsCollection, ...constraints));
-            })));
-
-            if (requestGeneration !== requestGenerationRef.current) return;
-
+            const streams = buildRentalFilterQueryStreams(activeFilters);
             const nextCursors = reset ? new Map() : new Map(periodCursorsRef.current);
-            const nextRentals = [];
-            snapshots.forEach((snapshot, index) => {
-                const scope = scopes[index];
-                const nextCursor = snapshot.docs[snapshot.docs.length - 1];
-                if (nextCursor) nextCursors.set(scope.key, nextCursor);
-                snapshot.docs.forEach(documentSnapshot => {
-                    nextRentals.push(mapRentalSnapshot(documentSnapshot));
+            const matchingRentals = new Map();
+            let queryRounds = 0;
+            let hasOpenStreams = true;
+
+            while (
+                matchingRentals.size < RENTAL_FILTER_MATCH_TARGET &&
+                hasOpenStreams &&
+                queryRounds < RENTAL_FILTER_MAX_QUERY_ROUNDS
+            ) {
+                const requests = [];
+
+                scopes.forEach(({ key: scopeKey, stationIds }) => {
+                    streams.forEach((stream) => {
+                        const cursorKey = `${scopeKey}::${stream.key}`;
+                        const cursorState = nextCursors.get(cursorKey);
+                        if (cursorState?.exhausted) return;
+
+                        const constraints = [];
+                        if (stationIds.length === 1) {
+                            constraints.push(where('rentalStationid', '==', stationIds[0]));
+                        } else if (stationIds.length > 1) {
+                            constraints.push(where('rentalStationid', 'in', stationIds));
+                        }
+                        if (stream.field) {
+                            constraints.push(where(stream.field, '==', stream.value));
+                        }
+                        constraints.push(
+                            where('rentalTime', '>=', periodStart),
+                            orderBy('rentalTime', 'desc')
+                        );
+                        if (cursorState?.cursor) {
+                            constraints.push(startAfter(cursorState.cursor));
+                        }
+                        constraints.push(limit(RENTAL_QUERY_BATCH_SIZE));
+                        requests.push({
+                            cursorKey,
+                            promise: getDocs(query(rentalsCollection, ...constraints)),
+                        });
+                    });
                 });
-            });
+
+                if (requests.length === 0) {
+                    hasOpenStreams = false;
+                    break;
+                }
+
+                const snapshots = await withRentalQueryTimeout(Promise.all(
+                    requests.map(request => request.promise)
+                ));
+                if (requestGeneration !== requestGenerationRef.current) return;
+
+                snapshots.forEach((snapshot, index) => {
+                    const { cursorKey } = requests[index];
+                    const nextCursor = snapshot.docs[snapshot.docs.length - 1] || null;
+                    nextCursors.set(cursorKey, {
+                        cursor: nextCursor,
+                        exhausted: snapshot.size < RENTAL_QUERY_BATCH_SIZE,
+                    });
+
+                    snapshot.docs.forEach((documentSnapshot) => {
+                        const rental = mapRentalSnapshot(documentSnapshot);
+                        if (!rentalMatchesActiveFilters(rental, activeFilters, {
+                            getStationVersion: item => (
+                                stationVersionById.get(String(item?.rentalStationid || '')) ||
+                                (isV2Kiosk({ stationid: item?.rentalStationid }) ? 'v2' : 'v1')
+                            ),
+                            hasLogError: rentalHasLogError,
+                        })) {
+                            return;
+                        }
+
+                        const rentalKey = rental.documentId || rental.rawid || rental.orderid;
+                        if (rentalKey) matchingRentals.set(String(rentalKey), rental);
+                    });
+                });
+
+                hasOpenStreams = scopes.some(({ key: scopeKey }) => (
+                    streams.some(stream => !nextCursors.get(`${scopeKey}::${stream.key}`)?.exhausted)
+                ));
+                queryRounds += 1;
+            }
+
             periodCursorsRef.current = nextCursors;
+            const nextRentals = Array.from(matchingRentals.values());
             setLoadedRentals(previous => (
                 reset
                     ? mergeRentalDocuments(nextRentals)
                     : mergeRentalDocuments(previous, nextRentals)
             ));
-            setHasMoreRentals(snapshots.some(snapshot => snapshot.size === RENTAL_QUERY_BATCH_SIZE));
+            setHasMoreRentals(hasOpenStreams);
             setRentalsError('');
         } catch (error) {
             if (requestGeneration !== requestGenerationRef.current) return;
@@ -1100,8 +1167,13 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
         }
     }, [
         activeFilters.period,
+        activeFilters.gateway,
+        activeFilters.returnType,
+        activeFilters.status,
+        activeFilters.version,
         canViewRentalDetails,
         isGlobalAdminScope,
+        stationVersionById,
         stationScopeChunks,
         t,
     ]);
@@ -1390,7 +1462,7 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
         } else if (activeFilters.status === 'refunded') {
             rentals = rentals.filter(isRefundedRental);
         } else if (activeFilters.status === 'error') {
-            rentals = rentals.filter(hasRentalLogError);
+            rentals = rentals.filter(rentalHasLogError);
         } else if (activeFilters.status !== 'all') {
             rentals = rentals.filter(r => normalizeRentalStatusKey(r.status) === activeFilters.status);
         }
