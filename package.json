@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "test:firestore-station-id": "node --test scripts/firestore-station-id.test.mjs",
+    "test:rental-dashboard-stats": "node --test scripts/rental-dashboard-stats.test.mjs",
     "test:kiosk-updates": "node --test scripts/kiosk-command-responses.test.mjs",
     "test:ui-resilience": "playwright test --config=playwright.resilience.config.js",
     "preview": "vite preview",

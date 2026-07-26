@@ -28,7 +28,7 @@ import ErrorBoundary from './components/ErrorBoundary.jsx';
 // 🔥 firebase-config must export BOTH db and auth
 import { db, auth } from './firebase-config';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, getDoc, collection, onSnapshot, query, where } from 'firebase/firestore';
+import { doc, documentId, getDoc, collection, onSnapshot, query, where } from 'firebase/firestore';
 
 const AdminPage = lazy(() => import('./pages/AdminPage.jsx'));
 const KioskEditorPage = lazy(() => import('./pages/KioskEditorPage.jsx'));
@@ -259,6 +259,7 @@ const EJECT_SLOT_TIMEOUT_MS = Number.isFinite(EJECT_SLOT_TIMEOUT_MS_CONFIG) && E
   : DEFAULT_EJECT_SLOT_TIMEOUT_MS;
 const EJECT_TIMEOUT_CHECK_INTERVAL_MS = 1000;
 const FIRESTORE_IN_QUERY_LIMIT = 30;
+const RAW_RENTAL_PAGES = new Set(['chargers', 'analytics', 'testing']);
 const ADMIN_RENTAL_SCOPE = Object.freeze({
   ready: true,
   scopeType: 'all',
@@ -652,6 +653,22 @@ function RouteLoadingState() {
   );
 }
 
+function useDesktopOnlyViewport() {
+  const [isDesktop, setIsDesktop] = useState(() => (
+    typeof window === 'undefined' || window.matchMedia('(min-width: 640px)').matches
+  ));
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(min-width: 640px)');
+    const handleChange = (event) => setIsDesktop(event.matches);
+    setIsDesktop(mediaQuery.matches);
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, []);
+
+  return isDesktop;
+}
+
 function normalizeNavigationSearch(value = '') {
   if (value == null) return '';
   if (typeof value === 'string') return value;
@@ -671,10 +688,12 @@ function App() {
   const [page, setPage] = useState('dashboard'); // 'dashboard', 'admin', 'media', 'binding', 'templates', 'kiosk-editor', 'rentals', 'chargers', 'provision', 'reporting', 'analytics', 'testing'
   const [dashboardSearchTerm, setDashboardSearchTerm] = useState('');
   const [chargerSearchTerm, setChargerSearchTerm] = useState('');
-  const [rentalsInitialPeriod, setRentalsInitialPeriod] = useState('today');
+  const [rentalsInitialPeriod, setRentalsInitialPeriod] = useState('7days');
   const [rentalsInitialStationIds, setRentalsInitialStationIds] = useState([]);
   const [rentalsInitialSearch, setRentalsInitialSearch] = useState('');
   const [rentalData, setRentalData] = useState([]);
+  const [rentalDashboardStatsByStationId, setRentalDashboardStatsByStationId] = useState(() => new Map());
+  const [rentalDashboardMetaReady, setRentalDashboardMetaReady] = useState(false);
   const [commandStatus, setCommandStatus] = useState(null);
   const [firestoreError, setFirestoreError] = useState(null);
   const [initialStatusCheck, setInitialStatusCheck] = useState(false);
@@ -708,6 +727,20 @@ function App() {
     scopeType: 'pending',
     stationIds: [],
   });
+  const isDesktopOnlyViewport = useDesktopOnlyViewport();
+  const canViewRentalDetails = Boolean(
+    clientInfo?.isAdmin || clientInfo?.features?.rentals === true
+  );
+  const canViewRentalSummaries = Boolean(
+    canViewRentalDetails ||
+    clientInfo?.features?.lease_revenue === true ||
+    clientInfo?.features?.rental_counts === true ||
+    clientInfo?.features?.rental_revenue === true ||
+    clientInfo?.features?.client_commission === true ||
+    clientInfo?.features?.rep_commission === true
+  );
+  const useRentalDashboardSummaries = canViewRentalSummaries && rentalDashboardMetaReady;
+  const shouldLoadRawRentals = canViewRentalDetails && RAW_RENTAL_PAGES.has(page);
 
   useEffect(() => {
     allStationsDataRef.current = allStationsData;
@@ -851,9 +884,10 @@ function App() {
   }, [handleStay]);
 
   const onNavigateToAnalytics = useCallback((initialData = null) => {
+    if (!isDesktopOnlyViewport) return;
     setAnalyticsInitialData(initialData);
     setPage('analytics');
-  }, []);
+  }, [isDesktopOnlyViewport]);
 
   // ✅ Prevent multiple push subscriptions across re-renders
   const subscribedRef = useRef(false);
@@ -885,6 +919,8 @@ function App() {
         setInitialStatusCheck(false);
         setAllStationsData([]);
         setRentalData([]);
+        setRentalDashboardStatsByStationId(new Map());
+        setRentalDashboardMetaReady(false);
         setKiosksReady(false);
         cancelDeferredAdminRentalLoad();
         setAdminRentalsReady(false);
@@ -990,7 +1026,24 @@ function App() {
     const checkTokenOnFocus = async () => {
       const currentToken = localStorage.getItem('dashboardToken');
       if (!currentToken) {
-        await handleLogout();
+        const currentUser = auth.currentUser;
+        if (!currentUser) {
+          console.info('Deferring token recovery until Firebase Auth restores the session.');
+          return;
+        }
+
+        try {
+          const recoveredToken = await currentUser.getIdToken(false);
+          localStorage.setItem('dashboardToken', recoveredToken);
+          setToken(recoveredToken);
+        } catch (error) {
+          if (isTransientAuthRefreshError(error)) {
+            console.warn('Auth token recovery failed, keeping the Firebase session for retry:', error);
+            return;
+          }
+
+          await handleLogout();
+        }
         return;
       }
 
@@ -1010,7 +1063,7 @@ function App() {
       refreshInFlight = true;
       try {
         if (!auth.currentUser) {
-          await handleLogout();
+          console.info('Deferring token refresh until Firebase Auth restores the session.');
           return;
         }
 
@@ -1223,7 +1276,105 @@ function App() {
   ]);
 
   useEffect(() => {
+    if (!canViewRentalSummaries || !hasAuthToken || !auth.currentUser || !listenerClientInfo) {
+      setRentalDashboardMetaReady(false);
+      setRentalDashboardStatsByStationId(new Map());
+      return undefined;
+    }
+
+    return onSnapshot(doc(db, 'rentalDashboardMeta', 'current'), (snapshot) => {
+      const ready = snapshot.exists() && snapshot.data()?.ready === true;
+      setRentalDashboardMetaReady(ready);
+      console.info(
+        ready
+          ? '[RentalDashboard] Compact summary mode is ready.'
+          : '[RentalDashboard] Metadata checked; using the bounded raw fallback.'
+      );
+      if (!ready) setRentalDashboardStatsByStationId(new Map());
+    }, (error) => {
+      console.warn('Unable to refresh rental dashboard metadata; keeping the last known data path.', error);
+    });
+  }, [canViewRentalSummaries, hasAuthToken, listenerClientInfo]);
+
+  useEffect(() => {
+    if (!canViewRentalSummaries || !useRentalDashboardSummaries || !hasAuthToken || !auth.currentUser || !listenerClientInfo) {
+      return undefined;
+    }
+
+    const scopeReady = listenerIsAdmin ? kiosksReady : rentalScope.ready;
+    if (!scopeReady) return undefined;
+
+    const summaryCollectionRef = collection(db, 'rentalDashboardStats');
+    const scopedStationIds = listenerIsAdmin ? [] : rentalScope.stationIds;
+    if (!listenerIsAdmin && scopedStationIds.length === 0) {
+      setRentalDashboardStatsByStationId(new Map());
+      return undefined;
+    }
+
+    const summaryQuerySpecs = listenerIsAdmin
+      ? [{ key: 'all', queryRef: summaryCollectionRef }]
+      : chunkValues(scopedStationIds).map((stationIdChunk) => ({
+          key: stationIdChunk.join('|'),
+          queryRef: query(summaryCollectionRef, where(documentId(), 'in', stationIdChunk)),
+        }));
+    const summariesByQuery = new Map();
+    let publishTimer = null;
+
+    const publishSummaries = () => {
+      publishTimer = null;
+      const combined = new Map();
+      summariesByQuery.forEach((summaryMap) => {
+        summaryMap.forEach((summary, stationId) => combined.set(stationId, summary));
+      });
+      setRentalDashboardStatsByStationId(combined);
+    };
+
+    const unsubscribeSummaries = summaryQuerySpecs.map(({ key, queryRef }) => (
+      onSnapshot(queryRef, (snapshot) => {
+        const summaryMap = summariesByQuery.get(key) || new Map();
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === 'removed') {
+            summaryMap.delete(change.doc.id);
+          } else {
+            summaryMap.set(change.doc.id, {
+              stationid: change.doc.id,
+              ...change.doc.data(),
+            });
+          }
+        });
+        summariesByQuery.set(key, summaryMap);
+
+        if (summariesByQuery.size !== summaryQuerySpecs.length) return;
+        if (publishTimer) clearTimeout(publishTimer);
+        publishTimer = setTimeout(publishSummaries, 50);
+      }, (error) => {
+        console.warn('Unable to refresh rental dashboard summaries; keeping the last good summary.', error);
+        setFirestoreError('Failed to refresh rental statistics. The dashboard may be out of date.');
+      })
+    ));
+
+    return () => {
+      if (publishTimer) clearTimeout(publishTimer);
+      unsubscribeSummaries.forEach((unsubscribe) => unsubscribe());
+    };
+  }, [
+    canViewRentalSummaries,
+    hasAuthToken,
+    kiosksReady,
+    listenerClientInfo,
+    listenerIsAdmin,
+    rentalScope.ready,
+    rentalScope.stationIds,
+    useRentalDashboardSummaries,
+  ]);
+
+  useEffect(() => {
     if (!hasAuthToken || !auth.currentUser || !listenerClientInfo) return;
+    if (!shouldLoadRawRentals) {
+      setRentalData([]);
+      startupListenerRef.current.rentalsLogged = true;
+      return undefined;
+    }
     if (!effectiveRentalScope.ready) return;
 
     const thirtyDaysAgo = new Date();
@@ -1335,6 +1486,7 @@ function App() {
     hasAuthToken,
     listenerClientInfo,
     listenerIsAdmin,
+    shouldLoadRawRentals,
   ]);
 
   // Failsafe Effect: Cleans up lingering UI effects when Firestore data confirms the state.
@@ -2317,11 +2469,12 @@ function App() {
       onNavigateToAdmin={() => setPage('admin')}
       onNavigateToAiBooths={() => setPage('ai-booths')}
       onNavigateToBinding={() => setPage('binding')}
-      onNavigateToRentals={(selection = 'today') => {
+      onNavigateToRentals={(selection = '7days') => {
+        if (!canViewRentalDetails) return;
         const period = typeof selection === 'string' ? selection : selection?.period;
         const stationIds = Array.isArray(selection?.stationIds) ? selection.stationIds : [];
         const searchTerm = typeof selection?.searchTerm === 'string' ? selection.searchTerm : '';
-        setRentalsInitialPeriod(['today', '7days', '30days'].includes(period) ? period : 'today');
+        setRentalsInitialPeriod(['today', '7days', '30days'].includes(period) ? period : '7days');
         setRentalsInitialStationIds(stationIds);
         setRentalsInitialSearch(searchTerm);
         setPage('rentals');
@@ -2331,12 +2484,16 @@ function App() {
         setPage('chargers');
       }}
       initialSearch={dashboardSearchTerm}
-      onNavigateToReporting={() => setPage('reporting')}
+      onNavigateToReporting={() => {
+        if (isDesktopOnlyViewport) setPage('reporting');
+      }}
       onNavigateToTesting={() => setPage('testing')}
       onNavigateToUiProfiles={() => setPage('ui-profiles')}
       onNavigateToAnalytics={onNavigateToAnalytics}
       onNavigateToKioskEditor={() => setPage('kiosk-editor')}
       rentalData={rentalData}
+      rentalDashboardStatsByStationId={rentalDashboardStatsByStationId}
+      useRentalDashboardSummaries={useRentalDashboardSummaries}
       allStationsData={dedupedStationsData}
       setAllStationsData={setAllStationsData}
       ngrokModalOpen={ngrokModalOpen}
@@ -2516,6 +2673,7 @@ function App() {
           />
         );
       case 'rentals':
+        if (!canViewRentalDetails) return dashboard;
         return (
           <RentalsPage
             onNavigateToProvisionPage={() => setPage('provision')}
@@ -2528,7 +2686,6 @@ function App() {
               setPage('chargers');
             }}
             clientInfo={clientInfo}
-            rentalData={rentalData}
             allStationsData={dedupedStationsData}
             t={t}
             language={language}
@@ -2564,7 +2721,7 @@ function App() {
           />
         );
       case 'reporting':
-        if (!hasReportingAccess) {
+        if (!hasReportingAccess || !isDesktopOnlyViewport) {
           return dashboard;
         }
 
@@ -2574,13 +2731,17 @@ function App() {
             onNavigateToAnalytics={onNavigateToAnalytics}
             onLogout={handleLogout}
             t={t}
-            rentalData={rentalData}
+            rentalData={[]}
             allStationsData={dedupedStationsData}
             clientInfo={clientInfo}
             userMode={isRegularReportingUser}
           />
         );
       case 'analytics':
+        if (!isDesktopOnlyViewport) {
+          return dashboard;
+        }
+
         return (
           <AnalyticsPage
             allStationsData={dedupedStationsData}

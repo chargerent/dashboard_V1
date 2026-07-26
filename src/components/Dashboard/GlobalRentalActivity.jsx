@@ -3,11 +3,12 @@
 import { memo } from 'react';
 import RentalStats from './RentalStats';
 
-function GlobalRentalActivity({ rentalData, clientInfo, referenceTime, activeFilters, t, onShowRentalDetails, leaseRevenue }) {
+function GlobalRentalActivity({ rentalData, dashboardStats, clientInfo, referenceTime, activeFilters, t, onShowRentalDetails, leaseRevenue }) {
     return (
         <div className="bg-white p-4 rounded-lg shadow-md mb-8">
             <RentalStats 
                 rentalData={rentalData}
+                dashboardStats={dashboardStats}
                 clientInfo={clientInfo} 
                 referenceTime={referenceTime}
                 leaseRevenue={leaseRevenue}

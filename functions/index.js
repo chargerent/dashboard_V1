@@ -1,10 +1,16 @@
 /* eslint-env node */
 const {onCall, onRequest, HttpsError} = require("firebase-functions/v2/https");
 const {onSchedule} = require("firebase-functions/v2/scheduler");
+const {onDocumentWritten} = require("firebase-functions/v2/firestore");
 const {defineSecret} = require("firebase-functions/params");
 const crypto = require("node:crypto");
 const admin = require("firebase-admin");
 const {rbcOpenApi} = require("./rbcOpenRouting/api");
+const {
+  applyRentalProjection,
+  buildRentalProjection,
+  projectionsEqual,
+} = require("./rentalDashboardStats");
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -9242,6 +9248,123 @@ exports.payouts_scheduledMonthlyReports = onSchedule({
 }, async () => {
   await generatePayoutReportsImpl({}, {uid: "scheduler", profile: {username: "scheduler"}});
 });
+
+exports.rentals_updateDashboardStats = onDocumentWritten(
+    "rentals/{rentalId}",
+    async (event) => {
+      const eventDocumentId = crypto.createHash("sha256").update(event.id).digest("hex");
+      const eventRef = db.collection("rentalDashboardEvents").doc(eventDocumentId);
+      const metaRef = db.collection("rentalDashboardMeta").doc("current");
+      const previousProjection = event.data.before.exists ?
+        buildRentalProjection(event.data.before.data()) :
+        null;
+      const desiredProjection = event.data.after.exists ?
+        buildRentalProjection(event.data.after.data()) :
+        null;
+      const sourceChangeTime = event.data.after.exists ?
+        event.data.after.updateTime :
+        admin.firestore.Timestamp.fromDate(new Date(event.time));
+
+      await db.runTransaction(async (transaction) => {
+        const [metaSnapshot, eventSnapshot] = await Promise.all([
+          transaction.get(metaRef),
+          transaction.get(eventRef),
+        ]);
+        const meta = metaSnapshot.exists ? metaSnapshot.data() : {};
+        const storedEvent = eventSnapshot.exists ? eventSnapshot.data() : null;
+        const eventIsPending = storedEvent?.applyState === "pending";
+        if (eventSnapshot.exists && (!eventIsPending || meta.ready !== true)) return;
+
+        const eventPreviousProjection = storedEvent ?
+          storedEvent.previousProjection :
+          previousProjection;
+        const eventDesiredProjection = storedEvent ?
+          storedEvent.desiredProjection :
+          desiredProjection;
+        const eventSourceChangeTime = storedEvent?.sourceChangeTime || sourceChangeTime;
+        const sourceReadTime = meta.sourceReadTime;
+        const shouldApplyToSummary = meta.ready === true && (
+          !sourceReadTime ||
+          !eventSourceChangeTime ||
+          eventSourceChangeTime.toMillis() > sourceReadTime.toMillis()
+        );
+
+        const stationIds = Array.from(new Set([
+          eventPreviousProjection?.stationid,
+          eventDesiredProjection?.stationid,
+        ].filter(Boolean)));
+        const summaryRefs = stationIds.map((stationId) => (
+          db.collection("rentalDashboardStats").doc(stationId)
+        ));
+        const summarySnapshots = shouldApplyToSummary ?
+          await Promise.all(
+              summaryRefs.map((summaryRef) => transaction.get(summaryRef)),
+          ) :
+          [];
+        const summariesByStationId = new Map(
+            summarySnapshots.map((snapshot, index) => [
+              stationIds[index],
+              snapshot.exists ? snapshot.data() : null,
+            ]),
+        );
+
+        if (
+          shouldApplyToSummary &&
+          eventPreviousProjection &&
+          !projectionsEqual(eventPreviousProjection, eventDesiredProjection)
+        ) {
+          summariesByStationId.set(
+              eventPreviousProjection.stationid,
+              applyRentalProjection(
+                  summariesByStationId.get(eventPreviousProjection.stationid),
+                  eventPreviousProjection,
+                  -1,
+              ),
+          );
+        }
+
+        if (
+          shouldApplyToSummary &&
+          eventDesiredProjection &&
+          !projectionsEqual(eventPreviousProjection, eventDesiredProjection)
+        ) {
+          summariesByStationId.set(
+              eventDesiredProjection.stationid,
+              applyRentalProjection(
+                  summariesByStationId.get(eventDesiredProjection.stationid),
+                  eventDesiredProjection,
+                  1,
+              ),
+          );
+        }
+
+        summariesByStationId.forEach((summary, stationId) => {
+          transaction.set(
+              db.collection("rentalDashboardStats").doc(stationId),
+              {
+                ...summary,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              },
+          );
+        });
+
+        transaction.set(eventRef, eventSnapshot.exists ? {
+          applyState: "applied",
+          appliedAt: admin.firestore.FieldValue.serverTimestamp(),
+        } : {
+          eventId: event.id,
+          rentalId: event.params.rentalId,
+          generation: meta.generation || null,
+          previousProjection,
+          desiredProjection,
+          sourceChangeTime,
+          applyState: meta.ready === true ? "applied" : "pending",
+          processedAt: admin.firestore.FieldValue.serverTimestamp(),
+          expireAt: admin.firestore.Timestamp.fromMillis(Date.now() + (90 * 24 * 60 * 60 * 1000)),
+        }, {merge: eventSnapshot.exists});
+      });
+    },
+);
 
 exports.uiProfile_list = functions.https.onCall(async (data, context) => {
   const authState = await assertCanManageUiProfilesFromContext(context);

@@ -2,6 +2,7 @@
 
 import { memo, useCallback, useMemo } from 'react';
 import { getKioskInfoAddress, getKioskPowerThreshold, isKioskOnline } from '../../utils/helpers';
+import { aggregateRentalDashboardStats } from '../../utils/rentalDashboardStats';
 import RentalStats from './RentalStats';
 
 // Helper component for progress bars
@@ -60,7 +61,7 @@ const CommissionStats = ({ clientInfo, accountMTD, accountYTD, repMTD, repYTD, s
     );
 };
 
-function LocationSummary({ location, kiosks, _chargerThreshold, clientInfo, rentalData, referenceTime, t, onNavigateToRentals }) {
+function LocationSummary({ location, kiosks, _chargerThreshold, clientInfo, rentalData, rentalDashboardStatsByStationId, useRentalDashboardSummaries = false, referenceTime, t, onNavigateToRentals }) {
     const clientRevShare = useMemo(() => {
         const value = Number(clientInfo?.revShare ?? clientInfo?.commission);
         return Number.isFinite(value) ? value : 0;
@@ -84,6 +85,14 @@ function LocationSummary({ location, kiosks, _chargerThreshold, clientInfo, rent
         });
         
         const stationIdsInLocation = new Set(kiosks.map(k => k.stationid));
+        const locationRentalDashboardTotals = useRentalDashboardSummaries
+            ? aggregateRentalDashboardStats(
+                rentalDashboardStatsByStationId,
+                [...stationIdsInLocation],
+                referenceTime,
+                currencySymbol
+            )
+            : null;
         const now = new Date(referenceTime.endsWith('Z') ? referenceTime : referenceTime + 'Z');
         const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
         const yearStart = new Date(now.getFullYear(), 0, 1);
@@ -94,10 +103,10 @@ function LocationSummary({ location, kiosks, _chargerThreshold, clientInfo, rent
         const locationRentals = [];
         const mtdRevenueByStation = new Map();
         const ytdRevenueByStation = new Map();
-        let rentedChargers = 0;
-        let missingChargers = 0;
+        let rentedChargers = locationRentalDashboardTotals?.statusCounts?.rented || 0;
+        let missingChargers = locationRentalDashboardTotals?.statusCounts?.lost || 0;
 
-        (rentalData || []).forEach((rental) => {
+        if (!useRentalDashboardSummaries) (rentalData || []).forEach((rental) => {
             if (!stationIdsInLocation.has(rental.rentalStationid)) return;
             if (!clientInfo.isAdmin) {
                 const belongsToClient = clientInfo.role === 'partner'
@@ -124,6 +133,19 @@ function LocationSummary({ location, kiosks, _chargerThreshold, clientInfo, rent
                 mtdRevenueByStation.set(stationid, (mtdRevenueByStation.get(stationid) || 0) + revenue);
             }
         });
+
+        if (useRentalDashboardSummaries) {
+            kiosks.forEach((kiosk) => {
+                const stationTotals = aggregateRentalDashboardStats(
+                    rentalDashboardStatsByStationId,
+                    [kiosk.stationid],
+                    referenceTime,
+                    kiosk.pricing?.symbol || currencySymbol
+                );
+                mtdRevenueByStation.set(kiosk.stationid, stationTotals.monthToDate.revenue);
+                ytdRevenueByStation.set(kiosk.stationid, stationTotals.yearToDate.revenue);
+            });
+        }
 
         let accountCommissionMTD = 0;
         let repCommissionMTD = 0;
@@ -170,8 +192,8 @@ function LocationSummary({ location, kiosks, _chargerThreshold, clientInfo, rent
             return sum;
         }, 0);
 
-        return { onlineKiosks, totalChargers, fullChargers, rentedChargers, missingChargers, addressInfo, locationRentals, accountCommissionMTD, repCommissionMTD, accountCommissionYTD, repCommissionYTD, totalLeaseRevenue, currencySymbol, repLeaseCommission };
-    }, [kiosks, rentalData, referenceTime, clientInfo, clientRevShare]);
+        return { onlineKiosks, totalChargers, fullChargers, rentedChargers, missingChargers, addressInfo, locationRentals, rentalDashboardTotals: locationRentalDashboardTotals, accountCommissionMTD, repCommissionMTD, accountCommissionYTD, repCommissionYTD, totalLeaseRevenue, currencySymbol, repLeaseCommission };
+    }, [clientInfo, clientRevShare, kiosks, referenceTime, rentalDashboardStatsByStationId, rentalData, useRentalDashboardSummaries]);
 
     const kioskOnlinePercent = kiosks.length > 0 ? (summary.onlineKiosks / kiosks.length) * 100 : 0;
     const kioskStatusColor = summary.onlineKiosks === kiosks.length ? '#22c55e' : '#ef4444';
@@ -188,6 +210,7 @@ function LocationSummary({ location, kiosks, _chargerThreshold, clientInfo, rent
     }, [chargerFullPercent]);
     
     const canShowRentalInfo = clientInfo.features.rentals || clientInfo.features.lease_revenue || clientInfo.features.rental_counts || clientInfo.features.rental_revenue;
+    const canViewRentalDetails = clientInfo.isAdmin || clientInfo.features.rentals;
     const stationIds = useMemo(() => kiosks.map(kiosk => kiosk.stationid), [kiosks]);
     const handleShowRentalDetails = useCallback((period) => {
         onNavigateToRentals?.({ period, stationIds });
@@ -239,13 +262,14 @@ function LocationSummary({ location, kiosks, _chargerThreshold, clientInfo, rent
                     <div className="md:col-span-1">
                         <RentalStats 
                             rentalData={summary.locationRentals} 
+                            dashboardStats={summary.rentalDashboardTotals}
                             clientInfo={clientInfo} 
                             referenceTime={referenceTime}
                             leaseRevenue={summary.totalLeaseRevenue}
                             repLeaseCommission={summary.repLeaseCommission}
                             kiosks={kiosks}
                             t={t}
-                            onShowRentalDetails={handleShowRentalDetails}
+                            onShowRentalDetails={canViewRentalDetails ? handleShowRentalDetails : undefined}
                         />
                     </div>
                     {(showAccountCommission || showRepCommission) && (

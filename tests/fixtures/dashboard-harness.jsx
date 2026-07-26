@@ -145,9 +145,54 @@ const makeRentals = (stations) => {
   });
 };
 
+const makeRentalDashboardStats = (rentals) => {
+  const statsByStationId = new Map();
+
+  rentals.forEach((rental) => {
+    const stationStats = statsByStationId.get(rental.rentalStationid) || {
+      days: {},
+    };
+    const dayKey = rental.rentalTime.slice(0, 10);
+    const dayStats = stationStats.days[dayKey] || {
+      count: 0,
+      revenue: 0,
+      initialCharge: 0,
+      rented: 0,
+      lost: 0,
+    };
+    dayStats.count += 1;
+    dayStats.revenue += Number(rental.totalCharged) || 0;
+    dayStats.initialCharge += Number(rental.initialCharge) || 0;
+    stationStats.days[dayKey] = dayStats;
+    if (rental.status === 'rented' || rental.status === 'lost') {
+      dayStats[rental.status] += 1;
+    }
+    statsByStationId.set(rental.rentalStationid, stationStats);
+  });
+
+  return statsByStationId;
+};
+
 function DashboardHarness() {
+  const queryParameters = new URLSearchParams(window.location.search);
+  const noRentalDetails = queryParameters.get('noRentalDetails') === '1';
   const seedStations = useMemo(() => makeStations(), []);
   const rentals = useMemo(() => makeRentals(seedStations), [seedStations]);
+  const rentalDashboardStats = useMemo(() => makeRentalDashboardStats(rentals), [rentals]);
+  const useRentalDashboardSummaries = queryParameters.get('rentalSummaries') === '1';
+  const effectiveClientInfo = useMemo(() => {
+    if (!noRentalDetails) return clientInfo;
+    return {
+      ...clientInfo,
+      isAdmin: false,
+      role: 'client',
+      username: 'summary-only-client',
+      features: {
+        ...clientInfo.features,
+        rentals: false,
+      },
+    };
+  }, [noRentalDetails]);
   const [stations, setStations] = useState(seedStations);
   const [kiosksReady, setKiosksReady] = useState(true);
   const [ngrokModalOpen, setNgrokModalOpen] = useState(false);
@@ -223,7 +268,7 @@ function DashboardHarness() {
     <Profiler id="dashboard-resilience" onRender={recordRender}>
       <DashboardPage
         onLogout={() => {}}
-        clientInfo={clientInfo}
+        clientInfo={effectiveClientInfo}
         t={t}
         language="en"
         setLanguage={() => {}}
@@ -234,7 +279,9 @@ function DashboardHarness() {
         onNavigateToChargers={() => {}}
         onNavigateToReporting={() => {}}
         onNavigateToTesting={() => {}}
-        rentalData={rentals}
+        rentalData={useRentalDashboardSummaries ? [] : rentals}
+        rentalDashboardStatsByStationId={rentalDashboardStats}
+        useRentalDashboardSummaries={useRentalDashboardSummaries}
         allStationsData={stations}
         onCommand={() => {}}
         commandStatus={commandStatus}

@@ -19,6 +19,20 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "rentalStationid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "rentalTime",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "rentals",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
           "fieldPath": "stationid",
           "order": "ASCENDING"
         },

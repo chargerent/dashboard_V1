@@ -21,6 +21,26 @@ test('fixture loads the real dashboard without authentication or backend command
   await expect(page.locator('[data-kiosk-control-panel="true"]')).toHaveCount(0);
 });
 
+test('desktop-only reporting and analytics controls are absent on mobile', async ({ page }) => {
+  await expect(page.getByTitle('Reporting')).toHaveCount(0);
+  await expect(page.getByTitle('Station Analytics')).toHaveCount(0);
+});
+
+test('compact rental summaries preserve dashboard activity cards', async ({ page }) => {
+  await page.goto(`${HARNESS_URL}?rentalSummaries=1`);
+  await expect(page.getByRole('heading', { name: 'RESILIENCE TEST LOCATION 1' })).toBeVisible();
+  await expect(page.getByText('Rental Activity').first()).toBeVisible();
+  await expect(page.getByText('30 Days').first()).toBeVisible();
+});
+
+test('summary-only clients cannot open rental details', async ({ page }) => {
+  await page.goto(`${HARNESS_URL}?rentalSummaries=1&noRentalDetails=1`);
+  await expect(page.getByRole('heading', { name: 'RESILIENCE TEST LOCATION 1' })).toBeVisible();
+  await expect(page.getByText('Rental Activity').first()).toBeVisible();
+  await expect(page.getByTitle('Rentals')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /Today/ }).first()).toBeDisabled();
+});
+
 test('rendering performance stays within the mobile DOM and commit budgets', async ({ page }, testInfo) => {
   const baseline = await page.evaluate(() => ({
     buttons: document.querySelectorAll('button').length,
@@ -135,4 +155,8 @@ test('@desktop kiosk detail controls preserve the desktop scroll position', asyn
   await expect(page.getByRole('heading', { name: 'Confirm Action' })).toHaveCount(0);
   const scrollAfterCancel = await page.evaluate(() => window.scrollY);
   expect(Math.abs(scrollAfterCancel - scrollBefore)).toBeLessThanOrEqual(2);
+});
+
+test('@desktop reporting remains available', async ({ page }) => {
+  await expect(page.getByTitle('Reporting')).toBeVisible();
 });

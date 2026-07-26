@@ -17,11 +17,11 @@ import { filterStationsForClient, isKioskOnline, isKioskActive, isModuleOnline, 
 import GlobalRentalActivity from '../components/Dashboard/GlobalRentalActivity';
 import LocationSummary from '../components/Dashboard/LocationSummary';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
-import RentalDetailView from '../components/Dashboard/RentalDetailView';
 import { CheckCircleIcon, CpuChipIcon, ExclamationTriangleIcon, QrCodeIcon, SparklesIcon } from '@heroicons/react/24/outline';
 import useKioskCommandFlow from '../hooks/useKioskCommandFlow';
 import { db } from '../firebase-config';
 import { callFunctionWithAuth } from '../utils/callableRequest';
+import { aggregateRentalDashboardStats } from '../utils/rentalDashboardStats';
 import { VERSION as DASHBOARD_VERSION } from '../version';
 
 const EMPTY_RENTALS = Object.freeze([]);
@@ -130,7 +130,7 @@ const buildStationStatusIssues = (kiosk, referenceTime) => {
     return issues;
 };
 
-export default function DashboardPage({ _token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToAiBooths, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToReporting, onNavigateToTesting, rentalData, allStationsData, _setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, _setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, _ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, _setNgrokInfo, manageIgnoredKiosk, kiosksReady, initialSearch = '', sessionWarningOpen = false, sessionCountdown = 60, onStayLoggedIn }) {
+export default function DashboardPage({ _token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToAiBooths, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToReporting, onNavigateToTesting, rentalData, rentalDashboardStatsByStationId, useRentalDashboardSummaries = false, allStationsData, _setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, _setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, _ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, _setNgrokInfo, manageIgnoredKiosk, kiosksReady, initialSearch = '', sessionWarningOpen = false, sessionCountdown = 60, onStayLoggedIn }) {
     const [loading, setLoading] = useState(!kiosksReady);
     const [error] = useState(null);
     const [expandedKioskId, setExpandedKioskId] = useState(null);
@@ -144,7 +144,6 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm);
     const ITEMS_PER_PAGE = 12;
     const [showInitialStatus, setShowInitialStatus] = useState(false);
-    const [rentalDetailView, setRentalDetailView] = useState(null); // { kioskId, period }
     const [showSoldOutModal, setShowSoldOutModal] = useState(false);
     const [statusFocusedKioskId, setStatusFocusedKioskId] = useState('');
     const [firmwareUpdateDetails, setFirmwareUpdateDetails] = useState(null);
@@ -270,14 +269,12 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     }, [initialSearch]);
     const handleToggleDetails = useCallback((stationid) => {
         setEditingKioskId(null); 
-        setRentalDetailView(null);
         setExpandedKioskId(prevId => (prevId === stationid ? null : stationid));
     }, []);
 
     const handleToggleEditMode = useCallback((stationid) => {
         setExpandedKioskId(null);
         setEditingKioskId(prevId => (prevId === stationid ? null : stationid));
-        setRentalDetailView(null);
     }, []);
 
     // Effect to manage ignoring kiosk updates while editing
@@ -293,14 +290,11 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     }, [editingKioskId, manageIgnoredKiosk]);
 
     const handleShowRentalDetails = useCallback((kioskId, period) => {
+        if (!clientInfo?.isAdmin && clientInfo?.features?.rentals !== true) return;
         setExpandedKioskId(null);
         setEditingKioskId(null);
-        setRentalDetailView(prev => {
-            // If it's the same kiosk and period, close it. Otherwise, open the new one.
-            if (prev && prev.kioskId === kioskId && prev.period === period) return null;
-            return { kioskId, period };
-        });
-    }, []);
+        onNavigateToRentals({ period, stationIds: [kioskId] });
+    }, [clientInfo?.features?.rentals, clientInfo?.isAdmin, onNavigateToRentals]);
 
     const clientStations = useMemo(() => {
         return filterStationsForClient(visibleStationsData, clientInfo);
@@ -616,13 +610,14 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     ), [stationInfoSignature]);
 
     const enrichedRentalData = useMemo(() => {
+        if (useRentalDashboardSummaries) return EMPTY_RENTALS;
         const enriched = (rentalData || []).map(rental => ({
             ...rental,
             clientId: stationInfoForEnrichment.get(rental.rentalStationid)?.client || rental.clientId,
             repId: stationInfoForEnrichment.get(rental.rentalStationid)?.rep || rental.repId,
         }));
         return enriched;
-    }, [rentalData, stationInfoForEnrichment]);
+    }, [rentalData, stationInfoForEnrichment, useRentalDashboardSummaries]);
 
     const rentalsByStationId = useMemo(() => {
         const groupedRentals = new Map();
@@ -645,16 +640,42 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
         filteredKiosksForGlobalStats.map(kiosk => kiosk.stationid).join('\u001f')
     ), [filteredKiosksForGlobalStats]);
     const filteredRentalDataForGlobalStats = useMemo(() => (
-        filteredStationIdsKey
+        !useRentalDashboardSummaries && filteredStationIdsKey
             ? filteredStationIdsKey.split('\u001f').flatMap(stationid => rentalsByStationId.get(stationid) || EMPTY_RENTALS)
             : EMPTY_RENTALS
-    ), [filteredStationIdsKey, rentalsByStationId]);
+    ), [filteredStationIdsKey, rentalsByStationId, useRentalDashboardSummaries]);
     const rentalsByLocation = useMemo(() => new Map(
         filteredLocations.map(([location, kiosks]) => [
             location,
-            kiosks.flatMap(kiosk => rentalsByStationId.get(kiosk.stationid) || EMPTY_RENTALS),
+            useRentalDashboardSummaries
+                ? EMPTY_RENTALS
+                : kiosks.flatMap(kiosk => rentalsByStationId.get(kiosk.stationid) || EMPTY_RENTALS),
         ])
-    ), [filteredLocations, rentalsByStationId]);
+    ), [filteredLocations, rentalsByStationId, useRentalDashboardSummaries]);
+    const globalRentalSymbol = useMemo(() => {
+        const symbols = new Set(
+            filteredKiosksForGlobalStats
+                .map(kiosk => String(kiosk.pricing?.symbol || '').trim())
+                .filter(Boolean)
+        );
+        return symbols.size === 1 ? [...symbols][0] : '';
+    }, [filteredKiosksForGlobalStats]);
+    const globalRentalDashboardTotals = useMemo(() => (
+        useRentalDashboardSummaries
+            ? aggregateRentalDashboardStats(
+                rentalDashboardStatsByStationId,
+                filteredKiosksForGlobalStats.map(kiosk => kiosk.stationid),
+                latestTimestamp,
+                globalRentalSymbol
+            )
+            : null
+    ), [
+        filteredKiosksForGlobalStats,
+        globalRentalSymbol,
+        latestTimestamp,
+        rentalDashboardStatsByStationId,
+        useRentalDashboardSummaries,
+    ]);
 
     const statusKiosksByCountry = useMemo(() => {
         return stationStatusRows.reduce((acc, row) => {
@@ -762,8 +783,8 @@ return (
                             </button>
                         </>
                     )}
-                    {hasReportingAccess && (
-                        <button onClick={onNavigateToReporting} className="hidden sm:inline-flex items-center justify-center p-2 rounded-md bg-indigo-100 text-indigo-700 hover:bg-indigo-200" title={t('reporting_page_title')}>
+                    {hasReportingAccess && !isCompactDashboard && (
+                        <button onClick={onNavigateToReporting} className="inline-flex items-center justify-center p-2 rounded-md bg-indigo-100 text-indigo-700 hover:bg-indigo-200" title={t('reporting_page_title')}>
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                             </svg>
@@ -833,6 +854,7 @@ return (
                         {(clientInfo.features.rentals || isAdminUser) && (
                             <GlobalRentalActivity
                                 rentalData={filteredRentalDataForGlobalStats}
+                                dashboardStats={globalRentalDashboardTotals}
                                 clientInfo={clientInfo}
                                 referenceTime={latestTimestamp}
                                 onShowRentalDetails={onNavigateToRentals}
@@ -872,6 +894,8 @@ return (
                                             chargerThreshold={0.25} 
                                             clientInfo={clientInfo}
                                             rentalData={rentalsByLocation.get(location) || EMPTY_RENTALS}
+                                            rentalDashboardStatsByStationId={rentalDashboardStatsByStationId}
+                                            useRentalDashboardSummaries={useRentalDashboardSummaries}
                                             referenceTime={latestTimestamp}
                                             t={t}
                                             onNavigateToRentals={onNavigateToRentals}
@@ -881,17 +905,22 @@ return (
                                                 const isExpanded = expandedKioskId === kiosk.stationid;
                                                 const isEditing = editingKioskId === kiosk.stationid;
                                                 const stationRentalData = rentalsByStationId.get(kiosk.stationid) || EMPTY_RENTALS;
+                                                const stationRentalDashboardTotals = useRentalDashboardSummaries
+                                                    ? aggregateRentalDashboardStats(
+                                                        rentalDashboardStatsByStationId,
+                                                        [kiosk.stationid],
+                                                        latestTimestamp,
+                                                        kiosk.pricing?.symbol || '$'
+                                                    )
+                                                    : null;
 
                                                 return (
                                                 <div key={kiosk.stationid}>
-                                                    <KioskPanel kiosk={kiosk} isExpanded={isExpanded || isEditing} onToggle={handleToggleDetails} onToggleEdit={handleToggleEditMode} mockNow={latestTimestamp} rentalData={stationRentalData} clientInfo={clientInfo} t={t} onCommand={handleGeneralCommand} onShowRentalDetails={handleShowRentalDetails} />
+                                                    <KioskPanel kiosk={kiosk} isExpanded={isExpanded || isEditing} onToggle={handleToggleDetails} onToggleEdit={handleToggleEditMode} mockNow={latestTimestamp} rentalData={stationRentalData} rentalDashboardStats={stationRentalDashboardTotals} clientInfo={clientInfo} t={t} onCommand={handleGeneralCommand} onShowRentalDetails={handleShowRentalDetails} />
                                                     {isEditing && kioskToEdit ? (
                                                         <KioskEditPanel kiosk={kioskToEdit} onSave={handleKioskSave} clientInfo={clientInfo} isVisible={editingKioskId === kiosk.stationid} t={t} onCommand={handleGeneralCommand} />
                                                     ) : (
                                                         clientInfo.features.details && isExpanded && <KioskDetailPanel kiosk={kiosk} isVisible={true} onSlotClick={handleSlotClick} onLockSlot={handleLockSlotClick} pendingSlots={pendingSlots} ejectingSlots={ejectingSlots} failedEjectSlots={failedEjectSlots} lockingSlots={lockingSlots} t={t} onCommand={handleGeneralCommand} onNavigateToChargers={onNavigateToChargers} clientInfo={clientInfo} mockNow={latestTimestamp} serverFlowVersion={serverFlowVersion} serverUiVersion={serverUiVersion} firmwareUpdateSessions={firmwareUpdateSessions} />
-                                                    )}
-                                                    {rentalDetailView?.kioskId === kiosk.stationid && (
-                                                        <RentalDetailView kiosk={kiosk} period={rentalDetailView.period} rentalData={enrichedRentalData} onClose={() => setRentalDetailView(null)} onCommand={handleGeneralCommand} onNavigateToRental={(searchTerm) => onNavigateToRentals({ searchTerm })} t={t} />
                                                     )}
                                                 </div>
                                             )})}

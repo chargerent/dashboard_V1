@@ -7,7 +7,7 @@ import { formatDateTime } from '../../utils/dateFormatter';
 import RentalStats from '../Dashboard/RentalStats';
 import GatewayIcon from './GatewayIcon';
 
-function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rentalData, clientInfo, t, onCommand, onShowRentalDetails }) {
+function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rentalData, rentalDashboardStats, clientInfo, t, onCommand, onShowRentalDetails }) {
     const isOnline = isKioskOnline(kiosk, mockNow);
     const isV2Kiosk = isNewSchemaKiosk(kiosk);
     const canEditKiosk = isOnline || isV2Kiosk;
@@ -201,6 +201,7 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                     <div className={`mt-4 ${isOnline ? 'border-t' : ''} pt-4`}>
                         <RentalStats 
                             rentalData={rentalData} 
+                            dashboardStats={rentalDashboardStats}
                             clientInfo={clientInfo}
                             stationId={kiosk.stationid} 
                             referenceTime={mockNow}

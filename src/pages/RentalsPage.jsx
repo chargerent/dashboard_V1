@@ -1,6 +1,17 @@
 // src/pages/RentalsPage.jsx
 
-import { useState, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+    collection,
+    getDoc,
+    getDocs,
+    limit,
+    orderBy,
+    query,
+    startAfter,
+    where,
+    doc,
+} from 'firebase/firestore';
 import {
     CheckCircleIcon,
     ChevronDownIcon,
@@ -19,12 +30,104 @@ import {
     normalizeRefundStatus,
 } from '../utils/rentals.js';
 import { isV2Kiosk } from '../utils/helpers.js';
+import { db } from '../firebase-config';
 import RefundModal from '../components/UI/RefundModal.jsx';
 import ConfirmationModal from '../components/UI/ConfirmationModal.jsx';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
 import CardBrandIcon from '../components/UI/CardBrandIcon.jsx';
 
 const RENTALS_PER_PAGE = 30;
+const RENTAL_QUERY_BATCH_SIZE = 50;
+const FIRESTORE_IN_QUERY_LIMIT = 30;
+const RENTAL_SEARCH_DEBOUNCE_MS = 400;
+const RENTAL_SEARCH_RESULT_LIMIT = 50;
+const RENTAL_QUERY_TIMEOUT_MS = 15_000;
+const RENTAL_SEARCH_FIELDS = [
+    'rawid',
+    'orderid',
+    'transactionid',
+    'transactionId',
+    'paymentSessionId',
+    'paymentAttemptId',
+    'card_last4',
+    'sn',
+    'chargerid',
+    'rentalStationid',
+];
+
+const chunkValues = (values, size = FIRESTORE_IN_QUERY_LIMIT) => {
+    const chunks = [];
+    for (let index = 0; index < values.length; index += size) {
+        chunks.push(values.slice(index, index + size));
+    }
+    return chunks;
+};
+
+const uniqueStrings = (values) => [...new Set(
+    values
+        .map(value => String(value || '').trim())
+        .filter(Boolean)
+)];
+
+const withRentalQueryTimeout = (queryPromise) => {
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = window.setTimeout(() => {
+            const error = new Error('Rental query timed out.');
+            error.code = 'rentals/query-timeout';
+            reject(error);
+        }, RENTAL_QUERY_TIMEOUT_MS);
+    });
+
+    return Promise.race([queryPromise, timeoutPromise])
+        .finally(() => window.clearTimeout(timeoutId));
+};
+
+const mapRentalSnapshot = (documentSnapshot) => {
+    const data = documentSnapshot.data();
+    return {
+        ...data,
+        rawid: data?.rawid || documentSnapshot.id,
+        documentId: documentSnapshot.id,
+    };
+};
+
+const mergeRentalDocuments = (...rentalGroups) => {
+    const merged = new Map();
+    rentalGroups.flat().forEach((rental) => {
+        const key = rental.documentId || rental.rawid || rental.orderid;
+        if (key) merged.set(String(key), rental);
+    });
+    return Array.from(merged.values()).sort((left, right) => {
+        const rightTime = getRentalActivityDate(right)?.getTime() ?? 0;
+        const leftTime = getRentalActivityDate(left)?.getTime() ?? 0;
+        return rightTime - leftTime;
+    });
+};
+
+const getPeriodStart = (period, referenceTime) => {
+    const now = safeToDate(referenceTime) || new Date();
+    const startDate = new Date(now);
+
+    if (period === 'today') {
+        startDate.setHours(0, 0, 0, 0);
+    } else if (period === '30days') {
+        startDate.setDate(startDate.getDate() - 30);
+    } else {
+        startDate.setDate(startDate.getDate() - 7);
+    }
+
+    return startDate.toISOString();
+};
+
+const buildSearchValues = (searchTerm) => {
+    const raw = String(searchTerm || '').trim();
+    const values = [raw];
+    if (raw.toUpperCase() !== raw) values.push(raw.toUpperCase());
+    if (raw.toLowerCase() !== raw) values.push(raw.toLowerCase());
+    if (/^\d+$/.test(raw)) values.push(Number(raw));
+    return [...new Set(values)];
+};
 
 const resolveRefundTransactionId = (rental) => (
     String(
@@ -869,14 +972,269 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock, onNavigateToCha
     );
 };
 
-export default function RentalsPage({ onNavigateToDashboard, onNavigateToChargers, clientInfo, rentalData, allStationsData, t, language, setLanguage, onLogout, onCommand, commandStatus, setCommandStatus, referenceTime, initialPeriod = 'today', initialStationIds = [], initialSearch = '' }) {
+export default function RentalsPage({ onNavigateToDashboard, onNavigateToChargers, clientInfo, allStationsData, t, language, setLanguage, onLogout, onCommand, commandStatus, setCommandStatus, referenceTime, initialPeriod = '7days', initialStationIds = [], initialSearch = '' }) {
+    const canViewRentalDetails = Boolean(clientInfo?.isAdmin || clientInfo?.features?.rentals === true);
     const [activeFilters, setActiveFilters] = useState({ period: initialPeriod, status: 'all', returnType: 'all', version: 'all', gateway: 'all' });
     const [searchTerm, setSearchTerm] = useState(initialSearch);
+    const [committedSearch, setCommittedSearch] = useState(initialSearch.trim());
     const [currentPage, setCurrentPage] = useState(1);
     const [showRefundModal, setShowRefundModal] = useState(false);
     const [rentalToRefund, setRentalToRefund] = useState(null);
     const [commandDetails, setCommandDetails] = useState(null);
     const [commandModalOpen, setCommandModalOpen] = useState(false);
+    const [loadedRentals, setLoadedRentals] = useState([]);
+    const [rentalsLoading, setRentalsLoading] = useState(true);
+    const [rentalsLoadingMore, setRentalsLoadingMore] = useState(false);
+    const [rentalsError, setRentalsError] = useState('');
+    const [hasMoreRentals, setHasMoreRentals] = useState(false);
+    const requestGenerationRef = useRef(0);
+    const periodCursorsRef = useRef(new Map());
+    const allStationsDataRef = useRef(allStationsData);
+
+    useEffect(() => {
+        allStationsDataRef.current = allStationsData;
+    }, [allStationsData]);
+
+    const availableStationIdsKey = useMemo(() => (
+        uniqueStrings((allStationsData || []).map(station => station.stationid))
+            .sort()
+            .join('\u001f')
+    ), [allStationsData]);
+    const availableStationIds = useMemo(() => (
+        availableStationIdsKey ? availableStationIdsKey.split('\u001f') : []
+    ), [availableStationIdsKey]);
+    const requestedStationIds = useMemo(() => uniqueStrings(initialStationIds), [initialStationIds]);
+    const scopedStationIds = useMemo(() => {
+        if (requestedStationIds.length > 0) {
+            const available = new Set(availableStationIds);
+            return requestedStationIds.filter(stationId => available.has(stationId));
+        }
+        return clientInfo?.isAdmin ? [] : availableStationIds;
+    }, [availableStationIds, clientInfo?.isAdmin, requestedStationIds]);
+    const isGlobalAdminScope = Boolean(clientInfo?.isAdmin && requestedStationIds.length === 0);
+    const stationScopeChunks = useMemo(() => (
+        isGlobalAdminScope ? [] : chunkValues(scopedStationIds)
+    ), [isGlobalAdminScope, scopedStationIds]);
+
+    useEffect(() => {
+        const timer = window.setTimeout(() => {
+            setCommittedSearch(searchTerm.trim());
+            setCurrentPage(1);
+        }, RENTAL_SEARCH_DEBOUNCE_MS);
+        return () => window.clearTimeout(timer);
+    }, [searchTerm]);
+
+    const fetchPeriodBatch = useCallback(async ({ reset }) => {
+        if (!canViewRentalDetails || (!isGlobalAdminScope && stationScopeChunks.length === 0)) {
+            setLoadedRentals([]);
+            setHasMoreRentals(false);
+            setRentalsLoading(false);
+            setRentalsLoadingMore(false);
+            return;
+        }
+
+        const requestGeneration = ++requestGenerationRef.current;
+        if (reset) {
+            periodCursorsRef.current = new Map();
+            setRentalsLoading(true);
+            setRentalsLoadingMore(false);
+            setRentalsError('');
+        } else {
+            setRentalsLoadingMore(true);
+        }
+
+        try {
+            const rentalsCollection = collection(db, 'rentals');
+            const periodStart = getPeriodStart(activeFilters.period);
+            const scopes = isGlobalAdminScope
+                ? [{ key: 'all', stationIds: [] }]
+                : stationScopeChunks.map(stationIds => ({
+                    key: stationIds.join('|'),
+                    stationIds,
+                }));
+            const snapshots = await withRentalQueryTimeout(Promise.all(scopes.map(({ key, stationIds }) => {
+                const constraints = [];
+                if (stationIds.length === 1) {
+                    constraints.push(where('rentalStationid', '==', stationIds[0]));
+                } else if (stationIds.length > 1) {
+                    constraints.push(where('rentalStationid', 'in', stationIds));
+                }
+                constraints.push(where('rentalTime', '>=', periodStart));
+                const cursor = reset ? null : periodCursorsRef.current.get(key);
+                constraints.push(orderBy('rentalTime', 'desc'));
+                if (cursor) constraints.push(startAfter(cursor));
+                constraints.push(limit(RENTAL_QUERY_BATCH_SIZE));
+                return getDocs(query(rentalsCollection, ...constraints));
+            })));
+
+            if (requestGeneration !== requestGenerationRef.current) return;
+
+            const nextCursors = reset ? new Map() : new Map(periodCursorsRef.current);
+            const nextRentals = [];
+            snapshots.forEach((snapshot, index) => {
+                const scope = scopes[index];
+                const nextCursor = snapshot.docs[snapshot.docs.length - 1];
+                if (nextCursor) nextCursors.set(scope.key, nextCursor);
+                snapshot.docs.forEach(documentSnapshot => {
+                    nextRentals.push(mapRentalSnapshot(documentSnapshot));
+                });
+            });
+            periodCursorsRef.current = nextCursors;
+            setLoadedRentals(previous => (
+                reset
+                    ? mergeRentalDocuments(nextRentals)
+                    : mergeRentalDocuments(previous, nextRentals)
+            ));
+            setHasMoreRentals(snapshots.some(snapshot => snapshot.size === RENTAL_QUERY_BATCH_SIZE));
+            setRentalsError('');
+        } catch (error) {
+            if (requestGeneration !== requestGenerationRef.current) return;
+            console.error('Unable to load bounded rental page:', error);
+            setRentalsError(t('rentals_load_error'));
+            if (reset) setLoadedRentals([]);
+        } finally {
+            if (requestGeneration === requestGenerationRef.current) {
+                setRentalsLoading(false);
+                setRentalsLoadingMore(false);
+            }
+        }
+    }, [
+        activeFilters.period,
+        canViewRentalDetails,
+        isGlobalAdminScope,
+        stationScopeChunks,
+        t,
+    ]);
+
+    const fetchSearchResults = useCallback(async (term) => {
+        if (!term) return;
+        if (!canViewRentalDetails || (!isGlobalAdminScope && stationScopeChunks.length === 0)) {
+            setLoadedRentals([]);
+            setHasMoreRentals(false);
+            setRentalsLoading(false);
+            return;
+        }
+
+        const requestGeneration = ++requestGenerationRef.current;
+        setRentalsLoading(true);
+        setRentalsLoadingMore(false);
+        setRentalsError('');
+        setHasMoreRentals(false);
+
+        try {
+            const rentalsCollection = collection(db, 'rentals');
+            const searchValues = buildSearchValues(term);
+            const scopes = isGlobalAdminScope
+                ? [{ stationIds: [] }]
+                : stationScopeChunks.map(stationIds => ({ stationIds }));
+            const queryPromises = [];
+
+            scopes.forEach(({ stationIds }) => {
+                RENTAL_SEARCH_FIELDS.forEach((fieldName) => {
+                    if (stationIds.length > 0 && fieldName === 'rentalStationid') return;
+                    searchValues.forEach((searchValue) => {
+                        const constraints = [];
+                        if (stationIds.length === 1) {
+                            constraints.push(where('rentalStationid', '==', stationIds[0]));
+                        } else if (stationIds.length > 1) {
+                            constraints.push(where('rentalStationid', 'in', stationIds));
+                        }
+                        constraints.push(
+                            where(fieldName, '==', searchValue),
+                            limit(RENTAL_SEARCH_RESULT_LIMIT)
+                        );
+                        queryPromises.push(getDocs(query(rentalsCollection, ...constraints)));
+                    });
+                });
+            });
+
+            const normalizedTerm = normalizeText(term);
+            const locationStationIds = availableStationIds.filter((stationId) => {
+                const station = (allStationsDataRef.current || []).find(item => item.stationid === stationId);
+                return (
+                    textIncludes(stationId, normalizedTerm) ||
+                    textIncludes(station?.info?.location, normalizedTerm) ||
+                    textIncludes(station?.info?.place, normalizedTerm)
+                );
+            });
+            chunkValues(locationStationIds).forEach((stationIds) => {
+                const stationConstraint = stationIds.length === 1
+                    ? where('rentalStationid', '==', stationIds[0])
+                    : where('rentalStationid', 'in', stationIds);
+                queryPromises.push(getDocs(query(
+                    rentalsCollection,
+                    stationConstraint,
+                    orderBy('rentalTime', 'desc'),
+                    limit(RENTAL_SEARCH_RESULT_LIMIT)
+                )));
+            });
+
+            if (isGlobalAdminScope && /^[^/]{1,150}$/.test(term)) {
+                queryPromises.push(getDoc(doc(rentalsCollection, term)));
+            }
+
+            const settledResults = await withRentalQueryTimeout(Promise.allSettled(queryPromises));
+            if (requestGeneration !== requestGenerationRef.current) return;
+
+            const allowedStations = isGlobalAdminScope ? null : new Set(scopedStationIds);
+            const matches = [];
+            let successfulQueries = 0;
+            settledResults.forEach((result) => {
+                if (result.status !== 'fulfilled') return;
+                successfulQueries += 1;
+                const snapshot = result.value;
+                if (snapshot?.docs) {
+                    snapshot.docs.forEach(documentSnapshot => matches.push(mapRentalSnapshot(documentSnapshot)));
+                } else if (snapshot?.exists?.()) {
+                    matches.push(mapRentalSnapshot(snapshot));
+                }
+            });
+            if (successfulQueries === 0 && settledResults.length > 0) {
+                throw settledResults[0].reason;
+            }
+
+            const scopedMatches = allowedStations
+                ? matches.filter(rental => allowedStations.has(String(rental.rentalStationid || '')))
+                : matches;
+            setLoadedRentals(mergeRentalDocuments(scopedMatches));
+            setRentalsError('');
+        } catch (error) {
+            if (requestGeneration !== requestGenerationRef.current) return;
+            console.error('Unable to search rentals:', error);
+            setLoadedRentals([]);
+            setRentalsError(t('rentals_search_error'));
+        } finally {
+            if (requestGeneration === requestGenerationRef.current) {
+                setRentalsLoading(false);
+                setRentalsLoadingMore(false);
+            }
+        }
+    }, [
+        availableStationIds,
+        canViewRentalDetails,
+        isGlobalAdminScope,
+        scopedStationIds,
+        stationScopeChunks,
+        t,
+    ]);
+
+    useEffect(() => {
+        if (committedSearch) return undefined;
+        setCurrentPage(1);
+        fetchPeriodBatch({ reset: true });
+        return () => {
+            requestGenerationRef.current += 1;
+        };
+    }, [committedSearch, fetchPeriodBatch]);
+
+    useEffect(() => {
+        if (!committedSearch) return undefined;
+        setCurrentPage(1);
+        fetchSearchResults(committedSearch);
+        return () => {
+            requestGenerationRef.current += 1;
+        };
+    }, [committedSearch, fetchSearchResults]);
 
     const chargerLocations = useMemo(() => {
         const map = new Map();
@@ -911,7 +1269,7 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
             });
         });
 
-        let rentals = (rentalData || []).map(rental => {
+        let rentals = loadedRentals.map(rental => {
             const chargerId = firstPresent(rental.sn, rental.chargerid);
             const chargerLocation = chargerLocations.get(String(chargerId || ''));
             const stationInfo = stationToClientMap.get(rental.rentalStationid);
@@ -972,6 +1330,13 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
                 textIncludes(r.card_last4, lowercasedSearch) ||
                 textIncludes(r.sn, lowercasedSearch) ||
                 textIncludes(r.chargerid, lowercasedSearch) ||
+                textIncludes(r.rawid, lowercasedSearch) ||
+                textIncludes(r.documentId, lowercasedSearch) ||
+                textIncludes(r.orderid, lowercasedSearch) ||
+                textIncludes(r.transactionid, lowercasedSearch) ||
+                textIncludes(r.transactionId, lowercasedSearch) ||
+                textIncludes(r.paymentSessionId, lowercasedSearch) ||
+                textIncludes(r.paymentAttemptId, lowercasedSearch) ||
                 textIncludes(r.vendState, lowercasedSearch) ||
                 textIncludes(r.failureReason, lowercasedSearch) ||
                 textIncludes(r.lastVendFailureReason, lowercasedSearch) ||
@@ -1042,7 +1407,7 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
             return bTime - aTime;
         });
 
-    }, [rentalData, allStationsData, clientInfo, activeFilters, searchTerm, referenceTime, chargerLocations, initialStationIds]);
+    }, [loadedRentals, allStationsData, clientInfo, activeFilters, searchTerm, referenceTime, chargerLocations, initialStationIds]);
 
     const totalPages = Math.max(1, Math.ceil(filteredRentals.length / RENTALS_PER_PAGE));
     const visiblePage = Math.min(currentPage, totalPages);
@@ -1069,6 +1434,20 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
 
     const handleNextPage = () => {
         setCurrentPage(page => Math.min(totalPages, page + 1));
+    };
+
+    const handleRefreshRentals = () => {
+        if (committedSearch) {
+            fetchSearchResults(committedSearch);
+        } else {
+            fetchPeriodBatch({ reset: true });
+        }
+    };
+
+    const handleLoadMoreRentals = () => {
+        if (!committedSearch && !rentalsLoading && !rentalsLoadingMore) {
+            fetchPeriodBatch({ reset: false });
+        }
     };
 
     const handleRefundClick = (rental) => {
@@ -1164,12 +1543,22 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
                         <div className="flex-grow"></div>
                         <div className="text-right">
                             <span className="text-lg font-bold text-gray-800">{filteredRentals.length}</span>
-                            <span className="text-sm text-gray-500 ml-2">{t('rentals')}</span>
+                            <span className="text-sm text-gray-500 ml-2">
+                                {committedSearch ? t('rental_search_results') : t('rentals_loaded')}
+                            </span>
                             {filteredRentals.length > RENTALS_PER_PAGE && (
                                 <p className="text-xs text-gray-500">
                                     {t('showing')} {pageStartIndex}-{pageEndIndex}
                                 </p>
                             )}
+                            <button
+                                type="button"
+                                onClick={handleRefreshRentals}
+                                disabled={rentalsLoading || rentalsLoadingMore}
+                                className="mt-1 block text-xs font-semibold text-blue-600 hover:text-blue-800 disabled:text-gray-400"
+                            >
+                                {t('refresh')}
+                            </button>
                         </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-4 mt-4">
@@ -1229,7 +1618,7 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
                     </div>
                 </div>
 
-                {totalPages > 1 && (
+                {!rentalsLoading && !rentalsError && totalPages > 1 && (
                     <div className="mb-6 flex items-center justify-between gap-4">
                         <button
                             onClick={handlePreviousPage}
@@ -1253,7 +1642,26 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
 
                 {/* Rentals Grid */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-                    {filteredRentals.length > 0 ? (
+                    {rentalsLoading ? (
+                        <div className="col-span-full flex min-h-48 flex-col items-center justify-center rounded-lg bg-white p-8 text-center shadow-md">
+                            <div className="h-10 w-10 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600"></div>
+                            <p className="mt-4 font-semibold text-gray-700">
+                                {committedSearch ? t('searching_rentals') : t('loading_recent_rentals')}
+                            </p>
+                            <p className="mt-1 text-sm text-gray-500">{t('please_wait')}</p>
+                        </div>
+                    ) : rentalsError ? (
+                        <div className="col-span-full rounded-lg border border-red-200 bg-red-50 p-8 text-center shadow-md">
+                            <p className="font-semibold text-red-700">{rentalsError}</p>
+                            <button
+                                type="button"
+                                onClick={handleRefreshRentals}
+                                className="mt-4 rounded-md bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+                            >
+                                {t('try_again')}
+                            </button>
+                        </div>
+                    ) : filteredRentals.length > 0 ? (
                         paginatedRentals.map(rental => {
                             const canLock = clientInfo?.commands?.lock && isReturnedRentalStatus(rental.status) && rental.location;
                             return <RentalCard 
@@ -1271,6 +1679,19 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
                         </div>
                     )}
                 </div>
+
+                {!rentalsLoading && !rentalsError && !committedSearch && hasMoreRentals && (
+                    <div className="mt-8 flex justify-center">
+                        <button
+                            type="button"
+                            onClick={handleLoadMoreRentals}
+                            disabled={rentalsLoadingMore}
+                            className="rounded-md bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-wait disabled:bg-blue-300"
+                        >
+                            {rentalsLoadingMore ? t('loading_more_rentals') : t('load_more_rentals')}
+                        </button>
+                    </div>
+                )}
             </main>
         </div>
     );

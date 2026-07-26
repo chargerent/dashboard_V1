@@ -31,8 +31,10 @@ const StatBox = memo(function StatBox({ period, selection, count, revenue, initi
     );
 });
 
-function RentalStats({ rentalData, clientInfo, referenceTime, stationId, kiosks, isGlobal, activeFilters, t, onShowRentalDetails, leaseRevenue, repLeaseCommission }) {
+function RentalStats({ rentalData, dashboardStats, clientInfo, referenceTime, stationId, kiosks, isGlobal, activeFilters, t, onShowRentalDetails, leaseRevenue, repLeaseCommission }) {
     const stats = useMemo(() => {
+        if (dashboardStats) return dashboardStats;
+
         const now = new Date(referenceTime.endsWith('Z') ? referenceTime : referenceTime + 'Z');
         const today = new Date(now);
         today.setHours(0, 0, 0, 0);
@@ -100,7 +102,7 @@ function RentalStats({ rentalData, clientInfo, referenceTime, stationId, kiosks,
             ...totals,
             symbol: symbol
         };
-    }, [rentalData, referenceTime, stationId, kiosks, isGlobal, activeFilters]);
+    }, [activeFilters, dashboardStats, isGlobal, kiosks, referenceTime, rentalData, stationId]);
 
     const labelClass = stationId ? "text-sm" : "text-base";
     const valueClass = stationId ? "text-xl" : "text-2xl";
