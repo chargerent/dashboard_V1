@@ -3,6 +3,8 @@ import test from 'node:test';
 
 import {
     buildRentalFilterQueryStreams,
+    buildStationVersionKey,
+    createStationVersionMap,
     rentalHasLogError,
     rentalMatchesActiveFilters,
 } from '../src/utils/rentalQueryFilters.js';
@@ -25,6 +27,32 @@ test('gateway filters query both normalized and legacy uppercase values', () => 
             { key: 'gateway:uid', field: 'gateway', value: 'uid' },
             { key: 'gateway:UID', field: 'gateway', value: 'UID' },
         ]
+    );
+});
+
+test('heartbeat-only kiosk updates preserve the station-version dependency key', () => {
+    const getVersion = station => station.hardware?.type === 'CT3' ? 'v2' : 'v1';
+    const initialStations = [
+        { stationid: 'US0001', timestamp: 'first', hardware: { type: 'CK30' } },
+        { stationid: 'US0002', timestamp: 'first', hardware: { type: 'CT3' } },
+    ];
+    const heartbeatStations = initialStations.map(station => ({
+        ...station,
+        timestamp: 'second',
+    }));
+
+    const initialKey = buildStationVersionKey(initialStations, getVersion);
+    const heartbeatKey = buildStationVersionKey(heartbeatStations, getVersion);
+    const changedVersionKey = buildStationVersionKey([
+        initialStations[0],
+        { ...initialStations[1], hardware: { type: 'CK30' } },
+    ], getVersion);
+
+    assert.equal(heartbeatKey, initialKey);
+    assert.notEqual(changedVersionKey, initialKey);
+    assert.deepEqual(
+        Object.fromEntries(createStationVersionMap(initialKey)),
+        { US0001: 'v1', US0002: 'v2' }
     );
 });
 

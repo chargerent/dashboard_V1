@@ -31,6 +31,8 @@ import {
 } from '../utils/rentals.js';
 import {
     buildRentalFilterQueryStreams,
+    buildStationVersionKey,
+    createStationVersionMap,
     rentalHasLogError,
     rentalMatchesActiveFilters,
 } from '../utils/rentalQueryFilters.js';
@@ -1018,12 +1020,16 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
     const stationScopeChunks = useMemo(() => (
         isGlobalAdminScope ? [] : chunkValues(scopedStationIds)
     ), [isGlobalAdminScope, scopedStationIds]);
-    const stationVersionById = useMemo(() => new Map(
-        (allStationsData || []).map(station => [
-            String(station.stationid || ''),
-            isV2Kiosk(station) ? 'v2' : 'v1',
-        ])
+    const stationVersionKey = useMemo(() => (
+        buildStationVersionKey(
+            allStationsData,
+            station => (isV2Kiosk(station) ? 'v2' : 'v1')
+        )
     ), [allStationsData]);
+    const stationVersionById = useMemo(
+        () => createStationVersionMap(stationVersionKey),
+        [stationVersionKey]
+    );
 
     useEffect(() => {
         const timer = window.setTimeout(() => {

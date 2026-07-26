@@ -19,6 +19,31 @@ const normalizeStatusKey = (status) => (
     normalizeText(status).replace(/[-\s]+/g, '_')
 );
 
+const STATION_VERSION_ENTRY_SEPARATOR = '\u001e';
+const STATION_VERSION_RECORD_SEPARATOR = '\u001f';
+
+export const buildStationVersionKey = (stations, getVersion) => (
+    (stations || [])
+        .map(station => [
+            String(station?.stationid || '').trim(),
+            getVersion(station),
+        ])
+        .filter(([stationId]) => stationId)
+        .map(([stationId, version]) => (
+            `${stationId}${STATION_VERSION_ENTRY_SEPARATOR}${version}`
+        ))
+        .sort()
+        .join(STATION_VERSION_RECORD_SEPARATOR)
+);
+
+export const createStationVersionMap = (stationVersionKey) => new Map(
+    stationVersionKey
+        ? stationVersionKey.split(STATION_VERSION_RECORD_SEPARATOR).map(entry => (
+            entry.split(STATION_VERSION_ENTRY_SEPARATOR)
+        ))
+        : []
+);
+
 const processEntryHasError = (entry) => {
     const status = normalizeText(entry?.status || entry?.paymentActionStatus);
     const event = normalizeText(entry?.event || entry?.type || entry?.title);
