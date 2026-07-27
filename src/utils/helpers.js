@@ -266,6 +266,10 @@ export const isStationProvisioned = (station) => {
     return true;
 };
 
+export const filterProvisionedStations = (stations) => (
+    (Array.isArray(stations) ? stations : []).filter(isStationProvisioned)
+);
+
 export const isModuleOnline = (module, referenceTime) => (
     hasRecentTimestamp(module?.lastUpdated, referenceTime, ONLINE_WINDOW_MS)
 );

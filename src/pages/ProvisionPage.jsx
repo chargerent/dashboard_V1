@@ -13,10 +13,14 @@ import {
 import ConfirmationModal from '../components/UI/ConfirmationModal';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
 import { callFunctionWithAuth } from '../utils/callableRequest';
+import {
+    applyDashboardAssignedStationId,
+    isAiBoothProvision,
+} from '../utils/provisioning';
 
 const initialFormData = {
     provisionid: '',
-    hardware: { type: 'CA36', mode: 'AI', modules: 12, hrate: '20', cpu: 'C4', gateway: 'PAYTERP68', screen: '49', quarantine: { time: 0, unit: 'min' }, audio: 'on', power: '90', gatewayoptions: 'INITIALPRICE', port: '1884', server: 'chargerent.io' },
+    hardware: { type: 'CT10', modversion: '2.0', mode: 'LIVE', modules: 1, hrate: '20', cpu: 'C4', gateway: 'PAYTERP68', screen: 'no screen', quarantine: { time: 0, unit: 'min' }, audio: 'on', power: '90', gatewayoptions: 'INITIALPRICE', port: '1884', server: 'chargerent.io' },
     info: { country: 'US', autoGeocode: true, account: 'OCHARGELLC', group: 'OCHARGELLC', rep: 'OCHARGELLC' },
     ui: { colors: { bcolor1: '#0000FF', bcolor2: '#008000' }, idletime: 20, defaultlanguage: 'ENGLISH', mode: 'media', reminder: {}, receipt: {}, coupons: {}, map: { active: false }, terms: { active: true }, languages: { active: true }, information: { active: true }, screensaver: { active: true } },
     pricing: { currency: 'US', symbol: '$', kioskmode: 'LEASE', text: 'LEASE - SIMPLE DAILY', webapp: true, mobileapp: true, online: true, startpage: { active: true }, taxrate: 0 }
@@ -24,6 +28,9 @@ const initialFormData = {
 
 const V2_KIOSK_TYPES = new Set(['CT3', 'CT4', 'CT8', 'CT12', 'CK48']);
 const V2_DEFAULT_WIFI = { name: 'powerbank', password: '123456789' };
+const GATEWAYS = ['P68', 'SWIPE', 'SCAN', 'RFID', 'STRIPE', 'APO', 'TOUCH'];
+const V1_GATEWAY_OPTIONS = ['INITIAL', 'FULL', 'OPEN', 'CLOSED', 'RES', 'UID'];
+const V2_GATEWAY_OPTIONS = V1_GATEWAY_OPTIONS.filter((option) => option !== 'UID');
 
 const formatWaitTime = (startTime) => {
     if (!startTime) return 'unknown';
@@ -85,13 +92,8 @@ const calculateRateArray = (pricing) => {
     return rentprice;
 };
 
-const isAiBoothPendingStation = (station) => (
-    String(station?.provisionid || '').toLowerCase().startsWith('aid-') ||
-    String(station?.hardware?.type || '').toUpperCase() === 'CA36'
-);
-
 const formatPendingStationOption = (station) => {
-    const prefix = isAiBoothPendingStation(station) ? 'AI Booth - ' : '';
+    const prefix = isAiBoothProvision(station) ? 'AI Booth - ' : '';
     return `${station.provisionid} (${prefix}${formatWaitTime(station.lastUpdated)})`;
 };
 
@@ -288,19 +290,26 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAiBooths, onLogout, 
         return pendingStations.find((station) => station.provisionid === formData.provisionid) || null;
     }, [pendingStations, formData.provisionid]);
 
-    const selectedIsAiBooth = useMemo(() => (
-        isAiBoothPendingStation(selectedPendingStation) ||
-        String(formData.hardware?.type || '').trim().toUpperCase() === 'CA36'
-    ), [selectedPendingStation, formData.hardware?.type]);
+    const selectedIsAiBooth = useMemo(
+        () => isAiBoothProvision(selectedPendingStation),
+        [selectedPendingStation],
+    );
+    const selectedIsV2Kiosk = useMemo(() => (
+        V2_KIOSK_TYPES.has(String(formData.hardware?.type || '').trim().toUpperCase())
+    ), [formData.hardware?.type]);
 
     const stationIdCandidates = useMemo(() => (
-        buildAvailableStationIds(allStationsData, formData.info?.country, selectedIsAiBooth)
+        selectedIsAiBooth
+            ? buildAvailableStationIds(allStationsData, formData.info?.country, true)
+            : []
     ), [allStationsData, formData.info?.country, selectedIsAiBooth]);
 
     const boundedStationIdOffset = stationIdCandidates.length > 0
         ? Math.min(stationIdOffset, stationIdCandidates.length - 1)
         : 0;
-    const assignedStationId = formData.provisionid ? (stationIdCandidates[boundedStationIdOffset] || '') : '';
+    const assignedStationId = selectedIsAiBooth && formData.provisionid
+        ? (stationIdCandidates[boundedStationIdOffset] || '')
+        : '';
 
     useEffect(() => {
         setStationIdOffset(0);
@@ -350,7 +359,9 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAiBooths, onLogout, 
 
             // Merge selected station data into the new form data object
             deepMerge(newFormData, selectedStation);
-            applyAiBoothHardwareDefaults(newFormData);
+            if (isAiBoothProvision(selectedStation)) {
+                applyAiBoothHardwareDefaults(newFormData);
+            }
             const withDefaults = withCountryDefaults(newFormData, newFormData.info?.country);
             delete withDefaults.stationid;
 
@@ -438,7 +449,7 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAiBooths, onLogout, 
             missing.push('provisionid');
         }
 
-        if (!assignedStationId) {
+        if (selectedIsAiBooth && !assignedStationId) {
             missing.push('stationid');
         }
 
@@ -490,7 +501,7 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAiBooths, onLogout, 
 
     const confirmProvision = async () => {
         setShowConfirmation(false);
-        const payload = JSON.parse(JSON.stringify(formData));
+        let payload = JSON.parse(JSON.stringify(formData));
         
         // Add rate array to pricing
         payload.pricing.rate = calculateRateArray(payload.pricing);
@@ -499,13 +510,17 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAiBooths, onLogout, 
         payload.modules = {};
         delete payload.hardware.modversion;
 
-        payload.stationid = assignedStationId;
+        payload = applyDashboardAssignedStationId(
+            payload,
+            selectedPendingStation,
+            assignedStationId,
+        );
 
         if (isV2ProvisionPayload(payload)) {
             payload.wifi = { ...V2_DEFAULT_WIFI };
         }
 
-        if (selectedIsAiBooth && String(payload.provisionid || '').toLowerCase().startsWith('aid-')) {
+        if (selectedIsAiBooth) {
             setCommandStatus?.({ state: 'sending', message: t('sending_command') });
 
             try {
@@ -566,7 +581,7 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAiBooths, onLogout, 
             <main className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto">
                 <div className="bg-white p-6 rounded-lg shadow-md space-y-6">
                     <div>
-                        <SectionTitle title="New AI Booth" />
+                        <SectionTitle title={selectedIsAiBooth ? 'New AI Booth' : 'New Kiosk'} />
                         <FormSelect 
                             label="Provision ID" 
                             name="provisionid" 
@@ -574,6 +589,7 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAiBooths, onLogout, 
                             section="" 
                             onDataChange={handleProvisionIdChange} 
                             options={['', ...pendingStations.map(formatPendingStationOption)]} isInvalid={missingFields.includes('provisionid')} />
+                        {selectedIsAiBooth && (
                         <div className={`mt-4 rounded-lg border p-4 ${missingFields.includes('stationid') ? 'border-red-500 bg-red-50' : 'border-gray-200 bg-gray-50'}`}>
                             <div className="mb-4">
                                 <FormMultiSwitch
@@ -626,6 +642,7 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAiBooths, onLogout, 
                                 </button>
                             </div>
                         </div>
+                        )}
                     </div>
 
                     {formData.provisionid && (
@@ -664,9 +681,9 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAiBooths, onLogout, 
                                     <FormMultiSwitch label="Audio" name="audio" options={['on', 'off']} value={formData.hardware.audio} section="hardware" onDataChange={onDataChange} />
                                     <FormSlider label="Volume" name="volume" value={formData.hardware.volume} section="hardware" min="0" max="100" onDataChange={onDataChange} />
                                     <FormSlider label="Power Threshold" name="power" value={formData.hardware.power} section="hardware" min="0" max="100" onDataChange={onDataChange} />
-                                    <FormMultiSwitch label="Gateway" name="gateway" options={['P68', 'SWIPE', 'SCAN', 'RFID', 'STRIPE', 'APO', 'TOUCH']} value={{'PAYTERP68': 'P68', 'APOLLO': 'APO'}[formData.hardware.gateway] || formData.hardware.gateway} section="hardware" onDataChange={(sec, name, val) => handleMultiSwitchChange(sec, name, val, {'P68': 'PAYTERP68', 'APO': 'APOLLO'})} />
+                                    <FormMultiSwitch label="Gateway" name="gateway" options={GATEWAYS} value={{'PAYTERP68': 'P68', 'APOLLO': 'APO'}[formData.hardware.gateway] || formData.hardware.gateway} section="hardware" onDataChange={(sec, name, val) => handleMultiSwitchChange(sec, name, val, {'P68': 'PAYTERP68', 'APO': 'APOLLO'})} />
                                     <FormInput label={selectedIsAiBooth ? 'SN (Optional)' : 'SN'} name="sn" value={formData.hardware.sn} section="hardware" onDataChange={onDataChange} isInvalid={missingFields.includes('hardware.sn')} />
-                                    <FormMultiSwitch label="Gateway Options" name="gatewayoptions" options={['INITIAL', 'FULL', 'OPEN', 'CLOSED', 'RES']} value={{'INITIALPRICE': 'INITIAL', 'FULLPRICE':'FULL', 'OPENMODE':'OPEN', 'CLOSEDLOOP':'CLOSED', 'RESERVATION':'RES'}[formData.hardware.gatewayoptions] || formData.hardware.gatewayoptions} section="hardware" onDataChange={(sec, name, val) => handleMultiSwitchChange(sec, name, val, {'INITIAL': 'INITIALPRICE', 'FULL': 'FULLPRICE', 'OPEN': 'OPENMODE', 'CLOSED': 'CLOSEDLOOP', 'RES': 'RESERVATION'})} />
+                                    <FormMultiSwitch label="Gateway Options" name="gatewayoptions" options={selectedIsV2Kiosk ? V2_GATEWAY_OPTIONS : V1_GATEWAY_OPTIONS} value={{'INITIALPRICE': 'INITIAL', 'FULLPRICE':'FULL', 'OPENMODE':'OPEN', 'CLOSEDLOOP':'CLOSED', 'RESERVATION':'RES'}[formData.hardware.gatewayoptions] || formData.hardware.gatewayoptions} section="hardware" onDataChange={(sec, name, val) => handleMultiSwitchChange(sec, name, val, {'INITIAL': 'INITIALPRICE', 'FULL': 'FULLPRICE', 'OPEN': 'OPENMODE', 'CLOSED': 'CLOSEDLOOP', 'RES': 'RESERVATION'})} />
                                     <FormMultiSwitch label="Screen" name="screen" options={['7', '10', '16', '21', '32', '49']} value={String(formData.hardware.screen || '49').toUpperCase().replace('IN', '')} section="hardware" onDataChange={onDataChange} />
                                     <FormInput label="Port" name="port" value={formData.hardware.port} section="hardware" onDataChange={onDataChange} />
                                     <FormInput label="Server" name="server" value={formData.hardware.server} section="hardware" onDataChange={onDataChange} />
@@ -739,7 +756,11 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAiBooths, onLogout, 
                 details={{
                     title: t('confirm_provisioning'),
                     confirmationText: t('provisioning_confirmation_message'),
-                    data: { ...formData, stationid: assignedStationId }
+                    data: applyDashboardAssignedStationId(
+                        formData,
+                        selectedPendingStation,
+                        assignedStationId,
+                    )
                 }}
                 t={t}
             />
@@ -749,7 +770,7 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAiBooths, onLogout, 
                     <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
                         <h2 className="mb-3 text-lg font-bold text-gray-900">Missing Required Values</h2>
                         <p className="mb-4 text-sm text-gray-600">
-                            Complete these fields before provisioning this AI booth.
+                            Complete these fields before provisioning this {selectedIsAiBooth ? 'AI booth' : 'kiosk'}.
                         </p>
                         <ul className="max-h-64 list-disc space-y-1 overflow-y-auto rounded-md border border-red-100 bg-red-50 p-4 pl-8 text-sm font-semibold text-red-700">
                             {validationPopupFields.map((field) => (

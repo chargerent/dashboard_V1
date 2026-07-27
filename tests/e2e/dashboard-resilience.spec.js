@@ -133,6 +133,19 @@ test('the last good dashboard remains visible through disconnect and recovery', 
   await expect(page.getByText('Loading...')).toHaveCount(0);
 });
 
+test('persistent SSH remains available while Node-RED-dependent controls are offline', async ({ page }) => {
+  await page.evaluate(() => window.__dashboardHarness.setTargetOffline());
+  await openTargetKiosk(page);
+
+  const sshButton = page.getByRole('button', { name: 'SSH', exact: true });
+  await expect(sshButton).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Ngrok', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Reload UI', exact: true })).toBeDisabled();
+
+  await sshButton.tap();
+  await expect(page.getByRole('heading', { name: 'Confirm Action' })).toBeVisible();
+});
+
 test('@desktop kiosk detail controls preserve the desktop scroll position', async ({ page }) => {
   const search = page.getByRole('textbox', { name: /search by location/i });
   await search.fill(TARGET_STATION_ID);

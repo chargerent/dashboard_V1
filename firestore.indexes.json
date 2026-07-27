@@ -33,6 +33,38 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "card_last4",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "rentalTime",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "rentals",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "rentalStationid",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "card_last4",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "rentalTime",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "rentals",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
           "fieldPath": "status",
           "order": "ASCENDING"
         },

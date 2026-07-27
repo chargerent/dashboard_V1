@@ -1218,9 +1218,12 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
                             constraints.push(where('rentalStationid', 'in', stationIds));
                         }
                         constraints.push(
-                            where(fieldName, '==', searchValue),
-                            limit(RENTAL_SEARCH_RESULT_LIMIT)
+                            where(fieldName, '==', searchValue)
                         );
+                        if (fieldName === 'card_last4') {
+                            constraints.push(orderBy('rentalTime', 'desc'));
+                        }
+                        constraints.push(limit(RENTAL_SEARCH_RESULT_LIMIT));
                         queryPromises.push(getDocs(query(rentalsCollection, ...constraints)));
                     });
                 });

@@ -238,6 +238,21 @@ function DashboardHarness() {
         setStations(seedStations);
         setKiosksReady(true);
       },
+      setTargetOffline() {
+        const offlineTimestamp = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+        setStations((previous) => previous.map((station) => (
+          station.stationid === TARGET_STATION_ID
+            ? {
+                ...station,
+                lastUpdated: offlineTimestamp,
+                modules: station.modules.map((module) => ({
+                  ...module,
+                  lastUpdated: offlineTimestamp,
+                })),
+              }
+            : station
+        )));
+      },
       startChurn(intervalMs = 50) {
         setChurnIntervalMs(intervalMs);
       },

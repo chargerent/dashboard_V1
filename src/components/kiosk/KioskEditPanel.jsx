@@ -51,6 +51,9 @@ const DEFAULT_MARKETING_OPTIONS = {
     buttonUrl: 'https://www.rogers.com/support/apps',
 };
 const DEFAULT_ANALYTICS_OPTIONS = { active: false };
+const GATEWAYS = ['P68', 'SWIPE', 'SCAN', 'RFID', 'STRIPE', 'APO', 'TOUCH'];
+const V1_GATEWAY_OPTIONS = ['INITIAL', 'FULL', 'OPEN', 'CLOSED', 'RES', 'UID'];
+const V2_GATEWAY_OPTIONS = V1_GATEWAY_OPTIONS.filter((option) => option !== 'UID');
 const PRICING_NUMERIC_FIELDS = ['taxrate', 'buyprice', 'dailyprice', 'authamount', 'initialperiod', 'overdue'];
 const PRICING_UID_FIELD_COUNT = 9;
 const isPlainObject = (value) => !!value && typeof value === 'object' && !Array.isArray(value);
@@ -464,14 +467,14 @@ function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVe
                     <FormMultiSwitch 
                         label="Gateway" 
                         name="gateway" 
-                        options={['P68', 'SWIPE', 'SCAN', 'RFID', 'STRIPE', 'APO', 'TOUCH']} 
+                        options={GATEWAYS}
                         value={{'PAYTERP68': 'P68', 'APOLLO': 'APO'}[formData.hardware?.gateway] || formData.hardware?.gateway} 
                         section="hardware" 
                         onDataChange={handleGatewayChange} />
                     <FormMultiSwitch 
                         label="Gateway Options" 
                         name="gatewayoptions" 
-                        options={['INITIAL', 'FULL', 'OPEN', 'CLOSED', 'RES']} 
+                        options={usesNewSchemaInfo ? V2_GATEWAY_OPTIONS : V1_GATEWAY_OPTIONS}
                         value={{'INITIALPRICE': 'INITIAL', 'FULLPRICE':'FULL', 'OPENMODE':'OPEN', 'CLOSEDLOOP':'CLOSED', 'RESERVATION':'RES'}[formData.hardware?.gatewayoptions] || formData.hardware?.gatewayoptions} 
                         section="hardware" 
                         onDataChange={handleGatewayOptionsChange} 

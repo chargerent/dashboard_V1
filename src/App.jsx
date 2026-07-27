@@ -23,6 +23,10 @@ import {
   getMatchingOutgoingCommandScope,
   parseKioskSoftwareUpdateResponse,
 } from './utils/kioskCommandResponses.js';
+import {
+  applySshStateOverride,
+  rememberSshStateOverride,
+} from './utils/kioskSshState.js';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 // 🔥 firebase-config must export BOTH db and auth
@@ -711,6 +715,7 @@ function App() {
   const failedEjectTimersRef = useRef(new Map());
   const ejectingSlotsRef = useRef([]);
   const outgoingCommandScopesRef = useRef(new Map());
+  const sshStateOverridesRef = useRef(new Map());
   const currentSocketSessionIdRef = useRef('');
   const startupListenerRef = useRef({ kiosksLogged: false, rentalsLogged: false });
   const adminRentalLoadHandleRef = useRef(null);
@@ -1176,6 +1181,7 @@ function App() {
       setAllStationsData(prevStations => {
         const nextStations = latestStationIdsInSnapshot
           .map(stationid => normalizedKiosksById.get(stationid))
+          .map(station => applySshStateOverride(station, sshStateOverridesRef.current))
           .filter(Boolean);
         const isUnchanged = (
           nextStations.length === prevStations.length &&
@@ -2218,8 +2224,18 @@ function App() {
             if (isSuccess) {
               const isConnecting = data.action.endsWith('connect');
               const type = data.action.startsWith('ngrok') ? 'ngrok' : 'ssh';
+              const responseStationId = data.kiosk || data.stationid;
+              if (type === 'ssh') {
+                rememberSshStateOverride(
+                  sshStateOverridesRef.current,
+                  responseStationId,
+                  isConnecting,
+                );
+              }
               setAllStationsData(prev => prev.map(station =>
-                station.stationid === data.kiosk ? { ...station, [type]: isConnecting } : station
+                station.stationid === responseStationId
+                  ? { ...station, [type]: isConnecting }
+                  : station
               ));
               if (shouldShowCommandStatus && isConnecting && type === 'ngrok' && data.status_en && data.action === 'ngrok connect') {
                 setNgrokInfo({ kioskId: data.kiosk, message: data.status_en });

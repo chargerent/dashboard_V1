@@ -8,6 +8,8 @@
     "build": "vite build",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
     "test:firestore-station-id": "node --test scripts/firestore-station-id.test.mjs",
+    "test:dashboard-station-visibility": "node --test scripts/dashboard-station-visibility.test.mjs",
+    "test:provisioning-station-id": "node --test scripts/provisioning-station-id.test.mjs",
     "test:rental-dashboard-stats": "node --test scripts/rental-dashboard-stats.test.mjs",
     "test:rental-query-filters": "node --test scripts/rental-query-filters.test.mjs",
     "test:kiosk-updates": "node --test scripts/kiosk-command-responses.test.mjs",

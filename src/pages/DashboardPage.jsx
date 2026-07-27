@@ -13,7 +13,7 @@ import InitialStatusPage from '../components/UI/InitialStatusPage';
 import SoldOutKiosksModal from '../components/UI/SoldOutKiosksModal.jsx';
 import FirmwareUpdateModal from '../components/UI/FirmwareUpdateModal.jsx';
 import InactivityModal from '../components/InactivityModal';
-import { filterStationsForClient, isKioskOnline, isKioskActive, isModuleOnline, isNewSchemaKiosk, isStationProvisioned } from '../utils/helpers';
+import { filterProvisionedStations, filterStationsForClient, isKioskOnline, isKioskActive, isModuleOnline, isNewSchemaKiosk, isStationProvisioned } from '../utils/helpers';
 import GlobalRentalActivity from '../components/Dashboard/GlobalRentalActivity';
 import LocationSummary from '../components/Dashboard/LocationSummary';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
@@ -299,6 +299,9 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     const clientStations = useMemo(() => {
         return filterStationsForClient(visibleStationsData, clientInfo);
     }, [visibleStationsData, clientInfo]);
+    const provisionedClientStations = useMemo(() => (
+        filterProvisionedStations(clientStations)
+    ), [clientStations]);
 
     const [latestTimestamp, setLatestTimestamp] = useState(() => new Date().toISOString());
 
@@ -309,16 +312,15 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     }, []);
 
     const initialStatusStations = useMemo(() => {
-        const provisionedStations = clientStations.filter(isStationProvisioned);
         const countryFilter = clientInfo?.features?.country;
         if (!countryFilter || countryFilter.toLowerCase() === 'all') {
-            return provisionedStations;
+            return provisionedClientStations;
         }
 
-        return provisionedStations.filter(station => (
+        return provisionedClientStations.filter(station => (
             station.info.country?.toUpperCase() === countryFilter.toUpperCase()
         ));
-    }, [clientStations, clientInfo]);
+    }, [clientInfo, provisionedClientStations]);
 
     const stationStatusRows = useMemo(() => {
         return initialStatusStations
@@ -346,7 +348,8 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     const StatusButtonIcon = stationStatusSeverity === 'healthy' ? CheckCircleIcon : ExclamationTriangleIcon;
     
     const preFilteredKiosks = useMemo(() => {
-        // If a search term is present, we start with all client stations and ignore other filters.
+        // If a search term is present, start with all client stations and ignore other filters.
+        // This intentionally allows pending kiosks to appear when the Active filter is off.
         if (debouncedSearchTerm && (clientInfo.features.search || isAdminUser || !!statusFocusedKioskId || !!initialSearch)) {
             const lowercasedSearch = debouncedSearchTerm.toLowerCase();
 
@@ -355,7 +358,7 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
                 return clientStations.filter(k => k.stationid.toLowerCase() === lowercasedSearch);
             }
 
-            return clientStations.filter(k => 
+            return clientStations.filter(k =>
                 k.info.location?.toLowerCase().includes(lowercasedSearch) ||
                 k.stationid.toLowerCase().includes(lowercasedSearch) ||
                 k.info.city?.toLowerCase().includes(lowercasedSearch) ||
