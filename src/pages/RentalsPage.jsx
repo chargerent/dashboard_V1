@@ -28,6 +28,8 @@ import {
     isReturnedRentalStatus,
     isSuccessfulRefundStatus,
     normalizeRefundStatus,
+    rentalMatchesRefundConfirmation,
+    replaceLoadedRentalDocument,
 } from '../utils/rentals.js';
 import {
     buildRentalFilterQueryStreams,
@@ -51,6 +53,7 @@ const FIRESTORE_IN_QUERY_LIMIT = 30;
 const RENTAL_SEARCH_DEBOUNCE_MS = 400;
 const RENTAL_SEARCH_RESULT_LIMIT = 50;
 const RENTAL_QUERY_TIMEOUT_MS = 15_000;
+const REFUND_REFRESH_RETRY_DELAYS_MS = [0, 750, 2_000];
 const RENTAL_SEARCH_FIELDS = [
     'rawid',
     'orderid',
@@ -395,9 +398,25 @@ const getAttemptTime = (attempt) => (
     )
 );
 
+const getEarliestTimestamp = (...timestamps) => {
+    let earliest = null;
+    let earliestTime = Number.POSITIVE_INFINITY;
+
+    timestamps.flat().forEach((timestamp) => {
+        const time = safeToDate(timestamp)?.getTime();
+        if (Number.isFinite(time) && time < earliestTime) {
+            earliest = timestamp;
+            earliestTime = time;
+        }
+    });
+
+    return earliest;
+};
+
 const buildRentalProcessLog = (rental, t) => {
     const entries = [];
     const backendProcessLog = Array.isArray(rental.processLog) ? rental.processLog : [];
+    const attempts = Array.isArray(rental.vendAttempts) ? rental.vendAttempts : [];
     const hasBackendEvent = (eventName) => backendProcessLog.some(entry => (
         normalizeText(entry?.event) === eventName
     ));
@@ -420,6 +439,13 @@ const buildRentalProcessLog = (rental, t) => {
     const fullTransactionId = resolveCopyTransactionId(rental);
     const initialStatus = normalizeRentalStatusKey(rental.status);
     const isDeclined = initialStatus === 'declined';
+    const transactionStartedAt = getEarliestTimestamp(
+        rental.rentalTime,
+        rental.failedAt,
+        rental.lastUpdate,
+        attempts.map(getAttemptTime),
+        getAttemptTime(rental.currentVendAttempt)
+    );
     const rentalDetails = formatDetailParts(
         fullTransactionId ? `${t('order_id')}: ${fullTransactionId}` : '',
         isDeclined && rental.paymentAttemptId ? `Payment attempt: ${rental.paymentAttemptId}` : '',
@@ -438,7 +464,7 @@ const buildRentalProcessLog = (rental, t) => {
         title: initialStatus === 'declined' ? t('payment_declined') : t('rental_created'),
         timestamp: initialStatus === 'declined'
             ? firstPresent(rental.declinedAt, rental.rentalTime, rental.lastUpdate)
-            : firstPresent(rental.rentalTime, rental.failedAt, rental.lastUpdate),
+            : firstPresent(transactionStartedAt, rental.rentalTime, rental.failedAt, rental.lastUpdate),
         status: initialStatus === 'pending' ? 'pending' : 'info',
         details: rentalDetails,
     });
@@ -462,7 +488,6 @@ const buildRentalProcessLog = (rental, t) => {
         });
     }
 
-    const attempts = Array.isArray(rental.vendAttempts) ? rental.vendAttempts : [];
     attempts.forEach((attempt, index) => {
         const succeeded = hasAttemptSucceeded(attempt);
         const attemptNumber = firstPresent(attempt.attemptNumber, index + 1);
@@ -783,12 +808,34 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock, onNavigateToCha
     const normalizedRefundStatus = normalizeRefundStatus(rental.refundStatus);
     const rentalStatusKey = normalizeRentalStatusKey(rental.status);
     const isDeclined = rentalStatusKey === 'declined';
+    const rentalStationId = String(rental.rentalStationid || '').trim();
+    const returnStationId = String(
+        firstPresent(rental.returnStationid, rental.returnStationId) || ''
+    ).trim();
+    const returnedToDifferentStation = (
+        Boolean(returnStationId) &&
+        normalizeText(returnStationId) !== normalizeText(rentalStationId)
+    );
+    const hasSuccessfulVendEvidence = (
+        rentalStatusKey === 'rented' ||
+        Boolean(rental.rentedAt) ||
+        normalizeText(rental.vendState) === 'dispensed' ||
+        Number(rental.exitStatus) === 1 ||
+        (Array.isArray(rental.vendAttempts) && rental.vendAttempts.some(hasAttemptSucceeded))
+    );
+    const isOpenSuccessfulRental = (
+        !rental.returnTime &&
+        !isReturnedRentalStatus(rental.status) &&
+        rentalStatusKey !== 'purchased' &&
+        hasSuccessfulVendEvidence
+    );
     const returnTimeLabel = rental.returnTime
         ? formatDateTime(rental.returnTime)
-        : (rentalStatusKey === 'vend_failed' ? 'N/A' : t('in_use'));
+        : (isOpenSuccessfulRental ? t('in_use') : 'N/A');
     const statusClass = rentalStatusKey === 'rented' ? 'bg-blue-100 text-blue-800' :
                         rentalStatusKey === 'purchased' ? 'bg-purple-100 text-purple-800' :
                         rentalStatusKey === 'refunded' ? 'bg-green-100 text-green-800' :
+                        rentalStatusKey === 'payment_approved' ? 'bg-orange-100 text-orange-800' :
                         rentalStatusKey === 'pending' ? 'bg-orange-100 text-orange-800' :
                         rentalStatusKey === 'declined' ? 'bg-gray-100 text-gray-800' :
                         rentalStatusKey === 'vend_failed' ? 'bg-red-100 text-red-800' :
@@ -903,6 +950,11 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock, onNavigateToCha
                         <div>
                             <p className="text-gray-500">{t('return')}</p>
                             <p className="text-gray-800">{returnTimeLabel}</p>
+                            {returnedToDifferentStation && (
+                                <p className="text-gray-600 text-[10px]">
+                                    {t('station')}: {returnStationId}
+                                </p>
+                            )}
                             {rental.returnModuleid && rental.returnSlotid && (
                                 <p className="text-gray-600 text-[10px]">
                                     M: {rental.returnModuleid} S: {rental.returnSlotid} @ {rental.returnPower}%
@@ -977,7 +1029,7 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock, onNavigateToCha
     );
 };
 
-export default function RentalsPage({ onNavigateToDashboard, onNavigateToChargers, clientInfo, allStationsData, t, language, setLanguage, onLogout, onCommand, commandStatus, setCommandStatus, referenceTime, initialPeriod = '7days', initialStationIds = [], initialSearch = '' }) {
+export default function RentalsPage({ onNavigateToDashboard, onNavigateToChargers, clientInfo, allStationsData, t, language, setLanguage, onLogout, onCommand, commandStatus, setCommandStatus, refundConfirmation, referenceTime, initialPeriod = '7days', initialStationIds = [], initialSearch = '' }) {
     const canViewRentalDetails = Boolean(clientInfo?.isAdmin || clientInfo?.features?.rentals === true);
     const [activeFilters, setActiveFilters] = useState({ period: initialPeriod, status: 'all', returnType: 'all', version: 'all', gateway: 'all' });
     const [searchTerm, setSearchTerm] = useState(initialSearch);
@@ -995,10 +1047,66 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
     const requestGenerationRef = useRef(0);
     const periodCursorsRef = useRef(new Map());
     const allStationsDataRef = useRef(allStationsData);
+    const loadedRentalsRef = useRef(loadedRentals);
 
     useEffect(() => {
         allStationsDataRef.current = allStationsData;
     }, [allStationsData]);
+
+    useEffect(() => {
+        loadedRentalsRef.current = loadedRentals;
+    }, [loadedRentals]);
+
+    useEffect(() => {
+        if (!refundConfirmation) return undefined;
+
+        const matchingRental = loadedRentalsRef.current.find(rental => (
+            rentalMatchesRefundConfirmation(rental, refundConfirmation)
+        ));
+        const documentId = matchingRental?.documentId;
+        if (!documentId) return undefined;
+
+        let cancelled = false;
+        const retryTimers = new Set();
+        const expectedSuccessfulRefund = isSuccessfulRefundStatus(
+            refundConfirmation.refund_status || refundConfirmation.status
+        );
+
+        const refreshRental = async (attemptIndex) => {
+            try {
+                const documentSnapshot = await getDoc(doc(db, 'rentals', documentId));
+                if (cancelled || !documentSnapshot.exists()) return;
+
+                const refreshedRental = mapRentalSnapshot(documentSnapshot);
+                setLoadedRentals(previous => mergeRentalDocuments(
+                    replaceLoadedRentalDocument(previous, refreshedRental)
+                ));
+
+                const refreshedStatus = normalizeRefundStatus(refreshedRental.refundStatus);
+                const refreshComplete = expectedSuccessfulRefund
+                    ? isSuccessfulRefundStatus(refreshedStatus)
+                    : refreshedStatus !== '';
+                const nextAttemptIndex = attemptIndex + 1;
+                if (!refreshComplete && nextAttemptIndex < REFUND_REFRESH_RETRY_DELAYS_MS.length) {
+                    const timerId = window.setTimeout(() => {
+                        retryTimers.delete(timerId);
+                        refreshRental(nextAttemptIndex);
+                    }, REFUND_REFRESH_RETRY_DELAYS_MS[nextAttemptIndex]);
+                    retryTimers.add(timerId);
+                }
+            } catch (error) {
+                if (!cancelled) {
+                    console.error('Unable to refresh refunded rental:', error);
+                }
+            }
+        };
+
+        refreshRental(0);
+        return () => {
+            cancelled = true;
+            retryTimers.forEach(timerId => window.clearTimeout(timerId));
+        };
+    }, [refundConfirmation]);
 
     const availableStationIdsKey = useMemo(() => (
         uniqueStrings((allStationsData || []).map(station => station.stationid))
@@ -1643,7 +1751,14 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
                         </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-4 mt-4">
-                        {['all', 'rented', 'returned', 'purchased', 'refunded', 'pending', 'declined', 'vend_failed', 'short_rental', 'error', 'uid'].map(status => (
+                        {['all', 'rented', 'returned', 'purchased', 'refunded', 'declined', 'uid', 'divider', 'pending', 'payment_approved', 'vend_failed', 'short_rental', 'error'].map(status => (
+                            status === 'divider' ? (
+                                <span
+                                    key={status}
+                                    className="mx-1 h-7 w-px self-center bg-gray-300"
+                                    aria-hidden="true"
+                                />
+                            ) : (
                             <button key={status} onClick={() => {
                                 if (status === 'uid') {
                                     handleFilterChange('gateway', activeFilters.gateway === 'uid' ? 'all' : 'uid');
@@ -1654,11 +1769,16 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
                             }}
                                 className={`px-3 py-1 text-sm font-semibold rounded-full transition-colors ${
                                     (status === 'uid' ? activeFilters.gateway === 'uid' : activeFilters.status === status)
-                                        ? (status === 'error' ? 'bg-red-600 text-white shadow' : 'bg-blue-600 text-white shadow')
-                                        : (status === 'error' ? 'bg-red-50 text-red-700 hover:bg-red-100 border border-red-100' : 'bg-gray-200 text-gray-700 hover:bg-gray-300')
+                                        ? (['pending', 'payment_approved', 'vend_failed', 'short_rental', 'error'].includes(status)
+                                            ? 'bg-red-600 text-white shadow'
+                                            : 'bg-blue-600 text-white shadow')
+                                        : (['pending', 'payment_approved', 'vend_failed', 'short_rental', 'error'].includes(status)
+                                            ? 'bg-red-50 text-red-700 hover:bg-red-100 border border-red-100'
+                                            : 'bg-gray-200 text-gray-700 hover:bg-gray-300')
                                 }`}>
                                 {status === 'error' ? t('log_errors_filter') : status === 'uid' ? 'UID' : t(status)}
                             </button>
+                            )
                         ))}
                     </div>
                     <div className="flex flex-wrap items-center gap-4 mt-4 border-t pt-4">

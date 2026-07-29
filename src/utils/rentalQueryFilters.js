@@ -11,6 +11,7 @@ const DIRECT_STATUS_FILTERS = new Set([
     'returned',
     'purchased',
     'pending',
+    'payment_approved',
     'declined',
     'vend_failed',
 ]);

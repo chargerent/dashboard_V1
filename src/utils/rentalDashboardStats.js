@@ -27,24 +27,29 @@ function addPeriod(target, source) {
   target.initialCharge += Number(source?.initialCharge) || 0;
 }
 
-function getUtcDateKey(value) {
-  const date = value instanceof Date ? value : new Date(value);
-  return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : '';
-}
-
-function getRentalPeriodKeys(referenceTime) {
+function getRentalPeriodStarts(referenceTime) {
   const now = new Date(referenceTime);
   const safeNow = Number.isFinite(now.getTime()) ? now : new Date();
-  const sevenDaysAgo = new Date(safeNow.getTime() - (7 * DAY_MS));
-  const thirtyDaysAgo = new Date(safeNow.getTime() - (30 * DAY_MS));
-  const todayKey = getUtcDateKey(safeNow);
+  const todayStart = new Date(safeNow);
+  todayStart.setHours(0, 0, 0, 0);
+  const sevenDaysAgo = new Date(safeNow);
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const thirtyDaysAgo = new Date(safeNow);
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const monthStart = new Date(safeNow);
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  const yearStart = new Date(safeNow);
+  yearStart.setMonth(0, 1);
+  yearStart.setHours(0, 0, 0, 0);
 
   return {
-    todayKey,
-    sevenDayKey: getUtcDateKey(sevenDaysAgo),
-    thirtyDayKey: getUtcDateKey(thirtyDaysAgo),
-    monthPrefix: todayKey.slice(0, 7),
-    yearPrefix: todayKey.slice(0, 4),
+    now: safeNow,
+    todayStart,
+    sevenDaysAgo,
+    thirtyDaysAgo,
+    monthStart,
+    yearStart,
   };
 }
 
@@ -63,31 +68,54 @@ export function aggregateRentalDashboardStats(
   symbol = '$'
 ) {
   const totals = createEmptyRentalDashboardTotals(symbol);
-  const {
-    todayKey,
-    sevenDayKey,
-    thirtyDayKey,
-    monthPrefix,
-    yearPrefix,
-  } = getRentalPeriodKeys(referenceTime);
+  const periodStarts = getRentalPeriodStarts(referenceTime);
 
   [...new Set((stationIds || []).map(value => String(value || '').trim()).filter(Boolean))]
     .forEach((stationId) => {
       const stationStats = getStationStats(statsByStationId, stationId);
       if (!stationStats) return;
 
-      Object.entries(stationStats.days || {}).forEach(([dayKey, dayTotals]) => {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey) || dayKey > todayKey) return;
+      const hourlyEntries = Object.entries(stationStats.hours || {});
+      if (hourlyEntries.length === 0) {
+        // Schema v2 compatibility while the production summaries are being migrated.
+        // These UTC day buckets cannot represent a browser-local midnight exactly.
+        const todayKey = periodStarts.now.toISOString().slice(0, 10);
+        const sevenDayKey = new Date(
+          periodStarts.now.getTime() - (7 * DAY_MS)
+        ).toISOString().slice(0, 10);
+        const thirtyDayKey = new Date(
+          periodStarts.now.getTime() - (30 * DAY_MS)
+        ).toISOString().slice(0, 10);
+        Object.entries(stationStats.days || {}).forEach(([dayKey, dayTotals]) => {
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey) || dayKey > todayKey) return;
 
-        if (dayKey === todayKey) addPeriod(totals.today, dayTotals);
-        if (dayKey >= sevenDayKey) addPeriod(totals.last7Days, dayTotals);
-        if (dayKey >= thirtyDayKey) {
-          addPeriod(totals.last30Days, dayTotals);
-          totals.statusCounts.rented += Number(dayTotals?.rented) || 0;
-          totals.statusCounts.lost += Number(dayTotals?.lost) || 0;
+          if (dayKey === todayKey) addPeriod(totals.today, dayTotals);
+          if (dayKey >= sevenDayKey) addPeriod(totals.last7Days, dayTotals);
+          if (dayKey >= thirtyDayKey) {
+            addPeriod(totals.last30Days, dayTotals);
+            totals.statusCounts.rented += Number(dayTotals?.rented) || 0;
+            totals.statusCounts.lost += Number(dayTotals?.lost) || 0;
+          }
+          if (dayKey.startsWith(todayKey.slice(0, 7))) addPeriod(totals.monthToDate, dayTotals);
+          if (dayKey.startsWith(todayKey.slice(0, 4))) addPeriod(totals.yearToDate, dayTotals);
+        });
+        return;
+      }
+
+      hourlyEntries.forEach(([hourKey, hourTotals]) => {
+        if (!/^\d{4}-\d{2}-\d{2}T\d{2}$/.test(hourKey)) return;
+        const bucketTime = new Date(`${hourKey}:00:00.000Z`);
+        if (!Number.isFinite(bucketTime.getTime()) || bucketTime > periodStarts.now) return;
+
+        if (bucketTime >= periodStarts.todayStart) addPeriod(totals.today, hourTotals);
+        if (bucketTime >= periodStarts.sevenDaysAgo) addPeriod(totals.last7Days, hourTotals);
+        if (bucketTime >= periodStarts.thirtyDaysAgo) {
+          addPeriod(totals.last30Days, hourTotals);
+          totals.statusCounts.rented += Number(hourTotals?.rented) || 0;
+          totals.statusCounts.lost += Number(hourTotals?.lost) || 0;
         }
-        if (dayKey.startsWith(monthPrefix)) addPeriod(totals.monthToDate, dayTotals);
-        if (dayKey.startsWith(yearPrefix)) addPeriod(totals.yearToDate, dayTotals);
+        if (bucketTime >= periodStarts.monthStart) addPeriod(totals.monthToDate, hourTotals);
+        if (bucketTime >= periodStarts.yearStart) addPeriod(totals.yearToDate, hourTotals);
       });
     });
 

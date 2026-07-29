@@ -696,6 +696,7 @@ function App() {
   const [rentalsInitialStationIds, setRentalsInitialStationIds] = useState([]);
   const [rentalsInitialSearch, setRentalsInitialSearch] = useState('');
   const [rentalData, setRentalData] = useState([]);
+  const [rentalRefundConfirmation, setRentalRefundConfirmation] = useState(null);
   const [rentalDashboardStatsByStationId, setRentalDashboardStatsByStationId] = useState(() => new Map());
   const [rentalDashboardMetaReady, setRentalDashboardMetaReady] = useState(false);
   const [commandStatus, setCommandStatus] = useState(null);
@@ -2180,6 +2181,10 @@ function App() {
                   : rental
               )
             );
+            setRentalRefundConfirmation({
+              ...data,
+              receivedAt: Date.now(),
+            });
           }
 
           if (flowUpdateResponse) {
@@ -2710,6 +2715,7 @@ function App() {
             onCommand={onCommand}
             commandStatus={commandStatus}
             setCommandStatus={setCommandStatus}
+            refundConfirmation={rentalRefundConfirmation}
             referenceTime={latestTimestamp}
             initialPeriod={rentalsInitialPeriod}
             initialStationIds={rentalsInitialStationIds}
@@ -2817,7 +2823,7 @@ function App() {
           <ProvisionPage
             onLogout={handleLogout}
             onNavigateToDashboard={() => setPage('dashboard')}
-            onNavigateToAiBooths={() => setPage('ai-booths')}
+            onNavigateToAdmin={() => setPage('admin')}
             t={t}
             onCommand={onCommand}
             allStationsData={allStationsData}

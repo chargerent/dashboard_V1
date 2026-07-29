@@ -71,6 +71,17 @@ export const rentalMatchesRefundConfirmation = (rental, confirmation) => {
     );
 };
 
+export const replaceLoadedRentalDocument = (rentals, refreshedRental) => {
+    const documentId = String(refreshedRental?.documentId || '').trim();
+    if (!documentId || !Array.isArray(rentals)) return rentals;
+
+    return rentals.map(rental => (
+        String(rental?.documentId || '').trim() === documentId
+            ? refreshedRental
+            : rental
+    ));
+};
+
 export const applyRefundConfirmationToRental = (rental, confirmation) => {
     const refundStatus = normalizeRefundStatus(confirmation?.refund_status || confirmation?.status) || 'approved';
     const refundDate = toValidIsoTimestamp(confirmation?.refund_date || confirmation?.time) || new Date().toISOString();

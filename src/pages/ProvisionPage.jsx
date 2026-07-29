@@ -1,7 +1,6 @@
 // src/pages/ProvisionPage.jsx
 
 import { useState, useCallback, useMemo, useEffect } from 'react';
-import { SparklesIcon } from '@heroicons/react/24/outline';
 import {
     FormInput,
     FormToggle,
@@ -275,7 +274,7 @@ const withCountryDefaults = (data, countryValue) => {
 
 const createInitialFormData = () => withCountryDefaults(initialFormData, initialFormData.info.country);
 
-const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAiBooths, onLogout, t, onCommand, allStationsData, lastProvisionedId, commandStatus, setCommandStatus }) => {
+const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAdmin, onLogout, t, onCommand, allStationsData, lastProvisionedId, commandStatus, setCommandStatus }) => {
     const [formData, setFormData] = useState(createInitialFormData);
     const [showConfirmation, setShowConfirmation] = useState(false);
     const [missingFields, setMissingFields] = useState([]);
@@ -558,21 +557,21 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAiBooths, onLogout, 
     return (
         <div className="min-h-screen bg-gray-100">
             <header className="bg-white shadow-sm">
-                <div className="max-w-4xl mx-auto py-4 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
+                <div className="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
                     <img className="h-12 w-auto" src="/logo.png" alt="Company Logo" onError={(e) => { e.target.onerror = null; e.target.style.display='none' }}/>
                     <div className="flex items-center space-x-4">
-                        {onNavigateToAiBooths && (
-                            <button
-                                onClick={onNavigateToAiBooths}
-                                className="inline-flex items-center gap-2 rounded-md bg-cyan-100 px-3 py-2 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-200"
-                                title="AI Booths"
-                            >
-                                <SparklesIcon className="h-5 w-5" />
-                                Back to AI Booths
-                            </button>
-                        )}
-                        <button onClick={onNavigateToDashboard} className="p-2 rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300" title={t('back_to_dashboard')}><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg></button>
-                        <button onClick={onLogout} className="p-2 rounded-md bg-red-500 text-white hover:bg-red-600" title={t('logout')}>
+                        <button type="button" onClick={onNavigateToDashboard} className="p-2 rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300" title={t('back_to_dashboard')}><svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg></button>
+                        <button
+                            type="button"
+                            onClick={onNavigateToAdmin}
+                            className="p-2 rounded-md bg-orange-100 text-orange-700 hover:bg-orange-200"
+                            title={t('admin_tools')}
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                            </svg>
+                        </button>
+                        <button type="button" onClick={onLogout} className="p-2 rounded-md bg-red-500 text-white hover:bg-red-600" title={t('logout')}>
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
                         </button>
                     </div>

@@ -625,6 +625,19 @@ export function createDefaultKioskUiProfile(clientId = '') {
   };
 }
 
+export function createKioskUiProfileFromTemplate(clientId = '', templateProfile = null) {
+  const target = createDefaultKioskUiProfile(clientId);
+  if (!templateProfile || typeof templateProfile !== 'object') return target;
+
+  return {
+    ...target,
+    status: String(templateProfile.status || target.status),
+    admin: cloneProfileValue(templateProfile.admin || target.admin),
+    ui: cloneProfileValue(templateProfile.ui || target.ui),
+    languages: cloneProfileValue(templateProfile.languages || target.languages),
+  };
+}
+
 export function resolveKioskUiSnapshot(profile) {
   const ui = deepMerge(DEFAULT_KIOSK_UI, profile?.ui || {});
   const languages = normalizeKioskLanguages(profile?.languages);

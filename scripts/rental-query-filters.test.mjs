@@ -18,6 +18,10 @@ test('rare exact statuses are queried before the 30-day result is paged', () => 
         buildRentalFilterQueryStreams({ status: 'purchased' }),
         [{ key: 'status:purchased', field: 'status', value: 'purchased' }]
     );
+    assert.deepEqual(
+        buildRentalFilterQueryStreams({ status: 'payment_approved' }),
+        [{ key: 'status:payment_approved', field: 'status', value: 'payment_approved' }]
+    );
 });
 
 test('gateway filters query both normalized and legacy uppercase values', () => {

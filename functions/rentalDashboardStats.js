@@ -1,5 +1,5 @@
 const ROLLING_RENTAL_DAYS = 31;
-const DASHBOARD_STATS_SCHEMA_VERSION = 2;
+const DASHBOARD_STATS_SCHEMA_VERSION = 3;
 
 function toFiniteNumber(value) {
   const number = Number(value);
@@ -10,6 +10,12 @@ function getUtcDateKey(value) {
   if (!value) return "";
   const date = value instanceof Date ? value : new Date(value);
   return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : "";
+}
+
+function getUtcHourKey(value) {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 13) : "";
 }
 
 function normalizeStationId(value) {
@@ -35,13 +41,13 @@ function buildRentalProjection(rental) {
   const stationid = normalizeStationId(rental.rentalStationid);
   if (!stationid) return null;
 
-  const dayKey = getUtcDateKey(rental.rentalTime);
+  const hourKey = getUtcHourKey(rental.rentalTime);
   return {
     stationid,
-    dayKey,
-    count: dayKey ? 1 : 0,
-    revenue: dayKey ? toFiniteNumber(rental.totalCharged) : 0,
-    initialCharge: dayKey ? toFiniteNumber(rental.initialCharge) : 0,
+    hourKey,
+    count: hourKey ? 1 : 0,
+    revenue: hourKey ? toFiniteNumber(rental.totalCharged) : 0,
+    initialCharge: hourKey ? toFiniteNumber(rental.initialCharge) : 0,
     status: normalizeProjectedStatus(rental.status),
   };
 }
@@ -52,7 +58,7 @@ function projectionsEqual(left, right) {
 
   return (
     left.stationid === right.stationid &&
-    left.dayKey === right.dayKey &&
+    left.hourKey === right.hourKey &&
     left.count === right.count &&
     left.revenue === right.revenue &&
     left.initialCharge === right.initialCharge &&
@@ -65,11 +71,11 @@ function clampNumber(value) {
   return normalized < 0 ? 0 : normalized;
 }
 
-function pruneOldDays(days, referenceTime = new Date()) {
-  const cutoffKey = getUtcDateKey(getRentalRetentionCutoff(referenceTime));
+function pruneOldHours(hours, referenceTime = new Date()) {
+  const cutoffKey = getUtcHourKey(getRentalRetentionCutoff(referenceTime));
 
   return Object.fromEntries(
-      Object.entries(days || {}).filter(([dayKey]) => dayKey >= cutoffKey),
+      Object.entries(hours || {}).filter(([hourKey]) => hourKey >= cutoffKey),
   );
 }
 
@@ -77,11 +83,11 @@ function applyRentalProjection(summary, projection, direction, referenceTime = n
   const next = {
     schemaVersion: DASHBOARD_STATS_SCHEMA_VERSION,
     stationid: projection.stationid,
-    days: {...(summary?.days || {})},
+    hours: {...(summary?.hours || {})},
   };
 
-  if (projection.dayKey && projection.count) {
-    const existing = next.days[projection.dayKey] || {};
+  if (projection.hourKey && projection.count) {
+    const existing = next.hours[projection.hourKey] || {};
     const updated = {
       count: clampNumber(toFiniteNumber(existing.count) + (direction * projection.count)),
       revenue: clampNumber(toFiniteNumber(existing.revenue) + (direction * projection.revenue)),
@@ -105,13 +111,13 @@ function applyRentalProjection(summary, projection, direction, referenceTime = n
       updated.rented === 0 &&
       updated.lost === 0
     ) {
-      delete next.days[projection.dayKey];
+      delete next.hours[projection.hourKey];
     } else {
-      next.days[projection.dayKey] = updated;
+      next.hours[projection.hourKey] = updated;
     }
   }
 
-  next.days = pruneOldDays(next.days, referenceTime);
+  next.hours = pruneOldHours(next.hours, referenceTime);
   return next;
 }
 

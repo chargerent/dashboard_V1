@@ -24,6 +24,7 @@ import {
   KIOSK_PROFILE_LANGUAGES,
   cloneProfileValue,
   createDefaultKioskUiProfile,
+  createKioskUiProfileFromTemplate,
   flattenLanguageFields,
   getNestedValue,
   normalizeKioskLanguages,
@@ -558,11 +559,12 @@ export default function UiProfilesPage({
       const loadedProfiles = oneProfilePerClient(Array.isArray(payload?.profiles) ? payload.profiles : []);
       const loadedClientIds = new Set(loadedProfiles.map((profile) => normalizeClientId(profile.clientId)));
       const missingClientIds = clientOptions.filter((clientId) => !loadedClientIds.has(clientId));
+      const testProfile = loadedProfiles.find((profile) => normalizeClientId(profile.clientId) === 'TEST');
       const createdProfiles = [];
 
       for (const clientId of missingClientIds) {
         const defaultProfile = {
-          ...createDefaultKioskUiProfile(clientId),
+          ...createKioskUiProfileFromTemplate(clientId, testProfile),
           id: clientProfileDocumentId(clientId),
         };
         const createPayload = await callFunctionWithAuth('uiProfile_upsert', { profile: defaultProfile });
