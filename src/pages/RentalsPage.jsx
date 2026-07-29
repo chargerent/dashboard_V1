@@ -125,8 +125,10 @@ const getPeriodStart = (period, referenceTime) => {
         startDate.setHours(0, 0, 0, 0);
     } else if (period === '30days') {
         startDate.setDate(startDate.getDate() - 30);
+        startDate.setMinutes(0, 0, 0);
     } else {
         startDate.setDate(startDate.getDate() - 7);
+        startDate.setMinutes(0, 0, 0);
     }
 
     return startDate.toISOString();
@@ -1556,10 +1558,12 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
             case '30days':
                 startDate = new Date(now);
                 startDate.setDate(startDate.getDate() - 30);
+                startDate.setMinutes(0, 0, 0);
                 break;
             case '7days':
                 startDate = new Date(now);
                 startDate.setDate(startDate.getDate() - 7);
+                startDate.setMinutes(0, 0, 0);
                 break;
             default: // Default to 'today'
                 startDate = new Date(now);

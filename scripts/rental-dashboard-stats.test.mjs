@@ -9,10 +9,33 @@ import {
 
 const require = createRequire(import.meta.url);
 const {
+  DASHBOARD_STATS_SCHEMA_VERSION,
   applyRentalProjection,
   buildRentalProjection,
+  isRentalDashboardGenerationReady,
   projectionsEqual,
 } = require('../functions/rentalDashboardStats.js');
+
+test('incremental writes require a ready matching summary generation', () => {
+  assert.equal(
+    isRentalDashboardGenerationReady({
+      ready: true,
+      schemaVersion: DASHBOARD_STATS_SCHEMA_VERSION,
+    }),
+    true
+  );
+  assert.equal(
+    isRentalDashboardGenerationReady({ ready: true, schemaVersion: 2 }),
+    false
+  );
+  assert.equal(
+    isRentalDashboardGenerationReady({
+      ready: false,
+      schemaVersion: DASHBOARD_STATS_SCHEMA_VERSION,
+    }),
+    false
+  );
+});
 
 test('dashboard aggregation uses browser-local boundaries for hourly buckets', () => {
   const originalTimezone = process.env.TZ;
@@ -48,6 +71,32 @@ test('dashboard aggregation uses browser-local boundaries for hourly buckets', (
     assert.deepEqual(totals.monthToDate, { count: 5, revenue: 27, initialCharge: 22 });
     assert.deepEqual(totals.yearToDate, { count: 12, revenue: 83, initialCharge: 57 });
     assert.deepEqual(totals.statusCounts, { rented: 3, lost: 1 });
+  } finally {
+    process.env.TZ = originalTimezone;
+  }
+});
+
+test('rolling periods align to the browser-local hour used by summary buckets', () => {
+  const originalTimezone = process.env.TZ;
+  process.env.TZ = 'Asia/Shanghai';
+  const statsByStationId = new Map([
+    ['US0001', {
+      hours: {
+        '2026-07-20T14': { count: 1, revenue: 6, initialCharge: 0 },
+      },
+    }],
+  ]);
+
+  try {
+    const totals = aggregateRentalDashboardStats(
+      statsByStationId,
+      ['US0001'],
+      '2026-07-27T14:45:00.000Z',
+      '$'
+    );
+
+    assert.equal(totals.last7Days.count, 1);
+    assert.equal(totals.last7Days.revenue, 6);
   } finally {
     process.env.TZ = originalTimezone;
   }

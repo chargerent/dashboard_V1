@@ -2,6 +2,7 @@
 const admin = require("firebase-admin");
 const crypto = require("node:crypto");
 const {
+  DASHBOARD_STATS_SCHEMA_VERSION,
   applyRentalProjection,
   buildRentalProjection,
   getRentalRetentionCutoff,
@@ -162,6 +163,7 @@ async function main() {
     await metaRef.set({
       ready: false,
       generation,
+      pendingSchemaVersion: DASHBOARD_STATS_SCHEMA_VERSION,
       startedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, {merge: true});
   }
@@ -193,6 +195,7 @@ async function main() {
     cutoff: cutoff.toISOString(),
     rentals: rentalsById.size,
     stations: summariesByStationId.size,
+    schemaVersion: DASHBOARD_STATS_SCHEMA_VERSION,
   }, null, 2));
 
   if (!shouldApply) {
@@ -220,6 +223,8 @@ async function main() {
 
   await metaRef.set({
     ready: true,
+    schemaVersion: DASHBOARD_STATS_SCHEMA_VERSION,
+    pendingSchemaVersion: admin.firestore.FieldValue.delete(),
     completedAt: admin.firestore.FieldValue.serverTimestamp(),
     cutoff: cutoff.toISOString(),
     sourceReadTime,

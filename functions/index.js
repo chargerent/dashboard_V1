@@ -7,8 +7,10 @@ const crypto = require("node:crypto");
 const admin = require("firebase-admin");
 const {rbcOpenApi} = require("./rbcOpenRouting/api");
 const {
+  DASHBOARD_STATS_SCHEMA_VERSION,
   applyRentalProjection,
   buildRentalProjection,
+  isRentalDashboardGenerationReady,
   projectionsEqual,
 } = require("./rentalDashboardStats");
 
@@ -9273,7 +9275,8 @@ exports.rentals_updateDashboardStats = onDocumentWritten(
         const meta = metaSnapshot.exists ? metaSnapshot.data() : {};
         const storedEvent = eventSnapshot.exists ? eventSnapshot.data() : null;
         const eventIsPending = storedEvent?.applyState === "pending";
-        if (eventSnapshot.exists && (!eventIsPending || meta.ready !== true)) return;
+        const generationReady = isRentalDashboardGenerationReady(meta);
+        if (eventSnapshot.exists && (!eventIsPending || !generationReady)) return;
 
         const eventPreviousProjection = storedEvent ?
           storedEvent.previousProjection :
@@ -9283,7 +9286,7 @@ exports.rentals_updateDashboardStats = onDocumentWritten(
           desiredProjection;
         const eventSourceChangeTime = storedEvent?.sourceChangeTime || sourceChangeTime;
         const sourceReadTime = meta.sourceReadTime;
-        const shouldApplyToSummary = meta.ready === true && (
+        const shouldApplyToSummary = generationReady && (
           !sourceReadTime ||
           !eventSourceChangeTime ||
           eventSourceChangeTime.toMillis() > sourceReadTime.toMillis()
@@ -9358,7 +9361,8 @@ exports.rentals_updateDashboardStats = onDocumentWritten(
           previousProjection,
           desiredProjection,
           sourceChangeTime,
-          applyState: meta.ready === true ? "applied" : "pending",
+          summarySchemaVersion: DASHBOARD_STATS_SCHEMA_VERSION,
+          applyState: generationReady ? "applied" : "pending",
           processedAt: admin.firestore.FieldValue.serverTimestamp(),
           expireAt: admin.firestore.Timestamp.fromMillis(Date.now() + (90 * 24 * 60 * 60 * 1000)),
         }, {merge: eventSnapshot.exists});

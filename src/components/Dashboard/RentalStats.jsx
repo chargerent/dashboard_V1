@@ -40,8 +40,10 @@ function RentalStats({ rentalData, dashboardStats, clientInfo, referenceTime, st
         today.setHours(0, 0, 0, 0);
         const sevenDaysAgo = new Date(now);
         sevenDaysAgo.setDate(now.getDate() - 7);
+        sevenDaysAgo.setMinutes(0, 0, 0);
         const thirtyDaysAgo = new Date(now);
         thirtyDaysAgo.setDate(now.getDate() - 30);
+        thirtyDaysAgo.setMinutes(0, 0, 0);
 
         let relevantRentals = rentalData || [];
 

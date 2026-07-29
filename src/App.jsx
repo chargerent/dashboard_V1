@@ -1386,6 +1386,7 @@ function App() {
 
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    thirtyDaysAgo.setMinutes(0, 0, 0);
     const dateThreshold = thirtyDaysAgo.toISOString();
     const dateThresholdMs = Date.parse(dateThreshold);
     const rentalsCollectionRef = collection(db, 'rentals');

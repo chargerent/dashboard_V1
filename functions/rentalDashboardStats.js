@@ -46,6 +46,11 @@ function buildRentalProjection(rental) {
   };
 }
 
+function isRentalDashboardGenerationReady(meta) {
+  return meta?.ready === true &&
+    Number(meta?.schemaVersion) === DASHBOARD_STATS_SCHEMA_VERSION;
+}
+
 function projectionsEqual(left, right) {
   if (left === right) return true;
   if (!left || !right) return false;
@@ -121,5 +126,6 @@ module.exports = {
   applyRentalProjection,
   buildRentalProjection,
   getRentalRetentionCutoff,
+  isRentalDashboardGenerationReady,
   projectionsEqual,
 };

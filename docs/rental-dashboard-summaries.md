@@ -6,15 +6,19 @@ existing 30-day raw-rental listener as a safe fallback.
 
 ## Collections
 
-- `rentalDashboardStats/{stationid}` stores daily count, revenue, initial-charge,
-  and `rented`/`lost` counters from the start of the current year, plus the
-  rolling 31-day edge needed at New Year.
+- `rentalDashboardStats/{stationid}` stores UTC-hour count, revenue,
+  initial-charge, and `rented`/`lost` counters from the start of the current
+  year, plus the rolling 31-day edge needed at New Year. The browser converts
+  those buckets into local Today, 7-day, and 30-day windows.
 - `rentalDashboardEvents/{eventIdHash}` deduplicates Firestore event retries.
   The trigger uses each event's before-and-after rental data, so station changes,
   refunds, and deletions update summaries without historical projection writes.
   While a backfill generation is active, these documents temporarily queue
   deltas and reconcile them against the source snapshot's read time.
-- `rentalDashboardMeta/current` controls the client cutover.
+- `rentalDashboardMeta/current` controls the client cutover. Incremental writes
+  are accepted only when `ready` is true and `schemaVersion` matches the
+  function's expected schema, preventing a new function from overwriting an
+  older summary generation with partial data.
 
 Dashboard cards subscribe to the summary collection. Raw global rental
 listeners are loaded only while Chargers, Analytics, or Testing is open.

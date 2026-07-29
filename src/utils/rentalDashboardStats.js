@@ -34,8 +34,10 @@ function getRentalPeriodStarts(referenceTime) {
   todayStart.setHours(0, 0, 0, 0);
   const sevenDaysAgo = new Date(safeNow);
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  sevenDaysAgo.setMinutes(0, 0, 0);
   const thirtyDaysAgo = new Date(safeNow);
   thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  thirtyDaysAgo.setMinutes(0, 0, 0);
   const monthStart = new Date(safeNow);
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
