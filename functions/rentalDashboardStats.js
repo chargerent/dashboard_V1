@@ -6,12 +6,6 @@ function toFiniteNumber(value) {
   return Number.isFinite(number) ? number : 0;
 }
 
-function getUtcDateKey(value) {
-  if (!value) return "";
-  const date = value instanceof Date ? value : new Date(value);
-  return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : "";
-}
-
 function getUtcHourKey(value) {
   if (!value) return "";
   const date = value instanceof Date ? value : new Date(value);
