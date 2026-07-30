@@ -205,6 +205,7 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                             clientInfo={clientInfo}
                             stationId={kiosk.stationid} 
                             referenceTime={mockNow}
+                            gatewayOptions={kiosk.hardware?.gatewayoptions}
                             t={t}
                             onShowRentalDetails={handleShowRentalPeriod}
                         />

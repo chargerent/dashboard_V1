@@ -1,8 +1,9 @@
 // src/components/Dashboard/RentalStats.jsx
 
 import { memo, useMemo } from 'react';
+import { usesFullPriceRevenueTotal } from '../../utils/rentalRevenueDisplay';
 
-const StatBox = memo(function StatBox({ period, selection, count, revenue, initialCharge, symbol, onShowRentalDetails, clientInfo, valueClass, t }) {
+const StatBox = memo(function StatBox({ period, selection, count, revenue, initialCharge, showInitialCharge, symbol, onShowRentalDetails, clientInfo, valueClass, t }) {
     const handleClick = (event) => {
         event.stopPropagation();
         onShowRentalDetails?.(selection);
@@ -21,9 +22,13 @@ const StatBox = memo(function StatBox({ period, selection, count, revenue, initi
             {(clientInfo?.features?.rental_revenue || clientInfo?.isAdmin) && (
                 <p className="text-sm font-semibold text-green-600">
                     <span className="block sm:inline">{symbol}{revenue.toFixed(0)}</span>
-                    <span className="hidden sm:inline"> / </span>
-                    <span className="mx-auto my-1 block h-px w-10 bg-green-300 sm:hidden" aria-hidden="true"></span>
-                    <span className="block sm:inline">{symbol}{initialCharge.toFixed(0)}</span>
+                    {showInitialCharge && (
+                        <>
+                            <span className="hidden sm:inline"> / </span>
+                            <span className="mx-auto my-1 block h-px w-10 bg-green-300 sm:hidden" aria-hidden="true"></span>
+                            <span className="block sm:inline">{symbol}{initialCharge.toFixed(0)}</span>
+                        </>
+                    )}
                 </p>
             )}
             <p className="text-xs text-gray-500 mt-1">{t(period)}</p>
@@ -31,7 +36,7 @@ const StatBox = memo(function StatBox({ period, selection, count, revenue, initi
     );
 });
 
-function RentalStats({ rentalData, dashboardStats, clientInfo, referenceTime, stationId, kiosks, isGlobal, activeFilters, t, onShowRentalDetails, leaseRevenue, repLeaseCommission }) {
+function RentalStats({ rentalData, dashboardStats, clientInfo, referenceTime, stationId, kiosks, isGlobal, activeFilters, gatewayOptions, t, onShowRentalDetails, leaseRevenue, repLeaseCommission }) {
     const stats = useMemo(() => {
         if (dashboardStats) return dashboardStats;
 
@@ -112,6 +117,7 @@ function RentalStats({ rentalData, dashboardStats, clientInfo, referenceTime, st
 
     const showLeaseRevenue = (clientInfo?.features?.lease_revenue || clientInfo?.isAdmin) && leaseRevenue > 0;
     const showRepLeaseCommission = clientInfo?.isAdmin && repLeaseCommission > 0;
+    const showInitialCharge = !usesFullPriceRevenueTotal(gatewayOptions);
 
     // If no rental/lease features are enabled, don't render anything.
     if (!clientInfo?.isAdmin && !clientInfo?.features?.rental_counts && !clientInfo?.features?.rental_revenue && !showLeaseRevenue) {
@@ -122,9 +128,9 @@ function RentalStats({ rentalData, dashboardStats, clientInfo, referenceTime, st
         <div className="flex flex-col justify-center text-center md:text-left">
             <h3 className={`font-bold text-gray-800 mb-2 ${labelClass}`}>{showLeaseRevenue ? t('revenue_activity') : t('rental_activity')}</h3>
             <div className={`grid ${showLeaseRevenue ? 'grid-cols-4' : 'grid-cols-3'} ${gapClass} items-stretch`}>
-                <StatBox period="today" selection="today" count={stats.today.count} revenue={stats.today.revenue} initialCharge={stats.today.initialCharge} symbol={stats.symbol} onShowRentalDetails={onShowRentalDetails} clientInfo={clientInfo} valueClass={valueClass} t={t} />
-                <StatBox period="days_7" selection="7days" count={stats.last7Days.count} revenue={stats.last7Days.revenue} initialCharge={stats.last7Days.initialCharge} symbol={stats.symbol} onShowRentalDetails={onShowRentalDetails} clientInfo={clientInfo} valueClass={valueClass} t={t} />
-                <StatBox period="days_30" selection="30days" count={stats.last30Days.count} revenue={stats.last30Days.revenue} initialCharge={stats.last30Days.initialCharge} symbol={stats.symbol} onShowRentalDetails={onShowRentalDetails} clientInfo={clientInfo} valueClass={valueClass} t={t} />
+                <StatBox period="today" selection="today" count={stats.today.count} revenue={stats.today.revenue} initialCharge={stats.today.initialCharge} showInitialCharge={showInitialCharge} symbol={stats.symbol} onShowRentalDetails={onShowRentalDetails} clientInfo={clientInfo} valueClass={valueClass} t={t} />
+                <StatBox period="days_7" selection="7days" count={stats.last7Days.count} revenue={stats.last7Days.revenue} initialCharge={stats.last7Days.initialCharge} showInitialCharge={showInitialCharge} symbol={stats.symbol} onShowRentalDetails={onShowRentalDetails} clientInfo={clientInfo} valueClass={valueClass} t={t} />
+                <StatBox period="days_30" selection="30days" count={stats.last30Days.count} revenue={stats.last30Days.revenue} initialCharge={stats.last30Days.initialCharge} showInitialCharge={showInitialCharge} symbol={stats.symbol} onShowRentalDetails={onShowRentalDetails} clientInfo={clientInfo} valueClass={valueClass} t={t} />
                 {showLeaseRevenue && (
                     <div className="bg-gray-100 p-2 rounded-md text-center flex flex-col justify-center">
                         <p className="text-sm font-semibold text-purple-600 leading-tight">{stats.symbol}{leaseRevenue}</p>
