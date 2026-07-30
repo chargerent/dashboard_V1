@@ -18,6 +18,7 @@ import {
 import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
 import LoadingSpinner from '../components/UI/LoadingSpinner.jsx';
 import { callFunctionWithAuth } from '../utils/callableRequest.js';
+import { formatDateTime } from '../utils/dateFormatter.js';
 import { isKioskOnline } from '../utils/helpers.js';
 import {
   DEFAULT_KIOSK_UI,
@@ -518,6 +519,9 @@ export default function UiProfilesPage({
   const [searchQuery, setSearchQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState(null);
+  const [publishingStationId, setPublishingStationId] = useState('');
+  const [publishingAll, setPublishingAll] = useState(false);
+  const [publishedAtOverrides, setPublishedAtOverrides] = useState({});
   const requestedProfileLoadKeysRef = useRef(new Set());
   const isDesktopViewport = useDesktopViewport();
 
@@ -677,27 +681,69 @@ export default function UiProfilesPage({
     }
   };
 
-  const applyProfile = async () => {
-    const profileToApply = await saveProfile('published');
-    if (!profileToApply?.id) return;
-    const stationids = matchingKiosks.map((kiosk) => kiosk.stationid).filter(Boolean);
-    if (!stationids.length) {
-      setSaveStatus({ state: 'success', message: 'Profile published. No kiosks are assigned to this client yet.' });
-      return;
-    }
+  const applySavedProfile = async (profileToApply, stationids, successMessage = '') => {
     setSaveStatus({ state: 'sending', message: 'Applying UI profile…' });
+    const payload = await callFunctionWithAuth('uiProfile_apply', { profileId: profileToApply.id, stationids });
+    const updatedKiosks = Array.isArray(payload?.kiosks) ? payload.kiosks : [];
+    for (const kiosk of updatedKiosks) {
+      await onCommand?.(kiosk.stationid, 'uichange', null, null, null, { kiosk, pushOnly: true });
+    }
+    setPublishedAtOverrides((previous) => ({
+      ...previous,
+      ...Object.fromEntries(updatedKiosks
+        .filter((kiosk) => kiosk.stationid && kiosk.ui?.profileAppliedAt)
+        .map((kiosk) => [kiosk.stationid, kiosk.ui.profileAppliedAt])),
+    }));
+    const count = Number(payload?.updatedCount ?? updatedKiosks.length);
+    setSaveStatus({
+      state: 'success',
+      message: successMessage || `Applied to ${count} kiosk${count === 1 ? '' : 's'}.`,
+    });
+    return count;
+  };
+
+  const applyProfile = async () => {
+    setPublishingAll(true);
     try {
-      const payload = await callFunctionWithAuth('uiProfile_apply', { profileId: profileToApply.id, stationids });
-      const updatedKiosks = Array.isArray(payload?.kiosks) ? payload.kiosks : [];
-      for (const kiosk of updatedKiosks) {
-        await onCommand?.(kiosk.stationid, 'uichange', null, null, null, { kiosk, pushOnly: true });
+      const profileToApply = await saveProfile('published');
+      if (!profileToApply?.id) return;
+      const stationids = matchingKiosks.map((kiosk) => kiosk.stationid).filter(Boolean);
+      if (!stationids.length) {
+        setSaveStatus({ state: 'success', message: 'Profile published. No kiosks are assigned to this client yet.' });
+        return;
       }
-      const count = payload?.updatedCount || updatedKiosks.length;
-      setSaveStatus({ state: 'success', message: `Applied to ${count} kiosk${count === 1 ? '' : 's'}.` });
+      await applySavedProfile(profileToApply, stationids);
       await loadProfiles(profileToApply.id);
     } catch (error) {
       console.error(error);
       setSaveStatus({ state: 'error', message: error?.message || 'Failed to apply UI profile.' });
+    } finally {
+      setPublishingAll(false);
+    }
+  };
+
+  const publishToKiosk = async (kiosk) => {
+    const stationid = String(kiosk?.stationid || '').trim();
+    if (!stationid) return;
+
+    setPublishingStationId(stationid);
+    try {
+      const profileToApply = await saveProfile('published');
+      if (!profileToApply?.id) return;
+      const count = await applySavedProfile(
+        profileToApply,
+        [stationid],
+        `Published to ${stationid}.`,
+      );
+      if (count !== 1) {
+        throw new Error(`${stationid} was not updated. Check its client assignment and try again.`);
+      }
+      await loadProfiles(profileToApply.id);
+    } catch (error) {
+      console.error(error);
+      setSaveStatus({ state: 'error', message: error?.message || `Failed to publish to ${stationid}.` });
+    } finally {
+      setPublishingStationId('');
     }
   };
 
@@ -785,13 +831,31 @@ export default function UiProfilesPage({
             <div className="max-h-72 space-y-1.5 overflow-y-auto">
               {matchingKiosks.map((kiosk) => {
                 const online = isKioskOnline(kiosk, referenceTime);
+                const lastPublishedAt = publishedAtOverrides[kiosk.stationid] || kiosk.ui?.profileAppliedAt;
+                const isPublishing = publishingStationId === kiosk.stationid;
                 return (
-                  <div key={kiosk.stationid} className="flex items-center justify-between gap-2 rounded-xl border border-slate-100 px-3 py-2.5">
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm font-semibold text-slate-800">{kiosk.stationid}</span>
-                      <span className="block truncate text-[11px] text-slate-500">{kiosk.info?.location || kiosk.info?.place || 'No location'}</span>
-                    </span>
-                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${online ? 'bg-emerald-500' : 'bg-slate-300'}`} title={online ? 'Online' : 'Offline'} />
+                  <div key={kiosk.stationid} className="rounded-xl border border-slate-100 px-3 py-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="min-w-0">
+                        <span className="flex items-center gap-1.5">
+                          <span className="truncate text-sm font-semibold text-slate-800">{kiosk.stationid}</span>
+                          <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${online ? 'bg-emerald-500' : 'bg-slate-300'}`} title={online ? 'Online' : 'Offline'} />
+                        </span>
+                        <span className="block truncate text-[11px] text-slate-500">{kiosk.info?.location || kiosk.info?.place || 'No location'}</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => publishToKiosk(kiosk)}
+                        disabled={publishingAll || Boolean(publishingStationId)}
+                        aria-label={`Publish profile to ${kiosk.stationid}`}
+                        className="shrink-0 rounded-lg bg-cyan-700 px-2.5 py-1.5 text-[11px] font-bold text-white shadow-sm hover:bg-cyan-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                      >
+                        {isPublishing ? 'Publishing…' : 'Publish'}
+                      </button>
+                    </div>
+                    <p className="mt-2 text-[10px] font-medium text-slate-400">
+                      Last published: {lastPublishedAt ? formatDateTime(lastPublishedAt) : 'Never'}
+                    </p>
                   </div>
                 );
               })}
@@ -809,7 +873,7 @@ export default function UiProfilesPage({
               </div>
               <div className="flex items-center gap-2">
                 <button type="button" onClick={() => saveProfile('draft')} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50">Save draft</button>
-                <button type="button" onClick={applyProfile} className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800">Publish</button>
+                <button type="button" onClick={applyProfile} disabled={publishingAll || Boolean(publishingStationId)} className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400">{publishingAll ? 'Publishing…' : 'Publish all'}</button>
               </div>
             </div>
             <div className="mt-5 flex gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1">

@@ -392,7 +392,7 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
             kiosks = kiosks.filter(k => k.info.locationtype === 'EVENT');
         }
 
-        const V2_TYPES = ['CT3', 'CT4', 'CT8', 'CT12', 'CK48'];
+        const V2_TYPES = ['CT3', 'CT4', 'CT8', 'CT12', 'CK24', 'CK48'];
         if (!showV1 || !showV2) {
             kiosks = kiosks.filter(k => {
                 const isV2 = V2_TYPES.includes(k.hardware?.type);

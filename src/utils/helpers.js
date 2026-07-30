@@ -1,6 +1,6 @@
 // src/utils/helpers.js
 
-const NEW_KIOSK_TYPES = new Set(['CT3', 'CT4', 'CT8', 'CT12', 'CK48']);
+const NEW_KIOSK_TYPES = new Set(['CT3', 'CT4', 'CT8', 'CT12', 'CK24', 'CK48']);
 const ONLINE_WINDOW_MS = 10 * 60 * 1000;
 const LEGACY_TIMESTAMP_PATTERN = /(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2}):(\d{2})/;
 const HAS_TIMEZONE_PATTERN = /(Z|[+-]\d{2}:?\d{2})$/i;
@@ -135,13 +135,15 @@ const inferNewSchemaHardwareType = (modules = []) => {
     if (totalSlots === 8) return 'CT8';
     if (totalSlots === 4) return 'CT4';
     if (totalSlots === 3) return 'CT3';
+    if (totalSlots === 24) return 'CK24';
 
     // Tolerate stale mixed layouts left behind by the old CT parser, e.g. 12+4+4.
     if (moduleCount === 3 && totalSlots >= 12 && totalSlots <= 20) return 'CT12';
     if (moduleCount === 2 && totalSlots >= 8 && totalSlots <= 12) return 'CT8';
-    if (moduleCount === 1 && totalSlots >= 20) return 'CK48';
+    if (moduleCount === 1 && totalSlots >= 20 && totalSlots < 48) return 'CK24';
+    if (moduleCount === 1 && totalSlots >= 48) return 'CK48';
 
-    return totalSlots >= 20 ? 'CK48' : 'CT3';
+    return totalSlots >= 20 && totalSlots < 48 ? 'CK24' : totalSlots >= 48 ? 'CK48' : 'CT3';
 };
 
 export const isNewSchemaKiosk = (kiosk) => {

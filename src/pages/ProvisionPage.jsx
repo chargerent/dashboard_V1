@@ -25,7 +25,7 @@ const initialFormData = {
     pricing: { currency: 'US', symbol: '$', kioskmode: 'LEASE', text: 'LEASE - SIMPLE DAILY', webapp: true, mobileapp: true, online: true, startpage: { active: true }, taxrate: 0 }
 };
 
-const V2_KIOSK_TYPES = new Set(['CT3', 'CT4', 'CT8', 'CT12', 'CK48']);
+const V2_KIOSK_TYPES = new Set(['CT3', 'CT4', 'CT8', 'CT12', 'CK24', 'CK48']);
 const V2_DEFAULT_WIFI = { name: 'powerbank', password: '123456789' };
 const GATEWAYS = ['P68', 'SWIPE', 'SCAN', 'RFID', 'STRIPE', 'APO', 'TOUCH'];
 const V1_GATEWAY_OPTIONS = ['INITIAL', 'FULL', 'OPEN', 'CLOSED', 'RES', 'UID'];
@@ -402,6 +402,7 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAdmin, onLogout, t, 
                     'CT12': 3,
                     'CA36': 12,
                     'CK20': 2,
+                    'CK24': 6,
                     'CK30': 3,
                     'CK48': 12,
                     'CK50': 5
@@ -670,7 +671,7 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAdmin, onLogout, t, 
                             <div className="p-4 rounded-lg">
                                 <SectionTitle title="Hardware" />
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <FormMultiSwitch label="Type" name="type" options={['CT3', 'CT4', 'CT8', 'CT10', 'CT12', 'CA36', 'CK20', 'CK30', 'CK48', 'CK50']} value={formData.hardware.type} section="hardware" onDataChange={onDataChange} />
+                                    <FormMultiSwitch label="Type" name="type" options={['CT3', 'CT4', 'CT8', 'CT10', 'CT12', 'CA36', 'CK20', 'CK24', 'CK30', 'CK48', 'CK50']} value={formData.hardware.type} section="hardware" onDataChange={onDataChange} />
                                     <FormMultiSwitch label="Mode" name="mode" options={['AI', 'LIVE', 'TEST']} value={formData.hardware.mode} section="hardware" onDataChange={onDataChange} />
                                     <FormInput label="Modules" name="modules" type="number" value={formData.hardware.modules} section="hardware" onDataChange={onDataChange} />
                                     <FormInput label="CPU" name="cpu" value={formData.hardware.cpu} section="hardware" onDataChange={onDataChange} />

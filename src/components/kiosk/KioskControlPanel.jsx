@@ -37,7 +37,7 @@ const ControlButton = ({ icon, label, subLabel, onClick, className = '', status,
     </button>
 );
 
-const V2_TYPES = ['CT3', 'CT4', 'CT8', 'CT12', 'CK48'];
+const V2_TYPES = ['CT3', 'CT4', 'CT8', 'CT12', 'CK24', 'CK48'];
 const DEFAULT_AUDIO_VOLUME = 50;
 
 const clampVolume = (value, fallback = DEFAULT_AUDIO_VOLUME) => {

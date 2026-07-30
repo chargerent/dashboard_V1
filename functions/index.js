@@ -6,6 +6,7 @@ const {defineSecret} = require("firebase-functions/params");
 const crypto = require("node:crypto");
 const admin = require("firebase-admin");
 const {rbcOpenApi} = require("./rbcOpenRouting/api");
+const {preserveProvisionedUiMode} = require("./uiProfileSnapshot");
 const {
   DASHBOARD_STATS_SCHEMA_VERSION,
   applyRentalProjection,
@@ -299,13 +300,14 @@ const DEFAULT_MEDIA_OPTIONS = {
   playlist: [],
   loop: true,
 };
-const MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set(["CT8", "CK48"]);
-const NEW_KIOSK_TYPES = new Set(["CT3", "CT4", "CT8", "CT12", "CK48"]);
+const MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set(["CT8", "CK24", "CK48"]);
+const NEW_KIOSK_TYPES = new Set(["CT3", "CT4", "CT8", "CT12", "CK24", "CK48"]);
 const BOUND_KIOSK_TYPE_CONFIG = Object.freeze({
   CT3: {modules: 1, slots: 3},
   CT4: {modules: 1, slots: 4},
   CT8: {modules: 2, slots: 8, screen: "16IN"},
   CT12: {modules: 3, slots: 12},
+  CK24: {modules: 6, slots: 24, screen: "24IN"},
   CK48: {modules: 12, slots: 48},
 });
 const V2_DEFAULT_WIFI = Object.freeze({
@@ -3844,7 +3846,7 @@ async function mediaAssignPlaylistImpl(data, authState) {
     }
 
     if (!isMediaConfigurableKiosk(kiosk)) {
-      failures.push({stationid, reason: "Only V2 CT8 or CK48 kiosks are supported"});
+      failures.push({stationid, reason: "Only V2 CT8, CK24, or CK48 kiosks are supported"});
       return;
     }
 
@@ -7320,9 +7322,10 @@ async function uiProfileApplyImpl(data, authState) {
       continue;
     }
 
+    const kioskUiSnapshot = preserveProvisionedUiMode(uiSnapshot, kiosk.ui);
     const nextKiosk = {
       ...clonePlain(kiosk),
-      ui: uiSnapshot,
+      ui: kioskUiSnapshot,
       uiProfileId: profile.id,
       updatedAt: new Date().toISOString(),
     };
@@ -7334,7 +7337,7 @@ async function uiProfileApplyImpl(data, authState) {
     }
 
     const kioskUpdate = {
-      ui: uiSnapshot,
+      ui: kioskUiSnapshot,
       uiProfileId: profile.id,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedBy: normalizeUsername(authState.profile?.username),

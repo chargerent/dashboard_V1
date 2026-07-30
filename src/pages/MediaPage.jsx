@@ -12,9 +12,9 @@ const UNTAGGED_FILTER_LABEL = 'Untagged';
 const MEDIA_LIST_TIMEOUT_MS = 45000;
 const MEDIA_UPLOAD_URL_TIMEOUT_MS = 45000;
 const MEDIA_FINALIZE_TIMEOUT_MS = 120000;
-const MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set(['CT8', 'CK48']);
-const MEDIA_CONFIGURABLE_KIOSK_LABEL = 'CT8 or CK48';
-const MEDIA_CONFIGURABLE_BADGE_FALLBACK = 'CT8/CK48';
+const MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set(['CT8', 'CK24', 'CK48']);
+const MEDIA_CONFIGURABLE_KIOSK_LABEL = 'CT8, CK24, or CK48';
+const MEDIA_CONFIGURABLE_BADGE_FALLBACK = 'CT8/CK24/CK48';
 
 function isPdfFile(fileOrAsset) {
   return String(fileOrAsset?.type || fileOrAsset?.contentType || '').trim().toLowerCase() === 'application/pdf';
@@ -1249,7 +1249,7 @@ export default function MediaPage({
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Upload Media</h2>
                 <p className="mt-1 text-sm text-gray-600">
-                  Upload images, videos, or PDFs to Firebase Storage for CT8 and CK48 station playlists.
+                  Upload images, videos, or PDFs to Firebase Storage for CT8, CK24, and CK48 station playlists.
                 </p>
                 <p className="mt-1 text-xs text-gray-500">
                   Upload scope: {uploadVisibility === 'global' ? 'Global library' : 'Your client library'}
@@ -1531,7 +1531,7 @@ export default function MediaPage({
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Target Stations</h2>
                 <p className="mt-1 text-sm text-gray-600">
-                  Select stations to assign assets to. Offline CT8 and CK48 kiosks will load their assigned media when they come back online.
+                  Select stations to assign assets to. Offline CT8, CK24, and CK48 kiosks will load their assigned media when they come back online.
                 </p>
               </div>
               <div className="text-right text-xs text-gray-500">
@@ -1559,7 +1559,7 @@ export default function MediaPage({
 
             {eligibleKiosks.length === 0 ? (
               <div className="mt-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-6 text-sm text-gray-500">
-                No CT8 or CK48 stations were found for this account.
+                No CT8, CK24, or CK48 stations were found for this account.
               </div>
             ) : (
               <div className="mt-4 max-h-[32rem] space-y-3 overflow-y-auto pr-1">

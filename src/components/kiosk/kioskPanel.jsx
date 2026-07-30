@@ -115,14 +115,15 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                                 const showModuleFw = parsedModuleFw === 1 || parsedModuleFw === 2;
                                 const moduleFw = showModuleFw ? String(parsedModuleFw) : '';
                                 const moduleStatus = outputOk ? t('online') : t('offline');
+                                const showModuleChargeIndicator = !isV2Kiosk;
                                 const moduleChargeEnabled = module?.chargeControl?.enabled !== false;
                                 const moduleChargeStatus = moduleChargeEnabled ? 'Charging enabled' : 'Charging disabled';
-                                const moduleTitle = `${module.id}: ${moduleStatus}${showModuleFw ? `, FW ${moduleFw}` : ''}, ${moduleChargeStatus}`;
+                                const moduleTitle = `${module.id}: ${moduleStatus}${showModuleFw ? `, FW ${moduleFw}` : ''}${showModuleChargeIndicator ? `, ${moduleChargeStatus}` : ''}`;
 
                                 return (
                                     <span
                                         key={module.id}
-                                        className="inline-flex h-8 w-6 shrink-0 flex-col items-center justify-start"
+                                        className={`inline-flex w-6 shrink-0 flex-col items-center ${showModuleChargeIndicator ? 'h-8 justify-start' : 'h-6 justify-center'}`}
                                         title={moduleTitle}
                                         aria-label={moduleTitle}
                                         role="img"
@@ -135,10 +136,12 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                                                 </span>
                                             )}
                                         </span>
-                                        <BoltIcon
-                                            aria-hidden="true"
-                                            className={`-mt-1 h-3.5 w-3.5 ${moduleChargeEnabled ? 'text-green-500' : 'text-orange-500'}`}
-                                        />
+                                        {showModuleChargeIndicator && (
+                                            <BoltIcon
+                                                aria-hidden="true"
+                                                className={`-mt-1 h-3.5 w-3.5 ${moduleChargeEnabled ? 'text-green-500' : 'text-orange-500'}`}
+                                            />
+                                        )}
                                     </span>
                                 );
                             })}

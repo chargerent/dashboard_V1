@@ -247,10 +247,10 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     const hasAnyCommands = Object.values(clientInfo.commands).some(v => v === true) || clientInfo.features.rentals;
     const canUpdateModules = clientInfo.commands.updates && isV2Kiosk;
     const showModuleFirmwareMetadata = isV2Kiosk;
-    const showInlineModuleIds = ['CT3', 'CT4', 'CT8', 'CT12', 'CK48'].includes(kiosk.hardware?.type);
+    const showInlineModuleIds = ['CT3', 'CT4', 'CT8', 'CT12', 'CK24', 'CK48'].includes(kiosk.hardware?.type);
     const chargeReadyThreshold = getKioskPowerThreshold(kiosk);
     useEffect(() => installKioskInteractionDebugCapture(), []);
-    const ck48PrimaryAsset = useMemo(() => {
+    const primaryMediaAsset = useMemo(() => {
         if (kiosk?.media?.active !== true) {
             return null;
         }
@@ -1048,6 +1048,64 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         </div>
     );
 
+    const renderAssignedMediaScreen = () => {
+        if (!isVisible) {
+            return null;
+        }
+
+        if (!primaryMediaAsset) {
+            return (
+                <div className="flex h-full w-full flex-col items-center justify-center bg-neutral-950 px-4 text-center text-white">
+                    <div className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-white/70">
+                        Screen Preview
+                    </div>
+                    <p className="mt-3 text-sm font-medium text-white">No media assigned</p>
+                    <p className="mt-1 text-xs text-white/60">Assign media to this station to preview the screen.</p>
+                </div>
+            );
+        }
+
+        if (primaryMediaAsset.previewKind === 'image') {
+            return (
+                <img
+                    src={primaryMediaAsset.downloadUrl}
+                    alt={primaryMediaAsset.name || `${stationId} assigned media`}
+                    className="h-full w-full object-contain"
+                    loading="lazy"
+                />
+            );
+        }
+
+        if (primaryMediaAsset.previewKind === 'video') {
+            return (
+                <video
+                    src={primaryMediaAsset.downloadUrl}
+                    className="h-full w-full object-contain"
+                    controls
+                    preload="metadata"
+                />
+            );
+        }
+
+        if (primaryMediaAsset.previewKind === 'pdf') {
+            return (
+                <div className="flex h-full w-full flex-col items-center justify-center bg-red-50 px-4 text-center">
+                    <div className="rounded-full bg-red-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-red-700">
+                        PDF
+                    </div>
+                    <p className="mt-3 text-sm font-medium text-gray-800">{primaryMediaAsset.name || 'Assigned PDF'}</p>
+                    <p className="mt-1 text-xs text-gray-500">PDF assigned to this station.</p>
+                </div>
+            );
+        }
+
+        return (
+            <div className="flex h-full w-full items-center justify-center bg-gray-100 px-4 text-center text-sm text-gray-500">
+                Preview unavailable for this media type.
+            </div>
+        );
+    };
+
     const renderCT8 = () => {
         const { slotsByPosition } = buildCompactSlotMap(kiosk.modules);
 
@@ -1068,6 +1126,33 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         );
     };
 
+    const renderCK24 = () => {
+        // CK24 uses the same six 2×2 module placements as the right column of CK48.
+        // Its flat slot positions 1–24 map to logical module indices 0–5.
+        const { slotsByPosition } = buildCompactSlotMap(kiosk.modules);
+        const rightColumnIndices = [0, 1, 2, 3, 4, 5];
+
+        return (
+            <div className="p-1.5 flex flex-col items-center gap-2.5">
+                <div className="w-full max-w-lg space-y-2.5">
+                    {renderCompactTowerHeader()}
+
+                    <div className="w-full overflow-hidden rounded-lg bg-black shadow-lg">
+                        <div className="w-full" style={{ aspectRatio: '9 / 16' }}>
+                            {renderAssignedMediaScreen()}
+                        </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2">
+                        {rightColumnIndices.map((groupIndex) => (
+                            renderCompactGroupCard(slotsByPosition, groupIndex)
+                        ))}
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     const renderCK48 = () => {
         // CK48 stores all 48 slots flat in modules[0] with absolute positions 1–48.
         // Visual layout: 12 logical modules arranged in 2 columns (right: 0–5, left: 6–11).
@@ -1076,63 +1161,6 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         const { slotsByPosition } = buildCompactSlotMap(kiosk.modules);
         const leftColumnIndices = [6, 7, 8, 9, 10, 11];
         const rightColumnIndices = [0, 1, 2, 3, 4, 5];
-        const renderScreenPreview = () => {
-            if (!isVisible) {
-                return null;
-            }
-
-            if (!ck48PrimaryAsset) {
-                return (
-                    <div className="flex h-full w-full flex-col items-center justify-center bg-neutral-950 px-4 text-center text-white">
-                        <div className="rounded-full bg-white/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-white/70">
-                            Screen Preview
-                        </div>
-                        <p className="mt-3 text-sm font-medium text-white">No media assigned</p>
-                        <p className="mt-1 text-xs text-white/60">Assign media to this station to preview the screen.</p>
-                    </div>
-                );
-            }
-
-            if (ck48PrimaryAsset.previewKind === 'image') {
-                return (
-                    <img
-                        src={ck48PrimaryAsset.downloadUrl}
-                        alt={ck48PrimaryAsset.name || `${stationId} assigned media`}
-                        className="h-full w-full object-contain"
-                        loading="lazy"
-                    />
-                );
-            }
-
-            if (ck48PrimaryAsset.previewKind === 'video') {
-                return (
-                    <video
-                        src={ck48PrimaryAsset.downloadUrl}
-                        className="h-full w-full object-contain"
-                        controls
-                        preload="metadata"
-                    />
-                );
-            }
-
-            if (ck48PrimaryAsset.previewKind === 'pdf') {
-                return (
-                    <div className="flex h-full w-full flex-col items-center justify-center bg-red-50 px-4 text-center">
-                        <div className="rounded-full bg-red-100 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-red-700">
-                            PDF
-                        </div>
-                        <p className="mt-3 text-sm font-medium text-gray-800">{ck48PrimaryAsset.name || 'Assigned PDF'}</p>
-                        <p className="mt-1 text-xs text-gray-500">PDF assigned to this station.</p>
-                    </div>
-                );
-            }
-
-            return (
-                <div className="flex h-full w-full items-center justify-center bg-gray-100 px-4 text-center text-sm text-gray-500">
-                    Preview unavailable for this media type.
-                </div>
-            );
-        };
 
         return (
             <div className="p-1.5 flex flex-col items-center gap-2.5">
@@ -1141,7 +1169,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
 
                     <div className="mx-auto w-full max-w-sm overflow-hidden rounded-lg bg-black shadow-lg">
                         <div className="w-full" style={{ aspectRatio: '9 / 16' }}>
-                            {renderScreenPreview()}
+                            {renderAssignedMediaScreen()}
                         </div>
                     </div>
 
@@ -1245,6 +1273,8 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                 return renderCK20();
             case 'CK30':
                 return renderCK30();
+            case 'CK24':
+                return renderCK24();
             case 'CK48':
                 return renderCK48();
             case 'CK50':
