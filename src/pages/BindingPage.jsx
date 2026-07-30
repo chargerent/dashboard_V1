@@ -11,7 +11,7 @@ const COUNTRY_OPTIONS = [
   { code: 'US', label: 'United States' },
 ];
 
-const KIOSK_TYPE_OPTIONS = ['CT3', 'CT4', 'CT8', 'CT12', 'CK48'];
+const KIOSK_TYPE_OPTIONS = ['CT3', 'CT4', 'CT8', 'CT12', 'CK24', 'CK48'];
 const DEFAULT_KIOSK_TYPE = 'CT8';
 
 function normalizeModuleId(moduleId) {

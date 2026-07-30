@@ -508,8 +508,11 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     const renderModuleControls = (module) => {
         const canEjectModule = clientInfo.commands.eject;
         const canRebootModule = !isV2Kiosk && clientInfo.commands.reboot;
+        const canChargeModule = !isV2Kiosk && clientInfo.commands.reboot;
+        const moduleChargeEnabled = module?.chargeControl?.enabled !== false;
+        const chargeAction = moduleChargeEnabled ? 'stop charge module' : 'start charge module';
 
-        if (!canEjectModule && !canRebootModule) {
+        if (!canEjectModule && !canChargeModule && !canRebootModule) {
             return null;
         }
 
@@ -535,6 +538,36 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M7 11l5-5m0 0l5 5m-5-5v12" />
+                        </svg>
+                    </button>
+                )}
+                {canChargeModule && (
+                    <button
+                        type="button"
+                        title={moduleChargeEnabled ? t('stop_charge_module') : t('start_charge_module')}
+                        data-kiosk-action={chargeAction}
+                        data-kiosk-stationid={stationId}
+                        data-kiosk-moduleid={module.id}
+                        data-kiosk-disabled-reason={!isOnline ? 'offline' : ''}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            logKioskInteraction('module-charge-toggle-click-handler', {
+                                stationId,
+                                moduleId: module.id,
+                                action: chargeAction,
+                                isOnline,
+                            }, e);
+                            onCommand(stationId, chargeAction, module.id);
+                        }}
+                        disabled={!isOnline}
+                        className={`p-1 flex-1 rounded flex justify-center items-center disabled:cursor-not-allowed disabled:text-gray-300 disabled:hover:bg-transparent ${
+                            moduleChargeEnabled
+                                ? 'text-yellow-600 hover:bg-yellow-100'
+                                : 'text-gray-500 hover:bg-gray-100'
+                        }`}
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill={moduleChargeEnabled ? 'currentColor' : 'none'} viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M13 3L4 14h7l-1 7 9-11h-7l1-7z" />
                         </svg>
                     </button>
                 )}

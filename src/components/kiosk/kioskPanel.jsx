@@ -1,7 +1,7 @@
 // src/components/kiosk/KioskPanel.jsx
 
 import { memo, useMemo, useCallback } from 'react';
-import { HeartIcon } from '@heroicons/react/24/solid';
+import { BoltIcon, HeartIcon } from '@heroicons/react/24/solid';
 import { isKioskOnline, getKioskPowerThreshold, isModuleOnline, isNewSchemaKiosk, isSlotActivelyCharging } from '../../utils/helpers';
 import { formatDateTime } from '../../utils/dateFormatter';
 import RentalStats from '../Dashboard/RentalStats';
@@ -115,22 +115,30 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                                 const showModuleFw = parsedModuleFw === 1 || parsedModuleFw === 2;
                                 const moduleFw = showModuleFw ? String(parsedModuleFw) : '';
                                 const moduleStatus = outputOk ? t('online') : t('offline');
-                                const moduleTitle = `${module.id}: ${moduleStatus}${showModuleFw ? `, FW ${moduleFw}` : ''}`;
+                                const moduleChargeEnabled = module?.chargeControl?.enabled !== false;
+                                const moduleChargeStatus = moduleChargeEnabled ? 'Charging enabled' : 'Charging disabled';
+                                const moduleTitle = `${module.id}: ${moduleStatus}${showModuleFw ? `, FW ${moduleFw}` : ''}, ${moduleChargeStatus}`;
 
                                 return (
                                     <span
                                         key={module.id}
-                                        className="relative inline-flex h-6 w-6 shrink-0 items-center justify-center"
+                                        className="inline-flex h-8 w-6 shrink-0 flex-col items-center justify-start"
                                         title={moduleTitle}
                                         aria-label={moduleTitle}
                                         role="img"
                                     >
-                                        <HeartIcon aria-hidden="true" className={`h-6 w-6 ${outputOk ? 'text-green-700' : 'text-red-700'}`} />
-                                        {showModuleFw && (
-                                            <span aria-hidden="true" className="pointer-events-none absolute inset-0 flex items-center justify-center pt-px text-[11px] font-black leading-none text-white">
-                                                {moduleFw}
-                                            </span>
-                                        )}
+                                        <span className="relative inline-flex h-6 w-6 items-center justify-center">
+                                            <HeartIcon aria-hidden="true" className={`h-6 w-6 ${outputOk ? 'text-green-700' : 'text-red-700'}`} />
+                                            {showModuleFw && (
+                                                <span aria-hidden="true" className="pointer-events-none absolute inset-0 flex items-center justify-center text-[11px] font-black leading-none text-white">
+                                                    {moduleFw}
+                                                </span>
+                                            )}
+                                        </span>
+                                        <BoltIcon
+                                            aria-hidden="true"
+                                            className={`-mt-1 h-3.5 w-3.5 ${moduleChargeEnabled ? 'text-green-500' : 'text-orange-500'}`}
+                                        />
                                     </span>
                                 );
                             })}

@@ -144,10 +144,13 @@ export function getMatchingLegacyCommandScope(scopes, data, now = Date.now()) {
   if (!action) return null;
   const adminId = getCommandResponseAdminId(data);
   const sender = getFirstScalarValue(data, SENDER_FIELDS).toLowerCase();
-  const isLegacyKioskUpdate = sender === 'kiosk' && Boolean(adminId) && (
-    action === 'update flow' || action === 'update ui'
+  const isLegacyKioskCommand = sender === 'kiosk' && Boolean(adminId) && (
+    action === 'update flow' ||
+    action === 'update ui' ||
+    action === 'start charge module' ||
+    action === 'stop charge module'
   );
-  if (!isLegacyKioskUpdate) return null;
+  if (!isLegacyKioskCommand) return null;
 
   const stationId = getCommandResponseStationId(data);
   const provisionId = getCommandResponseProvisionId(data);

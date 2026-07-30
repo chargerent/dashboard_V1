@@ -384,6 +384,7 @@ export const normalizeKioskData = (kiosks) => {
                 output: module.output,
                 heartbeatOutput: module.heartbeatOutput,
                 heartbeat: module.heartbeat,
+                chargeControl: module.chargeControl || null,
                 chargeMetrics: module.chargeMetrics || null,
                 FW: moduleFw,
                 softwareVersion: Number.isFinite(moduleSoftwareVersion) ? moduleSoftwareVersion : 0,

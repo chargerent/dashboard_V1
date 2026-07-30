@@ -320,6 +320,10 @@ export default function useKioskCommandFlow({
     } else if (action === 'reboot module') {
       confirmationText = `${t('reboot_module_confirmation')} ${moduleid}?`;
       commandDetailsPayload.slotid = moduleid;
+    } else if (action === 'start charge module') {
+      confirmationText = `${t('start_charge_module_confirmation')} ${moduleid}?`;
+    } else if (action === 'stop charge module') {
+      confirmationText = `${t('stop_charge_module_confirmation')} ${moduleid}?`;
     } else if (action === 'update flow' && uiVersion) {
       confirmationText = t('update_flow_confirmation').replace('{version}', uiVersion);
     } else if (action === 'update ui' && uiVersion) {

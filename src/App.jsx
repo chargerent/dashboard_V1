@@ -60,6 +60,80 @@ function moduleMatchesResponse(module, moduleRef) {
   return moduleId.split('m').pop() === responseId.split('m').pop();
 }
 
+function stationMatchesResponse(station, stationRef) {
+  const stationId = String(station?.stationid || '').trim().toLowerCase();
+  const responseId = String(stationRef || '').trim().toLowerCase();
+
+  return Boolean(stationId && responseId && stationId === responseId);
+}
+
+function updateStationsModuleChargeControl(stations, stationRef, moduleRef, enabled) {
+  let updated = false;
+
+  const nextStations = stations.map((station) => {
+    if (!stationMatchesResponse(station, stationRef) || !Array.isArray(station.modules)) {
+      return station;
+    }
+
+    let stationUpdated = false;
+    const modules = station.modules.map((module) => {
+      if (!moduleMatchesResponse(module, moduleRef)) return module;
+
+      stationUpdated = true;
+      return {
+        ...module,
+        chargeControl: {
+          ...(module.chargeControl || {}),
+          enabled,
+        },
+      };
+    });
+
+    if (!stationUpdated) return station;
+    updated = true;
+    return { ...station, modules };
+  });
+
+  return updated ? nextStations : stations;
+}
+
+function getModuleChargeOverrideKey(stationRef, moduleRef) {
+  const stationId = String(stationRef || '').trim().toLowerCase();
+  const moduleId = String(moduleRef || '').trim().toLowerCase().split('m').pop();
+
+  return stationId && moduleId ? `${stationId}:${moduleId}` : '';
+}
+
+function applyModuleChargeControlOverrides(station, overrides, now = Date.now()) {
+  if (!station || !Array.isArray(station.modules) || !(overrides instanceof Map) || overrides.size === 0) {
+    return station;
+  }
+
+  let updated = false;
+  const modules = station.modules.map((module) => {
+    const override = [...overrides.values()].find((candidate) => (
+      Number(candidate?.expiresAt || 0) > now &&
+      stationMatchesResponse(station, candidate.stationid) &&
+      moduleMatchesResponse(module, candidate.moduleid)
+    ));
+
+    if (!override) return module;
+
+    updated = true;
+    return {
+      ...module,
+      chargeControl: {
+        ...(module.chargeControl || {}),
+        enabled: override.enabled,
+        manualAction: override.action,
+        manualRequestId: override.requestId,
+      },
+    };
+  });
+
+  return updated ? { ...station, modules } : station;
+}
+
 function findMatchingModule(modules, moduleRef, chargerId) {
   const moduleList = Array.isArray(modules) ? modules : [];
   const numericChargerId = Number(chargerId);
@@ -256,6 +330,7 @@ const FIREBASE_SAVE_ACTIONS = {
 
 const COMMAND_SOCKET_OPEN_TIMEOUT_MS = 3000;
 const COMMAND_RESPONSE_SCOPE_TTL_MS = 10 * 60 * 1000;
+const MODULE_CHARGE_OVERRIDE_TTL_MS = 45 * 1000;
 const DEFAULT_EJECT_SLOT_TIMEOUT_MS = 90 * 1000;
 const EJECT_SLOT_TIMEOUT_MS_CONFIG = Number(import.meta.env.VITE_EJECT_SLOT_TIMEOUT_MS);
 const EJECT_SLOT_TIMEOUT_MS = Number.isFinite(EJECT_SLOT_TIMEOUT_MS_CONFIG) && EJECT_SLOT_TIMEOUT_MS_CONFIG > 0
@@ -716,6 +791,7 @@ function App() {
   const failedEjectTimersRef = useRef(new Map());
   const ejectingSlotsRef = useRef([]);
   const outgoingCommandScopesRef = useRef(new Map());
+  const moduleChargeControlOverridesRef = useRef(new Map());
   const sshStateOverridesRef = useRef(new Map());
   const currentSocketSessionIdRef = useRef('');
   const startupListenerRef = useRef({ kiosksLogged: false, rentalsLogged: false });
@@ -751,6 +827,38 @@ function App() {
   useEffect(() => {
     allStationsDataRef.current = allStationsData;
   }, [allStationsData]);
+
+  const pruneModuleChargeControlOverrides = useCallback((now = Date.now()) => {
+    for (const [key, override] of moduleChargeControlOverridesRef.current.entries()) {
+      if (now >= Number(override?.expiresAt || 0)) {
+        moduleChargeControlOverridesRef.current.delete(key);
+      }
+    }
+  }, []);
+
+  const rememberModuleChargeControlOverride = useCallback((stationid, moduleid, enabled, requestId, action) => {
+    const key = getModuleChargeOverrideKey(stationid, moduleid);
+    if (!key) return;
+
+    const now = Date.now();
+    pruneModuleChargeControlOverrides(now);
+    moduleChargeControlOverridesRef.current.set(key, {
+      stationid,
+      moduleid,
+      enabled,
+      requestId: String(requestId || '').trim(),
+      action,
+      expiresAt: now + MODULE_CHARGE_OVERRIDE_TTL_MS,
+    });
+  }, [pruneModuleChargeControlOverrides]);
+
+  const applyModuleChargeOverridesToStations = useCallback((stations) => {
+    pruneModuleChargeControlOverrides();
+    return stations.map((station) => (
+      applyModuleChargeControlOverrides(station, moduleChargeControlOverridesRef.current)
+    ));
+  }, [pruneModuleChargeControlOverrides]);
+
   const debugEjectUi = useCallback((message, payload) => {
     if (typeof window === 'undefined') return;
 
@@ -1180,10 +1288,11 @@ function App() {
     const publishKioskSnapshot = () => {
       kioskPublishTimer = null;
       setAllStationsData(prevStations => {
-        const nextStations = latestStationIdsInSnapshot
+        const snapshotStations = latestStationIdsInSnapshot
           .map(stationid => normalizedKiosksById.get(stationid))
           .map(station => applySshStateOverride(station, sshStateOverridesRef.current))
           .filter(Boolean);
+        const nextStations = applyModuleChargeOverridesToStations(snapshotStations);
         const isUnchanged = (
           nextStations.length === prevStations.length &&
           nextStations.every((station, index) => station === prevStations[index])
@@ -1270,6 +1379,7 @@ function App() {
     };
   }, [
     cancelDeferredAdminRentalLoad,
+    applyModuleChargeOverridesToStations,
     hasAuthToken,
     listenerClientId,
     listenerCountry,
@@ -2062,6 +2172,8 @@ function App() {
         case 'eject count':
         case 'eject module':
         case 'reboot module':
+        case 'start charge module':
+        case 'stop charge module':
           commandData = { ...baseData, ...details };
           break;
         case 'update module':
@@ -2406,6 +2518,20 @@ function App() {
           } else if (data.action === 'reboot module' || data.action === 'module reboot') {
             const isSuccess = Number(data.status) === 1 || data.status === 'accepted' || data.status === 'success';
             setScopedCommandStatus(data, { state: isSuccess ? 'success' : 'error', message: data.status_en || (isSuccess ? t('command_success') : t('command_failed')) });
+          } else if (data.action === 'start charge module' || data.action === 'stop charge module') {
+            const isSuccess = Number(data.status) === 1 || data.status === 'accepted' || data.status === 'success';
+            const stationId = data.kiosk || data.stationid;
+            const moduleId = data.moduleid || data.module;
+            const enabled = data.action === 'start charge module' || data.enabled === true;
+            setScopedCommandStatus(data, { state: isSuccess ? 'success' : 'error', message: data.status_en || (isSuccess ? t('command_success') : t('command_failed')) });
+            if (isSuccess && stationId && moduleId) {
+              rememberModuleChargeControlOverride(stationId, moduleId, enabled, data.requestId, data.action);
+              setAllStationsData((prevStations) => {
+                const nextStations = updateStationsModuleChargeControl(prevStations, stationId, moduleId, enabled);
+                allStationsDataRef.current = nextStations;
+                return nextStations;
+              });
+            }
           } else if (data.action === 'odroid reboot') {
             setScopedCommandStatus(data, { state: 'success', message: data.status_en });
           } else if (data.action === 'hotspot' && data.stationid) {
@@ -2473,7 +2599,7 @@ function App() {
         ws.current = null;
       }
     };
-  }, [token, clientInfo, t, clearEjectCommandState, debugEjectUi, flashFailedEjectSlot, setScopedCommandStatus]);
+  }, [token, clientInfo, t, clearEjectCommandState, debugEjectUi, flashFailedEjectSlot, rememberModuleChargeControlOverride, setScopedCommandStatus]);
 
   // Login handler (kept for LoginPage)
   const handleLogin = () => {
