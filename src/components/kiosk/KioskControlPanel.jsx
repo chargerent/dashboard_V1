@@ -77,6 +77,7 @@ const V2AudioControl = ({ kiosk, t, onCommand, disabled }) => {
         { label: '', ariaLabel: t('mute_audio'), volume: 0, icon: <SpeakerXMarkIcon className="h-5 w-5 stroke-2" /> },
         { label: '10%', volume: 10 },
         { label: '25%', volume: 25 },
+        { label: '50%', volume: 50 },
         { label: '100%', volume: 100 },
     ];
     const requestVolume = (nextVolume) => {
@@ -98,7 +99,7 @@ const V2AudioControl = ({ kiosk, t, onCommand, disabled }) => {
                 <span>{t('audio_volume')}</span>
                 <span className="font-mono">{currentVolume}%</span>
             </div>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-5 gap-1.5">
                 {audioPresets.map((preset) => {
                     const isActive = currentVolume === preset.volume;
                     return (
@@ -110,7 +111,7 @@ const V2AudioControl = ({ kiosk, t, onCommand, disabled }) => {
                                 requestVolume(preset.volume);
                             }}
                             disabled={disabled}
-                            className={`flex h-11 min-w-0 items-center justify-center gap-1 rounded-md px-2 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400 ${
+                            className={`flex h-11 min-w-0 items-center justify-center gap-1 rounded-md px-1 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400 ${
                                 isActive
                                     ? 'bg-sky-700 text-white shadow-sm'
                                     : 'bg-white text-sky-800 shadow-sm hover:bg-sky-100'
@@ -119,7 +120,7 @@ const V2AudioControl = ({ kiosk, t, onCommand, disabled }) => {
                             aria-label={preset.ariaLabel || `${t('set_volume')} ${preset.label}`}
                         >
                             {preset.icon}
-                            {preset.label && <span className="truncate">{preset.label}</span>}
+                            {preset.label && <span className="whitespace-nowrap">{preset.label}</span>}
                         </button>
                     );
                 })}

@@ -11,6 +11,7 @@ import {
     isNewSchemaKiosk,
     isSlotActivelyCharging,
 } from '../../utils/helpers';
+import { formatModuleFirmwareVersion } from '../../utils/firmwareVersion';
 import { installKioskInteractionDebugCapture, logKioskInteraction } from '../../utils/kioskInteractionDebug';
 
 // --- Sub-component for the charger status code ---
@@ -92,141 +93,6 @@ const getModuleTypeOutlineClass = (module) => {
     return '';
 };
 
-const getFirmwareSessionMillis = (session) => {
-    if (!session) return 0;
-    if (Number.isFinite(Number(session.updatedAtMillis))) return Number(session.updatedAtMillis);
-    if (Number.isFinite(Number(session.createdAtMillis))) return Number(session.createdAtMillis);
-    const timestamp = session.updatedAt || session.createdAt || '';
-    if (timestamp && typeof timestamp.toMillis === 'function') return timestamp.toMillis();
-    const parsed = Date.parse(timestamp);
-    return Number.isNaN(parsed) ? 0 : parsed;
-};
-
-const findFirmwareSessionForModule = (sessions, stationId, moduleId) => {
-    const station = String(stationId || '').trim();
-    const module = String(moduleId || '').trim();
-    if (!station || !module || !Array.isArray(sessions)) return null;
-
-    return sessions
-        .filter((session) => (
-            String(session?.stationid || session?.stationId || '').trim() === station &&
-            moduleIdsMatch(session?.moduleid || session?.moduleId, module)
-        ))
-        .sort((left, right) => getFirmwareSessionMillis(right) - getFirmwareSessionMillis(left))[0] || null;
-};
-
-const getFirmwareProgress = (session) => {
-    const percent = Number(session?.percent);
-    if (Number.isFinite(percent)) {
-        return Math.max(0, Math.min(100, Math.round(percent)));
-    }
-
-    const downloaded = Number(session?.bytesDownloaded);
-    const size = Number(session?.size);
-    if (Number.isFinite(downloaded) && Number.isFinite(size) && size > 0) {
-        return Math.max(0, Math.min(100, Math.round((downloaded / size) * 100)));
-    }
-
-    return 0;
-};
-
-const formatFirmwareSessionStatus = (session) => {
-    if (!session) return null;
-
-    const status = String(session.status || session.phase || '').trim().toLowerCase();
-    const percent = getFirmwareProgress(session);
-    const lastUpdateAge = Date.now() - getFirmwareSessionMillis(session);
-    const isStalled = ['command_sent', 'metadata_requested', 'downloading'].includes(status) &&
-        lastUpdateAge > 2 * 60 * 1000 &&
-        percent < 100;
-
-    if (isStalled) {
-        return {
-            label: `Download stalled at ${percent}%`,
-            className: 'border-amber-200 bg-amber-50 text-amber-800',
-            progressClassName: 'bg-amber-500',
-            percent,
-        };
-    }
-
-    if (status === 'download_complete' || session.downloadComplete === true) {
-        return {
-            label: 'Downloaded 100%',
-            className: 'border-emerald-200 bg-emerald-50 text-emerald-800',
-            progressClassName: 'bg-emerald-500',
-            percent: 100,
-        };
-    }
-
-    if (status === 'installed' || session.installConfirmed === true) {
-        return {
-            label: 'Firmware installed',
-            className: 'border-emerald-200 bg-emerald-50 text-emerald-800',
-            progressClassName: 'bg-emerald-500',
-            percent: 100,
-        };
-    }
-
-    if (status.startsWith('failed')) {
-        return {
-            label: session.statusLabel || `Download failed at ${percent}%`,
-            className: 'border-red-200 bg-red-50 text-red-700',
-            progressClassName: 'bg-red-500',
-            percent,
-        };
-    }
-
-    if (status === 'downloading') {
-        return {
-            label: `Downloading ${percent}%`,
-            className: 'border-sky-200 bg-sky-50 text-sky-800',
-            progressClassName: 'bg-sky-500',
-            percent,
-        };
-    }
-
-    if (status === 'metadata_requested') {
-        return {
-            label: 'Module requested firmware',
-            className: 'border-blue-200 bg-blue-50 text-blue-800',
-            progressClassName: 'bg-blue-500',
-            percent,
-        };
-    }
-
-    if (status === 'command_sent') {
-        return {
-            label: 'Update command sent',
-            className: 'border-blue-200 bg-blue-50 text-blue-800',
-            progressClassName: 'bg-blue-500',
-            percent,
-        };
-    }
-
-    return {
-        label: session.statusLabel || 'Firmware uploaded',
-        className: 'border-gray-200 bg-gray-50 text-gray-700',
-        progressClassName: 'bg-gray-400',
-        percent,
-    };
-};
-
-const FirmwareSessionStatus = ({ session }) => {
-    const status = formatFirmwareSessionStatus(session);
-    if (!status) return null;
-
-    return (
-        <div className={`mt-1 rounded-md border px-2 py-1 text-[10px] font-semibold leading-tight ${status.className}`}>
-            <div className="truncate" title={status.label}>{status.label}</div>
-            {status.percent > 0 && (
-                <div className="mt-1 h-1 overflow-hidden rounded-full bg-white/70">
-                    <div className={`h-full ${status.progressClassName}`} style={{ width: `${status.percent}%` }} />
-                </div>
-            )}
-        </div>
-    );
-};
-
 const resolvePlaylistAssetKind = (asset) => {
     const kind = String(asset?.kind || '').trim().toLowerCase();
     if (kind) return kind;
@@ -240,7 +106,7 @@ const resolvePlaylistAssetKind = (asset) => {
 };
 
 // --- Main Detail Panel Component ---
-function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSlots, ejectingSlots, failedEjectSlots, lockingSlots, t, onCommand, onNavigateToChargers, serverUiVersion, serverFlowVersion, clientInfo, mockNow, firmwareUpdateSessions = [] }) {
+function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSlots, ejectingSlots, failedEjectSlots, lockingSlots, t, onCommand, onNavigateToChargers, serverUiVersion, serverFlowVersion, clientInfo, mockNow }) {
     const isOnline = isKioskOnline(kiosk, mockNow);
     const isV2Kiosk = isNewSchemaKiosk(kiosk);
     const stationId = kiosk.stationid;
@@ -266,14 +132,6 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
             previewKind: resolvePlaylistAssetKind(firstAsset),
         };
     }, [kiosk?.media]);
-    const formatVersionDigits = useCallback((value) => {
-        const numericValue = Number(value);
-        if (!Number.isFinite(numericValue) || numericValue <= 0) {
-            return '---';
-        }
-
-        return String(Math.trunc(numericValue)).padStart(3, '0');
-    }, []);
     const formatFotaVersion = useCallback((module) => {
         const rawVersion = String(
             module?.fotaVersion ||
@@ -304,26 +162,23 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
             ? kiosk.modules
                 .map((module) => {
                     const moduleId = String(module?.id || '').trim();
-                    const softwareVersionDigits = formatVersionDigits(module?.softwareVersion);
-                    const hardwareVersionDigits = formatVersionDigits(module?.hardwareVersion);
+                    const firmwareVersion = formatModuleFirmwareVersion(
+                        module?.softwareVersion,
+                        module?.hardwareVersion
+                    );
                     const fotaVersion = formatFotaVersion(module);
-                    const firmwareSession = findFirmwareSessionForModule(firmwareUpdateSessions, stationId, moduleId);
                     return {
                         moduleId,
                         moduleOnline: isModuleOnline(module, mockNow),
-                        softwareVersionDigits,
-                        hardwareVersionDigits,
-                        firmwareLabel: `FW ${softwareVersionDigits}`,
-                        hardwareLabel: `HW ${hardwareVersionDigits}`,
+                        firmwareLabel: `FW ${firmwareVersion}`,
                         fotaVersionLabel: fotaVersion.label,
                         fotaVersionTitle: fotaVersion.title,
-                        firmwareSession,
                         updateLabel: t('update_module'),
                     };
                 })
                 .filter((entry) => entry.moduleId)
             : []
-    ), [firmwareUpdateSessions, formatFotaVersion, formatVersionDigits, kiosk.modules, mockNow, stationId, t]);
+    ), [formatFotaVersion, kiosk.modules, mockNow, t]);
     const moduleIds = useMemo(() => (
         moduleEntries.map((entry) => entry.moduleId)
     ), [moduleEntries]);
@@ -400,11 +255,12 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                     moduleId,
                     moduleOnline: isModuleOnline(module, mockNow),
                     updateLabel: t('update_module'),
-                    firmwareLabel: `FW ${formatVersionDigits(module?.softwareVersion)}`,
-                    hardwareLabel: `HW ${formatVersionDigits(module?.hardwareVersion)}`,
+                    firmwareLabel: `FW ${formatModuleFirmwareVersion(
+                        module?.softwareVersion,
+                        module?.hardwareVersion
+                    )}`,
                     fotaVersionLabel: fotaVersion.label,
                     fotaVersionTitle: fotaVersion.title,
-                    firmwareSession: findFirmwareSessionForModule(firmwareUpdateSessions, stationId, moduleId),
                     avgChargeRate: formatChargeRate(estimatedPctPerMinute),
                     etaToReady: hasReadyCharger
                         ? formatEtaToReady(0)
@@ -412,7 +268,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                 };
             })
             : []
-    ), [chargeReadyThreshold, firmwareUpdateSessions, formatChargeRate, formatEtaToReady, formatFotaVersion, formatVersionDigits, kiosk.modules, mockNow, stationId, t]);
+    ), [chargeReadyThreshold, formatChargeRate, formatEtaToReady, formatFotaVersion, kiosk.modules, mockNow, t]);
     const showLegacySideIndicators = !kiosk.isNewSchema;
 
     const ejectingSet = useMemo(
@@ -604,7 +460,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         const canEject = clientInfo.commands.eject;
         const canLock = clientInfo.commands.lock;
         const hasCharger = slotHasDisplayableCharger(slot);
-        const ejectDisabledReason = !canEject ? 'permission' : !isOnline ? 'offline' : !hasCharger ? 'empty' : '';
+        const ejectDisabledReason = !canEject ? 'permission' : !isOnline ? 'offline' : '';
         const lockDisabledReason = !isOnline ? 'offline' : '';
 
         return (
@@ -637,7 +493,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                             }, event);
                             onSlotClick(stationId, module.id, slot.position);
                         }}
-                        disabled={!canEject || !isOnline || !hasCharger}
+                        disabled={!canEject || !isOnline}
                         className="flex min-w-0 flex-grow items-center justify-start disabled:cursor-not-allowed"
                     >
                         <div className="flex flex-col items-center w-8 mr-2">
@@ -765,7 +621,6 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                 moduleOnline: false,
                                 updateLabel: t('update_module'),
                                 firmwareLabel: 'FW ---',
-                                hardwareLabel: 'HW ---',
                                 fotaVersionLabel: 'FOTA ---',
                                 fotaVersionTitle: 'No FOTA version reported',
                                 avgChargeRate: '--',
@@ -778,7 +633,6 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                             <>
                                                 <div className="mt-1 flex items-center gap-2 font-mono text-[10px] text-gray-500">
                                                     <span>{module.firmwareLabel}</span>
-                                                    <span>{module.hardwareLabel}</span>
                                                 </div>
                                                 <div
                                                     className="mt-1 truncate font-mono text-[10px] font-semibold text-emerald-700"
@@ -786,7 +640,6 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                                 >
                                                     {module.fotaVersionLabel}
                                                 </div>
-                                                <FirmwareSessionStatus session={module.firmwareSession} />
                                             </>
                                         )}
                                         <div className="flex items-center justify-between gap-3">
@@ -879,7 +732,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
 
     const renderCompactGridSlot = (entry, key) => {
         if (!entry?.slot || !entry?.module) {
-            return <div key={key} className="min-h-[40px] rounded-md border border-gray-300 bg-gray-100" />;
+            return <div key={key} className={`${kiosk.hardware?.type === 'CK48' ? 'min-h-[68px]' : 'min-h-[40px]'} rounded-md border border-gray-300 bg-gray-100`} />;
         }
 
         const { slot, module, displayPosition } = entry;
@@ -887,13 +740,14 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         const hasCharger = slotHasDisplayableCharger(slot);
         const canEject = clientInfo.commands.eject;
         const canLock = clientInfo.commands.lock;
-        const ejectDisabledReason = !canEject ? 'permission' : !isOnline ? 'offline' : !hasCharger ? 'empty' : '';
+        const isCK48CompactSlot = kiosk.hardware?.type === 'CK48';
+        const ejectDisabledReason = !canEject ? 'permission' : !isOnline ? 'offline' : '';
         const lockDisabledReason = !isOnline ? 'offline' : '';
 
         return (
             <div
                 key={key}
-                className={`relative min-h-[52px] rounded-md border p-0.5 text-left transition-colors duration-200 ${style.className} ${style.glow ? 'slot-charging-glow' : ''}`}
+                className={`relative ${kiosk.hardware?.type === 'CK48' ? 'min-h-[68px]' : 'min-h-[52px]'} rounded-md border p-0.5 text-left transition-colors duration-200 ${style.className} ${style.glow ? 'slot-charging-glow' : ''}`}
                 data-kiosk-slot-debug="true"
                 data-kiosk-stationid={kiosk.stationid}
                 data-kiosk-moduleid={module.id}
@@ -918,12 +772,12 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                 hasCharger,
                                 disabledReason: ejectDisabledReason,
                             }, event);
-                            if (hasCharger && canEject) {
+                            if (canEject && isOnline) {
                                 onSlotClick(kiosk.stationid, module.id, slot.position);
                             }
                         }}
-                        disabled={!canEject || !isOnline || !hasCharger}
-                        className="grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-1.5 text-left disabled:cursor-not-allowed"
+                        disabled={!canEject || !isOnline}
+                        className={`grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-1.5 text-left disabled:cursor-not-allowed ${isCK48CompactSlot ? 'min-h-[36px]' : ''}`}
                         title={hasCharger ? `SN ${slot.sn}` : `Slot ${displayPosition || slot.position}`}
                     >
                         <div className="flex min-w-[22px] shrink-0 flex-col items-start justify-start pt-0.5">
@@ -947,7 +801,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                             data-kiosk-moduleid={module.id}
                             data-kiosk-slotid={slot.position}
                             onClick={(event) => handleNavigateToCharger(event, slot.sn)}
-                            className="mt-0.5 block w-full min-w-0 truncate pr-5 text-left font-mono text-[8px] leading-tight text-sky-700 underline decoration-sky-300 underline-offset-2 hover:text-sky-900"
+                            className={`mt-0.5 block w-full min-w-0 truncate text-left font-mono leading-tight text-sky-700 underline decoration-sky-300 underline-offset-2 hover:text-sky-900 ${isCK48CompactSlot ? 'text-[9px]' : 'pr-5 text-[8px]'}`}
                             title={`${t('chargers_page_title')}: ${slot.sn}`}
                             aria-label={`${t('chargers_page_title')}: ${slot.sn}`}
                         >
@@ -955,7 +809,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                         </button>
                     )}
                     {!hasCharger && (
-                        <span className="mt-0.5 block w-full pr-5 font-mono text-[9px] leading-tight text-gray-500">
+                        <span className={`mt-0.5 block w-full font-mono text-[9px] leading-tight text-gray-500 ${isCK48CompactSlot ? '' : 'pr-5'}`}>
                             {'\u00A0'}
                         </span>
                     )}
@@ -983,7 +837,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                             onLockSlot(kiosk.stationid, module.id, slot.position, slot.isLocked);
                         }}
                         disabled={!isOnline}
-                        className="absolute bottom-1 right-1 flex h-[18px] w-[18px] items-center justify-center rounded-md bg-white/75 shadow-sm hover:bg-white disabled:cursor-not-allowed"
+                        className={`absolute right-1 ${isCK48CompactSlot ? 'top-5' : 'bottom-1'} flex h-[18px] w-[18px] items-center justify-center rounded-md bg-white/75 shadow-sm hover:bg-white disabled:cursor-not-allowed`}
                         title={getLockButtonTitle(slot)}
                     >
                         {slot.isLocked ? (
@@ -1173,13 +1027,13 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                         </div>
                     </div>
 
-                    <div className="grid w-full grid-cols-[repeat(auto-fit,minmax(260px,1fr))] gap-3">
-                        <div className="flex flex-col gap-2">
+                    <div className="grid w-full grid-cols-2 gap-3">
+                        <div className="flex min-w-0 flex-col gap-2">
                             {leftColumnIndices.map((groupIndex) => (
                                 renderCompactGroupCard(slotsByPosition, groupIndex)
                             ))}
                         </div>
-                        <div className="flex flex-col gap-2">
+                        <div className="flex min-w-0 flex-col gap-2">
                             {rightColumnIndices.map((groupIndex) => (
                                 renderCompactGroupCard(slotsByPosition, groupIndex)
                             ))}
@@ -1313,7 +1167,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                         {showModuleFirmwareMetadata && (
                                             <>
                                                 <span className="font-mono text-[10px] text-gray-500">
-                                                    {entry.firmwareLabel} / {entry.hardwareLabel}
+                                                    {entry.firmwareLabel}
                                                 </span>
                                                 <span
                                                     className="max-w-[160px] truncate font-mono text-[10px] font-semibold text-emerald-700"
@@ -1321,7 +1175,6 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                                 >
                                                     {entry.fotaVersionLabel}
                                                 </span>
-                                                <FirmwareSessionStatus session={entry.firmwareSession} />
                                             </>
                                         )}
                                         <button
@@ -1338,11 +1191,10 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                         <span>{entry.moduleId}</span>
                                         {showModuleFirmwareMetadata && (
                                             <>
-                                                <span className="text-[10px] text-gray-500">{entry.firmwareLabel} / {entry.hardwareLabel}</span>
+                                                <span className="text-[10px] text-gray-500">{entry.firmwareLabel}</span>
                                                 <span className="max-w-[160px] truncate text-[10px] font-semibold text-emerald-700" title={entry.fotaVersionTitle}>
                                                     {entry.fotaVersionLabel}
                                                 </span>
-                                                <FirmwareSessionStatus session={entry.firmwareSession} />
                                             </>
                                         )}
                                     </div>
