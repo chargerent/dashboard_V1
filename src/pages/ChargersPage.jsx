@@ -52,6 +52,18 @@ const formatPower = (value) => {
     return Number.isFinite(numericPower) ? `${numericPower}%` : String(value);
 };
 
+const hasFiniteAmountField = (value) => {
+    if (value === null || value === undefined || value === '') return false;
+
+    return Number.isFinite(Number(value));
+};
+
+const shouldShowRentalHistoryAmount = (rental, status) => {
+    if (hasFiniteAmountField(rental.totalCharged)) return true;
+
+    return status === 'purchased' && hasFiniteAmountField(rental.buyprice);
+};
+
 const PILL_BASE_CLASS = 'rounded-full px-2 py-0.5 text-[10px] font-semibold';
 const NEUTRAL_PILL_CLASS = `${PILL_BASE_CLASS} border border-gray-200 bg-gray-50 text-gray-600`;
 const SHORT_RENTAL_PILL_CLASS = `${PILL_BASE_CLASS} bg-red-100 text-red-700`;
@@ -134,7 +146,7 @@ const RentalHistoryItem = ({ rental, t, onOpen }) => {
         ? buildSlotDetail(rental.returnModuleid, rental.returnSlotid, rental.returnPower)
         : '';
     const duration = rental.returnTime ? formatDuration(rental.rentalTime, rental.returnTime) : t('in_use');
-    const shouldShowAmount = isReturnedRentalStatus(rental.status) || status === 'purchased' || Number(rental.totalCharged || rental.buyprice || 0) > 0;
+    const shouldShowAmount = shouldShowRentalHistoryAmount(rental, status);
     const amount = shouldShowAmount ? formatRentalChargeAmount(rental) : '';
     const returnType = translateCode(rental.returnType, t);
     const refundStatus = normalizeRefundStatus(rental.refundStatus);
@@ -238,7 +250,9 @@ const RentalHistoryItem = ({ rental, t, onOpen }) => {
                             {label}
                         </span>
                     ))}
-                    <span className="ml-1 font-mono text-sm font-semibold text-gray-900">{amount || '—'}</span>
+                    {amount && (
+                        <span className="ml-1 font-mono text-sm font-semibold text-gray-900">{amount}</span>
+                    )}
                 </div>
             )}
 

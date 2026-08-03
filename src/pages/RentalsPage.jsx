@@ -303,6 +303,45 @@ const formatCentsAmount = (cents, symbol = '$') => {
     return `${symbol || '$'}${(value / 100).toFixed(2)}`;
 };
 
+const normalizeGatewayKey = (value) => (
+    normalizeText(value).replace(/[^a-z0-9]+/g, '')
+);
+
+const isApolloGatewayValue = (value) => {
+    const gateway = normalizeGatewayKey(value);
+    return gateway === 'apollo' ||
+        gateway === 'apo' ||
+        gateway === 'apriva' ||
+        gateway === 'paygasus' ||
+        gateway === 'paygasusapollo';
+};
+
+const isApolloRental = (rental) => {
+    if (!rental) return false;
+
+    if (isApolloGatewayValue(firstPresent(
+        rental.gateway,
+        rental.hardware?.gateway,
+        rental.paymentGateway,
+        rental.gatewayoptions
+    ))) {
+        return true;
+    }
+
+    return Boolean(
+        rental.apollo === true ||
+        rental.isApollo === true ||
+        rental.authorizationHostReference ||
+        rental.aprivaHostTransactionId ||
+        rental.host_transaction_id ||
+        rental.cpsCancelStatusCode ||
+        rental.cpsCancelLookupStatusCode ||
+        rental.cpsCancelState ||
+        rental.cpsCommitStatusCode ||
+        rental.cpsCommitState
+    );
+};
+
 const resolveProcessEventTitle = (entry, t) => {
     const event = normalizeText(firstPresent(entry?.event, entry?.type, entry?.title));
     const action = humanizeCode(firstPresent(entry?.action, entry?.paymentAction));
@@ -310,6 +349,7 @@ const resolveProcessEventTitle = (entry, t) => {
     if (event === 'apollo-authorization-created') return 'Apollo authorization created';
     if (event === 'apollo-payment-action-queued') return `Apollo ${action || 'payment'} queued`;
     if (event === 'apollo-payment-route-missing') return `Apollo ${action || 'payment'} route missing`;
+    if (event === 'apollo-pending-timeout-detected') return 'Apollo pending rental timed out';
     if (event === 'apollo-cancel-verified' || event === 'apollo-authorization-cancelled') return 'Apollo authorization cancelled';
     if (event === 'apollo-cancel-retry-needed') return 'Apollo cancel retry scheduled';
     if (event === 'apollo-cancel-failed' || event === 'apollo-authorization-cancel-retry-failed') return 'Apollo cancel failed';
@@ -400,6 +440,55 @@ const getAttemptTime = (attempt) => (
     )
 );
 
+const humanizeVendFailureReason = (value) => {
+    const reason = normalizeText(value);
+
+    if (reason === 'motor_error_no_untried_charger') {
+        return 'No untried charger remained after motor errors';
+    }
+
+    if (reason === 'motor_error_max_attempts_exhausted') {
+        return 'Max attempts exhausted after motor errors';
+    }
+
+    if (reason === 'vend_act_timeout') {
+        return 'Vend ACT timeout';
+    }
+
+    return humanizeCode(value);
+};
+
+const isTerminalVendAttemptSummary = (attempt, rental) => {
+    const attemptReason = normalizeText(firstPresent(
+        attempt?.reason,
+        attempt?.failureReason,
+        attempt?.lastVendFailureReason
+    ));
+    const finalFailureReason = normalizeText(firstPresent(
+        rental?.failureReason,
+        rental?.lastVendFailureReason
+    ));
+    const vendStatus = normalizeText(attempt?.vendStatus);
+
+    if (!attemptReason || !finalFailureReason || attemptReason !== finalFailureReason) {
+        return false;
+    }
+
+    if (!vendStatus.includes('fail') && !vendStatus.includes('error')) {
+        return false;
+    }
+
+    return !(
+        attempt?.status ||
+        attempt?.at ||
+        attempt?.exitStatus != null ||
+        attempt?.solenoidStatus != null ||
+        attempt?.slotLocked != null ||
+        attempt?.lockedSlotnumber != null ||
+        attempt?.lockedModuleid != null
+    );
+};
+
 const getEarliestTimestamp = (...timestamps) => {
     let earliest = null;
     let earliestTime = Number.POSITIVE_INFINITY;
@@ -419,10 +508,17 @@ const buildRentalProcessLog = (rental, t) => {
     const entries = [];
     const backendProcessLog = Array.isArray(rental.processLog) ? rental.processLog : [];
     const attempts = Array.isArray(rental.vendAttempts) ? rental.vendAttempts : [];
+    const terminalAttemptSummaries = attempts.filter(attempt => (
+        isTerminalVendAttemptSummary(attempt, rental)
+    ));
+    const displayAttempts = attempts.filter(attempt => (
+        !isTerminalVendAttemptSummary(attempt, rental)
+    ));
+    const terminalFailureSummary = terminalAttemptSummaries[terminalAttemptSummaries.length - 1];
     const hasBackendEvent = (eventName) => backendProcessLog.some(entry => (
         normalizeText(entry?.event) === eventName
     ));
-    const addEntry = ({ title, timestamp, status = 'info', details = [] }) => {
+    const addEntry = ({ title, timestamp, status = 'info', details = [], countAsError = true }) => {
         const time = safeToDate(timestamp)?.getTime();
         entries.push({
             id: `${entries.length}-${title}`,
@@ -432,6 +528,7 @@ const buildRentalProcessLog = (rental, t) => {
             sortTime: Number.isFinite(time) ? time : null,
             order: entries.length,
             status,
+            countAsError,
             details: formatDetailParts(...details),
         });
     };
@@ -461,6 +558,7 @@ const buildRentalProcessLog = (rental, t) => {
         rental.paymentStatus ? `Payment: ${humanizeCode(rental.paymentStatus)}` : '',
         displayTransactionId && fullTransactionId && displayTransactionId !== fullTransactionId ? `Short ID: ${displayTransactionId}` : ''
     );
+    const apolloRental = isApolloRental(rental);
 
     addEntry({
         title: initialStatus === 'declined' ? t('payment_declined') : t('rental_created'),
@@ -476,7 +574,7 @@ const buildRentalProcessLog = (rental, t) => {
         rental.aprivaHostTransactionId,
         rental.host_transaction_id
     );
-    if ((authorizationReference || rental.authorizedAmountCents || rental.terminalTxnId) && !hasBackendEvent('apollo-authorization-created')) {
+    if (apolloRental && (authorizationReference || rental.authorizedAmountCents || rental.terminalTxnId) && !hasBackendEvent('apollo-authorization-created')) {
         addEntry({
             title: 'Apollo authorization created',
             timestamp: firstPresent(rental.paymentAuthorizedAt, rental.rentalTime),
@@ -490,17 +588,20 @@ const buildRentalProcessLog = (rental, t) => {
         });
     }
 
-    attempts.forEach((attempt, index) => {
+    displayAttempts.forEach((attempt, index) => {
         const succeeded = hasAttemptSucceeded(attempt);
         const attemptNumber = firstPresent(attempt.attemptNumber, index + 1);
         const requestedSn = firstPresent(attempt.requestedSn, attempt.sn, attempt.chargerid);
         const responseSn = firstPresent(attempt.responseSn, attempt.batterySN);
         const moduleId = firstPresent(attempt.moduleid, attempt.module, attempt.requestedModuleid);
         const slotId = firstPresent(attempt.requestedSlotid, attempt.slotid, attempt.slot);
-        const reason = humanizeCode(firstPresent(attempt.reason, attempt.status));
+        const reason = humanizeVendFailureReason(firstPresent(attempt.reason, attempt.status));
+        const attemptTitle = succeeded
+            ? t('charger_dispensed')
+            : (reason || t('dispense_failed'));
 
         addEntry({
-            title: `${t('attempt')} ${attemptNumber}: ${succeeded ? t('charger_dispensed') : t('dispense_failed')}`,
+            title: `${t('attempt')} ${attemptNumber}: ${attemptTitle}`,
             timestamp: getAttemptTime(attempt),
             status: succeeded ? 'success' : 'error',
             details: formatDetailParts(
@@ -511,12 +612,13 @@ const buildRentalProcessLog = (rental, t) => {
                 slotId != null ? `S: ${slotId}` : '',
                 attempt.exitStatus != null ? `${t('exit_status')}: ${attempt.exitStatus}` : '',
                 attempt.solenoidStatus != null ? `${t('solenoid_status')}: ${attempt.solenoidStatus}` : '',
-                reason ? `${t('reason')}: ${reason}` : ''
+                attempt.slotLocked ? `${t('locked')}: ${humanizeCode(attempt.slotLockReason) || 'Yes'}` : '',
+                !succeeded && reason && reason !== attemptTitle ? `${t('reason')}: ${reason}` : ''
             ),
         });
     });
 
-    if (attempts.length === 0 && rental.exitStatus != null) {
+    if (displayAttempts.length === 0 && rental.exitStatus != null) {
         const succeeded = Number(rental.exitStatus) === 1;
         addEntry({
             title: succeeded ? t('charger_dispensed') : t('dispense_failed'),
@@ -533,7 +635,7 @@ const buildRentalProcessLog = (rental, t) => {
     const currentAttempt = rental.currentVendAttempt;
     if (currentAttempt && normalizeText(rental.status) === 'pending') {
         addEntry({
-            title: `${t('attempt')} ${firstPresent(currentAttempt.attemptNumber, attempts.length + 1)}: ${t('dispense_requested')}`,
+            title: `${t('attempt')} ${firstPresent(currentAttempt.attemptNumber, displayAttempts.length + 1)}: ${t('dispense_requested')}`,
             timestamp: firstPresent(currentAttempt.sentAt, currentAttempt.createdAt, rental.rentalTime),
             status: normalizeText(rental.vendState) === 'retrying' ? 'warning' : 'pending',
             details: formatDetailParts(
@@ -543,7 +645,7 @@ const buildRentalProcessLog = (rental, t) => {
                 currentAttempt.batteryLevel != null ? `${currentAttempt.batteryLevel}%` : ''
             ),
         });
-    } else if (normalizeText(rental.status) === 'pending' && attempts.length === 0 && rental.exitStatus == null) {
+    } else if (normalizeText(rental.status) === 'pending' && displayAttempts.length === 0 && rental.exitStatus == null) {
         addEntry({
             title: t('waiting_for_vend_confirmation'),
             timestamp: rental.rentalTime,
@@ -556,7 +658,7 @@ const buildRentalProcessLog = (rental, t) => {
         });
     }
 
-    if (rental.lastVendFailure && attempts.length === 0) {
+    if (rental.lastVendFailure && displayAttempts.length === 0) {
         const failure = rental.lastVendFailure;
         addEntry({
             title: t('dispense_failed'),
@@ -568,7 +670,7 @@ const buildRentalProcessLog = (rental, t) => {
                 failure.exitStatus != null ? `${t('exit_status')}: ${failure.exitStatus}` : '',
                 failure.solenoidStatus != null ? `${t('solenoid_status')}: ${failure.solenoidStatus}` : '',
                 firstPresent(failure.reason, rental.lastVendFailureReason)
-                    ? `${t('reason')}: ${humanizeCode(firstPresent(failure.reason, rental.lastVendFailureReason))}`
+                    ? `${t('reason')}: ${humanizeVendFailureReason(firstPresent(failure.reason, rental.lastVendFailureReason))}`
                     : ''
             ),
         });
@@ -576,8 +678,8 @@ const buildRentalProcessLog = (rental, t) => {
 
     const rentalStatus = normalizeRentalStatusKey(rental.status);
     const hasSuccessfulVend = (
-        attempts.some(hasAttemptSucceeded) ||
-        (attempts.length === 0 && Number(rental.exitStatus) === 1)
+        displayAttempts.some(hasAttemptSucceeded) ||
+        (displayAttempts.length === 0 && Number(rental.exitStatus) === 1)
     );
     const hasCompletedVend = (
         hasSuccessfulVend ||
@@ -587,14 +689,27 @@ const buildRentalProcessLog = (rental, t) => {
         Boolean(rental.returnTime)
     );
     const finalFailureReason = firstPresent(rental.failureReason, rental.lastVendFailureReason);
-    const shouldShowFinalFailure = rentalStatus === 'vend_failed' || (finalFailureReason && !hasCompletedVend);
+    const failedDisplayAttemptCount = displayAttempts.filter(attempt => (
+        !hasAttemptSucceeded(attempt)
+    )).length;
+    const shouldShowFinalFailure = (
+        rentalStatus !== 'declined' &&
+        (rentalStatus === 'vend_failed' || (finalFailureReason && !hasCompletedVend))
+    );
 
     if (shouldShowFinalFailure) {
         addEntry({
             title: t('final_vend_failure'),
             timestamp: firstPresent(rental.failedAt, rental.lastUpdate, rental.rentalTime),
             status: 'error',
-            details: finalFailureReason ? [`${t('reason')}: ${humanizeCode(finalFailureReason)}`] : [],
+            countAsError: failedDisplayAttemptCount === 0,
+            details: formatDetailParts(
+                finalFailureReason ? `${t('reason')}: ${humanizeVendFailureReason(finalFailureReason)}` : '',
+                failedDisplayAttemptCount > 0 ? `${t('attempts')}: ${failedDisplayAttemptCount}` : '',
+                terminalFailureSummary?.requestedSn ? `Last ${t('requested').toLowerCase()}: ${terminalFailureSummary.requestedSn}` : '',
+                terminalFailureSummary?.moduleid ? `M: ${terminalFailureSummary.moduleid}` : '',
+                terminalFailureSummary?.requestedSlotid != null ? `S: ${terminalFailureSummary.requestedSlotid}` : ''
+            ),
         });
     }
 
@@ -637,8 +752,9 @@ const buildRentalProcessLog = (rental, t) => {
 
     if (rental.refundStatus) {
         const status = isSuccessfulRefundStatus(rental.refundStatus) ? 'success' : 'warning';
+        const isAuthorizationCancellation = normalizeText(rental.refundStatus) === 'cancelled';
         addEntry({
-            title: t('refund_recorded'),
+            title: isAuthorizationCancellation && apolloRental ? 'Apollo authorization cancelled' : t('refund_recorded'),
             timestamp: firstPresent(rental.refundDate, rental.lastUpdate, rental.returnTime),
             status,
             details: formatDetailParts(
@@ -652,7 +768,7 @@ const buildRentalProcessLog = (rental, t) => {
         });
     }
 
-    if (rental.paymentAction && !hasBackendEvent('apollo-payment-action-queued')) {
+    if (apolloRental && rental.paymentAction && !hasBackendEvent('apollo-payment-action-queued')) {
         addEntry({
             title: `Apollo ${humanizeCode(rental.paymentAction)} queued`,
             timestamp: firstPresent(rental.paymentActionQueuedAt, rental.returnTime, rental.paymentUpdatedAt),
@@ -671,7 +787,7 @@ const buildRentalProcessLog = (rental, t) => {
     }
 
     const hasCancelEvent = backendProcessLog.some(entry => normalizeText(entry?.event).includes('cancel'));
-    if ((rental.cpsCancelStatusCode || rental.cpsCancelLookupStatusCode || rental.cpsCancelState) && !hasCancelEvent) {
+    if (apolloRental && (rental.cpsCancelStatusCode || rental.cpsCancelLookupStatusCode || rental.cpsCancelState) && !hasCancelEvent) {
         addEntry({
             title: rental.cpsCancelConfirmed ? 'Apollo authorization cancelled' : 'Apollo cancel failed',
             timestamp: firstPresent(rental.cpsCancelVerifiedAt, rental.paymentUpdatedAt, rental.cpsCancelLastAttemptAt),
@@ -687,7 +803,7 @@ const buildRentalProcessLog = (rental, t) => {
     }
 
     const hasCommitEvent = backendProcessLog.some(entry => normalizeText(entry?.event).includes('commit'));
-    if ((rental.cpsCommitStatusCode || rental.cpsCommitState) && !hasCommitEvent) {
+    if (apolloRental && (rental.cpsCommitStatusCode || rental.cpsCommitState) && !hasCommitEvent) {
         addEntry({
             title: rental.cpsCommitConfirmed ? 'Apollo commit confirmed' : 'Apollo commit failed',
             timestamp: firstPresent(rental.cpsCommitResponseAt, rental.paymentUpdatedAt, rental.purchaseCompletedAt),
@@ -750,7 +866,10 @@ const logStatusStyles = {
 
 const RentalProcessLog = ({ rental, t }) => {
     const entries = buildRentalProcessLog(rental, t);
-    const errorCount = entries.filter(entry => entry.status === 'error').length;
+    const isDeclined = normalizeRentalStatusKey(rental?.status) === 'declined';
+    const errorCount = isDeclined
+        ? 0
+        : entries.filter(entry => entry.status === 'error' && entry.countAsError !== false).length;
 
     return (
         <details className="mt-4 border-t border-gray-100 pt-3">

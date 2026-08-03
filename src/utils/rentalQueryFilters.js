@@ -70,6 +70,8 @@ export const rentalHasLogError = (rental) => {
         normalizeText(entry?.event) === eventName
     ));
     const status = normalizeStatusKey(rental?.status);
+    if (status === 'declined') return false;
+
     const hasSuccessfulVend = (
         attempts.some(vendAttemptSucceeded) ||
         (attempts.length === 0 && Number(rental?.exitStatus) === 1)

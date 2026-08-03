@@ -838,7 +838,14 @@ export default function UiProfilesPage({
                     <div className="flex items-start justify-between gap-2">
                       <span className="min-w-0">
                         <span className="flex items-center gap-1.5">
-                          <span className="truncate text-sm font-semibold text-slate-800">{kiosk.stationid}</span>
+                          <button
+                            type="button"
+                            onClick={() => onNavigateToDashboard(kiosk.stationid)}
+                            className="truncate text-left text-sm font-semibold text-cyan-700 transition hover:text-cyan-900 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-500 focus-visible:ring-offset-2"
+                            title={`Show ${kiosk.stationid} on the dashboard`}
+                          >
+                            {kiosk.stationid}
+                          </button>
                           <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${online ? 'bg-emerald-500' : 'bg-slate-300'}`} title={online ? 'Online' : 'Offline'} />
                         </span>
                         <span className="block truncate text-[11px] text-slate-500">{kiosk.info?.location || kiosk.info?.place || 'No location'}</span>

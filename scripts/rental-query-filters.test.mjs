@@ -8,6 +8,13 @@ import {
     rentalHasLogError,
     rentalMatchesActiveFilters,
 } from '../src/utils/rentalQueryFilters.js';
+import {
+    isPendingRefundStatus,
+    isSuccessfulRefundStatus,
+} from '../src/utils/rentals.js';
+
+assert.equal(isSuccessfulRefundStatus('cancelled'), true);
+assert.equal(isPendingRefundStatus('cancel-pending'), true);
 
 test('rare exact statuses are queried before the 30-day result is paged', () => {
     assert.deepEqual(
@@ -126,6 +133,14 @@ test('log-error matching detects failed vend and backend process events', () => 
             processLog: [{ event: 'apollo-commit-failed', status: 'failed' }],
         }),
         true
+    );
+    assert.equal(
+        rentalHasLogError({
+            status: 'declined',
+            failureReason: 'payment_declined',
+            processLog: [{ event: 'payment-declined', status: 'failed' }],
+        }),
+        false
     );
 });
 

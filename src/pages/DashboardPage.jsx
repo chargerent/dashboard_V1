@@ -25,6 +25,8 @@ import { VERSION as DASHBOARD_VERSION } from '../version';
 const EMPTY_RENTALS = Object.freeze([]);
 const MOBILE_KIOSK_PREVIEW_LIMIT = 4;
 const DESKTOP_KIOSK_PREVIEW_LIMIT = 8;
+const INITIAL_STATUS_SETTLE_MS = 1500;
+const AI_BOOTH_DOCUMENT_ID_PATTERN = /^aid-/i;
 const COUNTRY_ORDER = { CA: 1, FR: 2, US: 3 };
 const STATUS_BUTTON_CLASSES = {
     offline: 'bg-red-100 text-red-700 hover:bg-red-200',
@@ -239,7 +241,8 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     }, [clientInfo?.features?.rentals, clientInfo?.isAdmin, onNavigateToRentals]);
 
     const clientStations = useMemo(() => {
-        return filterStationsForClient(visibleStationsData, clientInfo);
+        return filterStationsForClient(visibleStationsData, clientInfo)
+            .filter(station => !AI_BOOTH_DOCUMENT_ID_PATTERN.test(String(station?.stationid || '').trim()));
     }, [visibleStationsData, clientInfo]);
     const provisionedClientStations = useMemo(() => (
         filterProvisionedStations(clientStations)
@@ -280,6 +283,7 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     }, [initialStatusStations, latestTimestamp]);
 
     const stationStatusIssueCount = stationStatusRows.length;
+    const initialStatusStationCount = initialStatusStations.length;
     const stationStatusSeverity = stationStatusRows.some(row => row.issues.some(issue => issue.type === 'offline'))
         ? 'offline'
         : stationStatusRows.some(row => row.issues.some(issue => issue.type === 'disconnected'))
@@ -427,12 +431,16 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     }, [editingKioskId, visibleStationsData]);
     
     useEffect(() => {
-        if (!loading && hasStatusAccess && !initialStatusCheck && initialStatusStations.length > 0) {
-            if (stationStatusIssueCount > 0) {
-                setShowInitialStatus(true);
-            }
+        if (loading || !hasStatusAccess || initialStatusCheck || initialStatusStationCount === 0 || stationStatusIssueCount === 0) {
+            return undefined;
         }
-    }, [loading, hasStatusAccess, initialStatusCheck, initialStatusStations, stationStatusIssueCount]);
+
+        const settleTimer = window.setTimeout(() => {
+            setShowInitialStatus(true);
+        }, INITIAL_STATUS_SETTLE_MS);
+
+        return () => window.clearTimeout(settleTimer);
+    }, [loading, hasStatusAccess, initialStatusCheck, initialStatusStationCount, stationStatusIssueCount]);
 
     const handleInitialStatusDone = () => {
         setShowInitialStatus(false);

@@ -1,7 +1,7 @@
 import { normalizeText } from './text.js';
 
-const SUCCESSFUL_REFUND_STATUSES = new Set(['approved', 'refunded', 'succeeded']);
-const PENDING_REFUND_STATUSES = new Set(['pending']);
+const SUCCESSFUL_REFUND_STATUSES = new Set(['approved', 'refunded', 'succeeded', 'cancelled']);
+const PENDING_REFUND_STATUSES = new Set(['pending', 'cancel-pending']);
 
 const toValidIsoTimestamp = (value) => {
     if (!value) return '';

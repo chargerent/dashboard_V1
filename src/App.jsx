@@ -2747,7 +2747,10 @@ function App() {
         return (
           <UiProfilesPage
             onLogout={handleLogout}
-            onNavigateToDashboard={() => setPage('dashboard')}
+            onNavigateToDashboard={(searchTerm = '') => {
+              setDashboardSearchTerm(normalizeNavigationSearch(searchTerm));
+              setPage('dashboard');
+            }}
             onNavigateToAdmin={() => setPage('admin')}
             currentUser={clientInfo}
             allStationsData={dedupedStationsData}
