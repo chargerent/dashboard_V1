@@ -63,6 +63,39 @@ const vendAttemptSucceeded = (attempt) => (
     Number(attempt?.exitStatus) === 1
 );
 
+const isVendActTimeoutAttempt = (attempt) => (
+    normalizeText(attempt?.status) === 'no_act_timeout' ||
+    normalizeText(attempt?.reason) === 'vend_act_timeout'
+);
+
+const isMotorErrorAttempt = (attempt) => (
+    normalizeText(attempt?.status) === 'motor_error' ||
+    normalizeText(attempt?.reason) === 'motor_error'
+);
+
+const hasRecoveredVendEvidence = (rental, attempts = []) => {
+    const status = normalizeStatusKey(rental?.status);
+
+    return (
+        normalizeText(rental?.vendState) === 'dispensed' ||
+        Boolean(rental?.rentedAt) ||
+        status === 'rented' ||
+        status === 'purchased' ||
+        isReturnedRentalStatus(rental?.status) ||
+        Boolean(rental?.returnTime) ||
+        attempts.some(vendAttemptSucceeded) ||
+        Number(rental?.exitStatus) === 1
+    );
+};
+
+const isRecoveredVendActTimeoutAttempt = (attempt, rental, attempts = []) => (
+    isVendActTimeoutAttempt(attempt) && hasRecoveredVendEvidence(rental, attempts)
+);
+
+const isRecoveredMotorErrorAttempt = (attempt, rental, attempts = []) => (
+    isMotorErrorAttempt(attempt) && hasRecoveredVendEvidence(rental, attempts)
+);
+
 export const rentalHasLogError = (rental) => {
     const processLog = Array.isArray(rental?.processLog) ? rental.processLog : [];
     const attempts = Array.isArray(rental?.vendAttempts) ? rental.vendAttempts : [];
@@ -87,7 +120,11 @@ export const rentalHasLogError = (rental) => {
         status === 'vend_failed' ||
         ((rental?.failureReason || rental?.lastVendFailureReason) && !hasCompletedVend)
     );
-    const hasFailedAttempt = attempts.some(attempt => !vendAttemptSucceeded(attempt));
+    const hasUnrecoveredFailedAttempt = attempts.some(attempt => (
+        !vendAttemptSucceeded(attempt) &&
+        !isRecoveredVendActTimeoutAttempt(attempt, rental, attempts) &&
+        !isRecoveredMotorErrorAttempt(attempt, rental, attempts)
+    ));
     const hasFailedLegacyVend = (
         attempts.length === 0 &&
         rental?.exitStatus != null &&
@@ -115,7 +152,7 @@ export const rentalHasLogError = (rental) => {
     );
 
     return (
-        hasFailedAttempt ||
+        hasUnrecoveredFailedAttempt ||
         hasFailedLegacyVend ||
         Boolean(rental?.lastVendFailure && attempts.length === 0) ||
         hasFinalFailure ||

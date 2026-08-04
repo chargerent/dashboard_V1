@@ -429,6 +429,51 @@ const hasAttemptSucceeded = (attempt) => (
     Number(attempt?.exitStatus) === 1
 );
 
+const isVendActTimeoutAttempt = (attempt) => {
+    const status = normalizeText(attempt?.status);
+    const reason = normalizeText(firstPresent(
+        attempt?.reason,
+        attempt?.failureReason,
+        attempt?.lastVendFailureReason
+    ));
+
+    return status === 'no_act_timeout' || reason === 'vend_act_timeout';
+};
+
+const isMotorErrorAttempt = (attempt) => {
+    const status = normalizeText(attempt?.status);
+    const reason = normalizeText(firstPresent(
+        attempt?.reason,
+        attempt?.failureReason,
+        attempt?.lastVendFailureReason
+    ));
+
+    return status === 'motor_error' || reason === 'motor_error';
+};
+
+const hasRecoveredVendEvidence = (rental, attempts = []) => {
+    const status = normalizeRentalStatusKey(rental?.status);
+
+    return (
+        normalizeText(rental?.vendState) === 'dispensed' ||
+        Boolean(rental?.rentedAt) ||
+        status === 'rented' ||
+        status === 'purchased' ||
+        isReturnedRentalStatus(rental?.status) ||
+        Boolean(rental?.returnTime) ||
+        attempts.some(hasAttemptSucceeded) ||
+        Number(rental?.exitStatus) === 1
+    );
+};
+
+const isRecoveredVendActTimeoutAttempt = (attempt, rental, attempts = []) => (
+    isVendActTimeoutAttempt(attempt) && hasRecoveredVendEvidence(rental, attempts)
+);
+
+const isRecoveredMotorErrorAttempt = (attempt, rental, attempts = []) => (
+    isMotorErrorAttempt(attempt) && hasRecoveredVendEvidence(rental, attempts)
+);
+
 const getAttemptTime = (attempt) => (
     firstPresent(
         attempt?.respondedAt,
@@ -456,6 +501,20 @@ const humanizeVendFailureReason = (value) => {
     }
 
     return humanizeCode(value);
+};
+
+const formatVendAttemptTitle = ({ attempt, rental, attempts, succeeded, fallbackTitle, t }) => {
+    if (succeeded) return t('charger_dispensed');
+
+    if (isRecoveredVendActTimeoutAttempt(attempt, rental, attempts)) {
+        return 'Vend confirmation timeout';
+    }
+
+    if (isRecoveredMotorErrorAttempt(attempt, rental, attempts)) {
+        return 'Motor error reported';
+    }
+
+    return fallbackTitle || t('dispense_failed');
 };
 
 const isTerminalVendAttemptSummary = (attempt, rental) => {
@@ -517,6 +576,12 @@ const buildRentalProcessLog = (rental, t) => {
     const terminalFailureSummary = terminalAttemptSummaries[terminalAttemptSummaries.length - 1];
     const hasBackendEvent = (eventName) => backendProcessLog.some(entry => (
         normalizeText(entry?.event) === eventName
+    ));
+    const recoveredVendTimeoutAttempt = displayAttempts.find(attempt => (
+        isRecoveredVendActTimeoutAttempt(attempt, rental, displayAttempts)
+    ));
+    const recoveredMotorErrorAttempt = displayAttempts.find(attempt => (
+        isRecoveredMotorErrorAttempt(attempt, rental, displayAttempts)
     ));
     const addEntry = ({ title, timestamp, status = 'info', details = [], countAsError = true }) => {
         const time = safeToDate(timestamp)?.getTime();
@@ -590,20 +655,27 @@ const buildRentalProcessLog = (rental, t) => {
 
     displayAttempts.forEach((attempt, index) => {
         const succeeded = hasAttemptSucceeded(attempt);
+        const recoveredVendTimeout = isRecoveredVendActTimeoutAttempt(attempt, rental, displayAttempts);
+        const recoveredMotorError = isRecoveredMotorErrorAttempt(attempt, rental, displayAttempts);
         const attemptNumber = firstPresent(attempt.attemptNumber, index + 1);
         const requestedSn = firstPresent(attempt.requestedSn, attempt.sn, attempt.chargerid);
         const responseSn = firstPresent(attempt.responseSn, attempt.batterySN);
         const moduleId = firstPresent(attempt.moduleid, attempt.module, attempt.requestedModuleid);
         const slotId = firstPresent(attempt.requestedSlotid, attempt.slotid, attempt.slot);
         const reason = humanizeVendFailureReason(firstPresent(attempt.reason, attempt.status));
-        const attemptTitle = succeeded
-            ? t('charger_dispensed')
-            : (reason || t('dispense_failed'));
+        const attemptTitle = formatVendAttemptTitle({
+            attempt,
+            rental,
+            attempts: displayAttempts,
+            succeeded,
+            fallbackTitle: reason,
+            t,
+        });
 
         addEntry({
             title: `${t('attempt')} ${attemptNumber}: ${attemptTitle}`,
             timestamp: getAttemptTime(attempt),
-            status: succeeded ? 'success' : 'error',
+            status: succeeded ? 'success' : ((recoveredVendTimeout || recoveredMotorError) ? 'warning' : 'error'),
             details: formatDetailParts(
                 requestedSn ? `${t('requested')}: ${requestedSn}` : '',
                 responseSn && String(responseSn) !== String(requestedSn) ? `${t('response')}: ${responseSn}` : '',
@@ -613,10 +685,54 @@ const buildRentalProcessLog = (rental, t) => {
                 attempt.exitStatus != null ? `${t('exit_status')}: ${attempt.exitStatus}` : '',
                 attempt.solenoidStatus != null ? `${t('solenoid_status')}: ${attempt.solenoidStatus}` : '',
                 attempt.slotLocked ? `${t('locked')}: ${humanizeCode(attempt.slotLockReason) || 'Yes'}` : '',
-                !succeeded && reason && reason !== attemptTitle ? `${t('reason')}: ${reason}` : ''
+                recoveredVendTimeout ? `${t('reason')}: ${reason}` : '',
+                recoveredMotorError ? `${t('reason')}: ${reason}` : '',
+                !succeeded && !recoveredVendTimeout && !recoveredMotorError && reason && reason !== attemptTitle ? `${t('reason')}: ${reason}` : ''
             ),
         });
     });
+
+    if (recoveredVendTimeoutAttempt && !hasBackendEvent('vend-timeout-recovered')) {
+        addEntry({
+            title: 'Dispense confirmed after timeout',
+            timestamp: firstPresent(
+                rental.rentedAt,
+                rental.vendTime,
+                rental.popupConfirmedAt,
+                rental.rentalTime,
+                recoveredVendTimeoutAttempt.timedOutAt
+            ),
+            status: 'success',
+            details: formatDetailParts(
+                rental.rentalStationid ? `${t('station')}: ${rental.rentalStationid}` : '',
+                rental.rentalModuleid ? `M: ${rental.rentalModuleid}` : '',
+                rental.rentalSlotid != null ? `S: ${rental.rentalSlotid}` : '',
+                chargerSn ? `${t('charger_sn')}: ${chargerSn}` : '',
+                rental.retryVerification ? `Verification: ${humanizeCode(rental.retryVerification)}` : ''
+            ),
+        });
+    }
+
+    if (recoveredMotorErrorAttempt && !hasBackendEvent('motor-error-recovered')) {
+        addEntry({
+            title: 'Dispense confirmed after motor error',
+            timestamp: firstPresent(
+                rental.rentedAt,
+                rental.vendTime,
+                rental.popupConfirmedAt,
+                rental.rentalTime,
+                recoveredMotorErrorAttempt.at
+            ),
+            status: 'success',
+            details: formatDetailParts(
+                rental.rentalStationid ? `${t('station')}: ${rental.rentalStationid}` : '',
+                rental.rentalModuleid ? `M: ${rental.rentalModuleid}` : '',
+                rental.rentalSlotid != null ? `S: ${rental.rentalSlotid}` : '',
+                chargerSn ? `${t('charger_sn')}: ${chargerSn}` : '',
+                rental.retryVerification ? `Verification: ${humanizeCode(rental.retryVerification)}` : ''
+            ),
+        });
+    }
 
     if (displayAttempts.length === 0 && rental.exitStatus != null) {
         const succeeded = Number(rental.exitStatus) === 1;
@@ -678,8 +794,7 @@ const buildRentalProcessLog = (rental, t) => {
 
     const rentalStatus = normalizeRentalStatusKey(rental.status);
     const hasSuccessfulVend = (
-        displayAttempts.some(hasAttemptSucceeded) ||
-        (displayAttempts.length === 0 && Number(rental.exitStatus) === 1)
+        hasRecoveredVendEvidence(rental, displayAttempts)
     );
     const hasCompletedVend = (
         hasSuccessfulVend ||

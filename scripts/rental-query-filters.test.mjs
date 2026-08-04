@@ -142,6 +142,36 @@ test('log-error matching detects failed vend and backend process events', () => 
         }),
         false
     );
+    assert.equal(
+        rentalHasLogError({
+            status: 'returned',
+            vendState: 'dispensed',
+            vendAttempts: [{ status: 'no_act_timeout', reason: 'vend_act_timeout' }],
+        }),
+        false
+    );
+    assert.equal(
+        rentalHasLogError({
+            status: 'pending',
+            vendAttempts: [{ status: 'no_act_timeout', reason: 'vend_act_timeout' }],
+        }),
+        true
+    );
+    assert.equal(
+        rentalHasLogError({
+            status: 'rented',
+            vendState: 'dispensed',
+            vendAttempts: [{ status: 'motor_error' }],
+        }),
+        false
+    );
+    assert.equal(
+        rentalHasLogError({
+            status: 'vend_failed',
+            vendAttempts: [{ status: 'motor_error' }],
+        }),
+        true
+    );
 });
 
 test('secondary gateway, return type, and station-version filters remain combined', () => {
