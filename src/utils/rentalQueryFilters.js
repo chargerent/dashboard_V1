@@ -20,6 +20,14 @@ const normalizeStatusKey = (status) => (
     normalizeText(status).replace(/[-\s]+/g, '_')
 );
 
+const INTERMEDIATE_PROCESS_EVENTS = new Set([
+    'apollo-pending-timeout-detected',
+    'dispense-requested',
+    'vend-act-timeout-detected',
+    'motor-error-detected',
+    'vend-timeout-confirmed-present',
+]);
+
 const STATION_VERSION_ENTRY_SEPARATOR = '\u001e';
 const STATION_VERSION_RECORD_SEPARATOR = '\u001f';
 
@@ -48,6 +56,9 @@ export const createStationVersionMap = (stationVersionKey) => new Map(
 const processEntryHasError = (entry) => {
     const status = normalizeText(entry?.status || entry?.paymentActionStatus);
     const event = normalizeText(entry?.event || entry?.type || entry?.title);
+
+    if (INTERMEDIATE_PROCESS_EVENTS.has(event)) return false;
+
     return (
         status.includes('fail') ||
         status.includes('error') ||

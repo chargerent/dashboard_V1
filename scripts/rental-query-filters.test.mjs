@@ -167,8 +167,39 @@ test('log-error matching detects failed vend and backend process events', () => 
     );
     assert.equal(
         rentalHasLogError({
+            status: 'returned',
+            processLog: [
+                { event: 'motor-error-detected', status: 'error' },
+                { event: 'charger-dispensed', status: 'success' },
+            ],
+        }),
+        false
+    );
+    assert.equal(
+        rentalHasLogError({
+            status: 'returned',
+            processLog: [
+                { event: 'vend-timeout-confirmed-present', status: 'error' },
+                { event: 'rental-returned', status: 'success' },
+            ],
+        }),
+        false
+    );
+    assert.equal(
+        rentalHasLogError({
             status: 'vend_failed',
             vendAttempts: [{ status: 'motor_error' }],
+        }),
+        true
+    );
+    assert.equal(
+        rentalHasLogError({
+            status: 'vend_failed',
+            processLog: [
+                { event: 'motor-error-detected', status: 'error' },
+                { event: 'vend-timeout-confirmed-present', status: 'error' },
+                { event: 'vend-failed', status: 'error' },
+            ],
         }),
         true
     );

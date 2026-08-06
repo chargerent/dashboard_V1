@@ -1,12 +1,17 @@
 "use strict";
 
+const KIOSK_OWNED_UI_FIELDS = ["mode", "version", "created"];
+
 function preserveProvisionedUiMode(profileSnapshot, kioskUi) {
   const nextUi = {...(profileSnapshot || {})};
-  delete nextUi.mode;
 
-  if (kioskUi && Object.prototype.hasOwnProperty.call(kioskUi, "mode")) {
-    nextUi.mode = kioskUi.mode;
-  }
+  KIOSK_OWNED_UI_FIELDS.forEach((field) => {
+    delete nextUi[field];
+
+    if (kioskUi && Object.prototype.hasOwnProperty.call(kioskUi, field)) {
+      nextUi[field] = kioskUi[field];
+    }
+  });
 
   return nextUi;
 }

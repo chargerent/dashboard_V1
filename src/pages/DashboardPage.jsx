@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect } from 'react';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import FilterPanel from '../components/Dashboard/FilterPanel';
+import SshConnectivityPanel from '../components/Dashboard/SshConnectivityPanel';
 import KioskPanel from '../components/kiosk/kioskPanel';
 import KioskDetailPanel from '../components/kiosk/KioskDetailPanel';
 import KioskEditPanel from '../components/kiosk/KioskEditPanel';
@@ -105,7 +106,7 @@ const buildStationStatusIssues = (kiosk, referenceTime) => {
     return issues;
 };
 
-export default function DashboardPage({ _token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToAiBooths, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToReporting, onNavigateToTesting, rentalData, rentalDashboardStatsByStationId, useRentalDashboardSummaries = false, allStationsData, _setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, _setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, _ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, _setNgrokInfo, manageIgnoredKiosk, kiosksReady, initialSearch = '', sessionWarningOpen = false, sessionCountdown = 60, onStayLoggedIn }) {
+export default function DashboardPage({ _token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToAiBooths, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToReporting, onNavigateToTesting, rentalData, rentalDashboardStatsByStationId, useRentalDashboardSummaries = false, allStationsData, _setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, _setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, _ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, _setNgrokInfo, manageIgnoredKiosk, kiosksReady, sshConnectivityByStation = {}, ngrokConnectivityByStation = {}, initialSearch = '', sessionWarningOpen = false, sessionCountdown = 60, onStayLoggedIn }) {
     const [loading, setLoading] = useState(!kiosksReady);
     const [error] = useState(null);
     const [expandedKioskId, setExpandedKioskId] = useState(null);
@@ -802,6 +803,18 @@ return (
                                 clientInfo={clientInfo}
                                 t={t}
                                 searchEnabled={!!clientInfo.features.search || isAdminUser || !!statusFocusedKioskId}
+                            />
+                        )}
+                        {isAdminUser && (
+                            <SshConnectivityPanel
+                                kiosks={allStationsData}
+                                statusByStation={sshConnectivityByStation}
+                                onRefresh={(kiosk) => onCommand(kiosk.stationid, 'ssh status', null, kiosk.provisionid)}
+                                onDisconnect={(kiosk) => handleGeneralCommand(kiosk.stationid, 'ssh disconnect', null, kiosk.provisionid)}
+                                ngrokStatusByStation={ngrokConnectivityByStation}
+                                onRefreshNgrok={(kiosk) => onCommand(kiosk.stationid, 'ngrok status')}
+                                onDisconnectNgrok={(kiosk) => handleGeneralCommand(kiosk.stationid, 'ngrok disconnect')}
+                                referenceTime={latestTimestamp}
                             />
                         )}
                         {(clientInfo.features.rentals || isAdminUser) && (

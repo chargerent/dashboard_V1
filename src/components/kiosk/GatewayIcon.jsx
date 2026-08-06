@@ -10,7 +10,7 @@ function GatewayIcon({ gateway, _t }) {
             return (
                 <div title="Scanner" className="text-gray-600">
                     <svg xmlns="http://www.w3.org/2000/svg" className={iconSize} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m6-16v16M4 9h2m2 0h2m2 0h2m2 0h2M4 15h2m2 0h2m2 0h2m2 0h2" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 8V4a1 1 0 011-1h4m8 0h4a1 1 0 011 1v4m0 8v4a1 1 0 01-1 1h-4M8 21H4a1 1 0 01-1-1v-4M7 8v8m3-8v8m4-8v8m3-8v8" />
                     </svg>
                 </div>
             );

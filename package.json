@@ -13,6 +13,7 @@
     "test:rental-dashboard-stats": "node --test scripts/rental-dashboard-stats.test.mjs",
     "test:rental-query-filters": "node --test scripts/rental-query-filters.test.mjs",
     "test:kiosk-updates": "node --test scripts/kiosk-command-responses.test.mjs",
+    "test:kiosk-ui-profile": "node --test scripts/kiosk-ui-profile-status.test.mjs",
     "test:ui-resilience": "playwright test --config=playwright.resilience.config.js",
     "preview": "vite preview",
     "sync:mergin-map": "node ./scripts/sync-mergin-course-map.mjs"

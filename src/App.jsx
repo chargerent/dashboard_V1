@@ -27,6 +27,10 @@ import {
   applySshStateOverride,
   rememberSshStateOverride,
 } from './utils/kioskSshState.js';
+import {
+  applyNgrokStateOverride,
+  rememberNgrokStateOverride,
+} from './utils/kioskNgrokState.js';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 // 🔥 firebase-config must export BOTH db and auth
@@ -793,6 +797,7 @@ function App() {
   const outgoingCommandScopesRef = useRef(new Map());
   const moduleChargeControlOverridesRef = useRef(new Map());
   const sshStateOverridesRef = useRef(new Map());
+  const ngrokStateOverridesRef = useRef(new Map());
   const currentSocketSessionIdRef = useRef('');
   const startupListenerRef = useRef({ kiosksLogged: false, rentalsLogged: false });
   const adminRentalLoadHandleRef = useRef(null);
@@ -802,6 +807,8 @@ function App() {
   const [allStationsData, setAllStationsData] = useState([]);
   const allStationsDataRef = useRef(allStationsData);
   const [ngrokInfo, setNgrokInfo] = useState(null);
+  const [sshConnectivityByStation, setSshConnectivityByStation] = useState({});
+  const [ngrokConnectivityByStation, setNgrokConnectivityByStation] = useState({});
   const [kiosksReady, setKiosksReady] = useState(false);
   const [adminRentalsReady, setAdminRentalsReady] = useState(false);
   const [rentalScope, setRentalScope] = useState({
@@ -1288,9 +1295,23 @@ function App() {
     const publishKioskSnapshot = () => {
       kioskPublishTimer = null;
       setAllStationsData(prevStations => {
+        const publishNow = Date.now();
         const snapshotStations = latestStationIdsInSnapshot
           .map(stationid => normalizedKiosksById.get(stationid))
+          .map(station => {
+            const stationid = String(station?.stationid || '').trim();
+            const ignoreUntil = Number(ignoredKiosksRef.current[stationid] || 0);
+
+            if (!stationid || publishNow >= ignoreUntil) {
+              return station;
+            }
+
+            return allStationsDataRef.current.find(
+              localStation => localStation.stationid === stationid
+            ) || station;
+          })
           .map(station => applySshStateOverride(station, sshStateOverridesRef.current))
+          .map(station => applyNgrokStateOverride(station, ngrokStateOverridesRef.current))
           .filter(Boolean);
         const nextStations = applyModuleChargeOverridesToStations(snapshotStations);
         const isUnchanged = (
@@ -2033,6 +2054,11 @@ function App() {
           ? normalizeKioskData([payload.kiosk])[0]
           : null;
 
+        ignoredKiosksRef.current = {
+          ...ignoredKiosksRef.current,
+          [stationid]: Date.now() + 30000,
+        };
+
         if (normalizedKiosk) {
           setAllStationsData((prevKiosks) =>
             prevKiosks.map((station) =>
@@ -2250,7 +2276,9 @@ function App() {
         ignoredKiosksRef.current = nextIgnoredKiosks;
       }
 
-      setCommandStatus({ state: 'sending', message: t('sending_command') });
+      if (action !== 'ssh status' && action !== 'ngrok status') {
+        setCommandStatus({ state: 'sending', message: t('sending_command') });
+      }
     } else {
       setCommandStatus({ state: 'error', message: t('connection_lost') });
     }
@@ -2336,6 +2364,55 @@ function App() {
                 )
               );
             }
+          } else if (data.action === 'ssh status') {
+            const responseStationId = String(data.kiosk || data.stationid || '').trim();
+            if (responseStationId) {
+              const activeSessions = Math.max(0, Number(data.activeSessions || 0));
+              const tunnelConnected = data.tunnelConnected === true || data.connected === true || data.ssh === true;
+              setSshConnectivityByStation((previous) => ({
+                ...previous,
+                [responseStationId]: {
+                  tunnelConnected,
+                  activeSessions,
+                  checkedAt: Number(data.timeresponded || data.checkedAt || Date.now()),
+                  requestId: data.requestId || '',
+                },
+              }));
+              if (!tunnelConnected) {
+                rememberSshStateOverride(sshStateOverridesRef.current, responseStationId, false);
+                setAllStationsData((previous) => previous.map((station) => (
+                  station.stationid === responseStationId ? { ...station, ssh: false } : station
+                )));
+              }
+            }
+          } else if (data.action === 'ngrok status') {
+            const responseStationId = String(data.kiosk || data.stationid || '').trim();
+            if (responseStationId) {
+              const tunnelConnected = data.tunnelConnected === true || data.connected === true || data.ngrok === true;
+              setNgrokConnectivityByStation((previous) => {
+                const next = { ...previous };
+                if (tunnelConnected) {
+                  next[responseStationId] = {
+                    tunnelConnected: true,
+                    activeConnections: Math.max(0, Number(data.activeConnections || 0)),
+                    recentRequestRate: Math.max(0, Number(data.recentRequestRate || 0)),
+                    totalRequests: Math.max(0, Number(data.totalRequests || 0)),
+                    publicUrl: String(data.publicUrl || ''),
+                    checkedAt: Number(data.timeresponded || data.checkedAt || Date.now()),
+                    requestId: data.requestId || '',
+                  };
+                } else {
+                  delete next[responseStationId];
+                }
+                return next;
+              });
+              if (!tunnelConnected) {
+                rememberNgrokStateOverride(ngrokStateOverridesRef.current, responseStationId, false);
+                setAllStationsData((previous) => previous.map((station) => (
+                  station.stationid === responseStationId ? { ...station, ngrok: false } : station
+                )));
+              }
+            }
           } else if (data.action === 'ngrok connect' || data.action === 'ngrok disconnect' || data.action === 'ssh connect' || data.action === 'ssh disconnect') {
             const isSuccess = data.status == 1;
             const shouldShowCommandStatus = setScopedCommandStatus(data, { state: isSuccess ? 'success' : 'error', message: data.status_en || (isSuccess ? t('command_success') : t('command_failed')) });
@@ -2349,6 +2426,43 @@ function App() {
                   responseStationId,
                   isConnecting,
                 );
+                setSshConnectivityByStation((previous) => {
+                  const next = { ...previous };
+                  if (isConnecting) {
+                    next[responseStationId] = {
+                      tunnelConnected: true,
+                      activeSessions: 0,
+                      checkedAt: 0,
+                      requestId: data.requestId || '',
+                    };
+                  } else {
+                    delete next[responseStationId];
+                  }
+                  return next;
+                });
+              } else {
+                rememberNgrokStateOverride(
+                  ngrokStateOverridesRef.current,
+                  responseStationId,
+                  isConnecting,
+                );
+                setNgrokConnectivityByStation((previous) => {
+                  const next = { ...previous };
+                  if (isConnecting) {
+                    next[responseStationId] = {
+                      tunnelConnected: true,
+                      activeConnections: 0,
+                      recentRequestRate: 0,
+                      totalRequests: 0,
+                      publicUrl: '',
+                      checkedAt: 0,
+                      requestId: data.requestId || '',
+                    };
+                  } else {
+                    delete next[responseStationId];
+                  }
+                  return next;
+                });
               }
               setAllStationsData(prev => prev.map(station =>
                 station.stationid === responseStationId
@@ -2369,6 +2483,8 @@ function App() {
             }
           } else if (data.action && (data.action.startsWith('eject') || data.action === 'rent' || data.action === 'vend')) { // EJECT LOGIC
             const isSuccess = data.status == 1;
+            const bulkPhase = String(data.bulkPhase || '').trim().toLowerCase();
+            const isCompletedBulkConfirmation = bulkPhase === 'completed';
             const fallbackFailureMessage = t('eject_failed');
             const shouldShowCommandStatus = setScopedCommandStatus(data, {
               state: isSuccess ? 'success' : 'error',
@@ -2379,6 +2495,11 @@ function App() {
             const moduleRef = data.moduleid || data.module;
             const slotRef = data.slot ?? data.slotid;
             const chargerId = data.chargerid ?? data.sn;
+            const confirmedBulkSlots = isSuccess && isCompletedBulkConfirmation
+              ? ejectingSlotsRef.current.filter((slot) => (
+                  String(slot?.stationid || '').trim().toLowerCase() === String(stationId || '').trim().toLowerCase()
+                ))
+              : [];
 
             debugEjectUi('Received eject response', {
               action: data.action,
@@ -2387,17 +2508,25 @@ function App() {
               moduleRef,
               slotRef,
               chargerId,
+              bulkPhase,
+              confirmedBulkSlotCount: confirmedBulkSlots.length,
               message: data.status_en,
             });
             clearEjectCommandState(stationId, moduleRef, slotRef, chargerId);
+            if (confirmedBulkSlots.length > 0) {
+              const confirmedKeys = new Set(confirmedBulkSlots.map(getTrackedSlotKey));
+              setEjectingSlots((prev) => prev.filter((slot) => !confirmedKeys.has(getTrackedSlotKey(slot))));
+              setFailedEjectSlots((prev) => prev.filter((slot) => !confirmedKeys.has(getTrackedSlotKey(slot))));
+            }
 
             if (isSuccess && stationId) {
               setAllStationsData(prevStations => {
                 const updatedStations = prevStations.map(station => {
-                  if (station.stationid !== stationId) return station;
+                  if (!stationMatchesResponse(station, stationId)) return station;
 
                   const targetModule = findMatchingModule(station.modules, moduleRef, chargerId);
                   const targetSlot = findMatchingSlot(targetModule, slotRef, chargerId);
+                  const confirmedKeys = new Set(confirmedBulkSlots.map(getTrackedSlotKey));
 
                   if (targetModule && targetSlot) {
                     clearEjectCommandState(stationId, targetModule.id, targetSlot.position, chargerId);
@@ -2405,28 +2534,40 @@ function App() {
 
                   return {
                     ...station,
-                    modules: station.modules.map(module =>
-                      module.id === targetModule?.id
-                        ? {
-                            ...module,
-                            slots: module.slots.map(slot =>
-                              slot.position === targetSlot?.position
-                                ? {
-                                    ...slot,
-                                    sn: 0,
-                                    batteryLevel: 0,
-                                    chargingCurrent: 0,
-                                    sstat: '0C',
-                                    cmos: null,
-                                    isLocked: false,
-                                    lock: false,
-                                    lockReason: null,
-                                  }
-                                : slot
-                            )
-                          }
-                        : module
-                    )
+                    modules: station.modules.map(module => {
+                      const moduleHasConfirmedBulkSlot = module.slots.some((slot) => confirmedKeys.has(getTrackedSlotKey({
+                        stationid: station.stationid,
+                        moduleid: module.id,
+                        slotid: slot.position,
+                      })));
+
+                      if (module.id !== targetModule?.id && !moduleHasConfirmedBulkSlot) {
+                        return module;
+                      }
+
+                      return {
+                        ...module,
+                        slots: module.slots.map(slot =>
+                          slot.position === targetSlot?.position || confirmedKeys.has(getTrackedSlotKey({
+                                stationid: station.stationid,
+                                moduleid: module.id,
+                                slotid: slot.position,
+                              }))
+                            ? {
+                                ...slot,
+                                sn: 0,
+                                batteryLevel: 0,
+                                chargingCurrent: 0,
+                                sstat: '0C',
+                                cmos: null,
+                                isLocked: false,
+                                lock: false,
+                                lockReason: null,
+                              }
+                            : slot
+                        )
+                      };
+                    })
                   };
                 });
                 return updatedStations;
@@ -2480,8 +2621,8 @@ function App() {
                 }
               ));
 
-              console.log(`[5. IGNORE] Ignoring Firestore updates for ${stationId} for 20s.`);
-              ignoredKiosksRef.current = { ...ignoredKiosksRef.current, [stationId]: Date.now() + 20000 };
+              console.log(`[5. IGNORE] Ignoring Firestore updates for ${stationId} for 30s.`);
+              ignoredKiosksRef.current = { ...ignoredKiosksRef.current, [stationId]: Date.now() + 30000 };
 
               setLockingSlots(prev => prev.filter(l => !(l.stationid === stationId && l.moduleid.toString().endsWith(`m${moduleIdNum}`) && l.slotid === slotId)));
             } else if (data.status_en) {
@@ -2649,6 +2790,8 @@ function App() {
       ngrokInfo={ngrokInfo}
       setNgrokInfo={setNgrokInfo}
       onCommand={onCommand}
+      sshConnectivityByStation={sshConnectivityByStation}
+      ngrokConnectivityByStation={ngrokConnectivityByStation}
       commandStatus={commandStatus}
       setCommandStatus={setCommandStatus}
       firestoreError={firestoreError}

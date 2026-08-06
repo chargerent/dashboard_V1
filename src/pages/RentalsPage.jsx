@@ -342,9 +342,147 @@ const isApolloRental = (rental) => {
     );
 };
 
-const resolveProcessEventTitle = (entry, t) => {
-    const event = normalizeText(firstPresent(entry?.event, entry?.type, entry?.title));
+const LOG_PHASE = {
+    created: 10,
+    payment: 20,
+    request: 30,
+    attempt: 40,
+    verification: 45,
+    vendOutcome: 50,
+    usage: 60,
+    settlement: 70,
+    audit: 90,
+};
+
+const PROCESS_EVENT_PHASES = {
+    'apollo-authorization-created': LOG_PHASE.payment,
+    'apollo-pending-timeout-detected': LOG_PHASE.attempt,
+    'apollo-payment-action-queued': LOG_PHASE.settlement,
+    'apollo-cancel-verified': LOG_PHASE.settlement,
+    'apollo-authorization-cancelled': LOG_PHASE.settlement,
+    'apollo-cancel-retry-needed': LOG_PHASE.settlement,
+    'apollo-cancel-failed': LOG_PHASE.settlement,
+    'apollo-authorization-cancel-retry-failed': LOG_PHASE.settlement,
+    'apollo-commit-confirmed': LOG_PHASE.settlement,
+    'apollo-commit-failed': LOG_PHASE.settlement,
+    'dispense-requested': LOG_PHASE.request,
+    'vend-act-timeout-detected': LOG_PHASE.attempt,
+    'motor-error-detected': LOG_PHASE.attempt,
+    'vend-timeout-confirmed-present': LOG_PHASE.verification,
+    'vend-timeout-recovered': LOG_PHASE.vendOutcome,
+    'motor-error-recovered': LOG_PHASE.vendOutcome,
+    'charger-dispensed': LOG_PHASE.vendOutcome,
+    'vend-failed': LOG_PHASE.vendOutcome,
+    'physical-return-after-purchase': LOG_PHASE.usage,
+};
+
+const HIDDEN_PROCESS_EVENTS = new Set([
+    'apollo-pending-lifecycle-migrated',
+]);
+
+const INTERMEDIATE_PROCESS_EVENTS = new Set([
+    'apollo-pending-timeout-detected',
+    'dispense-requested',
+    'vend-act-timeout-detected',
+    'motor-error-detected',
+    'vend-timeout-confirmed-present',
+]);
+
+const normalizeProcessEvent = (entry) => (
+    normalizeText(firstPresent(entry?.event, entry?.type, entry?.title))
+);
+
+const processLogHasEvent = (processLog, eventNames) => {
+    const names = new Set(Array.isArray(eventNames) ? eventNames : [eventNames]);
+    return processLog.some(entry => names.has(normalizeProcessEvent(entry)));
+};
+
+const normalizeMatchValue = (value) => String(value ?? '').trim();
+
+const valuesMatch = (left, right) => {
+    const normalizedLeft = normalizeMatchValue(left);
+    const normalizedRight = normalizeMatchValue(right);
+    return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
+};
+
+const getAttemptModuleId = (attempt) => (
+    firstPresent(attempt?.moduleid, attempt?.module, attempt?.requestedModuleid)
+);
+
+const getAttemptSlotId = (attempt) => (
+    firstPresent(attempt?.requestedSlotid, attempt?.slotid, attempt?.slot)
+);
+
+const getProcessAttemptNumber = (entry, attempts = []) => {
+    const explicitAttemptNumber = firstPresent(entry?.attemptNumber, entry?.attempt, entry?.try);
+    if (explicitAttemptNumber) return explicitAttemptNumber;
+
+    const requestedSn = firstPresent(entry?.requestedSn, entry?.chargerid, entry?.sn);
+    const moduleId = firstPresent(entry?.moduleid, entry?.module, entry?.requestedModuleid);
+    const slotId = firstPresent(entry?.slotid, entry?.slot, entry?.requestedSlotid);
+    const matchedIndex = attempts.findIndex(attempt => (
+        (
+            !requestedSn ||
+            valuesMatch(firstPresent(attempt?.requestedSn, attempt?.sn, attempt?.chargerid), requestedSn)
+        ) &&
+        (
+            !moduleId ||
+            valuesMatch(getAttemptModuleId(attempt), moduleId)
+        ) &&
+        (
+            slotId == null ||
+            valuesMatch(getAttemptSlotId(attempt), slotId)
+        )
+    ));
+
+    if (matchedIndex < 0) return '';
+    return firstPresent(attempts[matchedIndex]?.attemptNumber, matchedIndex + 1);
+};
+
+const processEntryMatchesAttempt = (entry, attempt) => {
+    const entrySn = firstPresent(entry?.requestedSn, entry?.chargerid, entry?.sn);
+    const entryModuleId = firstPresent(entry?.moduleid, entry?.module, entry?.requestedModuleid);
+    const entrySlotId = firstPresent(entry?.slotid, entry?.slot, entry?.requestedSlotid);
+
+    if (!entrySn && !entryModuleId && entrySlotId == null) return false;
+
+    return (
+        (
+            !entrySn ||
+            valuesMatch(firstPresent(attempt?.requestedSn, attempt?.sn, attempt?.chargerid), entrySn)
+        ) &&
+        (
+            !entryModuleId ||
+            valuesMatch(getAttemptModuleId(attempt), entryModuleId)
+        ) &&
+        (
+            entrySlotId == null ||
+            valuesMatch(getAttemptSlotId(attempt), entrySlotId)
+        )
+    );
+};
+
+const processLogHasAttemptEvent = (processLog, eventNames, attempt, attempts = []) => {
+    const names = new Set(Array.isArray(eventNames) ? eventNames : [eventNames]);
+    const matchingEntries = processLog.filter(entry => names.has(normalizeProcessEvent(entry)));
+
+    if (matchingEntries.length === 0) return false;
+    if (matchingEntries.some(entry => processEntryMatchesAttempt(entry, attempt))) return true;
+    return attempts.length === 1 && matchingEntries.length === 1;
+};
+
+const shouldHideBackendProcessEntry = (entry) => (
+    HIDDEN_PROCESS_EVENTS.has(normalizeProcessEvent(entry))
+);
+
+const getProcessEntryPhase = (entry) => (
+    PROCESS_EVENT_PHASES[normalizeProcessEvent(entry)] || LOG_PHASE.audit
+);
+
+const resolveProcessEventTitle = (entry, t, attempts = []) => {
+    const event = normalizeProcessEvent(entry);
     const action = humanizeCode(firstPresent(entry?.action, entry?.paymentAction));
+    const attemptNumber = getProcessAttemptNumber(entry, attempts);
 
     if (event === 'apollo-authorization-created') return 'Apollo authorization created';
     if (event === 'apollo-payment-action-queued') return `Apollo ${action || 'payment'} queued`;
@@ -356,13 +494,54 @@ const resolveProcessEventTitle = (entry, t) => {
     if (event === 'apollo-commit-confirmed') return 'Apollo commit confirmed';
     if (event === 'apollo-commit-failed') return 'Apollo commit failed';
     if (event === 'physical-return-after-purchase') return 'Physical return after purchase';
+    if (event === 'dispense-requested') return t('dispense_requested');
+    if (event === 'charger-dispensed') {
+        return attemptNumber
+            ? `${t('attempt')} ${attemptNumber}: ${t('charger_dispensed')}`
+            : t('charger_dispensed');
+    }
+    if (event === 'vend-act-timeout-detected') {
+        return attemptNumber
+            ? `${t('attempt')} ${attemptNumber}: Vend confirmation timeout`
+            : 'Vend confirmation timeout';
+    }
+    if (event === 'motor-error-detected') {
+        return attemptNumber
+            ? `${t('attempt')} ${attemptNumber}: Motor error`
+            : 'Motor error detected';
+    }
+    if (event === 'vend-timeout-confirmed-present') return 'Slot verified: charger still present';
+    if (event === 'vend-timeout-recovered') return 'Dispense confirmed after timeout';
+    if (event === 'motor-error-recovered') return 'Dispense confirmed after motor error';
+    if (event === 'vend-failed') return t('final_vend_failure');
 
     return humanizeCode(firstPresent(entry?.title, entry?.event, entry?.type)) || t('process_log');
 };
 
 const resolveProcessEventStatus = (entry) => {
     const status = normalizeText(firstPresent(entry?.status, entry?.paymentActionStatus));
-    const event = normalizeText(firstPresent(entry?.event, entry?.type, entry?.title));
+    const event = normalizeProcessEvent(entry);
+
+    if (event === 'dispense-requested') return 'pending';
+
+    if (
+        event === 'vend-act-timeout-detected' ||
+        event === 'motor-error-detected' ||
+        event === 'vend-timeout-confirmed-present' ||
+        event === 'apollo-pending-timeout-detected'
+    ) {
+        return 'warning';
+    }
+
+    if (
+        event === 'charger-dispensed' ||
+        event === 'vend-timeout-recovered' ||
+        event === 'motor-error-recovered'
+    ) {
+        return 'success';
+    }
+
+    if (event === 'vend-failed') return 'error';
 
     if (
         status.includes('fail') ||
@@ -399,6 +578,12 @@ const resolveProcessEventStatus = (entry) => {
     }
 
     return 'info';
+};
+
+const processEntryCountsAsError = (entry) => {
+    const event = normalizeProcessEvent(entry);
+    if (INTERMEDIATE_PROCESS_EVENTS.has(event)) return false;
+    return resolveProcessEventStatus(entry) === 'error';
 };
 
 const buildBackendProcessDetails = (entry, rental, t) => {
@@ -566,24 +751,65 @@ const getEarliestTimestamp = (...timestamps) => {
 const buildRentalProcessLog = (rental, t) => {
     const entries = [];
     const backendProcessLog = Array.isArray(rental.processLog) ? rental.processLog : [];
+    const visibleBackendProcessLog = backendProcessLog.filter(entry => (
+        !shouldHideBackendProcessEntry(entry)
+    ));
     const attempts = Array.isArray(rental.vendAttempts) ? rental.vendAttempts : [];
     const terminalAttemptSummaries = attempts.filter(attempt => (
         isTerminalVendAttemptSummary(attempt, rental)
     ));
-    const displayAttempts = attempts.filter(attempt => (
+    const physicalAttempts = attempts.filter(attempt => (
         !isTerminalVendAttemptSummary(attempt, rental)
     ));
+    const processAttemptLoggedByBackend = (attempt) => {
+        if (hasAttemptSucceeded(attempt)) {
+            return processLogHasAttemptEvent(
+                visibleBackendProcessLog,
+                'charger-dispensed',
+                attempt,
+                physicalAttempts
+            );
+        }
+
+        if (isMotorErrorAttempt(attempt)) {
+            return processLogHasAttemptEvent(
+                visibleBackendProcessLog,
+                'motor-error-detected',
+                attempt,
+                physicalAttempts
+            );
+        }
+
+        if (isVendActTimeoutAttempt(attempt)) {
+            return processLogHasAttemptEvent(
+                visibleBackendProcessLog,
+                ['vend-act-timeout-detected', 'vend-timeout-recovered'],
+                attempt,
+                physicalAttempts
+            );
+        }
+
+        return false;
+    };
+    const displayAttempts = physicalAttempts.filter(attempt => (
+        !processAttemptLoggedByBackend(attempt)
+    ));
     const terminalFailureSummary = terminalAttemptSummaries[terminalAttemptSummaries.length - 1];
-    const hasBackendEvent = (eventName) => backendProcessLog.some(entry => (
-        normalizeText(entry?.event) === eventName
+    const hasBackendEvent = (eventNames) => processLogHasEvent(backendProcessLog, eventNames);
+    const recoveredVendTimeoutAttempt = physicalAttempts.find(attempt => (
+        isRecoveredVendActTimeoutAttempt(attempt, rental, physicalAttempts)
     ));
-    const recoveredVendTimeoutAttempt = displayAttempts.find(attempt => (
-        isRecoveredVendActTimeoutAttempt(attempt, rental, displayAttempts)
+    const recoveredMotorErrorAttempt = physicalAttempts.find(attempt => (
+        isRecoveredMotorErrorAttempt(attempt, rental, physicalAttempts)
     ));
-    const recoveredMotorErrorAttempt = displayAttempts.find(attempt => (
-        isRecoveredMotorErrorAttempt(attempt, rental, displayAttempts)
-    ));
-    const addEntry = ({ title, timestamp, status = 'info', details = [], countAsError = true }) => {
+    const addEntry = ({
+        title,
+        timestamp,
+        status = 'info',
+        details = [],
+        countAsError = true,
+        phase = LOG_PHASE.audit,
+    }) => {
         const time = safeToDate(timestamp)?.getTime();
         entries.push({
             id: `${entries.length}-${title}`,
@@ -591,6 +817,7 @@ const buildRentalProcessLog = (rental, t) => {
             timestamp,
             displayTime: formatLogTime(timestamp),
             sortTime: Number.isFinite(time) ? time : null,
+            phase,
             order: entries.length,
             status,
             countAsError,
@@ -631,6 +858,7 @@ const buildRentalProcessLog = (rental, t) => {
             ? firstPresent(rental.declinedAt, rental.rentalTime, rental.lastUpdate)
             : firstPresent(transactionStartedAt, rental.rentalTime, rental.failedAt, rental.lastUpdate),
         status: initialStatus === 'pending' ? 'pending' : 'info',
+        phase: LOG_PHASE.created,
         details: rentalDetails,
     });
 
@@ -644,6 +872,7 @@ const buildRentalProcessLog = (rental, t) => {
             title: 'Apollo authorization created',
             timestamp: firstPresent(rental.paymentAuthorizedAt, rental.rentalTime),
             status: 'info',
+            phase: LOG_PHASE.payment,
             details: formatDetailParts(
                 authorizationReference ? `Host ref: ${authorizationReference}` : '',
                 rental.terminalTxnId ? `Terminal txn: ${rental.terminalTxnId}` : '',
@@ -655,18 +884,19 @@ const buildRentalProcessLog = (rental, t) => {
 
     displayAttempts.forEach((attempt, index) => {
         const succeeded = hasAttemptSucceeded(attempt);
-        const recoveredVendTimeout = isRecoveredVendActTimeoutAttempt(attempt, rental, displayAttempts);
-        const recoveredMotorError = isRecoveredMotorErrorAttempt(attempt, rental, displayAttempts);
-        const attemptNumber = firstPresent(attempt.attemptNumber, index + 1);
+        const recoveredVendTimeout = isRecoveredVendActTimeoutAttempt(attempt, rental, physicalAttempts);
+        const recoveredMotorError = isRecoveredMotorErrorAttempt(attempt, rental, physicalAttempts);
+        const physicalAttemptIndex = physicalAttempts.indexOf(attempt);
+        const attemptNumber = firstPresent(attempt.attemptNumber, physicalAttemptIndex >= 0 ? physicalAttemptIndex + 1 : index + 1);
         const requestedSn = firstPresent(attempt.requestedSn, attempt.sn, attempt.chargerid);
         const responseSn = firstPresent(attempt.responseSn, attempt.batterySN);
-        const moduleId = firstPresent(attempt.moduleid, attempt.module, attempt.requestedModuleid);
-        const slotId = firstPresent(attempt.requestedSlotid, attempt.slotid, attempt.slot);
+        const moduleId = getAttemptModuleId(attempt);
+        const slotId = getAttemptSlotId(attempt);
         const reason = humanizeVendFailureReason(firstPresent(attempt.reason, attempt.status));
         const attemptTitle = formatVendAttemptTitle({
             attempt,
             rental,
-            attempts: displayAttempts,
+            attempts: physicalAttempts,
             succeeded,
             fallbackTitle: reason,
             t,
@@ -676,6 +906,7 @@ const buildRentalProcessLog = (rental, t) => {
             title: `${t('attempt')} ${attemptNumber}: ${attemptTitle}`,
             timestamp: getAttemptTime(attempt),
             status: succeeded ? 'success' : ((recoveredVendTimeout || recoveredMotorError) ? 'warning' : 'error'),
+            phase: succeeded ? LOG_PHASE.vendOutcome : LOG_PHASE.attempt,
             details: formatDetailParts(
                 requestedSn ? `${t('requested')}: ${requestedSn}` : '',
                 responseSn && String(responseSn) !== String(requestedSn) ? `${t('response')}: ${responseSn}` : '',
@@ -692,7 +923,7 @@ const buildRentalProcessLog = (rental, t) => {
         });
     });
 
-    if (recoveredVendTimeoutAttempt && !hasBackendEvent('vend-timeout-recovered')) {
+    if (recoveredVendTimeoutAttempt && !hasBackendEvent(['vend-timeout-recovered', 'charger-dispensed'])) {
         addEntry({
             title: 'Dispense confirmed after timeout',
             timestamp: firstPresent(
@@ -703,6 +934,7 @@ const buildRentalProcessLog = (rental, t) => {
                 recoveredVendTimeoutAttempt.timedOutAt
             ),
             status: 'success',
+            phase: LOG_PHASE.vendOutcome,
             details: formatDetailParts(
                 rental.rentalStationid ? `${t('station')}: ${rental.rentalStationid}` : '',
                 rental.rentalModuleid ? `M: ${rental.rentalModuleid}` : '',
@@ -713,7 +945,7 @@ const buildRentalProcessLog = (rental, t) => {
         });
     }
 
-    if (recoveredMotorErrorAttempt && !hasBackendEvent('motor-error-recovered')) {
+    if (recoveredMotorErrorAttempt && !hasBackendEvent(['motor-error-recovered', 'charger-dispensed'])) {
         addEntry({
             title: 'Dispense confirmed after motor error',
             timestamp: firstPresent(
@@ -724,6 +956,7 @@ const buildRentalProcessLog = (rental, t) => {
                 recoveredMotorErrorAttempt.at
             ),
             status: 'success',
+            phase: LOG_PHASE.vendOutcome,
             details: formatDetailParts(
                 rental.rentalStationid ? `${t('station')}: ${rental.rentalStationid}` : '',
                 rental.rentalModuleid ? `M: ${rental.rentalModuleid}` : '',
@@ -734,26 +967,34 @@ const buildRentalProcessLog = (rental, t) => {
         });
     }
 
-    if (displayAttempts.length === 0 && rental.exitStatus != null) {
+    if (physicalAttempts.length === 0 && rental.exitStatus != null) {
         const succeeded = Number(rental.exitStatus) === 1;
-        addEntry({
-            title: succeeded ? t('charger_dispensed') : t('dispense_failed'),
-            timestamp: firstPresent(rental.popupConfirmedAt, rental.vendTime, rental.rentedAt, rental.rentalTime),
-            status: succeeded ? 'success' : 'error',
-            details: formatDetailParts(
-                chargerSn ? `${t('charger_sn')}: ${chargerSn}` : '',
-                rental.exitStatus != null ? `${t('exit_status')}: ${rental.exitStatus}` : '',
-                rental.solenoidStatus != null ? `${t('solenoid_status')}: ${rental.solenoidStatus}` : ''
-            ),
-        });
+        const legacyExitAlreadyLogged = succeeded
+            ? hasBackendEvent('charger-dispensed')
+            : hasBackendEvent('vend-failed');
+
+        if (!legacyExitAlreadyLogged) {
+            addEntry({
+                title: succeeded ? t('charger_dispensed') : t('dispense_failed'),
+                timestamp: firstPresent(rental.popupConfirmedAt, rental.vendTime, rental.rentedAt, rental.rentalTime),
+                status: succeeded ? 'success' : 'error',
+                phase: succeeded ? LOG_PHASE.vendOutcome : LOG_PHASE.attempt,
+                details: formatDetailParts(
+                    chargerSn ? `${t('charger_sn')}: ${chargerSn}` : '',
+                    rental.exitStatus != null ? `${t('exit_status')}: ${rental.exitStatus}` : '',
+                    rental.solenoidStatus != null ? `${t('solenoid_status')}: ${rental.solenoidStatus}` : ''
+                ),
+            });
+        }
     }
 
     const currentAttempt = rental.currentVendAttempt;
-    if (currentAttempt && normalizeText(rental.status) === 'pending') {
+    if (currentAttempt && normalizeText(rental.status) === 'pending' && !hasBackendEvent('dispense-requested')) {
         addEntry({
-            title: `${t('attempt')} ${firstPresent(currentAttempt.attemptNumber, displayAttempts.length + 1)}: ${t('dispense_requested')}`,
+            title: `${t('attempt')} ${firstPresent(currentAttempt.attemptNumber, physicalAttempts.length + 1)}: ${t('dispense_requested')}`,
             timestamp: firstPresent(currentAttempt.sentAt, currentAttempt.createdAt, rental.rentalTime),
             status: normalizeText(rental.vendState) === 'retrying' ? 'warning' : 'pending',
+            phase: LOG_PHASE.request,
             details: formatDetailParts(
                 currentAttempt.sn ? `${t('charger_sn')}: ${currentAttempt.sn}` : '',
                 currentAttempt.moduleid ? `M: ${currentAttempt.moduleid}` : '',
@@ -761,11 +1002,12 @@ const buildRentalProcessLog = (rental, t) => {
                 currentAttempt.batteryLevel != null ? `${currentAttempt.batteryLevel}%` : ''
             ),
         });
-    } else if (normalizeText(rental.status) === 'pending' && displayAttempts.length === 0 && rental.exitStatus == null) {
+    } else if (normalizeText(rental.status) === 'pending' && physicalAttempts.length === 0 && rental.exitStatus == null && !hasBackendEvent('dispense-requested')) {
         addEntry({
             title: t('waiting_for_vend_confirmation'),
             timestamp: rental.rentalTime,
             status: 'pending',
+            phase: LOG_PHASE.request,
             details: formatDetailParts(
                 rental.rentalModuleid ? `M: ${rental.rentalModuleid}` : '',
                 rental.rentalSlotid != null ? `S: ${rental.rentalSlotid}` : '',
@@ -774,12 +1016,13 @@ const buildRentalProcessLog = (rental, t) => {
         });
     }
 
-    if (rental.lastVendFailure && displayAttempts.length === 0) {
+    if (rental.lastVendFailure && physicalAttempts.length === 0 && !hasBackendEvent('vend-failed')) {
         const failure = rental.lastVendFailure;
         addEntry({
             title: t('dispense_failed'),
             timestamp: firstPresent(failure.respondedAt, failure.failedAt, rental.lastUpdate),
             status: 'error',
+            phase: LOG_PHASE.attempt,
             details: formatDetailParts(
                 failure.requestedSn ? `${t('requested')}: ${failure.requestedSn}` : '',
                 failure.responseSn ? `${t('response')}: ${failure.responseSn}` : '',
@@ -794,7 +1037,7 @@ const buildRentalProcessLog = (rental, t) => {
 
     const rentalStatus = normalizeRentalStatusKey(rental.status);
     const hasSuccessfulVend = (
-        hasRecoveredVendEvidence(rental, displayAttempts)
+        hasRecoveredVendEvidence(rental, physicalAttempts)
     );
     const hasCompletedVend = (
         hasSuccessfulVend ||
@@ -804,7 +1047,7 @@ const buildRentalProcessLog = (rental, t) => {
         Boolean(rental.returnTime)
     );
     const finalFailureReason = firstPresent(rental.failureReason, rental.lastVendFailureReason);
-    const failedDisplayAttemptCount = displayAttempts.filter(attempt => (
+    const failedPhysicalAttemptCount = physicalAttempts.filter(attempt => (
         !hasAttemptSucceeded(attempt)
     )).length;
     const shouldShowFinalFailure = (
@@ -812,15 +1055,16 @@ const buildRentalProcessLog = (rental, t) => {
         (rentalStatus === 'vend_failed' || (finalFailureReason && !hasCompletedVend))
     );
 
-    if (shouldShowFinalFailure) {
+    if (shouldShowFinalFailure && !hasBackendEvent('vend-failed')) {
         addEntry({
             title: t('final_vend_failure'),
             timestamp: firstPresent(rental.failedAt, rental.lastUpdate, rental.rentalTime),
             status: 'error',
-            countAsError: failedDisplayAttemptCount === 0,
+            phase: LOG_PHASE.vendOutcome,
+            countAsError: failedPhysicalAttemptCount === 0,
             details: formatDetailParts(
                 finalFailureReason ? `${t('reason')}: ${humanizeVendFailureReason(finalFailureReason)}` : '',
-                failedDisplayAttemptCount > 0 ? `${t('attempts')}: ${failedDisplayAttemptCount}` : '',
+                failedPhysicalAttemptCount > 0 ? `${t('attempts')}: ${failedPhysicalAttemptCount}` : '',
                 terminalFailureSummary?.requestedSn ? `Last ${t('requested').toLowerCase()}: ${terminalFailureSummary.requestedSn}` : '',
                 terminalFailureSummary?.moduleid ? `M: ${terminalFailureSummary.moduleid}` : '',
                 terminalFailureSummary?.requestedSlotid != null ? `S: ${terminalFailureSummary.requestedSlotid}` : ''
@@ -833,6 +1077,7 @@ const buildRentalProcessLog = (rental, t) => {
             title: t('purchase_recorded'),
             timestamp: firstPresent(rental.purchaseTime, rental.purchasedAt, rental.returnTime, rental.rentalTime),
             status: 'success',
+            phase: LOG_PHASE.usage,
             details: formatDetailParts(formatRentalChargeAmount(rental)),
         });
     }
@@ -842,6 +1087,7 @@ const buildRentalProcessLog = (rental, t) => {
             title: t('rental_returned'),
             timestamp: rental.returnTime,
             status: 'success',
+            phase: LOG_PHASE.usage,
             details: formatDetailParts(
                 rental.returnStationid ? `${t('station')}: ${rental.returnStationid}` : '',
                 rental.returnModuleid ? `M: ${rental.returnModuleid}` : '',
@@ -856,6 +1102,7 @@ const buildRentalProcessLog = (rental, t) => {
             title: t('in_use'),
             timestamp: firstPresent(rental.lastUpdate, rental.rentalTime),
             status: 'pending',
+            phase: LOG_PHASE.usage,
             details: formatDetailParts(
                 rental.rentalStationid ? `${t('station')}: ${rental.rentalStationid}` : '',
                 rental.rentalModuleid ? `M: ${rental.rentalModuleid}` : '',
@@ -872,6 +1119,7 @@ const buildRentalProcessLog = (rental, t) => {
             title: isAuthorizationCancellation && apolloRental ? 'Apollo authorization cancelled' : t('refund_recorded'),
             timestamp: firstPresent(rental.refundDate, rental.lastUpdate, rental.returnTime),
             status,
+            phase: LOG_PHASE.settlement,
             details: formatDetailParts(
                 humanizeCode(rental.refundStatus),
                 rental.refundAmount != null
@@ -891,6 +1139,7 @@ const buildRentalProcessLog = (rental, t) => {
                 status: rental.paymentActionStatus,
                 event: `apollo-${rental.paymentAction}`,
             }),
+            phase: LOG_PHASE.settlement,
             details: formatDetailParts(
                 rental.paymentActionReason ? `${t('reason')}: ${humanizeCode(rental.paymentActionReason)}` : '',
                 rental.paymentActionStatus ? `${t('status')}: ${humanizeCode(rental.paymentActionStatus)}` : '',
@@ -907,6 +1156,7 @@ const buildRentalProcessLog = (rental, t) => {
             title: rental.cpsCancelConfirmed ? 'Apollo authorization cancelled' : 'Apollo cancel failed',
             timestamp: firstPresent(rental.cpsCancelVerifiedAt, rental.paymentUpdatedAt, rental.cpsCancelLastAttemptAt),
             status: rental.cpsCancelConfirmed ? 'success' : 'error',
+            phase: LOG_PHASE.settlement,
             details: formatDetailParts(
                 rental.cpsCancelState ? `State: ${rental.cpsCancelState}` : '',
                 rental.cpsCancelResult ? `Result: ${rental.cpsCancelResult}` : '',
@@ -923,6 +1173,7 @@ const buildRentalProcessLog = (rental, t) => {
             title: rental.cpsCommitConfirmed ? 'Apollo commit confirmed' : 'Apollo commit failed',
             timestamp: firstPresent(rental.cpsCommitResponseAt, rental.paymentUpdatedAt, rental.purchaseCompletedAt),
             status: rental.cpsCommitConfirmed ? 'success' : 'error',
+            phase: LOG_PHASE.settlement,
             details: formatDetailParts(
                 rental.cpsCommitState ? `State: ${rental.cpsCommitState}` : '',
                 rental.cpsCommitResult ? `Result: ${rental.cpsCommitResult}` : '',
@@ -933,16 +1184,21 @@ const buildRentalProcessLog = (rental, t) => {
         });
     }
 
-    backendProcessLog.forEach((entry) => {
+    visibleBackendProcessLog.forEach((entry) => {
         addEntry({
-            title: resolveProcessEventTitle(entry, t),
+            title: resolveProcessEventTitle(entry, t, physicalAttempts),
             timestamp: firstPresent(entry?.timestamp, entry?.time, entry?.createdAt, rental.paymentUpdatedAt, rental.lastUpdate),
             status: resolveProcessEventStatus(entry),
+            phase: getProcessEntryPhase(entry),
+            countAsError: processEntryCountsAsError(entry),
             details: buildBackendProcessDetails(entry, rental, t),
         });
     });
 
     return entries.sort((left, right) => {
+        const phaseDifference = (left.phase ?? LOG_PHASE.audit) - (right.phase ?? LOG_PHASE.audit);
+        if (phaseDifference !== 0) return phaseDifference;
+
         if (left.sortTime !== null && right.sortTime !== null) {
             return left.sortTime - right.sortTime || left.order - right.order;
         }

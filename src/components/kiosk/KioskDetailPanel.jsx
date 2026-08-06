@@ -13,6 +13,7 @@ import {
 } from '../../utils/helpers';
 import { formatModuleFirmwareVersion } from '../../utils/firmwareVersion';
 import { installKioskInteractionDebugCapture, logKioskInteraction } from '../../utils/kioskInteractionDebug';
+import { resolveKioskUiProfileStatus } from '../../utils/kioskUiProfileStatus';
 
 // --- Sub-component for the charger status code ---
 const StatusIndicator = ({ status }) => {
@@ -115,6 +116,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     const showModuleFirmwareMetadata = isV2Kiosk;
     const showInlineModuleIds = ['CT3', 'CT4', 'CT8', 'CT12', 'CK24', 'CK48'].includes(kiosk.hardware?.type);
     const chargeReadyThreshold = getKioskPowerThreshold(kiosk);
+    const uiProfileStatus = useMemo(() => resolveKioskUiProfileStatus(kiosk), [kiosk]);
     useEffect(() => installKioskInteractionDebugCapture(), []);
     const primaryMediaAsset = useMemo(() => {
         if (kiosk?.media?.active !== true) {
@@ -582,18 +584,70 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         </div>
     );
 
-    const renderPaymentTerminal = () => (
-        <div className="bg-gray-800 text-white p-4 h-auto flex flex-col justify-center rounded-lg shadow-lg">
-            <div className="text-left w-full px-2">
-                <p className="text-xs text-gray-400">UI Mode</p>
-                <p className="text-sm text-white font-semibold truncate">{kiosk.ui?.mode || '---'}</p>
-                <p className="text-xs text-gray-400 mt-2">UI State</p>
-                <p className="text-sm text-white font-semibold truncate">{kiosk.uistate || '---'}</p>
-                <p className="text-xs text-gray-400 mt-2">SN</p>
-                <p className="text-sm text-white font-semibold truncate">{kiosk.hardware?.sn || '---'}</p>
+    const renderPaymentTerminal = (hardwareType) => {
+        const model = String(hardwareType || kiosk.hardware?.type || '').toUpperCase();
+        const modelStyles = {
+            CT10: {
+                shell: 'border-cyan-700/60 bg-gradient-to-b from-gray-800 to-gray-950 p-4',
+                profileName: 'text-base',
+            },
+            CK20: {
+                shell: 'border-blue-700/60 bg-gradient-to-br from-gray-800 to-slate-950 p-3.5',
+                profileName: 'text-sm',
+            },
+            CK30: {
+                shell: 'border-indigo-700/60 bg-gradient-to-r from-gray-900 to-slate-950 p-3',
+                profileName: 'text-sm',
+            },
+        };
+        const style = modelStyles[model] || modelStyles.CT10;
+        const statusClasses = {
+            confirmed: 'border-emerald-400/30 bg-emerald-400/15 text-emerald-200',
+            pending: 'border-amber-400/30 bg-amber-400/15 text-amber-100',
+            'out-of-sync': 'border-orange-400/30 bg-orange-400/15 text-orange-100',
+            error: 'border-red-400/30 bg-red-400/15 text-red-100',
+            legacy: 'border-gray-400/30 bg-gray-400/10 text-gray-300',
+        };
+
+        return (
+            <div
+                className={`h-auto rounded-lg border text-white shadow-lg ${style.shell}`}
+                data-kiosk-profile-screen={model}
+                data-kiosk-profile-state={uiProfileStatus.state}
+            >
+                <div className="rounded-md border border-white/10 bg-white/[0.06] px-3 py-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                        <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-white/45">Profile</p>
+                        <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${statusClasses[uiProfileStatus.state]}`}>
+                            {uiProfileStatus.statusLabel}
+                        </span>
+                    </div>
+                    <p className={`mt-0.5 truncate font-bold text-white ${style.profileName}`} title={uiProfileStatus.profileName}>
+                        {uiProfileStatus.profileName}
+                    </p>
+                    <p className="mt-1 text-[10px] text-white/60">{uiProfileStatus.versionLabel}</p>
+                    <p className="mt-1 truncate text-[10px] text-white/50" title={uiProfileStatus.updatedAt || 'Update time unknown'}>
+                        Updated {uiProfileStatus.updatedLabel}
+                    </p>
+                </div>
+
+                <div className="mt-2 grid grid-cols-3 gap-2 border-t border-white/10 pt-2">
+                    <div className="min-w-0">
+                        <p className="text-[9px] uppercase tracking-wide text-white/35">UI Mode</p>
+                        <p className="truncate text-[11px] font-semibold text-white/80">{kiosk.ui?.mode || '---'}</p>
+                    </div>
+                    <div className="min-w-0">
+                        <p className="text-[9px] uppercase tracking-wide text-white/35">UI State</p>
+                        <p className="truncate text-[11px] font-semibold text-white/80">{kiosk.uistate || '---'}</p>
+                    </div>
+                    <div className="min-w-0">
+                        <p className="text-[9px] uppercase tracking-wide text-white/35">SN</p>
+                        <p className="truncate text-[11px] font-semibold text-white/80">{kiosk.hardware?.sn || '---'}</p>
+                    </div>
+                </div>
             </div>
-        </div>
-    );
+        );
+    };
 
     const renderCompactTowerHeader = () => {
         const qrFallback = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(
@@ -1049,7 +1103,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
             <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
                 <div className="w-full flex flex-col gap-3">
                     {kiosk.modules[0] && renderModule(kiosk.modules[0])}
-                    {renderPaymentTerminal()}
+                    {renderPaymentTerminal('CT10')}
                 </div>
             </div>
         );
@@ -1059,7 +1113,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         return (
         <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
             <div className="w-full flex flex-col gap-3">
-                {renderPaymentTerminal()}
+                {renderPaymentTerminal('CK20')}
                 {kiosk.modules[0] && renderModule(kiosk.modules[0], { reverseOrder: true })}
                 {kiosk.modules[1] && renderModule(kiosk.modules[1], { reverseOrder: true })}
             </div>
@@ -1071,7 +1125,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
             <div className="w-full flex flex-col gap-3">
                 {kiosk.modules[0] && renderModule(kiosk.modules[0], { reverseOrder: true })}
-                {renderPaymentTerminal()}
+                {renderPaymentTerminal('CK30')}
                 {kiosk.modules[1] && renderModule(kiosk.modules[1], { reverseOrder: true })}
                 {kiosk.modules[2] && renderModule(kiosk.modules[2], { reverseOrder: true })}
             </div>
