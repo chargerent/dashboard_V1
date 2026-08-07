@@ -17,7 +17,6 @@ const PAGE_SIZE = 30;
 const SEEN_STORAGE_KEY = 'chargerent:kiosk-activity-seen:v1';
 const FILTERS = [
     ['all', 'All activity'],
-    ['errors', 'Errors'],
     ['connectivity', 'Connectivity'],
     ['module', 'Modules'],
     ['interaction', 'Interactions'],
@@ -69,7 +68,6 @@ const formatDuration = (durationMs) => {
 
 const matchesFilter = (event, filter) => {
     if (filter === 'all') return true;
-    if (filter === 'errors') return ['warning', 'error', 'critical'].includes(event.severity);
     return event.category === filter;
 };
 
