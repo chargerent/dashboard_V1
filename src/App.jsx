@@ -53,6 +53,31 @@ const MediaPage = lazy(() => import('./pages/MediaPage.jsx'));
 const UiProfilesPage = lazy(() => import('./pages/UiProfilesPage.jsx'));
 const AiBoothsPage = lazy(() => import('./pages/AiBoothsPage.jsx'));
 const PayoutsPage = lazy(() => import('./pages/PayoutsPage.jsx'));
+const ActivityPage = lazy(() => import('./pages/ActivityPage.jsx'));
+
+function readActivityNavigation() {
+  if (typeof window === 'undefined') return { page: 'dashboard', stationId: '' };
+  const params = new URLSearchParams(window.location.search);
+  return {
+    page: params.get('page') === 'activity' ? 'activity' : 'dashboard',
+    stationId: String(params.get('station') || '').trim().toUpperCase(),
+  };
+}
+
+function activityUrl(stationId = '') {
+  const url = new URL(window.location.href);
+  url.searchParams.set('page', 'activity');
+  if (stationId) url.searchParams.set('station', stationId);
+  else url.searchParams.delete('station');
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+function dashboardUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete('page');
+  url.searchParams.delete('station');
+  return `${url.pathname}${url.search}${url.hash}`;
+}
 
 function moduleMatchesResponse(module, moduleRef) {
   const moduleId = String(module?.id || '').trim();
@@ -768,7 +793,8 @@ function App() {
   const hasAuthToken = Boolean(token);
   const [clientInfo, setClientInfo] = useState(null);
   const [language, setLanguage] = useState('en');
-  const [page, setPage] = useState('dashboard'); // 'dashboard', 'admin', 'media', 'binding', 'templates', 'kiosk-editor', 'rentals', 'chargers', 'provision', 'reporting', 'analytics', 'testing'
+  const [page, setPage] = useState(() => readActivityNavigation().page); // 'dashboard', 'activity', 'admin', 'media', 'binding', 'templates', 'kiosk-editor', 'rentals', 'chargers', 'provision', 'reporting', 'analytics', 'testing'
+  const [activityInitialStation, setActivityInitialStation] = useState(() => readActivityNavigation().stationId);
   const [dashboardSearchTerm, setDashboardSearchTerm] = useState('');
   const [chargerSearchTerm, setChargerSearchTerm] = useState('');
   const [rentalsInitialPeriod, setRentalsInitialPeriod] = useState('7days');
@@ -1009,6 +1035,39 @@ function App() {
     setAnalyticsInitialData(initialData);
     setPage('analytics');
   }, [isDesktopOnlyViewport]);
+
+  const onNavigateToActivity = useCallback((stationId = '') => {
+    const normalized = String(stationId || '').trim().toUpperCase();
+    setActivityInitialStation(normalized);
+    setPage('activity');
+    window.history.pushState({ dashboardActivityNavigation: true }, '', activityUrl(normalized));
+  }, []);
+
+  const onActivityStationChange = useCallback((stationId = '') => {
+    const normalized = String(stationId || '').trim().toUpperCase();
+    setActivityInitialStation(normalized);
+    window.history.replaceState({ dashboardActivityNavigation: true }, '', activityUrl(normalized));
+  }, []);
+
+  const onNavigateFromActivityToDashboard = useCallback(() => {
+    if (window.history.state?.dashboardActivityNavigation) {
+      window.history.back();
+      return;
+    }
+    window.history.replaceState({}, '', dashboardUrl());
+    setPage('dashboard');
+    setActivityInitialStation('');
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const navigation = readActivityNavigation();
+      setPage(navigation.page);
+      setActivityInitialStation(navigation.stationId);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   // ✅ Prevent multiple push subscriptions across re-renders
   const subscribedRef = useRef(false);
@@ -2772,6 +2831,8 @@ function App() {
         setChargerSearchTerm(normalizeNavigationSearch(searchTerm));
         setPage('chargers');
       }}
+      onNavigateToActivity={onNavigateToActivity}
+      operationalActivityEnabled
       initialSearch={dashboardSearchTerm}
       onNavigateToReporting={() => {
         if (isDesktopOnlyViewport) setPage('reporting');
@@ -2847,6 +2908,16 @@ function App() {
     const isRegularReportingUser = !clientInfo.isAdmin && clientInfo.role !== 'partner';
 
     switch (page) {
+      case 'activity':
+        return (
+          <ActivityPage
+            onLogout={handleLogout}
+            onNavigateToDashboard={onNavigateFromActivityToDashboard}
+            allStationsData={dedupedStationsData}
+            initialStationId={activityInitialStation}
+            onStationChange={onActivityStationChange}
+          />
+        );
       case 'admin':
         if (!canOpenAdminTools) {
           return dashboard;

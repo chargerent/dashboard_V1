@@ -1,6 +1,7 @@
 // src/pages/DashboardPage.jsx
 import { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect } from 'react';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
+import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import FilterPanel from '../components/Dashboard/FilterPanel';
 import SshConnectivityPanel from '../components/Dashboard/SshConnectivityPanel';
 import KioskPanel from '../components/kiosk/kioskPanel';
@@ -22,8 +23,10 @@ import useKioskCommandFlow from '../hooks/useKioskCommandFlow';
 import { callFunctionWithAuth } from '../utils/callableRequest';
 import { aggregateRentalDashboardStats } from '../utils/rentalDashboardStats';
 import { VERSION as DASHBOARD_VERSION } from '../version';
+import { db } from '../firebase-config';
 
 const EMPTY_RENTALS = Object.freeze([]);
+const EMPTY_INCIDENTS = Object.freeze([]);
 const MOBILE_KIOSK_PREVIEW_LIMIT = 4;
 const DESKTOP_KIOSK_PREVIEW_LIMIT = 8;
 const INITIAL_STATUS_SETTLE_MS = 1500;
@@ -106,8 +109,9 @@ const buildStationStatusIssues = (kiosk, referenceTime) => {
     return issues;
 };
 
-export default function DashboardPage({ _token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToAiBooths, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToReporting, onNavigateToTesting, rentalData, rentalDashboardStatsByStationId, useRentalDashboardSummaries = false, allStationsData, _setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, _setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, _ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, _setNgrokInfo, manageIgnoredKiosk, kiosksReady, sshConnectivityByStation = {}, ngrokConnectivityByStation = {}, initialSearch = '', sessionWarningOpen = false, sessionCountdown = 60, onStayLoggedIn }) {
+export default function DashboardPage({ _token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToAiBooths, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToActivity, onNavigateToReporting, onNavigateToTesting, rentalData, rentalDashboardStatsByStationId, useRentalDashboardSummaries = false, allStationsData, _setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, _setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, _ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, _setNgrokInfo, manageIgnoredKiosk, kiosksReady, sshConnectivityByStation = {}, ngrokConnectivityByStation = {}, initialSearch = '', sessionWarningOpen = false, sessionCountdown = 60, onStayLoggedIn, operationalActivityEnabled = false }) {
     const [loading, setLoading] = useState(!kiosksReady);
+    const [urgentIncidents, setUrgentIncidents] = useState([]);
     const [error] = useState(null);
     const [expandedKioskId, setExpandedKioskId] = useState(null);
     const [editingKioskId, setEditingKioskId] = useState(null);
@@ -133,6 +137,43 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     const hasBindingAccess = clientInfo?.username === 'chargerent' || clientInfo?.features?.binding === true || clientInfo?.commands?.binding === true;
     const hasTestingAccess = clientInfo?.username === 'chargerent' || clientInfo?.features?.testing === true;
     const canOpenAdminTools = isAdminUser || clientInfo?.commands?.['client edit'] === true || clientInfo?.features?.media === true || clientInfo?.features?.ui_editor === true;
+    const visibleStationIds = useMemo(() => new Set(
+        visibleStationsData.map((station) => String(station.stationid || '').trim()).filter(Boolean)
+    ), [visibleStationsData]);
+    const urgentIncidentsByStation = useMemo(() => {
+        const byStation = new Map();
+        urgentIncidents.forEach((incident) => {
+            if (!visibleStationIds.has(incident.stationId)) return;
+            const stationIncidents = byStation.get(incident.stationId) || [];
+            stationIncidents.push(incident);
+            byStation.set(incident.stationId, stationIncidents);
+        });
+        byStation.forEach((stationIncidents) => stationIncidents.sort((left, right) => {
+            const severityDifference = Number(right.severity === 'critical') - Number(left.severity === 'critical');
+            if (severityDifference !== 0) return severityDifference;
+            return Number(right.durationMs || 0) - Number(left.durationMs || 0);
+        }));
+        return byStation;
+    }, [urgentIncidents, visibleStationIds]);
+    const visibleUrgentIncidentCount = useMemo(() => (
+        [...urgentIncidentsByStation.values()].reduce((total, stationIncidents) => total + stationIncidents.length, 0)
+    ), [urgentIncidentsByStation]);
+
+    useEffect(() => {
+        if (!operationalActivityEnabled) {
+            setUrgentIncidents([]);
+            return undefined;
+        }
+        const urgentQuery = query(collection(db, 'kioskIncidents'), where('state', '==', 'open'));
+        return onSnapshot(urgentQuery, (snapshot) => {
+            setUrgentIncidents(snapshot.docs
+                .map((document) => ({ id: document.id, ...document.data() }))
+                .filter((incident) => ['critical', 'error'].includes(incident.severity)));
+        }, (snapshotError) => {
+            console.error('Unable to load urgent kiosk incidents', snapshotError);
+        });
+    }, [operationalActivityEnabled]);
+
     const handleFirmwareUpdateRequest = useCallback((details) => {
         setFirmwareUpdateDetails(details);
     }, []);
@@ -723,6 +764,20 @@ return (
                             )}
                         </button>
                     )}
+                    {operationalActivityEnabled && (
+                        <button
+                            onClick={() => onNavigateToActivity('')}
+                            className="relative p-2 rounded-md bg-red-100 text-red-700 hover:bg-red-200"
+                            title="Kiosk activity"
+                        >
+                            <ExclamationTriangleIcon className="h-6 w-6" />
+                            {visibleUrgentIncidentCount > 0 && (
+                                <span className="absolute -top-1 -right-1 rounded-full bg-red-500 px-1 py-0.5 text-[0.6rem] font-bold leading-none text-white">
+                                    {visibleUrgentIncidentCount}
+                                </span>
+                            )}
+                        </button>
+                    )}
                     {(clientInfo.features.rentals || isAdminUser) && (
                         <>
                             <button onClick={onNavigateToRentals} className="p-2 rounded-md bg-green-100 text-green-700 hover:bg-green-200" title={t('rentals_page_title')}>
@@ -882,7 +937,7 @@ return (
 
                                                 return (
                                                 <div key={kiosk.stationid}>
-                                                    <KioskPanel kiosk={kiosk} isExpanded={isExpanded || isEditing} onToggle={handleToggleDetails} onToggleEdit={handleToggleEditMode} mockNow={latestTimestamp} rentalData={stationRentalData} rentalDashboardStats={stationRentalDashboardTotals} clientInfo={clientInfo} t={t} onCommand={handleGeneralCommand} onShowRentalDetails={handleShowRentalDetails} />
+                                                    <KioskPanel kiosk={kiosk} isExpanded={isExpanded || isEditing} onToggle={handleToggleDetails} onToggleEdit={handleToggleEditMode} mockNow={latestTimestamp} rentalData={stationRentalData} rentalDashboardStats={stationRentalDashboardTotals} clientInfo={clientInfo} t={t} onCommand={handleGeneralCommand} onShowRentalDetails={handleShowRentalDetails} urgentIncidents={urgentIncidentsByStation.get(kiosk.stationid) || EMPTY_INCIDENTS} onNavigateToActivity={onNavigateToActivity} />
                                                     {isEditing && kioskToEdit ? (
                                                         <KioskEditPanel kiosk={kioskToEdit} onSave={handleKioskSave} clientInfo={clientInfo} isVisible={editingKioskId === kiosk.stationid} t={t} onCommand={handleGeneralCommand} />
                                                     ) : (
