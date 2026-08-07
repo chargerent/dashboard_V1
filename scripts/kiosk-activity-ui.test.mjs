@@ -33,8 +33,8 @@ test('offline kiosk cards consolidate status and suppress telemetry overdue dupl
 test('dashboard activity navigation uses a distinct purple activity control', async () => {
     const dashboard = await readSource('../src/pages/DashboardPage.jsx');
 
-    assert.match(dashboard, /ClipboardDocumentListIcon/);
-    assert.match(dashboard, /bg-purple-600/);
+    assert.match(dashboard, /data-icon="activity-pulse"/);
+    assert.match(dashboard, /bg-purple-500/);
     assert.match(dashboard, /aria-label="Kiosk activity"/);
 });
 

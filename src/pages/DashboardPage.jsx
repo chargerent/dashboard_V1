@@ -18,7 +18,7 @@ import { filterProvisionedStations, filterStationsForClient, isKioskOnline, isKi
 import GlobalRentalActivity from '../components/Dashboard/GlobalRentalActivity';
 import LocationSummary from '../components/Dashboard/LocationSummary';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
-import { CheckCircleIcon, ClipboardDocumentListIcon, CpuChipIcon, ExclamationTriangleIcon, QrCodeIcon, SparklesIcon } from '@heroicons/react/24/outline';
+import { CheckCircleIcon, CpuChipIcon, ExclamationTriangleIcon, QrCodeIcon, SparklesIcon } from '@heroicons/react/24/outline';
 import useKioskCommandFlow from '../hooks/useKioskCommandFlow';
 import { callFunctionWithAuth } from '../utils/callableRequest';
 import { aggregateRentalDashboardStats } from '../utils/rentalDashboardStats';
@@ -763,11 +763,14 @@ return (
                     {operationalActivityEnabled && (
                         <button
                             onClick={() => onNavigateToActivity('')}
-                            className="rounded-md bg-purple-600 p-2 text-white transition-colors hover:bg-purple-700"
+                            className="rounded-md bg-purple-500 p-2 text-white transition-colors hover:bg-purple-600"
                             title="Kiosk activity"
                             aria-label="Kiosk activity"
+                            data-icon="activity-pulse"
                         >
-                            <ClipboardDocumentListIcon className="h-6 w-6" />
+                            <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h4l2.25-6 4.5 12L16 12h5" />
+                            </svg>
                         </button>
                     )}
                     {(clientInfo.features.rentals || isAdminUser) && (
