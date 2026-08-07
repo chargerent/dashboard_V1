@@ -9,12 +9,12 @@ import {
     startAfter,
     where,
 } from 'firebase/firestore';
-import { ArrowLeftIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline';
+import { ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 import { db } from '../firebase-config';
 import { formatDateTime } from '../utils/dateFormatter';
-import { VERSION as DASHBOARD_VERSION } from '../version';
 
 const PAGE_SIZE = 30;
+const SEEN_STORAGE_KEY = 'chargerent:kiosk-activity-seen:v1';
 const FILTERS = [
     ['all', 'All activity'],
     ['errors', 'Errors'],
@@ -39,6 +39,20 @@ const eventTime = (event) => (
     event?.occurredAt ||
     null
 );
+
+const unseenTime = (event) => (
+    event?.receivedAt?.toDate?.() ||
+    event?.updatedAt?.toDate?.() ||
+    event?.openedAt?.toDate?.() ||
+    eventTime(event)
+);
+
+const timeValue = (value) => {
+    if (!value) return 0;
+    if (value instanceof Date) return value.getTime();
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+};
 
 const eventTimeLabel = (event) => {
     const value = eventTime(event);
@@ -90,6 +104,30 @@ function ActivityRow({ event, open = false, onSelectStation }) {
     );
 }
 
+function IncidentCard({ incident, onSelectStation }) {
+    const style = SEVERITY_STYLES[incident.severity] || SEVERITY_STYLES.warning;
+
+    return (
+        <article className={`min-w-0 rounded-md border p-2 ${style}`}>
+            <div className="flex min-w-0 items-center justify-between gap-1.5">
+                <button
+                    type="button"
+                    className="truncate text-[11px] font-bold uppercase tracking-wide hover:underline"
+                    onClick={() => onSelectStation(incident.stationId)}
+                >
+                    {incident.stationId || 'Unknown'}
+                </button>
+                <span className="shrink-0 rounded-full bg-white/70 px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase">Open</span>
+            </div>
+            <p className="mt-1 truncate text-xs font-semibold" title={incident.summary || incident.type}>{incident.summary || incident.type}</p>
+            <div className="mt-1 flex items-center justify-between gap-1 text-[9px] opacity-70">
+                <span className="truncate">{eventTimeLabel(incident)}</span>
+                {incident.durationMs > 0 && <span className="shrink-0">{formatDuration(incident.durationMs)}</span>}
+            </div>
+        </article>
+    );
+}
+
 export default function ActivityPage({
     onLogout,
     onNavigateToDashboard,
@@ -107,6 +145,13 @@ export default function ActivityPage({
     const [loading, setLoading] = useState(true);
     const [loadingMore, setLoadingMore] = useState(false);
     const [error, setError] = useState('');
+    const [seenActivity, setSeenActivity] = useState(() => {
+        try {
+            return JSON.parse(localStorage.getItem(SEEN_STORAGE_KEY) || '{}');
+        } catch {
+            return {};
+        }
+    });
 
     const allowedStationKey = allStationsData
         .map((station) => String(station.stationid || '').trim())
@@ -180,6 +225,35 @@ export default function ActivityPage({
         .filter((incident) => !selectedStation || incident.stationId === selectedStation)
         .sort((left, right) => Number(eventTime(right)) - Number(eventTime(left))), [incidents, selectedStation]);
     const visibleEvents = useMemo(() => events.filter((event) => matchesFilter(event, filter)), [events, filter]);
+    const seenScope = selectedStation || 'all-kiosks';
+    const newestActivityByFilter = useMemo(() => Object.fromEntries(FILTERS.map(([filterValue]) => {
+        const newest = [...visibleIncidents, ...events]
+            .filter((event) => matchesFilter(event, filterValue))
+            .reduce((latest, event) => Math.max(latest, timeValue(unseenTime(event))), 0);
+        return [filterValue, newest];
+    })), [events, visibleIncidents]);
+    const unseenFilters = useMemo(() => new Set(FILTERS
+        .filter(([filterValue]) => newestActivityByFilter[filterValue] > Number(seenActivity?.[seenScope]?.[filterValue] || 0))
+        .map(([filterValue]) => filterValue)), [newestActivityByFilter, seenActivity, seenScope]);
+
+    const chooseFilter = useCallback((nextFilter) => {
+        setFilter(nextFilter);
+        setSeenActivity((previous) => {
+            const next = {
+                ...previous,
+                [seenScope]: {
+                    ...(previous[seenScope] || {}),
+                    [nextFilter]: newestActivityByFilter[nextFilter] || Date.now(),
+                },
+            };
+            try {
+                localStorage.setItem(SEEN_STORAGE_KEY, JSON.stringify(next));
+            } catch {
+                // Seen indicators are a browser convenience; the activity page still works without storage.
+            }
+            return next;
+        });
+    }, [newestActivityByFilter, seenScope]);
 
     const handleStationSubmit = (event) => {
         event.preventDefault();
@@ -190,18 +264,17 @@ export default function ActivityPage({
         <div className="min-h-screen bg-slate-100 text-slate-900">
             <header className="sticky top-0 z-20 border-b bg-white/95 shadow-sm backdrop-blur">
                 <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-3 py-3 sm:px-6">
-                    <div className="flex min-w-0 items-center gap-3">
-                        <button type="button" onClick={onNavigateToDashboard} className="rounded-md p-2 text-slate-600 hover:bg-slate-100" aria-label="Back to dashboard">
-                            <ArrowLeftIcon className="h-5 w-5" />
-                        </button>
-                        <div className="min-w-0">
-                            <h1 className="truncate text-lg font-bold sm:text-xl">Kiosk activity</h1>
-                            <p className="hidden text-xs text-slate-500 sm:block">Operational incidents and non-rental events</p>
-                        </div>
+                    <div className="min-w-0">
+                        <h1 className="truncate text-lg font-bold sm:text-xl">Kiosk activity</h1>
+                        <p className="hidden text-xs text-slate-500 sm:block">Operational incidents and non-rental events</p>
                     </div>
                     <div className="flex items-center gap-2">
-                        <span className="hidden rounded bg-slate-100 px-2 py-1 text-xs text-slate-500 sm:inline">v{DASHBOARD_VERSION}</span>
-                        <button type="button" onClick={onLogout} className="rounded-md bg-red-500 px-3 py-2 text-xs font-semibold text-white hover:bg-red-600">Logout</button>
+                        <button type="button" onClick={onNavigateToDashboard} className="rounded-md bg-gray-200 p-2 text-gray-700 hover:bg-gray-300" title="Back to dashboard" aria-label="Home">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 011-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
+                        </button>
+                        <button type="button" onClick={onLogout} className="rounded-md bg-red-500 p-2 text-white hover:bg-red-600" title="Logout" aria-label="Logout">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+                        </button>
                     </div>
                 </div>
             </header>
@@ -239,8 +312,8 @@ export default function ActivityPage({
                         <span className="rounded-full bg-red-100 px-2.5 py-1 text-xs font-bold text-red-700">{visibleIncidents.length}</span>
                     </div>
                     {visibleIncidents.length > 0 ? (
-                        <div className="grid gap-3 md:grid-cols-2">
-                            {visibleIncidents.map((incident) => <ActivityRow key={incident.id} event={incident} open onSelectStation={selectStation} />)}
+                        <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+                            {visibleIncidents.map((incident) => <IncidentCard key={incident.id} incident={incident} onSelectStation={selectStation} />)}
                         </div>
                     ) : (
                         <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">No open incidents in this view.</div>
@@ -252,7 +325,10 @@ export default function ActivityPage({
                         <h2 className="text-base font-bold">Activity history{selectedStation ? ` · ${selectedStation}` : ''}</h2>
                         <div className="flex gap-1 overflow-x-auto pb-1">
                             {FILTERS.map(([value, label]) => (
-                                <button key={value} type="button" onClick={() => setFilter(value)} className={`whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold ${filter === value ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-200'}`}>{label}</button>
+                                <button key={value} type="button" onClick={() => chooseFilter(value)} className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold ${filter === value ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-200'}`}>
+                                    {label}
+                                    {unseenFilters.has(value) && filter !== value && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500" aria-label="Unseen activity" />}
+                                </button>
                             ))}
                         </div>
                     </div>

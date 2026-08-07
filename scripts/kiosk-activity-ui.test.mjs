@@ -28,4 +28,8 @@ test('activity page paginates history and supports station deep links', async ()
     assert.match(activityPage, /const PAGE_SIZE = 30/);
     assert.match(activityPage, /startAfter\(after\)/);
     assert.match(activityPage, /Load more/);
+    assert.match(activityPage, /aria-label="Home"/);
+    assert.match(activityPage, /SEEN_STORAGE_KEY/);
+    assert.match(activityPage, /Unseen activity/);
+    assert.doesNotMatch(activityPage, /DASHBOARD_VERSION|ArrowLeftIcon/);
 });
