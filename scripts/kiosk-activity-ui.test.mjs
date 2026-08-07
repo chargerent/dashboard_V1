@@ -27,6 +27,15 @@ test('offline kiosk cards consolidate status and suppress telemetry overdue dupl
     assert.match(statusAlert, /kiosk_telemetry_overdue/);
     assert.match(statusAlert, /incidents\.filter/);
     assert.match(statusAlert, /Kiosk offline/);
+    assert.doesNotMatch(statusAlert, /Offline since/);
+});
+
+test('dashboard activity navigation uses a distinct purple activity control', async () => {
+    const dashboard = await readSource('../src/pages/DashboardPage.jsx');
+
+    assert.match(dashboard, /ClipboardDocumentListIcon/);
+    assert.match(dashboard, /bg-purple-600/);
+    assert.match(dashboard, /aria-label="Kiosk activity"/);
 });
 
 test('activity page paginates history and supports station deep links', async () => {

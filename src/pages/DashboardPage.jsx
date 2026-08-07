@@ -18,7 +18,7 @@ import { filterProvisionedStations, filterStationsForClient, isKioskOnline, isKi
 import GlobalRentalActivity from '../components/Dashboard/GlobalRentalActivity';
 import LocationSummary from '../components/Dashboard/LocationSummary';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
-import { CheckCircleIcon, CpuChipIcon, ExclamationTriangleIcon, QrCodeIcon, SparklesIcon } from '@heroicons/react/24/outline';
+import { CheckCircleIcon, ClipboardDocumentListIcon, CpuChipIcon, ExclamationTriangleIcon, QrCodeIcon, SparklesIcon } from '@heroicons/react/24/outline';
 import useKioskCommandFlow from '../hooks/useKioskCommandFlow';
 import { callFunctionWithAuth } from '../utils/callableRequest';
 import { aggregateRentalDashboardStats } from '../utils/rentalDashboardStats';
@@ -155,10 +155,6 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
         }));
         return byStation;
     }, [urgentIncidents, visibleStationIds]);
-    const visibleUrgentIncidentCount = useMemo(() => (
-        [...urgentIncidentsByStation.values()].reduce((total, stationIncidents) => total + stationIncidents.length, 0)
-    ), [urgentIncidentsByStation]);
-
     useEffect(() => {
         if (!operationalActivityEnabled) {
             setUrgentIncidents([]);
@@ -767,15 +763,11 @@ return (
                     {operationalActivityEnabled && (
                         <button
                             onClick={() => onNavigateToActivity('')}
-                            className="relative p-2 rounded-md bg-red-100 text-red-700 hover:bg-red-200"
+                            className="rounded-md bg-purple-600 p-2 text-white transition-colors hover:bg-purple-700"
                             title="Kiosk activity"
+                            aria-label="Kiosk activity"
                         >
-                            <ExclamationTriangleIcon className="h-6 w-6" />
-                            {visibleUrgentIncidentCount > 0 && (
-                                <span className="absolute -top-1 -right-1 rounded-full bg-red-500 px-1 py-0.5 text-[0.6rem] font-bold leading-none text-white">
-                                    {visibleUrgentIncidentCount}
-                                </span>
-                            )}
+                            <ClipboardDocumentListIcon className="h-6 w-6" />
                         </button>
                     )}
                     {(clientInfo.features.rentals || isAdminUser) && (

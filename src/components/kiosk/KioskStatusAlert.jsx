@@ -49,7 +49,7 @@ export default function KioskStatusAlert({
                             </>
                         ) : (
                             <>
-                                Offline since {formatDateTime(lastUpdated)}
+                                {formatDateTime(lastUpdated)}
                                 {offlineDetail ? ` · ${offlineDetail}` : ''}
                             </>
                         )}
