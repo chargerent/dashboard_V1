@@ -189,11 +189,18 @@ export default function ActivityPage({
     }, [allowedStationIds]);
 
     const loadEvents = useCallback(async ({ append = false, after = null } = {}) => {
+        if (!selectedStation) {
+            setEvents([]);
+            setCursor(null);
+            setHasMore(false);
+            setLoading(false);
+            setLoadingMore(false);
+            return;
+        }
         append ? setLoadingMore(true) : setLoading(true);
         setError('');
         try {
-            const constraints = [];
-            if (selectedStation) constraints.push(where('stationId', '==', selectedStation));
+            const constraints = [where('stationId', '==', selectedStation)];
             constraints.push(orderBy('occurredAt', 'desc'));
             if (after) constraints.push(startAfter(after));
             constraints.push(limit(PAGE_SIZE));
@@ -301,6 +308,8 @@ export default function ActivityPage({
                     </form>
                 </section>
 
+                {error && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+
                 <section>
                     <div className="mb-3 flex items-center justify-between">
                         <h2 className="flex items-center gap-2 text-base font-bold">
@@ -318,7 +327,7 @@ export default function ActivityPage({
                     )}
                 </section>
 
-                <section>
+                {selectedStation && <section>
                     <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <h2 className="text-base font-bold">Activity history{selectedStation ? ` · ${selectedStation}` : ''}</h2>
                         <div className="flex gap-1 overflow-x-auto pb-1">
@@ -330,7 +339,6 @@ export default function ActivityPage({
                             ))}
                         </div>
                     </div>
-                    {error && <p className="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
                     {loading ? (
                         <p className="rounded-lg bg-white p-6 text-center text-sm text-slate-500">Loading activity…</p>
                     ) : visibleEvents.length > 0 ? (
@@ -347,7 +355,7 @@ export default function ActivityPage({
                             </button>
                         </div>
                     )}
-                </section>
+                </section>}
             </main>
         </div>
     );

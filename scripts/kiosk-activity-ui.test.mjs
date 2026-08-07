@@ -47,6 +47,8 @@ test('activity page paginates history and supports station deep links', async ()
     assert.match(app, /searchParams\.set\('page', 'activity'\)/);
     assert.match(app, /searchParams\.set\('station', stationId\)/);
     assert.match(activityPage, /const PAGE_SIZE = 30/);
+    assert.match(activityPage, /if \(!selectedStation\)/);
+    assert.match(activityPage, /\{selectedStation && <section>/);
     assert.match(activityPage, /startAfter\(after\)/);
     assert.match(activityPage, /Load more/);
     assert.match(activityPage, /aria-label="Home"/);
