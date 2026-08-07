@@ -5,7 +5,7 @@ const crypto = require("node:crypto");
 const EVENTS_COLLECTION = "kioskEvents";
 const INCIDENTS_COLLECTION = "kioskIncidents";
 const MONITORS_COLLECTION = "kioskStateMonitors";
-const EVENT_RETENTION_DAYS = 90;
+const EVENT_RETENTION_DAYS = 7;
 const ONLINE_WINDOW_MS = 10 * 60 * 1000;
 const CRITICAL_OFFLINE_WINDOW_MS = 30 * 60 * 1000;
 const ACTIVE_KIOSK_WINDOW_MS = 10 * 24 * 60 * 60 * 1000;
@@ -38,6 +38,43 @@ const asMillis = (value) => {
 };
 
 const normalizeText = (value) => String(value ?? "").trim();
+const normalizeStatus = (value) => normalizeText(value).toLowerCase();
+
+const interactionSurface = (value) => {
+  const source = normalizeText(value).toLowerCase();
+  if (/p68|payter|apollo|terminal|uid/.test(source)) return "terminal";
+  if (/ui|screen|scanner/.test(source)) return "ui";
+  return "unknown";
+};
+
+const rentalTransactionId = (rental) => normalizeText(
+    rental?.transactionid || rental?.transactionId || rental?.orderid || rental?.rawid,
+);
+
+const rentalInteractionId = (rental) => normalizeText(
+    rental?.interactionId || rental?.interactionid || rental?.reservationid ||
+    rental?.reservationId || rental?.paymentAttemptId,
+);
+
+const kioskInteractionContext = (kiosk) => {
+  const interaction = kiosk?.interaction?.current || kiosk?.interaction?.lastCompleted || {};
+  return {
+    interactionId: normalizeText(interaction.id || interaction.interactionId) || null,
+    interactionKind: normalizeText(interaction.kind) || null,
+    sourceSurface: interactionSurface(interaction.surface),
+  };
+};
+
+const uiStatePageSummary = (value) => {
+  const normalized = normalizeText(value);
+  if (!normalized) return "Unknown page visited";
+  const pageName = normalized
+      .replace(/page$/i, "")
+      .replaceAll("_", " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  return `${pageName.charAt(0).toUpperCase()}${pageName.slice(1)} page visited`;
+};
 
 const isV2Kiosk = (kiosk) => {
   const stationId = normalizeText(kiosk?.stationid).toUpperCase();
@@ -89,6 +126,10 @@ const comparableKioskState = (kiosk, nowMs = Date.now()) => ({
 });
 
 const eventId = () => crypto.randomUUID();
+const stableEventId = (value) => crypto.createHash("sha256")
+    .update(value)
+    .digest("hex")
+    .slice(0, 40);
 const incidentDocId = (incidentKey) => crypto.createHash("sha256")
     .update(incidentKey)
     .digest("hex")
@@ -128,6 +169,7 @@ const diffKioskEvents = (before, after, identity, now, nowMs = Date.now()) => {
   }
 
   if (before && previous.uiState !== current.uiState) {
+    const interaction = kioskInteractionContext(after);
     events.push(buildPointEvent(identity, {
       category: "interaction",
       type: "ui_state_changed",
@@ -136,11 +178,13 @@ const diffKioskEvents = (before, after, identity, now, nowMs = Date.now()) => {
       previousValue: previous.uiState || null,
       currentValue: current.uiState || null,
       page: current.uiState || null,
-      summary: `Screen changed to ${current.uiState || "unknown"}`,
+      summary: uiStatePageSummary(current.uiState),
+      ...interaction,
     }, now));
   }
 
   if (before && previous.button !== current.button) {
+    const interaction = kioskInteractionContext(after);
     events.push(buildPointEvent(identity, {
       category: "interaction",
       type: "customer_button_state_changed",
@@ -149,6 +193,7 @@ const diffKioskEvents = (before, after, identity, now, nowMs = Date.now()) => {
       previousValue: previous.button || null,
       currentValue: current.button || null,
       summary: `Customer controls ${current.button || "changed"}`,
+      ...interaction,
     }, now));
   }
 
@@ -187,6 +232,178 @@ const diffKioskEvents = (before, after, identity, now, nowMs = Date.now()) => {
   return {events, current};
 };
 
+const rentalInteractionCandidates = (before, after) => {
+  if (!after) return [];
+  const previousStatus = normalizeStatus(before?.status);
+  const currentStatus = normalizeStatus(after.status);
+  const candidates = [];
+
+  if (!before && after.rentalTime && [
+    "payment_approved",
+    "rented",
+    "returned",
+    "purchased",
+  ].includes(currentStatus)) {
+    candidates.push({
+      type: "rental_paid",
+      summary: "Rental paid",
+      occurredAt: after.rentalTime,
+      stationId: normalizeText(after.rentalStationid),
+      interactionId: rentalInteractionId(after),
+      transactionId: rentalTransactionId(after),
+      sourceSurface: interactionSurface(after.source || after.rentalFlow || after.gateway),
+    });
+  } else if (previousStatus !== currentStatus && currentStatus === "payment_approved") {
+    candidates.push({
+      type: "rental_paid",
+      summary: "Rental paid",
+      occurredAt: after.rentalTime || after.lastUpdate,
+      stationId: normalizeText(after.rentalStationid),
+      interactionId: rentalInteractionId(after),
+      transactionId: rentalTransactionId(after),
+      sourceSurface: interactionSurface(after.source || after.rentalFlow || after.gateway),
+    });
+  }
+
+  if (previousStatus !== currentStatus) {
+    const statusEvents = {
+      rented: ["charger_rented", "Charger rented", after.rentalTime],
+      returned: ["charger_returned", "Charger returned", after.returnTime],
+      purchased: ["charger_purchased", "Charger purchased", after.purchaseTime || after.purchasedAt],
+      refunded: ["rental_refunded", "Rental refunded", after.refundDate || after.lastUpdate],
+      canceled: ["rental_canceled", "Rental canceled", after.lastUpdate],
+      failed: ["rental_failed", "Rental failed", after.failedAt || after.lastUpdate],
+      vend_failed: ["charger_dispense_failed", "Charger dispense failed", after.failedAt || after.lastUpdate],
+    };
+    const statusEvent = statusEvents[currentStatus];
+    if (statusEvent) {
+      candidates.push({
+        type: statusEvent[0],
+        summary: statusEvent[1],
+        occurredAt: statusEvent[2],
+        stationId: currentStatus === "returned" ?
+          normalizeText(after.returnStationid || after.returnStationId || after.rentalStationid) :
+          normalizeText(after.rentalStationid),
+        interactionId: currentStatus === "returned" ?
+          normalizeText(after.returnInteractionId) : rentalInteractionId(after),
+        interactionKind: currentStatus === "returned" ? "return" : "rental",
+        transactionId: rentalTransactionId(after),
+        chargerId: normalizeText(after.chargerid || after.sn),
+        moduleId: currentStatus === "returned" ?
+          normalizeText(after.returnModuleid || after.returnModuleId) :
+          normalizeText(after.rentalModuleid),
+        slot: currentStatus === "returned" ?
+          (after.returnSlotid ?? after.returnSlotId ?? null) :
+          (after.rentalSlotid ?? null),
+        sourceSurface: interactionSurface(
+            currentStatus === "returned" ? after.returnSource :
+              (after.source || after.rentalFlow || after.gateway),
+        ),
+      });
+    }
+  }
+
+  return candidates.filter(({stationId}) => stationId);
+};
+
+const rentalAuditInteractionCandidates = (before, after) => {
+  if (!after) return [];
+  const previousIds = new Set((Array.isArray(before?.rentalEvents) ? before.rentalEvents : [])
+      .map((event) => normalizeText(event?.eventid))
+      .filter(Boolean));
+  const mappings = {
+    reservation_created: ["charger_reserved", "Charger reserved", "info"],
+    reservation_released: ["reservation_released", "Reservation released", "info"],
+    payment_timeout: ["payment_timed_out", "Payment timed out", "error"],
+    payment_declined: ["payment_declined", "Payment declined", "warning"],
+    payment_approved: ["payment_approved", "Payment approved", "info"],
+    vend_failed: ["charger_dispense_failed", "Charger dispense failed", "error"],
+    vend_succeeded: ["charger_dispensed", "Charger dispensed", "info"],
+  };
+
+  return (Array.isArray(after.rentalEvents) ? after.rentalEvents : [])
+      .filter((event) => {
+        const eventId = normalizeText(event?.eventid);
+        return eventId && !previousIds.has(eventId) && mappings[normalizeStatus(event?.eventtype)];
+      })
+      .map((event) => {
+        const [type, summary, severity] = mappings[normalizeStatus(event.eventtype)];
+        return {
+          type,
+          summary,
+          severity,
+          occurredAt: event.occurredat || event.receivedat || after.lastUpdate,
+          stationId: normalizeText(event.stationid || after.rentalStationid),
+          interactionId: normalizeText(event.interactionId || event.interactionid) ||
+            rentalInteractionId(after),
+          interactionKind: "rental",
+          transactionId: normalizeText(event.transactionid) || rentalTransactionId(after),
+          chargerId: normalizeText(event.chargerid || after.chargerid || after.sn),
+          moduleId: normalizeText(event.moduleid || after.rentalModuleid),
+          slot: event.slotnumber ?? after.rentalSlotid ?? null,
+          sourceSurface: interactionSurface(event.source || after.source || after.gateway),
+          auditEventId: normalizeText(event.eventid),
+          details: {
+            reservationId: normalizeText(event.reservationid) || null,
+            paymentAttemptId: normalizeText(event.paymentAttemptId) || null,
+            failureReason: normalizeText(event.failureReason || event.failurereason) || null,
+            processLog: Array.isArray(event.processLog) ? event.processLog.slice(-20) : [],
+          },
+        };
+      });
+};
+
+const handleRentalWrite = async ({before, after, rentalId, sourceEventId, admin, db}) => {
+  const now = admin.firestore.Timestamp.now();
+  const statusCandidates = rentalInteractionCandidates(before, after);
+  const auditCandidates = rentalAuditInteractionCandidates(before, after);
+  const hasPaymentApproval = auditCandidates.some(({type}) => type === "payment_approved");
+  const candidates = [
+    ...statusCandidates.filter(({type}) => type !== "rental_paid" || !hasPaymentApproval),
+    ...auditCandidates,
+  ];
+  if (!candidates.length) return;
+  const batch = db.batch();
+  candidates.forEach((candidate) => {
+    const occurredAtMs = asMillis(candidate.occurredAt);
+    const occurredAt = occurredAtMs == null ? now : admin.firestore.Timestamp.fromMillis(occurredAtMs);
+    const fallbackInteractionId = candidate.type === "charger_returned" ?
+      `return:${rentalId}:${occurredAtMs || "unknown"}` :
+      `rental:${rentalId}`;
+    const event = buildPointEvent({
+      stationId: candidate.stationId,
+      provisionId: "",
+      kioskGeneration: "",
+      gateway: "",
+    }, {
+      category: "interaction",
+      type: candidate.type,
+      severity: candidate.severity || (candidate.type.includes("failed") ? "error" : "info"),
+      source: "rental",
+      summary: candidate.summary,
+      occurredAt,
+      interactionId: candidate.interactionId || fallbackInteractionId,
+      interactionKind: candidate.interactionKind || "rental",
+      sourceSurface: candidate.sourceSurface || "unknown",
+      transactionId: candidate.transactionId || null,
+      chargerId: candidate.chargerId || null,
+      moduleId: candidate.moduleId || null,
+      slot: candidate.slot ?? null,
+      details: {
+        rentalId,
+        ...(candidate.details || {}),
+      },
+    }, now);
+    const documentId = stableEventId(
+        candidate.auditEventId ?
+          `rental-audit:${candidate.auditEventId}` :
+          `rental:${sourceEventId || rentalId}:${candidate.type}:${candidate.stationId}`,
+    );
+    batch.set(db.collection(EVENTS_COLLECTION).doc(documentId), event);
+  });
+  await batch.commit();
+};
+
 const statePolicy = (uiState) => UI_STATE_POLICIES.find(({pattern}) => pattern.test(uiState)) || {
   timeoutMs: 180_000,
   label: "Unknown customer state",
@@ -221,6 +438,8 @@ const shouldMonitorKiosk = (kiosk, nowMs) => {
 
 const watchdogCandidates = (kiosk, monitor, nowMs) => {
   const candidates = [];
+  const v2Kiosk = isV2Kiosk(kiosk);
+  const modules = normalizeModules(kiosk);
   const uiState = normalizeText(kiosk?.uistate);
   const policy = statePolicy(uiState);
   const enteredAt = asMillis(monitor?.uiStateEnteredAt) ?? nowMs;
@@ -241,14 +460,15 @@ const watchdogCandidates = (kiosk, monitor, nowMs) => {
   }
 
   const kioskLastSeen = asMillis(kiosk?.lastUpdate ?? kiosk?.timestamp);
-  if (kioskLastSeen && nowMs - kioskLastSeen > ONLINE_WINDOW_MS) {
+  if (kioskLastSeen && nowMs - kioskLastSeen > ONLINE_WINDOW_MS &&
+      (!v2Kiosk || modules.length === 0)) {
     candidates.push({
       key: "kiosk-telemetry-overdue",
-      category: "connectivity",
+      category: "module",
       type: "kiosk_telemetry_overdue",
       severity: nowMs - kioskLastSeen > CRITICAL_OFFLINE_WINDOW_MS ? "critical" : "error",
       source: "backend",
-      summary: "Kiosk telemetry is overdue",
+      summary: "Overdue heartbeat",
       enteredAt: kioskLastSeen,
       expectedExitBy: kioskLastSeen + ONLINE_WINDOW_MS,
       durationMs: nowMs - kioskLastSeen,
@@ -289,7 +509,6 @@ const watchdogCandidates = (kiosk, monitor, nowMs) => {
     });
   }
 
-  const modules = normalizeModules(kiosk);
   modules.forEach((module, index) => {
     const id = moduleKey(module, index);
     const seenAt = asMillis(module?.lastUpdated ?? module?.timestamp ?? module?.lastSeenAt);
@@ -299,25 +518,11 @@ const watchdogCandidates = (kiosk, monitor, nowMs) => {
         category: "module",
         type: "module_disconnected",
         severity: "error",
-        source: isV2Kiosk(kiosk) ? "besiter" : "kiosk",
+        source: v2Kiosk ? "besiter" : "kiosk",
         moduleId: id,
         summary: `Module ${id} is disconnected`,
         enteredAt: asMillis(monitor?.moduleStates?.[id]?.enteredAt) ?? seenAt ?? nowMs,
         durationMs: nowMs - (asMillis(monitor?.moduleStates?.[id]?.enteredAt) ?? seenAt ?? nowMs),
-      });
-    }
-    if (isV2Kiosk(kiosk) && seenAt && nowMs - seenAt > ONLINE_WINDOW_MS) {
-      candidates.push({
-        key: `module-${id}-telemetry-overdue`,
-        category: "module",
-        type: "module_telemetry_overdue",
-        severity: nowMs - seenAt > CRITICAL_OFFLINE_WINDOW_MS ? "critical" : "error",
-        source: "besiter",
-        moduleId: id,
-        summary: `Module ${id} telemetry is overdue`,
-        enteredAt: seenAt,
-        expectedExitBy: seenAt + ONLINE_WINDOW_MS,
-        durationMs: nowMs - seenAt,
       });
     }
   });
@@ -399,44 +604,69 @@ const reconcileIncident = async ({
   kiosk,
   provisionId,
   candidate,
-  existingIncident,
   now,
 }) => {
   const identity = baseIdentity(kiosk, provisionId);
   const incidentKey = `${identity.stationId}:${candidate.key}`;
   const ref = db.collection(INCIDENTS_COLLECTION).doc(incidentDocId(incidentKey));
-  if (existingIncident?.state === "open") {
-    await ref.set({
-      severity: candidate.severity,
-      durationMs: candidate.durationMs,
+  const opened = await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    if (snapshot.data()?.state === "open") {
+      transaction.set(ref, {
+        severity: candidate.severity,
+        durationMs: candidate.durationMs,
+        lastObservedAt: now,
+        updatedAt: now,
+      }, {merge: true});
+      return false;
+    }
+
+    transaction.set(ref, {
+      ...identity,
+      ...candidate,
+      incidentKey,
+      state: "open",
+      openedAt: now,
       lastObservedAt: now,
       updatedAt: now,
     }, {merge: true});
-    return;
+    return true;
+  });
+  if (opened) {
+    await writeEvents(db, [buildPointEvent(identity, {
+      ...candidate,
+      incidentKey,
+      state: "opened",
+    }, now)]);
   }
-
-  const incident = {
-    ...identity,
-    ...candidate,
-    incidentKey,
-    state: "open",
-    openedAt: now,
-    lastObservedAt: now,
-    updatedAt: now,
-  };
-  await ref.set(incident, {merge: true});
-  await writeEvents(db, [buildPointEvent(identity, {
-    ...candidate,
-    incidentKey,
-    state: "opened",
-  }, now)]);
 };
 
-const resolveMissingIncidents = async ({db, openIncidents, activeKeys, now}) => {
+const resolvedIncidentSummary = (incident) => (
+  incident.type === "kiosk_telemetry_overdue" ?
+    "Heartbeat restored" :
+    `${incident.summary || incident.type} resolved`
+);
+
+const resolveMissingIncidents = async ({
+  db,
+  openIncidents,
+  activeKeys,
+  now,
+  silentlyResolveKeys = new Set(),
+}) => {
   const batch = db.batch();
   openIncidents.forEach(({ref, data: incident}) => {
     const key = normalizeText(incident.incidentKey).split(":").slice(1).join(":");
     if (activeKeys.has(key)) return;
+    if (silentlyResolveKeys.has(key)) {
+      batch.set(ref, {
+        state: "resolved",
+        resolvedAt: now,
+        updatedAt: now,
+        resolutionReason: "superseded_duplicate",
+      }, {merge: true});
+      return;
+    }
     batch.set(ref, {state: "resolved", resolvedAt: now, updatedAt: now}, {merge: true});
     const openedAtMs = asMillis(incident.openedAt) ?? now.toMillis();
     batch.set(db.collection(EVENTS_COLLECTION).doc(eventId()), {
@@ -450,7 +680,7 @@ const resolveMissingIncidents = async ({db, openIncidents, activeKeys, now}) => 
       source: "watchdog",
       state: "resolved",
       incidentKey: incident.incidentKey,
-      summary: `${incident.summary || incident.type} resolved`,
+      summary: resolvedIncidentSummary(incident),
       durationMs: Math.max(0, now.toMillis() - openedAtMs),
       occurredAt: now,
       receivedAt: now,
@@ -503,19 +733,20 @@ const runWatchdog = async ({admin, db}) => {
     }
     const candidates = watchdogCandidates(kiosk, monitor, nowMs);
     const activeKeys = new Set(candidates.map(({key}) => key));
+    const silentlyResolveKeys = new Set();
+    if (isV2Kiosk(kiosk)) {
+      silentlyResolveKeys.add("kiosk-telemetry-overdue");
+      normalizeModules(kiosk).forEach((module, index) => {
+        silentlyResolveKeys.add(`module-${moduleKey(module, index)}-telemetry-overdue`);
+      });
+    }
     const stationIncidents = openByStation.get(normalizeText(kiosk.stationid)) || [];
-    const incidentsByKey = new Map(stationIncidents.map(({data}) => [
-      data.incidentKey,
-      data,
-    ]));
     for (const candidate of candidates) {
-      const incidentKey = `${normalizeText(kiosk.stationid)}:${candidate.key}`;
       await reconcileIncident({
         db,
         kiosk,
         provisionId: kioskDoc.id,
         candidate,
-        existingIncident: incidentsByKey.get(incidentKey),
         now,
       });
       openedOrUpdated += 1;
@@ -525,23 +756,59 @@ const runWatchdog = async ({admin, db}) => {
       openIncidents: stationIncidents,
       activeKeys,
       now,
+      silentlyResolveKeys,
     });
   }
 
   return {kiosks: kiosks.size, incidents: openedOrUpdated};
 };
 
+const deleteQueryInBatches = async (db, queryFactory) => {
+  let deleted = 0;
+  let hasMore = true;
+  while (hasMore) {
+    const snapshot = await queryFactory().limit(400).get();
+    if (snapshot.empty) return deleted;
+    const batch = db.batch();
+    snapshot.docs.forEach((document) => batch.delete(document.ref));
+    await batch.commit();
+    deleted += snapshot.size;
+    hasMore = snapshot.size === 400;
+  }
+  return deleted;
+};
+
+const pruneOperationalHistory = async ({admin, db, nowMs = Date.now()}) => {
+  const cutoff = admin.firestore.Timestamp.fromMillis(
+      nowMs - (EVENT_RETENTION_DAYS * 86400000),
+  );
+  const [events, incidents] = await Promise.all([
+    deleteQueryInBatches(db, () => db.collection(EVENTS_COLLECTION)
+        .where("occurredAt", "<", cutoff)),
+    deleteQueryInBatches(db, () => db.collection(INCIDENTS_COLLECTION)
+        .where("resolvedAt", "<", cutoff)),
+  ]);
+  return {events, incidents};
+};
+
 module.exports = {
+  EVENT_RETENTION_DAYS,
   EVENTS_COLLECTION,
   INCIDENTS_COLLECTION,
   MONITORS_COLLECTION,
   comparableKioskState,
   diffKioskEvents,
   handleKioskWrite,
+  handleRentalWrite,
   isV2Kiosk,
+  pruneOperationalHistory,
+  rentalAuditInteractionCandidates,
+  rentalInteractionCandidates,
+  resolvedIncidentSummary,
   runWatchdog,
   shouldMonitorKiosk,
   statePolicy,
   terminalPhase,
+  uiStatePageSummary,
   watchdogCandidates,
 };

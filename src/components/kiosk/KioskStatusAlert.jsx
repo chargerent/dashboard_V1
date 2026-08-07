@@ -2,6 +2,18 @@ import { ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 import { formatDateTime } from '../../utils/dateFormatter';
 
 const TELEMETRY_OVERDUE_TYPE = 'kiosk_telemetry_overdue';
+const MODULE_TELEMETRY_OVERDUE_TYPE = 'module_telemetry_overdue';
+const MODULE_DISCONNECTED_TYPE = 'module_disconnected';
+
+const collapseRelatedModuleIncidents = (incidents) => {
+    const disconnectedModuleIds = new Set(incidents
+        .filter((incident) => incident.type === MODULE_DISCONNECTED_TYPE)
+        .map((incident) => String(incident.moduleId || '')));
+    return incidents.filter((incident) => (
+        incident.type !== MODULE_TELEMETRY_OVERDUE_TYPE ||
+        !disconnectedModuleIds.has(String(incident.moduleId || ''))
+    ));
+};
 
 const formatDuration = (durationMs) => {
     const minutes = Math.max(0, Math.floor(Number(durationMs || 0) / 60000));
@@ -17,9 +29,10 @@ export default function KioskStatusAlert({
     stationId,
     onNavigateToActivity,
 }) {
-    const visibleIncidents = isOnline
+    const statusIncidents = isOnline
         ? incidents
         : incidents.filter((incident) => incident.type !== TELEMETRY_OVERDUE_TYPE);
+    const visibleIncidents = collapseRelatedModuleIncidents(statusIncidents);
 
     if (isOnline && visibleIncidents.length === 0) return null;
 

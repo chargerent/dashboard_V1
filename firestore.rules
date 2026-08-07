@@ -2,6 +2,13 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    function isAdmin() {
+      return request.auth != null && (
+        request.auth.token.role == 'admin' ||
+        request.auth.token.username == 'chargerent'
+      );
+    }
+
     // Keep users locked down: only owner can read/write their profile
     match /users/{uid} {
       allow read, create, update: if request.auth != null && request.auth.uid == uid;
@@ -20,12 +27,12 @@ service cloud.firestore {
     }
 
     match /kioskEvents/{docId} {
-      allow read: if request.auth != null;
+      allow read: if isAdmin();
       allow write: if false;
     }
 
     match /kioskIncidents/{docId} {
-      allow read: if request.auth != null;
+      allow read: if isAdmin();
       allow write: if false;
     }
 
@@ -43,8 +50,10 @@ service cloud.firestore {
     }
 
     // Everything else: no public read, no writes
-    match /{document=**} {
-      allow read: if request.auth != null; // signed-in only
+    match /{collection}/{document=**} {
+      allow read: if request.auth != null &&
+        collection != 'kioskEvents' &&
+        collection != 'kioskIncidents'; // signed-in only, except admin activity data above
       allow write: if false;
     }
   }

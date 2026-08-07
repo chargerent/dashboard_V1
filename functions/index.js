@@ -16,6 +16,8 @@ const {
 } = require("./rentalDashboardStats");
 const {
   handleKioskWrite,
+  handleRentalWrite,
+  pruneOperationalHistory,
   runWatchdog: runKioskOperationalWatchdog,
 } = require("./kioskOperationalEvents");
 
@@ -9377,6 +9379,20 @@ exports.rentals_updateDashboardStats = onDocumentWritten(
     },
 );
 
+exports.rentals_recordOperationalEvents = onDocumentWritten(
+    "rentals/{rentalId}",
+    async (event) => {
+      await handleRentalWrite({
+        before: event.data.before.exists ? event.data.before.data() : null,
+        after: event.data.after.exists ? event.data.after.data() : null,
+        rentalId: event.params.rentalId,
+        sourceEventId: event.id,
+        admin,
+        db,
+      });
+    },
+);
+
 exports.kiosks_recordOperationalEvents = onDocumentWritten(
     "kiosks/{provisionId}",
     async (event) => {
@@ -9398,6 +9414,15 @@ exports.kiosks_operationalWatchdog = onSchedule({
   timeoutSeconds: 540,
 }, async () => {
   await runKioskOperationalWatchdog({admin, db});
+});
+
+exports.kiosks_pruneOperationalHistory = onSchedule({
+  schedule: "15 3 * * *",
+  timeZone: "UTC",
+  memory: "256MiB",
+  timeoutSeconds: 540,
+}, async () => {
+  await pruneOperationalHistory({admin, db});
 });
 
 exports.uiProfile_list = functions.https.onCall(async (data, context) => {

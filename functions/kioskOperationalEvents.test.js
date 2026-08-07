@@ -3,12 +3,21 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 const {
+  EVENT_RETENTION_DAYS,
   diffKioskEvents,
   isV2Kiosk,
+  rentalAuditInteractionCandidates,
+  rentalInteractionCandidates,
+  resolvedIncidentSummary,
   shouldMonitorKiosk,
   terminalPhase,
+  uiStatePageSummary,
   watchdogCandidates,
 } = require("./kioskOperationalEvents");
+
+test("retains operational history for seven days", () => {
+  assert.equal(EVENT_RETENTION_DAYS, 7);
+});
 
 const timestamp = (millis) => ({
   toMillis: () => millis,
@@ -44,6 +53,11 @@ test("records V1 MQTT, screen, button, and module transitions", () => {
     uistate: "payment credited",
     button: "disabled",
     modules: {1: {id: "US0118m1", serialstatus: false}},
+    interaction: {current: {
+      id: "interaction-123",
+      kind: "rental",
+      surface: "ui",
+    }},
   };
   const {events} = diffKioskEvents(before, after, {
     stationId: "US0118",
@@ -56,6 +70,17 @@ test("records V1 MQTT, screen, button, and module transitions", () => {
     "customer_button_state_changed",
     "module_disconnected",
   ]);
+  assert.equal(events.find(({type}) => type === "ui_state_changed").summary,
+      "Payment credited page visited");
+  assert.equal(events.find(({type}) => type === "ui_state_changed").interactionId,
+      "interaction-123");
+  assert.equal(events.find(({type}) => type === "ui_state_changed").sourceSurface, "ui");
+});
+
+test("labels every recorded kiosk page visit clearly", () => {
+  assert.equal(uiStatePageSummary("startpage"), "Start page visited");
+  assert.equal(uiStatePageSummary("rentpage"), "Rent page visited");
+  assert.equal(uiStatePageSummary("return_page"), "Return page visited");
 });
 
 test("opens an overdue UI incident for a stuck P68 state", () => {
@@ -105,6 +130,94 @@ test("detects V2 module telemetry that stays stale", () => {
     terminalPhaseEnteredAt: new Date(now),
     mqttStateEnteredAt: new Date(now),
   }, now);
-  assert.ok(candidates.some(({type}) => type === "module_telemetry_overdue"));
   assert.ok(candidates.some(({type}) => type === "module_disconnected"));
+  assert.equal(candidates.some(({type}) => type === "module_telemetry_overdue"), false);
+  assert.equal(candidates.some(({type}) => type === "kiosk_telemetry_overdue"), false);
+});
+
+test("groups an overdue kiosk heartbeat with module activity", () => {
+  const now = Date.now();
+  const candidates = watchdogCandidates({
+    stationid: "US0118",
+    mqtt: true,
+    lastUpdate: new Date(now - 11 * 60_000).toISOString(),
+  }, {
+    uiStateEnteredAt: new Date(now),
+    terminalPhaseEnteredAt: new Date(now),
+    mqttStateEnteredAt: new Date(now),
+  }, now);
+  const heartbeat = candidates.find(({type}) => type === "kiosk_telemetry_overdue");
+  assert.equal(heartbeat.category, "module");
+  assert.equal(heartbeat.summary, "Overdue heartbeat");
+});
+
+test("records the heartbeat recovery transition", () => {
+  assert.equal(resolvedIncidentSummary({
+    type: "kiosk_telemetry_overdue",
+    summary: "Overdue heartbeat",
+  }), "Heartbeat restored");
+});
+
+test("records paid, rented, and returned rental interactions", () => {
+  assert.deepEqual(rentalInteractionCandidates(null, {
+    status: "rented",
+    rentalStationid: "US0118",
+    rentalTime: "2026-08-07T10:00:00Z",
+  }).map(({type}) => type), ["rental_paid", "charger_rented"]);
+
+  assert.deepEqual(rentalInteractionCandidates({status: "rented"}, {
+    status: "returned",
+    rentalStationid: "US0118",
+    returnStationid: "US0092",
+    returnTime: "2026-08-07T11:00:00Z",
+  }).map(({type, stationId}) => ({type, stationId})), [{
+    type: "charger_returned",
+    stationId: "US0092",
+  }]);
+});
+
+test("correlates new rental audit events with one interaction", () => {
+  const before = {
+    rentalEvents: [{eventid: "existing", eventtype: "reservation_created"}],
+  };
+  const after = {
+    rentalStationid: "US0118",
+    orderid: "TX-123",
+    reservationid: "reservation-123",
+    rentalEvents: [
+      ...before.rentalEvents,
+      {
+        eventid: "approved-1",
+        eventtype: "payment_approved",
+        occurredat: "2026-08-07T10:00:00Z",
+        stationid: "US0118",
+        interactionId: "interaction-123",
+        source: "p68_triangle",
+        transactionid: "TX-123",
+        paymentAttemptId: "payment-123",
+      },
+      {
+        eventid: "vend-failed-1",
+        eventtype: "vend_failed",
+        occurredat: "2026-08-07T10:00:05Z",
+        stationid: "US0118",
+        interactionId: "interaction-123",
+        source: "p68_triangle",
+        transactionid: "TX-123",
+        failureReason: "motor_error",
+        processLog: [{event: "vend_failed"}],
+      },
+    ],
+  };
+
+  const events = rentalAuditInteractionCandidates(before, after);
+  assert.deepEqual(events.map(({type}) => type), [
+    "payment_approved",
+    "charger_dispense_failed",
+  ]);
+  assert.ok(events.every(({interactionId}) => interactionId === "interaction-123"));
+  assert.ok(events.every(({transactionId}) => transactionId === "TX-123"));
+  assert.ok(events.every(({sourceSurface}) => sourceSurface === "terminal"));
+  assert.equal(events[1].details.failureReason, "motor_error");
+  assert.deepEqual(events[1].details.processLog, [{event: "vend_failed"}]);
 });

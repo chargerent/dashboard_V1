@@ -12,16 +12,38 @@ import {
 import { ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 import { db } from '../firebase-config';
 import { formatDateTime } from '../utils/dateFormatter';
+import { isKioskActive, isKioskOnline } from '../utils/helpers';
 
 const PAGE_SIZE = 30;
 const SEEN_STORAGE_KEY = 'chargerent:kiosk-activity-seen:v1';
+const TELEMETRY_OVERDUE_TYPE = 'kiosk_telemetry_overdue';
+const MQTT_DISCONNECTED_TYPE = 'mqtt_disconnected';
+const MODULE_EVENT_TYPES = new Set([
+    TELEMETRY_OVERDUE_TYPE,
+    `${TELEMETRY_OVERDUE_TYPE}_resolved`,
+    'module_connected',
+    'module_disconnected',
+    'module_telemetry_overdue',
+    'module_telemetry_overdue_resolved',
+]);
+const CONNECTIVITY_EVENT_TYPES = new Set([
+    'mqtt_connected',
+    MQTT_DISCONNECTED_TYPE,
+    `${MQTT_DISCONNECTED_TYPE}_resolved`,
+    'kiosk_online',
+    'kiosk_offline',
+]);
 const FILTERS = [
     ['all', 'All activity'],
     ['connectivity', 'Connectivity'],
     ['module', 'Modules'],
     ['interaction', 'Interactions'],
-    ['terminal', 'Terminal'],
     ['admin', 'Admin'],
+];
+const DATE_RANGES = [
+    ['today', 'Today', 1],
+    ['3days', '3 days', 3],
+    ['7days', '7 days', 7],
 ];
 
 const SEVERITY_STYLES = {
@@ -71,7 +93,138 @@ const matchesFilter = (event, filter) => {
     return event.category === filter;
 };
 
-function ActivityRow({ event, open = false, onSelectStation }) {
+const pageVisitSummary = (value) => {
+    const normalized = String(value || '').trim();
+    if (!normalized) return 'Unknown page visited';
+    const pageName = normalized
+        .replace(/page$/i, '')
+        .replaceAll('_', ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return `${pageName.charAt(0).toUpperCase()}${pageName.slice(1)} page visited`;
+};
+
+const normalizeActivityEvent = (event) => {
+    const type = String(event.type || '');
+    const isResolvedHeartbeat = type === `${TELEMETRY_OVERDUE_TYPE}_resolved`;
+    if (type === TELEMETRY_OVERDUE_TYPE || isResolvedHeartbeat) {
+        return {
+            ...event,
+            category: 'module',
+            summary: isResolvedHeartbeat ? 'Heartbeat restored' : 'Overdue heartbeat',
+        };
+    }
+    if (type === 'ui_state_changed') {
+        return {
+            ...event,
+            category: 'interaction',
+            summary: pageVisitSummary(event.page || event.currentValue),
+        };
+    }
+    if (event.category === 'terminal' || type === 'terminal_state_entered') {
+        return { ...event, category: 'interaction' };
+    }
+    if (MODULE_EVENT_TYPES.has(type)) return { ...event, category: 'module' };
+    if (CONNECTIVITY_EVENT_TYPES.has(type)) return { ...event, category: 'connectivity' };
+    return event;
+};
+
+const interactionTitle = (events) => {
+    const kind = events.find((event) => event.interactionKind)?.interactionKind;
+    if (kind === 'rental' || kind === 'rent') return 'Rental interaction';
+    if (kind === 'return') return 'Charger return';
+    const selectedAction = events.find((event) => event.action)?.action;
+    if (selectedAction) return `${String(selectedAction).replaceAll('_', ' ')} interaction`;
+    return 'Kiosk interaction';
+};
+
+const eventDetailLabels = (event) => [
+    (event.transactionId || event.details?.transactionId) && `Transaction ${event.transactionId || event.details.transactionId}`,
+    (event.reservationId || event.details?.reservationId) && `Reservation ${event.reservationId || event.details.reservationId}`,
+    event.moduleId && `Module ${event.moduleId}`,
+    (event.slotId ?? event.slot) != null && `Slot ${event.slotId ?? event.slot}`,
+    event.chargerId && `Charger ${event.chargerId}`,
+    event.page && `Screen: ${event.page}`,
+    event.terminalState && `Terminal: ${String(event.terminalState).replaceAll('_', ' ')}`,
+    event.error || event.errorMessage || event.failureReason || event.details?.failureReason,
+].filter(Boolean);
+
+const groupInteractionEvents = (activityEvents) => {
+    const grouped = new Map();
+    const items = [];
+
+    activityEvents.forEach((event) => {
+        if (event.category !== 'interaction' || !event.interactionId) {
+            items.push({ key: event.id, type: 'event', event, occurredAt: timeValue(eventTime(event)) });
+            return;
+        }
+        const key = String(event.interactionId);
+        let group = grouped.get(key);
+        if (!group) {
+            group = { key, type: 'interaction', events: [], occurredAt: 0 };
+            grouped.set(key, group);
+            items.push(group);
+        }
+        group.events.push(event);
+        group.occurredAt = Math.max(group.occurredAt, timeValue(eventTime(event)));
+    });
+
+    grouped.forEach((group) => group.events.sort((left, right) => (
+        timeValue(eventTime(left)) - timeValue(eventTime(right))
+    )));
+    return items.sort((left, right) => right.occurredAt - left.occurredAt);
+};
+
+const activityStateKey = (event) => {
+    if (event.incidentKey) return `${event.incidentKey}:${event.state || event.type}`;
+    return [
+        event.type,
+        event.moduleId,
+        event.page,
+        event.terminalState,
+        event.currentValue,
+        event.summary,
+    ].map((value) => String(value ?? '')).join(':');
+};
+
+const collapseRepeatedStates = (activityEvents) => activityEvents.reduce((collapsed, event) => {
+    const previous = collapsed.at(-1);
+    if (previous && activityStateKey(previous) === activityStateKey(event)) return collapsed;
+    collapsed.push(event);
+    return collapsed;
+}, []);
+
+const RELATED_STATE_WINDOW_MS = 2 * 60 * 1000;
+const relatedStateExists = (events, event, types, moduleSpecific = false) => {
+    const eventMs = timeValue(eventTime(event));
+    return events.some((candidate) => {
+        if (candidate === event || !types.has(candidate.type)) return false;
+        if (moduleSpecific && String(candidate.moduleId || '') !== String(event.moduleId || '')) return false;
+        const candidateMs = timeValue(eventTime(candidate));
+        return eventMs > 0 && candidateMs > 0 && Math.abs(candidateMs - eventMs) <= RELATED_STATE_WINDOW_MS;
+    });
+};
+
+const collapseRelatedModuleStates = (activityEvents) => activityEvents.filter((event) => {
+    if (event.type === 'module_telemetry_overdue') {
+        return !relatedStateExists(activityEvents, event, new Set(['module_disconnected']), true);
+    }
+    if (event.type === 'module_telemetry_overdue_resolved') {
+        return !relatedStateExists(activityEvents, event, new Set(['module_connected', 'module_disconnected_resolved']), true);
+    }
+    if (event.type === 'module_disconnected_resolved') {
+        return !relatedStateExists(activityEvents, event, new Set(['module_connected']), true);
+    }
+    if (event.kioskGeneration === 'v2' && event.type === TELEMETRY_OVERDUE_TYPE) {
+        return !relatedStateExists(activityEvents, event, new Set(['module_disconnected', 'module_telemetry_overdue']));
+    }
+    if (event.kioskGeneration === 'v2' && event.type === `${TELEMETRY_OVERDUE_TYPE}_resolved`) {
+        return !relatedStateExists(activityEvents, event, new Set(['module_connected', 'module_disconnected_resolved', 'module_telemetry_overdue_resolved']));
+    }
+    return true;
+});
+
+function ActivityRow({ event, open = false, onNavigateToDashboard }) {
     const style = SEVERITY_STYLES[event.severity] || SEVERITY_STYLES.info;
 
     return (
@@ -81,7 +234,8 @@ function ActivityRow({ event, open = false, onSelectStation }) {
                     <button
                         type="button"
                         className="text-xs font-bold uppercase tracking-wide hover:underline"
-                        onClick={() => onSelectStation(event.stationId)}
+                        onClick={() => onNavigateToDashboard(event.stationId)}
+                        aria-label={`Show ${event.stationId || 'unknown kiosk'} on dashboard`}
                     >
                         {event.stationId || 'Unknown kiosk'}
                     </button>
@@ -93,32 +247,96 @@ function ActivityRow({ event, open = false, onSelectStation }) {
             </div>
             <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] opacity-75">
                 <span>{eventTimeLabel(event)}</span>
-                {event.moduleId && <span>Module {event.moduleId}</span>}
-                {event.page && <span>Screen: {event.page}</span>}
-                {event.terminalState && <span>{event.terminalState.replaceAll('_', ' ')}</span>}
                 {event.durationMs > 0 && <span>{formatDuration(event.durationMs)}</span>}
+                {eventDetailLabels(event).map((label) => <span key={label}>{label}</span>)}
             </div>
         </article>
     );
 }
 
-function IncidentCard({ incident, onSelectStation }) {
+function InteractionCard({ events, onNavigateToDashboard }) {
+    const firstEvent = events[0];
+    const lastEvent = events.at(-1);
+    const severity = events.some((event) => ['critical', 'error'].includes(event.severity))
+        ? 'error'
+        : events.some((event) => event.severity === 'warning') ? 'warning' : 'info';
+    const style = SEVERITY_STYLES[severity] || SEVERITY_STYLES.info;
+    const transactionIds = [...new Set(events.map((event) => event.transactionId).filter(Boolean))];
+    const completed = events.some((event) => event.type === 'interaction_completed');
+    const failed = events.some((event) => ['interaction_failed', 'interaction_timed_out', 'charger_dispense_failed', 'payment_declined'].includes(event.type));
+
+    return (
+        <details className={`group rounded-lg border ${style}`}>
+            <summary className="cursor-pointer list-none p-3 marker:hidden sm:p-4">
+                <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                        <button
+                            type="button"
+                            className="text-xs font-bold uppercase tracking-wide hover:underline"
+                            onClick={(event) => {
+                                event.preventDefault();
+                                onNavigateToDashboard(firstEvent.stationId);
+                            }}
+                            aria-label={`Show ${firstEvent.stationId || 'unknown kiosk'} on dashboard`}
+                        >
+                            {firstEvent.stationId || 'Unknown kiosk'}
+                        </button>
+                        <p className="mt-1 text-sm font-semibold leading-5">{interactionTitle(events)}</p>
+                    </div>
+                    <span className="shrink-0 rounded-full bg-white/70 px-2 py-1 font-mono text-[10px] font-bold uppercase">
+                        {failed ? 'Error' : completed ? 'Complete' : 'In progress'}
+                    </span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] opacity-75">
+                    <span>{eventTimeLabel(firstEvent)}</span>
+                    <span>{events.length} steps</span>
+                    {transactionIds.map((transactionId) => <span key={transactionId}>Transaction {transactionId}</span>)}
+                    <span className="font-semibold group-open:hidden">View timeline</span>
+                </div>
+            </summary>
+            <ol className="mx-3 mb-3 border-l border-current/20 pl-4 sm:mx-4 sm:mb-4">
+                {events.map((event) => (
+                    <li key={event.id} className="relative pb-3 last:pb-0">
+                        <span className="absolute -left-[1.18rem] top-1.5 h-2 w-2 rounded-full bg-current" />
+                        <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+                            <p className="text-sm font-semibold">{event.summary || event.type}</p>
+                            <time className="text-[11px] opacity-70">{eventTimeLabel(event)}</time>
+                        </div>
+                        {eventDetailLabels(event).length > 0 && (
+                            <p className="mt-0.5 text-[11px] opacity-75">{eventDetailLabels(event).join(' · ')}</p>
+                        )}
+                    </li>
+                ))}
+            </ol>
+            {lastEvent.durationMs > 0 && <p className="px-3 pb-3 text-[11px] opacity-70 sm:px-4 sm:pb-4">Duration {formatDuration(lastEvent.durationMs)}</p>}
+        </details>
+    );
+}
+
+function IncidentCard({ incident, onSelectStation, onNavigateToDashboard }) {
     const style = SEVERITY_STYLES[incident.severity] || SEVERITY_STYLES.warning;
 
     return (
-        <article className={`min-w-0 rounded-md border p-2 ${style}`}>
-            <div className="flex min-w-0 items-center justify-between gap-1.5">
+        <article className={`relative min-w-0 rounded-md border p-2 text-left transition-shadow hover:shadow-sm ${style}`}>
+            <button
+                type="button"
+                className="absolute inset-0 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                onClick={() => onSelectStation(incident.stationId)}
+                aria-label={`View activity for ${incident.stationId || 'unknown kiosk'}: ${incident.summary || incident.type}`}
+            />
+            <div className="pointer-events-none relative z-10 flex min-w-0 items-center justify-between gap-1.5">
                 <button
                     type="button"
-                    className="truncate text-[11px] font-bold uppercase tracking-wide hover:underline"
-                    onClick={() => onSelectStation(incident.stationId)}
+                    className="pointer-events-auto truncate text-[11px] font-bold uppercase tracking-wide hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    onClick={() => onNavigateToDashboard(incident.stationId)}
+                    aria-label={`Show ${incident.stationId || 'unknown kiosk'} on dashboard`}
                 >
                     {incident.stationId || 'Unknown'}
                 </button>
                 <span className="shrink-0 rounded-full bg-white/70 px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase">Open</span>
             </div>
-            <p className="mt-1 truncate text-xs font-semibold" title={incident.summary || incident.type}>{incident.summary || incident.type}</p>
-            <div className="mt-1 flex items-center justify-between gap-1 text-[9px] opacity-70">
+            <p className="pointer-events-none relative z-10 mt-1 truncate text-xs font-semibold" title={incident.summary || incident.type}>{incident.summary || incident.type}</p>
+            <div className="pointer-events-none relative z-10 mt-1 flex items-center justify-between gap-1 text-[9px] opacity-70">
                 <span className="truncate">{eventTimeLabel(incident)}</span>
                 {incident.durationMs > 0 && <span className="shrink-0">{formatDuration(incident.durationMs)}</span>}
             </div>
@@ -136,6 +354,7 @@ export default function ActivityPage({
     const [selectedStation, setSelectedStation] = useState(initialStationId);
     const [stationInput, setStationInput] = useState(initialStationId);
     const [filter, setFilter] = useState('all');
+    const [dateRange, setDateRange] = useState('today');
     const [incidents, setIncidents] = useState([]);
     const [events, setEvents] = useState([]);
     const [cursor, setCursor] = useState(null);
@@ -143,6 +362,7 @@ export default function ActivityPage({
     const [loading, setLoading] = useState(true);
     const [loadingMore, setLoadingMore] = useState(false);
     const [error, setError] = useState('');
+    const [referenceTime, setReferenceTime] = useState(() => new Date().toISOString());
     const [seenActivity, setSeenActivity] = useState(() => {
         try {
             return JSON.parse(localStorage.getItem(SEEN_STORAGE_KEY) || '{}');
@@ -152,6 +372,7 @@ export default function ActivityPage({
     });
 
     const allowedStationKey = allStationsData
+        .filter((station) => isKioskActive(station, referenceTime))
         .map((station) => String(station.stationid || '').trim())
         .filter(Boolean)
         .sort()
@@ -160,6 +381,18 @@ export default function ActivityPage({
         allowedStationKey ? allowedStationKey.split('\u0000') : []
     ), [allowedStationKey]);
     const stationOptions = useMemo(() => [...allowedStationIds].sort(), [allowedStationIds]);
+    const stationsById = useMemo(() => new Map(
+        allStationsData
+            .filter((station) => isKioskActive(station, referenceTime))
+            .map((station) => [String(station.stationid || '').trim(), station])
+    ), [allStationsData, referenceTime]);
+    const historyStartMs = useMemo(() => {
+        const days = DATE_RANGES.find(([value]) => value === dateRange)?.[2] || 1;
+        const start = new Date(referenceTime);
+        start.setHours(0, 0, 0, 0);
+        start.setDate(start.getDate() - (days - 1));
+        return start.getTime();
+    }, [dateRange, referenceTime]);
 
     const selectStation = useCallback((stationId = '') => {
         const normalized = String(stationId || '').trim().toUpperCase();
@@ -172,6 +405,17 @@ export default function ActivityPage({
         setSelectedStation(initialStationId);
         setStationInput(initialStationId);
     }, [initialStationId]);
+
+    useEffect(() => {
+        if (allStationsData.length > 0 && selectedStation && !allowedStationIds.has(selectedStation)) {
+            selectStation('');
+        }
+    }, [allStationsData.length, allowedStationIds, selectStation, selectedStation]);
+
+    useEffect(() => {
+        const timer = window.setInterval(() => setReferenceTime(new Date().toISOString()), 30_000);
+        return () => window.clearInterval(timer);
+    }, []);
 
     useEffect(() => {
         const incidentsQuery = query(
@@ -201,13 +445,15 @@ export default function ActivityPage({
         setError('');
         try {
             const constraints = [where('stationId', '==', selectedStation)];
+            constraints.push(where('occurredAt', '>=', new Date(historyStartMs)));
             constraints.push(orderBy('occurredAt', 'desc'));
             if (after) constraints.push(startAfter(after));
             constraints.push(limit(PAGE_SIZE));
             const snapshot = await getDocs(query(collection(db, 'kioskEvents'), ...constraints));
             const nextEvents = snapshot.docs
                 .map((document) => ({ id: document.id, ...document.data() }))
-                .filter((event) => allowedStationIds.has(event.stationId));
+                .filter((event) => allowedStationIds.has(event.stationId))
+                .map(normalizeActivityEvent);
             setEvents((previous) => append ? [...previous, ...nextEvents] : nextEvents);
             setCursor(snapshot.docs.at(-1) || null);
             setHasMore(snapshot.size === PAGE_SIZE);
@@ -218,7 +464,7 @@ export default function ActivityPage({
             setLoading(false);
             setLoadingMore(false);
         }
-    }, [allowedStationIds, selectedStation]);
+    }, [allowedStationIds, historyStartMs, selectedStation]);
 
     useEffect(() => {
         setEvents([]);
@@ -226,10 +472,55 @@ export default function ActivityPage({
         loadEvents();
     }, [loadEvents]);
 
-    const visibleIncidents = useMemo(() => incidents
+    const operationalIncidents = useMemo(() => {
+        const byStation = new Map();
+        incidents.forEach((incident) => {
+            const stationIncidents = byStation.get(incident.stationId) || [];
+            stationIncidents.push(incident);
+            byStation.set(incident.stationId, stationIncidents);
+        });
+
+        return [...byStation.entries()].flatMap(([stationId, stationIncidents]) => {
+            const kiosk = stationsById.get(stationId);
+            const hasV2ModuleDisconnect = stationIncidents.some((incident) => (
+                incident.kioskGeneration === 'v2' && incident.type === 'module_disconnected'
+            ));
+            if (hasV2ModuleDisconnect) {
+                return stationIncidents.filter((incident) => ![
+                    TELEMETRY_OVERDUE_TYPE,
+                    MQTT_DISCONNECTED_TYPE,
+                    'module_telemetry_overdue',
+                ].includes(incident.type));
+            }
+            const telemetryIncident = stationIncidents.find((incident) => incident.type === TELEMETRY_OVERDUE_TYPE);
+            if (!kiosk || !telemetryIncident || isKioskOnline(kiosk, referenceTime)) return stationIncidents;
+
+            const offlineAt = kiosk.lastUpdated || telemetryIncident.openedAt;
+            const offlineDate = offlineAt?.toDate?.() || new Date(offlineAt);
+            const offlineDurationMs = Number.isFinite(offlineDate.getTime())
+                ? Math.max(0, new Date(referenceTime).getTime() - offlineDate.getTime())
+                : telemetryIncident.durationMs;
+            const otherIncidents = stationIncidents.filter((incident) => (
+                incident.type !== TELEMETRY_OVERDUE_TYPE && incident.type !== MQTT_DISCONNECTED_TYPE
+            ));
+
+            return [{
+                ...telemetryIncident,
+                type: 'kiosk_offline',
+                category: 'connectivity',
+                summary: 'Kiosk offline',
+                openedAt: offlineAt,
+                durationMs: offlineDurationMs,
+            }, ...otherIncidents];
+        });
+    }, [incidents, referenceTime, stationsById]);
+
+    const visibleIncidents = useMemo(() => operationalIncidents
         .filter((incident) => !selectedStation || incident.stationId === selectedStation)
-        .sort((left, right) => Number(eventTime(right)) - Number(eventTime(left))), [incidents, selectedStation]);
-    const visibleEvents = useMemo(() => events.filter((event) => matchesFilter(event, filter)), [events, filter]);
+        .sort((left, right) => Number(eventTime(right)) - Number(eventTime(left))), [operationalIncidents, selectedStation]);
+    const visibleEvents = useMemo(() => collapseRelatedModuleStates(collapseRepeatedStates(events))
+        .filter((event) => matchesFilter(event, filter)), [events, filter]);
+    const visibleActivityItems = useMemo(() => groupInteractionEvents(visibleEvents), [visibleEvents]);
     const seenScope = selectedStation || 'all-kiosks';
     const newestActivityByFilter = useMemo(() => Object.fromEntries(FILTERS.map(([filterValue]) => {
         const newest = [...visibleIncidents, ...events]
@@ -271,10 +562,10 @@ export default function ActivityPage({
                 <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-3 py-3 sm:px-6">
                     <div className="min-w-0">
                         <h1 className="truncate text-lg font-bold sm:text-xl">Kiosk activity</h1>
-                        <p className="hidden text-xs text-slate-500 sm:block">Operational incidents and non-rental events</p>
+                        <p className="hidden text-xs text-slate-500 sm:block">Operational incidents and kiosk interactions</p>
                     </div>
                     <div className="flex items-center gap-2">
-                        <button type="button" onClick={onNavigateToDashboard} className="rounded-md bg-gray-200 p-2 text-gray-700 hover:bg-gray-300" title="Back to dashboard" aria-label="Home">
+                        <button type="button" onClick={() => onNavigateToDashboard()} className="rounded-md bg-gray-200 p-2 text-gray-700 hover:bg-gray-300" title="Back to dashboard" aria-label="Home">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 011-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
                         </button>
                         <button type="button" onClick={onLogout} className="rounded-md bg-red-500 p-2 text-white hover:bg-red-600" title="Logout" aria-label="Logout">
@@ -320,7 +611,7 @@ export default function ActivityPage({
                     </div>
                     {visibleIncidents.length > 0 ? (
                         <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-                            {visibleIncidents.map((incident) => <IncidentCard key={incident.id} incident={incident} onSelectStation={selectStation} />)}
+                            {visibleIncidents.map((incident) => <IncidentCard key={incident.id} incident={incident} onSelectStation={selectStation} onNavigateToDashboard={onNavigateToDashboard} />)}
                         </div>
                     ) : (
                         <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">No open incidents in this view.</div>
@@ -328,9 +619,18 @@ export default function ActivityPage({
                 </section>
 
                 {selectedStation && <section>
-                    <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                        <h2 className="text-base font-bold">Activity history{selectedStation ? ` · ${selectedStation}` : ''}</h2>
-                        <div className="flex gap-1 overflow-x-auto pb-1">
+                    <div className="mb-3 space-y-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <h2 className="text-base font-bold">Activity history{selectedStation ? ` · ${selectedStation}` : ''}</h2>
+                            <div className="flex rounded-lg bg-white p-1 shadow-sm" aria-label="Activity date range">
+                                {DATE_RANGES.map(([value, label]) => (
+                                    <button key={value} type="button" onClick={() => setDateRange(value)} className={`rounded-md px-3 py-1.5 text-xs font-semibold ${dateRange === value ? 'bg-slate-800 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
+                                        {label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="flex gap-1 overflow-x-auto pb-1 sm:justify-end">
                             {FILTERS.map(([value, label]) => (
                                 <button key={value} type="button" onClick={() => chooseFilter(value)} className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold ${filter === value ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-200'}`}>
                                     {label}
@@ -341,9 +641,11 @@ export default function ActivityPage({
                     </div>
                     {loading ? (
                         <p className="rounded-lg bg-white p-6 text-center text-sm text-slate-500">Loading activity…</p>
-                    ) : visibleEvents.length > 0 ? (
+                    ) : visibleActivityItems.length > 0 ? (
                         <div className="space-y-3">
-                            {visibleEvents.map((event) => <ActivityRow key={event.id} event={event} onSelectStation={selectStation} />)}
+                            {visibleActivityItems.map((item) => item.type === 'interaction'
+                                ? <InteractionCard key={`interaction:${item.key}`} events={item.events} onNavigateToDashboard={onNavigateToDashboard} />
+                                : <ActivityRow key={item.key} event={item.event} onNavigateToDashboard={onNavigateToDashboard} />)}
                         </div>
                     ) : (
                         <p className="rounded-lg bg-white p-6 text-center text-sm text-slate-500">No matching activity recorded.</p>

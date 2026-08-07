@@ -1049,11 +1049,9 @@ function App() {
     window.history.replaceState({ dashboardActivityNavigation: true }, '', activityUrl(normalized));
   }, []);
 
-  const onNavigateFromActivityToDashboard = useCallback(() => {
-    if (window.history.state?.dashboardActivityNavigation) {
-      window.history.back();
-      return;
-    }
+  const onNavigateFromActivityToDashboard = useCallback((stationId = '') => {
+    const normalized = String(stationId || '').trim().toUpperCase();
+    setDashboardSearchTerm(normalized);
     window.history.replaceState({}, '', dashboardUrl());
     setPage('dashboard');
     setActivityInitialStation('');
@@ -2832,7 +2830,7 @@ function App() {
         setPage('chargers');
       }}
       onNavigateToActivity={onNavigateToActivity}
-      operationalActivityEnabled
+      operationalActivityEnabled={clientInfo?.isAdmin === true}
       initialSearch={dashboardSearchTerm}
       onNavigateToReporting={() => {
         if (isDesktopOnlyViewport) setPage('reporting');
@@ -2909,6 +2907,10 @@ function App() {
 
     switch (page) {
       case 'activity':
+        if (clientInfo?.isAdmin !== true) {
+          return dashboard;
+        }
+
         return (
           <ActivityPage
             onLogout={handleLogout}
