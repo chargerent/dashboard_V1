@@ -6,6 +6,7 @@ import { isKioskOnline, getKioskPowerThreshold, isModuleOnline, isNewSchemaKiosk
 import { formatDateTime } from '../../utils/dateFormatter';
 import RentalStats from '../Dashboard/RentalStats';
 import GatewayIcon from './GatewayIcon';
+import KioskEventLog from './KioskEventLog';
 
 function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rentalData, rentalDashboardStats, clientInfo, t, onCommand, onShowRentalDetails }) {
     const isOnline = isKioskOnline(kiosk, mockNow);
@@ -222,6 +223,7 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                         />
                     </div>
                 )}
+                <KioskEventLog stationId={kiosk.stationid} />
                 {clientInfo.features.pricing && kiosk.pricing && (
                     <div className={`mt-4 ${isOnline ? 'border-t' : ''} pt-4 text-xs text-gray-600`}>
                         <h4 className="font-semibold text-gray-700 mb-2">{t('pricing_structure')}</h4>

@@ -1,6 +1,38 @@
 {
   "indexes": [
     {
+      "collectionGroup": "kioskEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "stationId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "occurredAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "kioskIncidents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "stationId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "state",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "openedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "rentals",
       "queryScope": "COLLECTION",
       "fields": [

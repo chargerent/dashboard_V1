@@ -19,6 +19,16 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /kioskEvents/{docId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /kioskIncidents/{docId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
     // Login lockout state — public read so LoginPage can check before auth
     // Writes are only via Cloud Functions (Admin SDK bypasses these rules)
     match /loginAttempts/{username} {

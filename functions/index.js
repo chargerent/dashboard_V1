@@ -14,6 +14,10 @@ const {
   isRentalDashboardGenerationReady,
   projectionsEqual,
 } = require("./rentalDashboardStats");
+const {
+  handleKioskWrite,
+  runWatchdog: runKioskOperationalWatchdog,
+} = require("./kioskOperationalEvents");
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -9372,6 +9376,29 @@ exports.rentals_updateDashboardStats = onDocumentWritten(
       });
     },
 );
+
+exports.kiosks_recordOperationalEvents = onDocumentWritten(
+    "kiosks/{provisionId}",
+    async (event) => {
+      await handleKioskWrite({
+        before: event.data.before.exists ? event.data.before.data() : null,
+        after: event.data.after.exists ? event.data.after.data() : null,
+        provisionId: event.params.provisionId,
+        sourceUpdateTime: event.data.after.exists ? event.data.after.updateTime : null,
+        admin,
+        db,
+      });
+    },
+);
+
+exports.kiosks_operationalWatchdog = onSchedule({
+  schedule: "every 2 minutes",
+  timeZone: "UTC",
+  memory: "512MiB",
+  timeoutSeconds: 540,
+}, async () => {
+  await runKioskOperationalWatchdog({admin, db});
+});
 
 exports.uiProfile_list = functions.https.onCall(async (data, context) => {
   const authState = await assertCanManageUiProfilesFromContext(context);
