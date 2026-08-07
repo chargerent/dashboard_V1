@@ -3,10 +3,9 @@
 import { memo, useMemo, useCallback } from 'react';
 import { BoltIcon, HeartIcon } from '@heroicons/react/24/solid';
 import { isKioskOnline, getKioskPowerThreshold, isModuleOnline, isNewSchemaKiosk, isSlotActivelyCharging } from '../../utils/helpers';
-import { formatDateTime } from '../../utils/dateFormatter';
 import RentalStats from '../Dashboard/RentalStats';
 import GatewayIcon from './GatewayIcon';
-import KioskUrgentAlert from './KioskUrgentAlert';
+import KioskStatusAlert from './KioskStatusAlert';
 
 function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rentalData, rentalDashboardStats, clientInfo, t, onCommand, onShowRentalDetails, urgentIncidents, onNavigateToActivity }) {
     const isOnline = isKioskOnline(kiosk, mockNow);
@@ -204,11 +203,13 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                     </div>
                 </div>
                 {kiosk.disabled && <div className="mt-2 p-2 bg-red-100 text-red-700 text-center rounded-md text-sm font-semibold">{t('kiosk_disabled')}</div>}
-                {!isOnline && (
-                    <div className="mt-4 p-2 bg-red-100 text-red-800 text-center rounded-md text-xs font-semibold">
-                        Offline since: {formatDateTime(kiosk.lastUpdated)}
-                    </div>
-                )}
+                <KioskStatusAlert
+                    incidents={urgentIncidents}
+                    isOnline={isOnline}
+                    lastUpdated={kiosk.lastUpdated}
+                    stationId={kiosk.stationid}
+                    onNavigateToActivity={onNavigateToActivity}
+                />
                 {clientInfo.features.rentals && (
                     <div className={`mt-4 ${isOnline ? 'border-t' : ''} pt-4`}>
                         <RentalStats 
@@ -223,7 +224,6 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                         />
                     </div>
                 )}
-                <KioskUrgentAlert incidents={urgentIncidents} stationId={kiosk.stationid} onNavigateToActivity={onNavigateToActivity} />
                 {clientInfo.features.pricing && kiosk.pricing && (
                     <div className={`mt-4 ${isOnline ? 'border-t' : ''} pt-4 text-xs text-gray-600`}>
                         <h4 className="font-semibold text-gray-700 mb-2">{t('pricing_structure')}</h4>

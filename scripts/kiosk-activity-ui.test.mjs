@@ -13,8 +13,20 @@ test('activity history is lazy-loaded outside kiosk cards', async () => {
 
     assert.match(app, /lazy\(\(\) => import\('\.\/pages\/ActivityPage\.jsx'\)\)/);
     assert.doesNotMatch(kioskPanel, /kioskEvents|onSnapshot|KioskEventLog/);
-    assert.match(kioskPanel, /KioskUrgentAlert/);
+    assert.match(kioskPanel, /KioskStatusAlert/);
     assert.match(dashboard, /where\('state', '==', 'open'\)/);
+});
+
+test('offline kiosk cards consolidate status and suppress telemetry overdue duplication', async () => {
+    const [kioskPanel, statusAlert] = await Promise.all([
+        readSource('../src/components/kiosk/kioskPanel.jsx'),
+        readSource('../src/components/kiosk/KioskStatusAlert.jsx'),
+    ]);
+
+    assert.doesNotMatch(kioskPanel, /Offline since:/);
+    assert.match(statusAlert, /kiosk_telemetry_overdue/);
+    assert.match(statusAlert, /incidents\.filter/);
+    assert.match(statusAlert, /Kiosk offline/);
 });
 
 test('activity page paginates history and supports station deep links', async () => {
