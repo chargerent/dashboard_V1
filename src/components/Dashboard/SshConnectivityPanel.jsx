@@ -29,6 +29,15 @@ export default function SshConnectivityPanel({
             .filter((kiosk) => kiosk?.ngrok === true && kiosk?.stationid && isKioskActive(kiosk, referenceTime))
             .sort((left, right) => String(left.stationid).localeCompare(String(right.stationid)))
     ), [kiosks, referenceTime]);
+    const connections = useMemo(() => (
+        [
+            ...connectedKiosks.map((kiosk) => ({ type: 'ssh', kiosk })),
+            ...connectedNgrokKiosks.map((kiosk) => ({ type: 'ngrok', kiosk })),
+        ].sort((left, right) => (
+            String(left.kiosk.stationid).localeCompare(String(right.kiosk.stationid)) ||
+            left.type.localeCompare(right.type)
+        ))
+    ), [connectedKiosks, connectedNgrokKiosks]);
 
     useEffect(() => {
         const connectedIds = new Set(connectedKiosks.map((kiosk) => kiosk.stationid));
@@ -66,8 +75,7 @@ export default function SshConnectivityPanel({
         >
             <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                    <h2 id="remote-connectivity-heading" className="text-base font-bold text-slate-900">Remote Connectivity</h2>
-                    <p className="mt-1 text-sm text-slate-500">Connected SSH and Ngrok tunnels with live usage checks.</p>
+                    <h2 id="remote-connectivity-heading" className="text-base font-bold text-slate-900">Remote Connections</h2>
                 </div>
                 <button
                     type="button"
@@ -82,105 +90,75 @@ export default function SshConnectivityPanel({
                 </button>
             </div>
 
-            <h3 className="mt-4 text-sm font-bold text-slate-800">SSH connections</h3>
-            {connectedKiosks.length === 0 ? (
-                <p className="mt-4 rounded-lg bg-slate-50 px-3 py-4 text-sm text-slate-600">No connected SSH tunnels.</p>
+            {connections.length === 0 ? (
+                <p className="mt-4 rounded-lg bg-slate-50 px-3 py-4 text-sm text-slate-600">No active remote connections.</p>
             ) : (
-                <div className="mt-4 space-y-2">
-                    {connectedKiosks.map((kiosk) => {
-                        const status = statusByStation?.[kiosk.stationid];
-                        const activeSessions = Number(status?.activeSessions || 0);
-                        const hasFreshStatus = Boolean(status?.checkedAt);
-                        const isInUse = hasFreshStatus && activeSessions > 0;
-
-                        return (
-                            <div
-                                key={kiosk.stationid}
-                                data-testid={`ssh-connectivity-row-${kiosk.stationid}`}
-                                className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-3"
-                            >
-                                <div className="min-w-0">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        <span className="font-bold text-slate-900">{kiosk.stationid}</span>
-                                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">Tunnel connected</span>
-                                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                                            !hasFreshStatus
-                                                ? 'bg-slate-100 text-slate-600'
-                                                : isInUse
-                                                    ? 'bg-amber-100 text-amber-800'
-                                                    : 'bg-blue-100 text-blue-800'
-                                        }`}>
-                                            {!hasFreshStatus ? 'Checking…' : isInUse ? `${activeSessions} session${activeSessions === 1 ? '' : 's'} in use` : 'Idle'}
-                                        </span>
-                                    </div>
-                                    <p className="mt-1 text-xs text-slate-500">{formatCheckedAt(status?.checkedAt)}</p>
-                                </div>
-                                <button
-                                    type="button"
-                                    onClick={() => onDisconnect(kiosk)}
-                                    className={`rounded-lg px-3 py-2 text-sm font-semibold text-white ${isInUse ? 'bg-amber-600 hover:bg-amber-700' : 'bg-red-600 hover:bg-red-700'}`}
-                                >
-                                    {isInUse ? 'Force disconnect' : 'Disconnect'}
-                                </button>
-                            </div>
-                        );
-                    })}
-                </div>
-            )}
-
-            <h3 className="mt-6 text-sm font-bold text-slate-800">Ngrok connections</h3>
-            {connectedNgrokKiosks.length === 0 ? (
-                <p className="mt-2 rounded-lg bg-slate-50 px-3 py-4 text-sm text-slate-600">No connected Ngrok tunnels.</p>
-            ) : (
-                <div className="mt-2 space-y-2">
-                    {connectedNgrokKiosks.map((kiosk) => {
-                        const status = ngrokStatusByStation?.[kiosk.stationid];
-                        const activeConnections = Number(status?.activeConnections || 0);
+                <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                    {connections.map(({ type, kiosk }) => {
+                        const isSsh = type === 'ssh';
+                        const status = isSsh
+                            ? statusByStation?.[kiosk.stationid]
+                            : ngrokStatusByStation?.[kiosk.stationid];
+                        const activeCount = Number(isSsh ? status?.activeSessions || 0 : status?.activeConnections || 0);
                         const recentRequestRate = Number(status?.recentRequestRate || 0);
                         const hasFreshStatus = Boolean(status?.checkedAt);
-                        const isInUse = hasFreshStatus && activeConnections > 0;
-                        const hasRecentTraffic = hasFreshStatus && !isInUse && recentRequestRate > 0;
+                        const isInUse = hasFreshStatus && activeCount > 0;
+                        const hasRecentTraffic = !isSsh && hasFreshStatus && !isInUse && recentRequestRate > 0;
                         const usageLabel = !hasFreshStatus
                             ? 'Checking…'
                             : isInUse
-                                ? `${activeConnections} connection${activeConnections === 1 ? '' : 's'} in use`
+                                ? `${activeCount} ${isSsh ? 'session' : 'connection'}${activeCount === 1 ? '' : 's'} in use`
                                 : hasRecentTraffic
                                     ? 'Recent traffic'
                                     : 'Idle';
+                        const needsWarning = isInUse || hasRecentTraffic;
+                        const disconnect = isSsh ? onDisconnect : onDisconnectNgrok;
 
                         return (
-                            <div
-                                key={kiosk.stationid}
-                                data-testid={`ngrok-connectivity-row-${kiosk.stationid}`}
-                                className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-3"
+                            <button
+                                type="button"
+                                key={`${type}-${kiosk.stationid}`}
+                                data-testid={`${type}-connectivity-row-${kiosk.stationid}`}
+                                onClick={() => disconnect(kiosk)}
+                                aria-label={`Disconnect ${isSsh ? 'SSH' : 'Ngrok'} connection for ${kiosk.stationid}`}
+                                className={`group min-w-0 rounded-xl border p-4 text-left transition focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                                    needsWarning
+                                        ? 'border-amber-200 bg-amber-50 hover:border-amber-300 hover:bg-amber-100 focus:ring-amber-500'
+                                        : 'border-slate-200 bg-white hover:border-red-300 hover:bg-red-50 focus:ring-red-500'
+                                }`}
                             >
-                                <div className="min-w-0">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        <span className="font-bold text-slate-900">{kiosk.stationid}</span>
-                                        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">Tunnel connected</span>
-                                        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                                            !hasFreshStatus
-                                                ? 'bg-slate-100 text-slate-600'
-                                                : isInUse || hasRecentTraffic
-                                                    ? 'bg-amber-100 text-amber-800'
-                                                    : 'bg-blue-100 text-blue-800'
-                                        }`}>
-                                            {usageLabel}
-                                        </span>
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            <span className="truncate text-base font-bold text-slate-900">{kiosk.stationid}</span>
+                                            <span className={`rounded-full px-2 py-0.5 text-xs font-bold uppercase tracking-wide ${
+                                                isSsh ? 'bg-violet-100 text-violet-800' : 'bg-cyan-100 text-cyan-800'
+                                            }`}>
+                                                {isSsh ? 'SSH' : 'Ngrok'}
+                                            </span>
+                                        </div>
+                                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">Connected</span>
+                                            <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                                                !hasFreshStatus
+                                                    ? 'bg-slate-100 text-slate-600'
+                                                    : needsWarning
+                                                        ? 'bg-amber-100 text-amber-800'
+                                                        : 'bg-blue-100 text-blue-800'
+                                            }`}>
+                                                {usageLabel}
+                                            </span>
+                                        </div>
                                     </div>
-                                    <p className="mt-1 text-xs text-slate-500">
-                                        {formatCheckedAt(status?.checkedAt)}
-                                        {status?.publicUrl ? ` · ${status.publicUrl}` : ''}
-                                    </p>
+                                    <span className={`shrink-0 text-xs font-bold ${needsWarning ? 'text-amber-700' : 'text-red-600'} group-hover:underline`}>
+                                        {needsWarning ? 'Force disconnect' : 'Disconnect'}
+                                    </span>
                                 </div>
-                                <button
-                                    type="button"
-                                    onClick={() => onDisconnectNgrok(kiosk)}
-                                    className={`rounded-lg px-3 py-2 text-sm font-semibold text-white ${isInUse || hasRecentTraffic ? 'bg-amber-600 hover:bg-amber-700' : 'bg-red-600 hover:bg-red-700'}`}
-                                >
-                                    {isInUse || hasRecentTraffic ? 'Force disconnect' : 'Disconnect'}
-                                </button>
-                            </div>
+                                <p className="mt-3 truncate text-xs text-slate-500">
+                                    {formatCheckedAt(status?.checkedAt)}
+                                    {!isSsh && status?.publicUrl ? ` · ${status.publicUrl}` : ''}
+                                </p>
+                            </button>
                         );
                     })}
                 </div>

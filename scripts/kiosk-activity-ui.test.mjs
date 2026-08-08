@@ -5,15 +5,21 @@ import test from 'node:test';
 const readSource = (path) => readFile(new URL(path, import.meta.url), 'utf8');
 
 test('activity history is lazy-loaded outside kiosk cards', async () => {
-    const [app, kioskPanel, dashboard] = await Promise.all([
+    const [app, kioskPanel, dashboard, rentalStats] = await Promise.all([
         readSource('../src/App.jsx'),
         readSource('../src/components/kiosk/kioskPanel.jsx'),
         readSource('../src/pages/DashboardPage.jsx'),
+        readSource('../src/components/Dashboard/RentalStats.jsx'),
     ]);
 
     assert.match(app, /lazy\(\(\) => import\('\.\/pages\/ActivityPage\.jsx'\)\)/);
     assert.doesNotMatch(kioskPanel, /kioskEvents|onSnapshot|KioskEventLog/);
     assert.match(kioskPanel, /KioskStatusAlert/);
+    assert.match(kioskPanel, /onNavigateToActivity=\{clientInfo\.isAdmin \? onNavigateToActivity : undefined\}/);
+    assert.match(rentalStats, /aria-label=\{`View activity for \$\{stationId\}`\}/);
+    assert.match(rentalStats, /data-icon="activity-pulse" className="h-4 w-4 shrink-0"/);
+    assert.match(rentalStats, /onNavigateToActivity\(stationId\)/);
+    assert.match(rentalStats, /clientInfo\?\.isAdmin === true/);
     assert.match(dashboard, /where\('state', '==', 'open'\)/);
 });
 
@@ -38,7 +44,8 @@ test('dashboard activity navigation uses a distinct purple activity control', as
     ]);
 
     assert.match(dashboard, /data-icon="activity-pulse"/);
-    assert.match(dashboard, /bg-purple-500/);
+    assert.match(dashboard, /bg-\[#B784A7\]/);
+    assert.match(dashboard, /hover:bg-\[#9D6B8F\]/);
     assert.match(dashboard, /aria-label="Kiosk activity"/);
     assert.match(app, /operationalActivityEnabled=\{clientInfo\?\.isAdmin === true\}/);
     assert.match(app, /case 'activity':[\s\S]*if \(clientInfo\?\.isAdmin !== true\)[\s\S]*return dashboard/);
@@ -74,7 +81,10 @@ test('activity page paginates history and supports station deep links', async ()
     assert.match(activityPage, /category: 'module'/);
     assert.match(activityPage, /const collapseRepeatedStates/);
     assert.match(activityPage, /activityStateKey\(previous\) === activityStateKey\(event\)/);
+    assert.match(activityPage, /return `module:\$\{event\.type\}:\$\{String\(event\.moduleId \|\| ''\)\.trim\(\)\}`/);
+    assert.match(activityPage, /summary: `Module\$\{moduleId \? ` \$\{moduleId\}` : ''\} \$\{type === 'module_connected' \? 'connected' : 'disconnected'\}`/);
     assert.match(activityPage, /const collapseRelatedModuleStates/);
+    assert.match(activityPage, /if \(event\.type === 'module_disconnected_resolved'\) return false/);
     assert.match(activityPage, /event\.kioskGeneration === 'v2' && event\.type === TELEMETRY_OVERDUE_TYPE/);
     assert.match(activityPage, /const hasV2ModuleDisconnect/);
     assert.match(activityPage, /const \[dateRange, setDateRange\] = useState\('today'\)/);
@@ -83,7 +93,17 @@ test('activity page paginates history and supports station deep links', async ()
     assert.match(activityPage, /where\('occurredAt', '>=', new Date\(historyStartMs\)\)/);
     assert.match(activityPage, /isKioskActive\(station, referenceTime\)/);
     assert.match(activityPage, /selectedStation && !allowedStationIds\.has\(selectedStation\)/);
-    assert.match(activityPage, /summary: pageVisitSummary\(event\.page \|\| event\.currentValue\)/);
+    assert.match(activityPage, /sourceSurface === 'terminal' \? 'Terminal button pressed' : 'Button pressed'/);
+    assert.match(activityPage, /startpage: 'Returned to start page'/);
+    assert.match(activityPage, /returntypage: 'Return complete page'/);
+    assert.match(activityPage, /const interactionSequence/);
+    assert.match(activityPage, /event\.type === 'customer_button_state_changed' && state === 'disabled'/);
+    assert.match(activityPage, /type === 'customer_button_state_changed'[\s\S]*severity: 'info'/);
+    assert.match(activityPage, /interactionSequence\(left\) - interactionSequence\(right\)/);
+    assert.match(activityPage, /const selectedStationSurface = useMemo/);
+    assert.match(activityPage, /normalizeActivityEvent\(event, selectedStationSurface\)/);
+    assert.match(activityPage, /\[allowedStationIds, historyStartMs, selectedStation, selectedStationSurface\]/);
+    assert.doesNotMatch(activityPage, /\[allowedStationIds, historyStartMs, selectedStation, stationsById\]/);
     assert.match(activityPage, /startAfter\(after\)/);
     assert.match(activityPage, /Load more/);
     assert.match(activityPage, /aria-label="Home"/);
@@ -93,9 +113,30 @@ test('activity page paginates history and supports station deep links', async ()
     assert.doesNotMatch(activityPage, /\['terminal', 'Terminal'\]/);
     assert.match(activityPage, /event\.category === 'terminal'.*category: 'interaction'/s);
     assert.match(activityPage, /const groupInteractionEvents/);
-    assert.match(activityPage, /event\.category !== 'interaction' \|\| !event\.interactionId/);
+    assert.match(activityPage, /const rentalTimelineKey/);
+    assert.match(activityPage, /const TRANSACTION_TIMELINE_EVENT_TYPES = new Set/);
+    assert.match(activityPage, /where\('transactionId', 'in', returnTransactionIds\)/);
+    assert.doesNotMatch(activityPage, /\.filter\(\(event\) => event\.stationId === selectedStation\)/);
+    assert.match(activityPage, /const isTransactionEvent = event\.category === 'interaction'/);
+    assert.match(activityPage, /transactionKey && TRANSACTION_TIMELINE_EVENT_TYPES\.has\(event\.type\)/);
+    assert.match(activityPage, /const cardKind = event\.type === 'charger_returned' \? 'return' : 'rental'/);
+    assert.match(activityPage, /const key = `\$\{cardKind\}:\$\{transactionKey\}`/);
+    assert.match(activityPage, /if \(!isTransactionEvent\)[\s\S]*type: 'event'/);
+    assert.match(activityPage, /if \(kind === 'return'\) return 'Return interaction'/);
+    assert.doesNotMatch(activityPage, /originalKinds\.has\('return'\)/);
+    assert.match(activityPage, /groupInteractionEvents\([\s\S]*visibleEvents,[\s\S]*relatedTimelineEvents/);
+    assert.match(activityPage, /cardKind=\{item\.cardKind\}/);
+    assert.match(activityPage, /cardEvent=\{item\.cardEvent\}/);
+    assert.match(activityPage, /if \(cardKind === 'return'\) return 'Charger return'/);
+    assert.match(activityPage, /'charger_returned'/);
+    assert.match(activityPage, /Rental duration \{formatDuration\(rentalDurationMs\)\}/);
+    assert.match(activityPage, /second: '2-digit'/);
+    assert.doesNotMatch(activityPage, /const returnedToStart = events\.some/);
+    assert.doesNotMatch(activityPage, /event\.category !== 'interaction' \|\| !event\.interactionId/);
     assert.match(activityPage, /<InteractionCard key=\{`interaction:/);
     assert.match(activityPage, /Transaction \{transactionId\}/);
     assert.match(activityPage, /View timeline/);
+    assert.match(activityPage, /const RENTAL_INTERACTION_STYLE = 'border-emerald-200 bg-emerald-50 text-emerald-900'/);
+    assert.match(activityPage, /severity === 'info' && isRentalInteraction/);
     assert.doesNotMatch(activityPage, /DASHBOARD_VERSION|ArrowLeftIcon/);
 });

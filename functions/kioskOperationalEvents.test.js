@@ -71,16 +71,45 @@ test("records V1 MQTT, screen, button, and module transitions", () => {
     "module_disconnected",
   ]);
   assert.equal(events.find(({type}) => type === "ui_state_changed").summary,
-      "Payment credited page visited");
+      "Payment credited page");
   assert.equal(events.find(({type}) => type === "ui_state_changed").interactionId,
       "interaction-123");
   assert.equal(events.find(({type}) => type === "ui_state_changed").sourceSurface, "ui");
+  assert.equal(events.find(({type}) => type === "customer_button_state_changed").severity,
+      "info");
 });
 
 test("labels every recorded kiosk page visit clearly", () => {
-  assert.equal(uiStatePageSummary("startpage"), "Start page visited");
-  assert.equal(uiStatePageSummary("rentpage"), "Rent page visited");
-  assert.equal(uiStatePageSummary("return_page"), "Return page visited");
+  assert.equal(uiStatePageSummary("startpage"), "Returned to start page");
+  assert.equal(uiStatePageSummary("rentpage"), "Rent page");
+  assert.equal(uiStatePageSummary("return_page"), "Return page");
+  assert.equal(uiStatePageSummary("returntypage"), "Return complete page");
+  assert.equal(uiStatePageSummary("waitpage"), "Please wait page");
+  assert.equal(uiStatePageSummary("button pressed", "ui"), "Button pressed");
+  assert.equal(uiStatePageSummary("button pressed", "terminal"), "Terminal button pressed");
+});
+
+test("labels no-screen kiosk presses as terminal and records controls disabled afterward", () => {
+  const now = timestamp(Date.now());
+  const before = {
+    stationid: "US0017",
+    hardware: {type: "CK30", screen: "no screen"},
+    ui: {mode: "MEDIA"},
+    uistate: "startpage",
+    button: "enabled",
+  };
+  const after = {...before, uistate: "button pressed", button: "disabled"};
+  const {events} = diffKioskEvents(before, after, {
+    stationId: "US0017",
+    provisionId: "id-9937541816",
+    kioskGeneration: "v1",
+  }, now);
+  const pressIndex = events.findIndex(({type}) => type === "ui_state_changed");
+  const disabledIndex = events.findIndex(({type}) => type === "customer_button_state_changed");
+  assert.equal(events[pressIndex].summary, "Terminal button pressed");
+  assert.equal(events[pressIndex].sourceSurface, "terminal");
+  assert.equal(events[disabledIndex].severity, "info");
+  assert.ok(pressIndex < disabledIndex);
 });
 
 test("opens an overdue UI incident for a stuck P68 state", () => {

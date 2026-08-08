@@ -221,6 +221,7 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                             gatewayOptions={kiosk.hardware?.gatewayoptions}
                             t={t}
                             onShowRentalDetails={handleShowRentalPeriod}
+                            onNavigateToActivity={clientInfo.isAdmin ? onNavigateToActivity : undefined}
                         />
                     </div>
                 )}

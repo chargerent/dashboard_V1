@@ -763,7 +763,7 @@ return (
                     {operationalActivityEnabled && (
                         <button
                             onClick={() => onNavigateToActivity('')}
-                            className="rounded-md bg-purple-500 p-2 text-white transition-colors hover:bg-purple-600"
+                            className="rounded-md bg-[#B784A7] p-2 text-white transition-colors hover:bg-[#9D6B8F]"
                             title="Kiosk activity"
                             aria-label="Kiosk activity"
                             data-icon="activity-pulse"

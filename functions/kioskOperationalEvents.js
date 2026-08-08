@@ -47,6 +47,15 @@ const interactionSurface = (value) => {
   return "unknown";
 };
 
+const kioskInteractionSurface = (kiosk, explicitSurface) => {
+  const explicit = interactionSurface(explicitSurface);
+  if (explicit !== "unknown") return explicit;
+  const screen = normalizeText(kiosk?.hardware?.screen).toLowerCase();
+  const uiMode = normalizeText(kiosk?.ui?.mode).toLowerCase();
+  if (/no screen|none|terminal only/.test(screen) || uiMode === "media") return "terminal";
+  return "ui";
+};
+
 const rentalTransactionId = (rental) => normalizeText(
     rental?.transactionid || rental?.transactionId || rental?.orderid || rental?.rawid,
 );
@@ -61,19 +70,35 @@ const kioskInteractionContext = (kiosk) => {
   return {
     interactionId: normalizeText(interaction.id || interaction.interactionId) || null,
     interactionKind: normalizeText(interaction.kind) || null,
-    sourceSurface: interactionSurface(interaction.surface),
+    sourceSurface: kioskInteractionSurface(kiosk, interaction.surface),
   };
 };
 
-const uiStatePageSummary = (value) => {
+const uiStatePageSummary = (value, sourceSurface = "ui") => {
   const normalized = normalizeText(value);
-  if (!normalized) return "Unknown page visited";
+  if (!normalized) return "Unknown page";
+  const exactSummary = {
+    startpage: "Returned to start page",
+    returninfopage: "Return information page",
+    returntypage: "Return complete page",
+    waitpage: "Please wait page",
+    loadingpage: "Loading page",
+    thankyoupage: "Thank you page",
+    declinedpage: "Payment declined page",
+    ooopage: "Out of order page",
+    remotepage: "Remote support page",
+    loginpage: "Admin login page",
+  }[normalized.toLowerCase()];
+  if (exactSummary) return exactSummary;
+  if (/^button[ _-]*pressed$/i.test(normalized)) {
+    return sourceSurface === "terminal" ? "Terminal button pressed" : "Button pressed";
+  }
   const pageName = normalized
       .replace(/page$/i, "")
       .replaceAll("_", " ")
       .replace(/\s+/g, " ")
       .trim();
-  return `${pageName.charAt(0).toUpperCase()}${pageName.slice(1)} page visited`;
+  return `${pageName.charAt(0).toUpperCase()}${pageName.slice(1)} page`;
 };
 
 const isV2Kiosk = (kiosk) => {
@@ -178,7 +203,7 @@ const diffKioskEvents = (before, after, identity, now, nowMs = Date.now()) => {
       previousValue: previous.uiState || null,
       currentValue: current.uiState || null,
       page: current.uiState || null,
-      summary: uiStatePageSummary(current.uiState),
+      summary: uiStatePageSummary(current.uiState, interaction.sourceSurface),
       ...interaction,
     }, now));
   }
@@ -188,7 +213,7 @@ const diffKioskEvents = (before, after, identity, now, nowMs = Date.now()) => {
     events.push(buildPointEvent(identity, {
       category: "interaction",
       type: "customer_button_state_changed",
-      severity: current.button.toLowerCase() === "disabled" ? "warning" : "info",
+      severity: "info",
       source: "kiosk",
       previousValue: previous.button || null,
       currentValue: current.button || null,

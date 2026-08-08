@@ -11,7 +11,6 @@ import {
 } from 'firebase/firestore';
 import { ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 import { db } from '../firebase-config';
-import { formatDateTime } from '../utils/dateFormatter';
 import { isKioskActive, isKioskOnline } from '../utils/helpers';
 
 const PAGE_SIZE = 30;
@@ -52,6 +51,25 @@ const SEVERITY_STYLES = {
     warning: 'border-amber-200 bg-amber-50 text-amber-900',
     info: 'border-slate-200 bg-white text-slate-700',
 };
+const RENTAL_INTERACTION_STYLE = 'border-emerald-200 bg-emerald-50 text-emerald-900';
+const TRANSACTION_TIMELINE_EVENT_TYPES = new Set([
+    'rental_paid',
+    'charger_reserved',
+    'reservation_released',
+    'payment_timed_out',
+    'payment_declined',
+    'payment_approved',
+    'charger_dispense_failed',
+    'charger_dispensed',
+    'charger_rented',
+    'charger_returned',
+    'charger_purchased',
+    'rental_refunded',
+    'rental_canceled',
+    'rental_failed',
+    'interaction_failed',
+    'interaction_timed_out',
+]);
 
 const eventTime = (event) => (
     event?.occurredAt?.toDate?.() ||
@@ -78,8 +96,15 @@ const timeValue = (value) => {
 const eventTimeLabel = (event) => {
     const value = eventTime(event);
     if (!value) return 'Time unavailable';
-    const normalized = value instanceof Date ? value.toISOString() : String(value);
-    return formatDateTime(normalized);
+    const normalized = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(normalized.getTime())) return 'Time unavailable';
+    return normalized.toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
+    });
 };
 
 const formatDuration = (durationMs) => {
@@ -95,16 +120,48 @@ const matchesFilter = (event, filter) => {
 
 const pageVisitSummary = (value) => {
     const normalized = String(value || '').trim();
-    if (!normalized) return 'Unknown page visited';
+    if (!normalized) return 'Unknown page';
+    const exactSummary = {
+        startpage: 'Returned to start page',
+        returninfopage: 'Return information page',
+        returntypage: 'Return complete page',
+        waitpage: 'Please wait page',
+        loadingpage: 'Loading page',
+        thankyoupage: 'Thank you page',
+        declinedpage: 'Payment declined page',
+        ooopage: 'Out of order page',
+        remotepage: 'Remote support page',
+        loginpage: 'Admin login page',
+    }[normalized.toLowerCase()];
+    if (exactSummary) return exactSummary;
     const pageName = normalized
         .replace(/page$/i, '')
         .replaceAll('_', ' ')
         .replace(/\s+/g, ' ')
         .trim();
-    return `${pageName.charAt(0).toUpperCase()}${pageName.slice(1)} page visited`;
+    return `${pageName.charAt(0).toUpperCase()}${pageName.slice(1)} page`;
 };
 
-const normalizeActivityEvent = (event) => {
+const kioskInteractionSurface = (kiosk) => {
+    const screen = String(kiosk?.hardware?.screen || '').toLowerCase();
+    const uiMode = String(kiosk?.ui?.mode || '').toLowerCase();
+    return /no screen|none|terminal only/.test(screen) || uiMode === 'media' ? 'terminal' : 'ui';
+};
+
+const eventInteractionSurface = (event, fallbackSurface = 'ui') => {
+    const explicit = String(event.sourceSurface || '').toLowerCase();
+    if (explicit === 'ui' || explicit === 'terminal') return explicit;
+    return fallbackSurface;
+};
+
+const interactionSequence = (event) => {
+    const state = String(event.page || event.currentValue || '').trim().toLowerCase();
+    if (event.type === 'ui_state_changed' && /^button[ _-]*pressed$/.test(state)) return 10;
+    if (event.type === 'customer_button_state_changed' && state === 'disabled') return 20;
+    return 50;
+};
+
+const normalizeActivityEvent = (event, fallbackSurface) => {
     const type = String(event.type || '');
     const isResolvedHeartbeat = type === `${TELEMETRY_OVERDUE_TYPE}_resolved`;
     if (type === TELEMETRY_OVERDUE_TYPE || isResolvedHeartbeat) {
@@ -115,24 +172,43 @@ const normalizeActivityEvent = (event) => {
         };
     }
     if (type === 'ui_state_changed') {
+        const sourceSurface = eventInteractionSurface(event, fallbackSurface);
+        const page = String(event.page || event.currentValue || '').trim();
+        const isButtonPress = /^button[ _-]*pressed$/i.test(page);
         return {
             ...event,
             category: 'interaction',
-            summary: pageVisitSummary(event.page || event.currentValue),
+            sourceSurface,
+            summary: isButtonPress
+                ? sourceSurface === 'terminal' ? 'Terminal button pressed' : 'Button pressed'
+                : pageVisitSummary(page),
         };
+    }
+    if (type === 'customer_button_state_changed') {
+        return { ...event, category: 'interaction', severity: 'info' };
     }
     if (event.category === 'terminal' || type === 'terminal_state_entered') {
         return { ...event, category: 'interaction' };
+    }
+    if (type === 'module_disconnected' || type === 'module_connected') {
+        const moduleId = String(event.moduleId || '').trim();
+        return {
+            ...event,
+            category: 'module',
+            summary: `Module${moduleId ? ` ${moduleId}` : ''} ${type === 'module_connected' ? 'connected' : 'disconnected'}`,
+        };
     }
     if (MODULE_EVENT_TYPES.has(type)) return { ...event, category: 'module' };
     if (CONNECTIVITY_EVENT_TYPES.has(type)) return { ...event, category: 'connectivity' };
     return event;
 };
 
-const interactionTitle = (events) => {
+const interactionTitle = (events, cardKind = '') => {
+    if (cardKind === 'return') return 'Charger return';
+    if (cardKind === 'rental') return 'Rental interaction';
     const kind = events.find((event) => event.interactionKind)?.interactionKind;
     if (kind === 'rental' || kind === 'rent') return 'Rental interaction';
-    if (kind === 'return') return 'Charger return';
+    if (kind === 'return') return 'Return interaction';
     const selectedAction = events.find((event) => event.action)?.action;
     if (selectedAction) return `${String(selectedAction).replaceAll('_', ' ')} interaction`;
     return 'Kiosk interaction';
@@ -149,19 +225,34 @@ const eventDetailLabels = (event) => [
     event.error || event.errorMessage || event.failureReason || event.details?.failureReason,
 ].filter(Boolean);
 
-const groupInteractionEvents = (activityEvents) => {
+const rentalTimelineKey = (event) => String(
+    event.details?.rentalId || event.rentalId || event.transactionId || '',
+).trim();
+
+const uniqueTimelineEvents = (events) => [...new Map(
+    events.map((event) => [event.id, event]),
+).values()].sort((left, right) => (
+    timeValue(eventTime(left)) - timeValue(eventTime(right)) ||
+    interactionSequence(left) - interactionSequence(right)
+));
+
+const groupInteractionEvents = (activityEvents, relatedTimelineEvents = []) => {
     const grouped = new Map();
     const items = [];
 
     activityEvents.forEach((event) => {
-        if (event.category !== 'interaction' || !event.interactionId) {
+        const transactionKey = rentalTimelineKey(event);
+        const isTransactionEvent = event.category === 'interaction' &&
+            transactionKey && TRANSACTION_TIMELINE_EVENT_TYPES.has(event.type);
+        if (!isTransactionEvent) {
             items.push({ key: event.id, type: 'event', event, occurredAt: timeValue(eventTime(event)) });
             return;
         }
-        const key = String(event.interactionId);
+        const cardKind = event.type === 'charger_returned' ? 'return' : 'rental';
+        const key = `${cardKind}:${transactionKey}`;
         let group = grouped.get(key);
         if (!group) {
-            group = { key, type: 'interaction', events: [], occurredAt: 0 };
+            group = { key, type: 'interaction', cardKind, transactionKey, events: [], occurredAt: 0 };
             grouped.set(key, group);
             items.push(group);
         }
@@ -169,13 +260,34 @@ const groupInteractionEvents = (activityEvents) => {
         group.occurredAt = Math.max(group.occurredAt, timeValue(eventTime(event)));
     });
 
-    grouped.forEach((group) => group.events.sort((left, right) => (
-        timeValue(eventTime(left)) - timeValue(eventTime(right))
-    )));
+    const timelinesByRental = new Map();
+    [...activityEvents, ...relatedTimelineEvents].forEach((event) => {
+        const key = rentalTimelineKey(event);
+        if (!key || event.category !== 'interaction' || !TRANSACTION_TIMELINE_EVENT_TYPES.has(event.type)) return;
+        const timeline = timelinesByRental.get(key) || [];
+        timeline.push(event);
+        timelinesByRental.set(key, timeline);
+    });
+    timelinesByRental.forEach((timeline, key) => {
+        timelinesByRental.set(key, uniqueTimelineEvents(timeline));
+    });
+
+    grouped.forEach((group) => {
+        group.events = uniqueTimelineEvents(group.events);
+        group.cardEvent = group.cardKind === 'return'
+            ? group.events.find((event) => event.type === 'charger_returned')
+            : group.events[0];
+        if (timelinesByRental.has(group.transactionKey)) {
+            group.events = timelinesByRental.get(group.transactionKey);
+        }
+    });
     return items.sort((left, right) => right.occurredAt - left.occurredAt);
 };
 
 const activityStateKey = (event) => {
+    if (event.type === 'module_disconnected' || event.type === 'module_connected') {
+        return `module:${event.type}:${String(event.moduleId || '').trim()}`;
+    }
     if (event.incidentKey) return `${event.incidentKey}:${event.state || event.type}`;
     return [
         event.type,
@@ -206,14 +318,12 @@ const relatedStateExists = (events, event, types, moduleSpecific = false) => {
 };
 
 const collapseRelatedModuleStates = (activityEvents) => activityEvents.filter((event) => {
+    if (event.type === 'module_disconnected_resolved') return false;
     if (event.type === 'module_telemetry_overdue') {
         return !relatedStateExists(activityEvents, event, new Set(['module_disconnected']), true);
     }
     if (event.type === 'module_telemetry_overdue_resolved') {
         return !relatedStateExists(activityEvents, event, new Set(['module_connected', 'module_disconnected_resolved']), true);
-    }
-    if (event.type === 'module_disconnected_resolved') {
-        return !relatedStateExists(activityEvents, event, new Set(['module_connected']), true);
     }
     if (event.kioskGeneration === 'v2' && event.type === TELEMETRY_OVERDUE_TYPE) {
         return !relatedStateExists(activityEvents, event, new Set(['module_disconnected', 'module_telemetry_overdue']));
@@ -254,16 +364,33 @@ function ActivityRow({ event, open = false, onNavigateToDashboard }) {
     );
 }
 
-function InteractionCard({ events, onNavigateToDashboard }) {
+function InteractionCard({ events, cardEvent, cardKind, onNavigateToDashboard }) {
     const firstEvent = events[0];
     const lastEvent = events.at(-1);
+    const displayEvent = cardEvent || firstEvent;
     const severity = events.some((event) => ['critical', 'error'].includes(event.severity))
         ? 'error'
         : events.some((event) => event.severity === 'warning') ? 'warning' : 'info';
-    const style = SEVERITY_STYLES[severity] || SEVERITY_STYLES.info;
+    const isRentalInteraction = events.some((event) => (
+        ['rental', 'rent'].includes(String(event.interactionKind || '').toLowerCase()) ||
+        event.source === 'rental' ||
+        Boolean(event.transactionId)
+    ));
+    const style = severity === 'info' && isRentalInteraction
+        ? RENTAL_INTERACTION_STYLE
+        : SEVERITY_STYLES[severity] || SEVERITY_STYLES.info;
     const transactionIds = [...new Set(events.map((event) => event.transactionId).filter(Boolean))];
-    const completed = events.some((event) => event.type === 'interaction_completed');
+    const completed = events.some((event) => [
+        'interaction_completed',
+        'charger_dispensed',
+        'charger_returned',
+    ].includes(event.type));
     const failed = events.some((event) => ['interaction_failed', 'interaction_timed_out', 'charger_dispense_failed', 'payment_declined'].includes(event.type));
+    const rentalStartedAt = events.find((event) => event.type === 'charger_rented');
+    const rentalReturnedAt = [...events].reverse().find((event) => event.type === 'charger_returned');
+    const rentalDurationMs = rentalStartedAt && rentalReturnedAt
+        ? Math.max(0, timeValue(eventTime(rentalReturnedAt)) - timeValue(eventTime(rentalStartedAt)))
+        : 0;
 
     return (
         <details className={`group rounded-lg border ${style}`}>
@@ -275,22 +402,23 @@ function InteractionCard({ events, onNavigateToDashboard }) {
                             className="text-xs font-bold uppercase tracking-wide hover:underline"
                             onClick={(event) => {
                                 event.preventDefault();
-                                onNavigateToDashboard(firstEvent.stationId);
+                                onNavigateToDashboard(displayEvent.stationId);
                             }}
-                            aria-label={`Show ${firstEvent.stationId || 'unknown kiosk'} on dashboard`}
+                            aria-label={`Show ${displayEvent.stationId || 'unknown kiosk'} on dashboard`}
                         >
-                            {firstEvent.stationId || 'Unknown kiosk'}
+                            {displayEvent.stationId || 'Unknown kiosk'}
                         </button>
-                        <p className="mt-1 text-sm font-semibold leading-5">{interactionTitle(events)}</p>
+                        <p className="mt-1 text-sm font-semibold leading-5">{interactionTitle(events, cardKind)}</p>
                     </div>
                     <span className="shrink-0 rounded-full bg-white/70 px-2 py-1 font-mono text-[10px] font-bold uppercase">
                         {failed ? 'Error' : completed ? 'Complete' : 'In progress'}
                     </span>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] opacity-75">
-                    <span>{eventTimeLabel(firstEvent)}</span>
+                    <span>{eventTimeLabel(displayEvent)}</span>
                     <span>{events.length} steps</span>
                     {transactionIds.map((transactionId) => <span key={transactionId}>Transaction {transactionId}</span>)}
+                    {rentalDurationMs > 0 && <span>Rental duration {formatDuration(rentalDurationMs)}</span>}
                     <span className="font-semibold group-open:hidden">View timeline</span>
                 </div>
             </summary>
@@ -357,6 +485,7 @@ export default function ActivityPage({
     const [dateRange, setDateRange] = useState('today');
     const [incidents, setIncidents] = useState([]);
     const [events, setEvents] = useState([]);
+    const [relatedTimelineEvents, setRelatedTimelineEvents] = useState([]);
     const [cursor, setCursor] = useState(null);
     const [hasMore, setHasMore] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -386,6 +515,12 @@ export default function ActivityPage({
             .filter((station) => isKioskActive(station, referenceTime))
             .map((station) => [String(station.stationid || '').trim(), station])
     ), [allStationsData, referenceTime]);
+    const selectedStationSurface = useMemo(() => {
+        const selectedKiosk = allStationsData.find((station) => (
+            String(station.stationid || '').trim() === selectedStation
+        ));
+        return kioskInteractionSurface(selectedKiosk);
+    }, [allStationsData, selectedStation]);
     const historyStartMs = useMemo(() => {
         const days = DATE_RANGES.find(([value]) => value === dateRange)?.[2] || 1;
         const start = new Date(referenceTime);
@@ -435,6 +570,7 @@ export default function ActivityPage({
     const loadEvents = useCallback(async ({ append = false, after = null } = {}) => {
         if (!selectedStation) {
             setEvents([]);
+            setRelatedTimelineEvents([]);
             setCursor(null);
             setHasMore(false);
             setLoading(false);
@@ -453,8 +589,30 @@ export default function ActivityPage({
             const nextEvents = snapshot.docs
                 .map((document) => ({ id: document.id, ...document.data() }))
                 .filter((event) => allowedStationIds.has(event.stationId))
-                .map(normalizeActivityEvent);
+                .map((event) => normalizeActivityEvent(event, selectedStationSurface));
+            const returnTransactionIds = [...new Set(nextEvents
+                .filter((event) => event.type === 'charger_returned')
+                .map((event) => event.transactionId)
+                .filter(Boolean))]
+                .slice(0, 30);
+            let nextRelatedEvents = [];
+            if (returnTransactionIds.length > 0) {
+                try {
+                    const relatedSnapshot = await getDocs(query(
+                        collection(db, 'kioskEvents'),
+                        where('transactionId', 'in', returnTransactionIds),
+                    ));
+                    nextRelatedEvents = relatedSnapshot.docs
+                        .map((document) => ({ id: document.id, ...document.data() }))
+                        .map((event) => normalizeActivityEvent(event, selectedStationSurface));
+                } catch (timelineError) {
+                    console.warn('Unable to enrich returned rental timelines', timelineError);
+                }
+            }
             setEvents((previous) => append ? [...previous, ...nextEvents] : nextEvents);
+            setRelatedTimelineEvents((previous) => append
+                ? uniqueTimelineEvents([...previous, ...nextRelatedEvents])
+                : nextRelatedEvents);
             setCursor(snapshot.docs.at(-1) || null);
             setHasMore(snapshot.size === PAGE_SIZE);
         } catch (loadError) {
@@ -464,10 +622,11 @@ export default function ActivityPage({
             setLoading(false);
             setLoadingMore(false);
         }
-    }, [allowedStationIds, historyStartMs, selectedStation]);
+    }, [allowedStationIds, historyStartMs, selectedStation, selectedStationSurface]);
 
     useEffect(() => {
         setEvents([]);
+        setRelatedTimelineEvents([]);
         setCursor(null);
         loadEvents();
     }, [loadEvents]);
@@ -518,9 +677,15 @@ export default function ActivityPage({
     const visibleIncidents = useMemo(() => operationalIncidents
         .filter((incident) => !selectedStation || incident.stationId === selectedStation)
         .sort((left, right) => Number(eventTime(right)) - Number(eventTime(left))), [operationalIncidents, selectedStation]);
-    const visibleEvents = useMemo(() => collapseRelatedModuleStates(collapseRepeatedStates(events))
+    const visibleEvents = useMemo(() => collapseRelatedModuleStates(collapseRepeatedStates([...events].sort((left, right) => (
+        timeValue(eventTime(right)) - timeValue(eventTime(left)) ||
+        interactionSequence(left) - interactionSequence(right)
+    ))))
         .filter((event) => matchesFilter(event, filter)), [events, filter]);
-    const visibleActivityItems = useMemo(() => groupInteractionEvents(visibleEvents), [visibleEvents]);
+    const visibleActivityItems = useMemo(() => groupInteractionEvents(
+        visibleEvents,
+        relatedTimelineEvents,
+    ), [relatedTimelineEvents, visibleEvents]);
     const seenScope = selectedStation || 'all-kiosks';
     const newestActivityByFilter = useMemo(() => Object.fromEntries(FILTERS.map(([filterValue]) => {
         const newest = [...visibleIncidents, ...events]
@@ -644,7 +809,7 @@ export default function ActivityPage({
                     ) : visibleActivityItems.length > 0 ? (
                         <div className="space-y-3">
                             {visibleActivityItems.map((item) => item.type === 'interaction'
-                                ? <InteractionCard key={`interaction:${item.key}`} events={item.events} onNavigateToDashboard={onNavigateToDashboard} />
+                                ? <InteractionCard key={`interaction:${item.key}`} events={item.events} cardEvent={item.cardEvent} cardKind={item.cardKind} onNavigateToDashboard={onNavigateToDashboard} />
                                 : <ActivityRow key={item.key} event={item.event} onNavigateToDashboard={onNavigateToDashboard} />)}
                         </div>
                     ) : (

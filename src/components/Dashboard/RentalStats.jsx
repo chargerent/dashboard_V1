@@ -36,7 +36,7 @@ const StatBox = memo(function StatBox({ period, selection, count, revenue, initi
     );
 });
 
-function RentalStats({ rentalData, dashboardStats, clientInfo, referenceTime, stationId, kiosks, isGlobal, activeFilters, gatewayOptions, t, onShowRentalDetails, leaseRevenue, repLeaseCommission }) {
+function RentalStats({ rentalData, dashboardStats, clientInfo, referenceTime, stationId, kiosks, isGlobal, activeFilters, gatewayOptions, t, onShowRentalDetails, onNavigateToActivity, leaseRevenue, repLeaseCommission }) {
     const stats = useMemo(() => {
         if (dashboardStats) return dashboardStats;
 
@@ -118,6 +118,8 @@ function RentalStats({ rentalData, dashboardStats, clientInfo, referenceTime, st
     const showLeaseRevenue = (clientInfo?.features?.lease_revenue || clientInfo?.isAdmin) && leaseRevenue > 0;
     const showRepLeaseCommission = clientInfo?.isAdmin && repLeaseCommission > 0;
     const showInitialCharge = !usesFullPriceRevenueTotal(gatewayOptions);
+    const canNavigateToActivity = clientInfo?.isAdmin === true && Boolean(stationId) &&
+        !showLeaseRevenue && typeof onNavigateToActivity === 'function';
 
     // If no rental/lease features are enabled, don't render anything.
     if (!clientInfo?.isAdmin && !clientInfo?.features?.rental_counts && !clientInfo?.features?.rental_revenue && !showLeaseRevenue) {
@@ -126,7 +128,24 @@ function RentalStats({ rentalData, dashboardStats, clientInfo, referenceTime, st
 
     return (
         <div className="flex flex-col justify-center text-center md:text-left">
-            <h3 className={`font-bold text-gray-800 mb-2 ${labelClass}`}>{showLeaseRevenue ? t('revenue_activity') : t('rental_activity')}</h3>
+            <h3 className={`font-bold text-gray-800 mb-2 ${labelClass}`}>
+                {canNavigateToActivity ? (
+                    <button
+                        type="button"
+                        className="inline-flex items-center gap-1.5 rounded-sm text-left text-[#9D6B8F] underline decoration-[#D7B4CA] underline-offset-2 hover:text-[#7F536F] focus:outline-none focus:ring-2 focus:ring-[#B784A7]"
+                        aria-label={`View activity for ${stationId}`}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            onNavigateToActivity(stationId);
+                        }}
+                    >
+                        <svg data-icon="activity-pulse" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h4l2.25-6 4.5 12L16 12h5" />
+                        </svg>
+                        {t('rental_activity')}
+                    </button>
+                ) : showLeaseRevenue ? t('revenue_activity') : t('rental_activity')}
+            </h3>
             <div className={`grid ${showLeaseRevenue ? 'grid-cols-4' : 'grid-cols-3'} ${gapClass} items-stretch`}>
                 <StatBox period="today" selection="today" count={stats.today.count} revenue={stats.today.revenue} initialCharge={stats.today.initialCharge} showInitialCharge={showInitialCharge} symbol={stats.symbol} onShowRentalDetails={onShowRentalDetails} clientInfo={clientInfo} valueClass={valueClass} t={t} />
                 <StatBox period="days_7" selection="7days" count={stats.last7Days.count} revenue={stats.last7Days.revenue} initialCharge={stats.last7Days.initialCharge} showInitialCharge={showInitialCharge} symbol={stats.symbol} onShowRentalDetails={onShowRentalDetails} clientInfo={clientInfo} valueClass={valueClass} t={t} />
