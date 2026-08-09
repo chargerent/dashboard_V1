@@ -1,6 +1,6 @@
 // src/components/kiosk/KioskDetailPanel.jsx
 
-import { memo, useMemo, useCallback, useEffect } from 'react';
+import { memo, useMemo, useCallback, useEffect, useState } from 'react';
 import KioskControlPanel from './KioskControlPanel';
 import {
     getKioskPowerThreshold,
@@ -45,6 +45,29 @@ const ChargeStatusIndicator = ({ slot }) => {
     return (
         <span className={`text-[10px] font-mono font-bold ${colorClass}`}>{normalizedStatus}</span>
     );
+};
+
+const ChargeTimeoutIndicator = () => (
+    <span
+        className="inline-flex shrink-0 text-amber-700"
+        title="Charging start timed out"
+        aria-label="Charging start timed out"
+        data-kiosk-charge-timeout="true"
+    >
+        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 2h6M12 2v3m6.36 1.64 1.42-1.42M12 8v5l3 2" />
+            <circle cx="12" cy="14" r="8" />
+        </svg>
+    </span>
+);
+
+const isSlotInChargeTimeout = (module, slot, now) => {
+    const state = module?.chargeControl?.[`slot${slot?.position}`];
+    const blockedUntil = Number(state?.blockedUntil);
+
+    return String(state?.blockedAction || '').trim().toLowerCase() === 'start' &&
+        Number.isFinite(blockedUntil) &&
+        blockedUntil > now;
 };
 
 const moduleIdsMatch = (left, right) => {
@@ -108,6 +131,7 @@ const resolvePlaylistAssetKind = (asset) => {
 
 // --- Main Detail Panel Component ---
 function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSlots, ejectingSlots, failedEjectSlots, lockingSlots, t, onCommand, onNavigateToChargers, serverUiVersion, serverFlowVersion, clientInfo, mockNow }) {
+    const [mountedAt] = useState(() => Date.now());
     const isOnline = isKioskOnline(kiosk, mockNow);
     const isV2Kiosk = isNewSchemaKiosk(kiosk);
     const stationId = kiosk.stationid;
@@ -116,6 +140,8 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     const showModuleFirmwareMetadata = isV2Kiosk;
     const showInlineModuleIds = ['CT3', 'CT4', 'CT8', 'CT12', 'CK24', 'CK48'].includes(kiosk.hardware?.type);
     const chargeReadyThreshold = getKioskPowerThreshold(kiosk);
+    const mockNowMs = mockNow instanceof Date ? mockNow.getTime() : Number(mockNow);
+    const chargeTimeoutNow = Number.isFinite(mockNowMs) ? mockNowMs : mountedAt;
     const uiProfileStatus = useMemo(() => resolveKioskUiProfileStatus(kiosk), [kiosk]);
     useEffect(() => installKioskInteractionDebugCapture(), []);
     const primaryMediaAsset = useMemo(() => {
@@ -462,6 +488,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         const canEject = clientInfo.commands.eject;
         const canLock = clientInfo.commands.lock;
         const hasCharger = slotHasDisplayableCharger(slot);
+        const isChargeTimedOut = isSlotInChargeTimeout(module, slot, chargeTimeoutNow);
         const ejectDisabledReason = !canEject ? 'permission' : !isOnline ? 'offline' : '';
         const lockDisabledReason = !isOnline ? 'offline' : '';
 
@@ -506,6 +533,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                             <span className="flex items-center gap-1 text-xs font-mono font-bold">
                                 <span>{hasCharger ? `${slot.batteryLevel}%` : t('empty')}</span>
                                 <ChargeStatusIndicator slot={slot} />
+                                {isChargeTimedOut && <ChargeTimeoutIndicator />}
                             </span>
                             <span className="text-[10px] text-gray-400 font-mono leading-tight truncate">{'\u00A0'}</span>
                         </div>
@@ -792,6 +820,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         const { slot, module, displayPosition } = entry;
         const style = getSlotStyle(slot, module);
         const hasCharger = slotHasDisplayableCharger(slot);
+        const isChargeTimedOut = isSlotInChargeTimeout(module, slot, chargeTimeoutNow);
         const canEject = clientInfo.commands.eject;
         const canLock = clientInfo.commands.lock;
         const isCK48CompactSlot = kiosk.hardware?.type === 'CK48';
@@ -845,6 +874,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                 {hasCharger ? `${slot.batteryLevel}%` : '—'}
                             </span>
                             <ChargeStatusIndicator slot={slot} />
+                            {isChargeTimedOut && <ChargeTimeoutIndicator />}
                         </div>
                     </button>
                     {hasCharger && (

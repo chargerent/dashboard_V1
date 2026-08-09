@@ -65,6 +65,13 @@ const rentalInteractionId = (rental) => normalizeText(
     rental?.reservationId || rental?.paymentAttemptId,
 );
 
+const isUidRentalRecord = (rental) =>
+  normalizeStatus(rental?.source) === "p68_uid" ||
+  normalizeStatus(rental?.paymentStatus) === "uid_authorized" ||
+  normalizeStatus(rental?.paymentstatus) === "uid_authorized" ||
+  normalizeStatus(rental?.rentalFlow) === "p68-uid-postvend-v1" ||
+  normalizeStatus(rental?.createdFrom) === "p68-uid-postvend-v1";
+
 const kioskInteractionContext = (kiosk) => {
   const interaction = kiosk?.interaction?.current || kiosk?.interaction?.lastCompleted || {};
   return {
@@ -261,9 +268,10 @@ const rentalInteractionCandidates = (before, after) => {
   if (!after) return [];
   const previousStatus = normalizeStatus(before?.status);
   const currentStatus = normalizeStatus(after.status);
+  const uidRental = isUidRentalRecord(after);
   const candidates = [];
 
-  if (!before && after.rentalTime && [
+  if (!uidRental && !before && after.rentalTime && [
     "payment_approved",
     "rented",
     "returned",
@@ -278,7 +286,8 @@ const rentalInteractionCandidates = (before, after) => {
       transactionId: rentalTransactionId(after),
       sourceSurface: interactionSurface(after.source || after.rentalFlow || after.gateway),
     });
-  } else if (previousStatus !== currentStatus && currentStatus === "payment_approved") {
+  } else if (!uidRental && previousStatus !== currentStatus &&
+      currentStatus === "payment_approved") {
     candidates.push({
       type: "rental_paid",
       summary: "Rental paid",
@@ -300,7 +309,10 @@ const rentalInteractionCandidates = (before, after) => {
       failed: ["rental_failed", "Rental failed", after.failedAt || after.lastUpdate],
       vend_failed: ["charger_dispense_failed", "Charger dispense failed", after.failedAt || after.lastUpdate],
     };
-    const statusEvent = statusEvents[currentStatus];
+    // UID rentals are physically established by their vend_succeeded audit event.
+    // Do not synthesize "Rental paid" or a second "Charger rented" event for them.
+    const statusEvent = uidRental && currentStatus === "rented" ? null :
+      statusEvents[currentStatus];
     if (statusEvent) {
       candidates.push({
         type: statusEvent[0],
@@ -324,6 +336,10 @@ const rentalInteractionCandidates = (before, after) => {
             currentStatus === "returned" ? after.returnSource :
               (after.source || after.rentalFlow || after.gateway),
         ),
+        details: currentStatus === "purchased" ? {
+          rentalTime: after.rentalTime || after.rentedAt || null,
+          overdueTime: after.overdueTime || null,
+        } : undefined,
       });
     }
   }
@@ -536,8 +552,11 @@ const watchdogCandidates = (kiosk, monitor, nowMs) => {
 
   modules.forEach((module, index) => {
     const id = moduleKey(module, index);
-    const seenAt = asMillis(module?.lastUpdated ?? module?.timestamp ?? module?.lastSeenAt);
     if (!moduleConnected(module, kiosk, nowMs)) {
+      const trackedState = monitor?.moduleStates?.[id];
+      const disconnectedEnteredAt = trackedState?.connected === false ?
+        (asMillis(trackedState.enteredAt) ?? nowMs) :
+        nowMs;
       candidates.push({
         key: `module-${id}-disconnected`,
         category: "module",
@@ -546,8 +565,8 @@ const watchdogCandidates = (kiosk, monitor, nowMs) => {
         source: v2Kiosk ? "besiter" : "kiosk",
         moduleId: id,
         summary: `Module ${id} is disconnected`,
-        enteredAt: asMillis(monitor?.moduleStates?.[id]?.enteredAt) ?? seenAt ?? nowMs,
-        durationMs: nowMs - (asMillis(monitor?.moduleStates?.[id]?.enteredAt) ?? seenAt ?? nowMs),
+        enteredAt: disconnectedEnteredAt,
+        durationMs: Math.max(0, nowMs - disconnectedEnteredAt),
       });
     }
   });

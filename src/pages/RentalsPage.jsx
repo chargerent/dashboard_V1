@@ -24,7 +24,6 @@ import { normalizeText, textEquals, textIncludes } from '../utils/text';
 import {
     formatRentalChargeAmount,
     hasRefundRequest,
-    isRefundedRental,
     isReturnedRentalStatus,
     isSuccessfulRefundStatus,
     normalizeRefundStatus,
@@ -37,6 +36,7 @@ import {
     createStationVersionMap,
     rentalHasLogError,
     rentalMatchesActiveFilters,
+    rentalMatchesSearchTerm,
 } from '../utils/rentalQueryFilters.js';
 import { isV2Kiosk } from '../utils/helpers.js';
 import { db } from '../firebase-config';
@@ -1981,61 +1981,13 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
             rentals = rentals.filter(rental => scopedStationIds.has(String(rental.rentalStationid)));
         }
 
-        if (activeFilters.version && activeFilters.version !== 'all') {
-            rentals = rentals.filter(r => r.stationVersion === activeFilters.version);
-        }
-
-        if (activeFilters.gateway && activeFilters.gateway !== 'all') {
-            rentals = rentals.filter(r => normalizeText(r.gateway) === activeFilters.gateway);
-        }
-
         const lowercasedSearch = normalizeText(searchTerm);
-        const isCardLast4Search = /^\d{4}$/.test(lowercasedSearch);
-
-        // Search is an override: once a query is entered, ignore period/status/return-type filters.
         if (lowercasedSearch) {
-            if (isCardLast4Search) {
-                rentals = rentals.filter(r => textEquals(r.card_last4, lowercasedSearch));
-
-                return rentals.sort((a, b) => {
-                    const bTime = getRentalActivityDate(b)?.getTime() ?? 0;
-                    const aTime = getRentalActivityDate(a)?.getTime() ?? 0;
-                    return bTime - aTime;
-                });
-            }
-
-            rentals = rentals.filter(r =>
-                textIncludes(r.rentalLocation, lowercasedSearch) ||
-                textIncludes(r.rentalPlace, lowercasedSearch) ||
-                textIncludes(r.rentalStationid, lowercasedSearch) ||
-                textIncludes(r.card_last4, lowercasedSearch) ||
-                textIncludes(r.sn, lowercasedSearch) ||
-                textIncludes(r.chargerid, lowercasedSearch) ||
-                textIncludes(r.rawid, lowercasedSearch) ||
-                textIncludes(r.documentId, lowercasedSearch) ||
-                textIncludes(r.orderid, lowercasedSearch) ||
-                textIncludes(r.transactionid, lowercasedSearch) ||
-                textIncludes(r.transactionId, lowercasedSearch) ||
-                textIncludes(r.paymentSessionId, lowercasedSearch) ||
-                textIncludes(r.paymentAttemptId, lowercasedSearch) ||
-                textIncludes(r.vendState, lowercasedSearch) ||
-                textIncludes(r.failureReason, lowercasedSearch) ||
-                textIncludes(r.lastVendFailureReason, lowercasedSearch) ||
-                (Array.isArray(r.vendAttempts) && r.vendAttempts.some(attempt => (
-                    textIncludes(attempt.reason, lowercasedSearch) ||
-                    textIncludes(attempt.exitStatus, lowercasedSearch) ||
-                    textIncludes(attempt.solenoidStatus, lowercasedSearch)
-                )))
-            );
-
-            return rentals.sort((a, b) => {
-                const bTime = getRentalActivityDate(b)?.getTime() ?? 0;
-                const aTime = getRentalActivityDate(a)?.getTime() ?? 0;
-                return bTime - aTime;
-            });
+            rentals = rentals.filter(rental => (
+                rentalMatchesSearchTerm(rental, lowercasedSearch)
+            ));
         }
 
-        // Filter by period
         if (!referenceTime) return []; // Guard against undefined referenceTime
 
         const now = safeToDate(referenceTime) || new Date();
@@ -2066,22 +2018,12 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
             return rentalDate && rentalDate >= startDate;
         });
 
-        // Filter by status
-        if (activeFilters.status === 'short_rental') {
-            const FIVE_MINUTES_IN_MS = 5 * 60 * 1000;
-            rentals = rentals.filter(r => isReturnedRentalStatus(r.status) && r.rentalPeriod && r.rentalPeriod < FIVE_MINUTES_IN_MS);
-        } else if (activeFilters.status === 'refunded') {
-            rentals = rentals.filter(isRefundedRental);
-        } else if (activeFilters.status === 'error') {
-            rentals = rentals.filter(rentalHasLogError);
-        } else if (activeFilters.status !== 'all') {
-            rentals = rentals.filter(r => normalizeRentalStatusKey(r.status) === activeFilters.status);
-        }
-
-        // Filter by returnType
-        if (activeFilters.returnType && activeFilters.returnType !== 'all') {
-            rentals = rentals.filter(r => r.returnType === activeFilters.returnType);
-        }
+        rentals = rentals.filter(rental => (
+            rentalMatchesActiveFilters(rental, activeFilters, {
+                getStationVersion: item => item?.stationVersion || '',
+                hasLogError: rentalHasLogError,
+            })
+        ));
 
         // Sort by most recent
         return rentals.sort((a, b) => {

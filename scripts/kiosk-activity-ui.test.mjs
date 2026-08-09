@@ -115,6 +115,13 @@ test('activity page paginates history and supports station deep links', async ()
     assert.match(activityPage, /const groupInteractionEvents/);
     assert.match(activityPage, /const rentalTimelineKey/);
     assert.match(activityPage, /const TRANSACTION_TIMELINE_EVENT_TYPES = new Set/);
+    assert.match(activityPage, /const PURCHASED_RENTAL_STYLE = 'border-sky-200 bg-sky-50 text-sky-900'/);
+    assert.match(activityPage, /return 'Rental closed — purchased'/);
+    assert.match(activityPage, /'charger_purchased'/);
+    assert.match(activityPage, /Rental \{activityTimeLabel\(rentalTime\)\}/);
+    assert.match(activityPage, /Overdue \{activityTimeLabel\(overdueTime\)\}/);
+    assert.match(activityPage, /events\.length === 1 \? 'step' : 'steps'/);
+    assert.match(activityPage, /where\(documentId\(\), 'in', rentalRecordIds\)/);
     assert.match(activityPage, /where\('transactionId', 'in', returnTransactionIds\)/);
     assert.doesNotMatch(activityPage, /\.filter\(\(event\) => event\.stationId === selectedStation\)/);
     assert.match(activityPage, /const isTransactionEvent = event\.category === 'interaction'/);

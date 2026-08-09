@@ -2,7 +2,7 @@ import {
     isRefundedRental,
     isReturnedRentalStatus,
 } from './rentals.js';
-import { normalizeText } from './text.js';
+import { normalizeText, textEquals, textIncludes } from './text.js';
 
 const FIVE_MINUTES_IN_MS = 5 * 60 * 1000;
 
@@ -268,4 +268,37 @@ export const rentalMatchesActiveFilters = (
     if (status === 'error') return hasLogError(rental);
 
     return normalizeStatusKey(rental?.status) === status;
+};
+
+export const rentalMatchesSearchTerm = (rental, searchTerm) => {
+    const normalizedSearch = normalizeText(searchTerm);
+    if (!normalizedSearch) return true;
+
+    if (/^\d{4}$/.test(normalizedSearch)) {
+        return textEquals(rental?.card_last4, normalizedSearch);
+    }
+
+    return (
+        textIncludes(rental?.rentalLocation, normalizedSearch) ||
+        textIncludes(rental?.rentalPlace, normalizedSearch) ||
+        textIncludes(rental?.rentalStationid, normalizedSearch) ||
+        textIncludes(rental?.card_last4, normalizedSearch) ||
+        textIncludes(rental?.sn, normalizedSearch) ||
+        textIncludes(rental?.chargerid, normalizedSearch) ||
+        textIncludes(rental?.rawid, normalizedSearch) ||
+        textIncludes(rental?.documentId, normalizedSearch) ||
+        textIncludes(rental?.orderid, normalizedSearch) ||
+        textIncludes(rental?.transactionid, normalizedSearch) ||
+        textIncludes(rental?.transactionId, normalizedSearch) ||
+        textIncludes(rental?.paymentSessionId, normalizedSearch) ||
+        textIncludes(rental?.paymentAttemptId, normalizedSearch) ||
+        textIncludes(rental?.vendState, normalizedSearch) ||
+        textIncludes(rental?.failureReason, normalizedSearch) ||
+        textIncludes(rental?.lastVendFailureReason, normalizedSearch) ||
+        (Array.isArray(rental?.vendAttempts) && rental.vendAttempts.some(attempt => (
+            textIncludes(attempt?.reason, normalizedSearch) ||
+            textIncludes(attempt?.exitStatus, normalizedSearch) ||
+            textIncludes(attempt?.solenoidStatus, normalizedSearch)
+        )))
+    );
 };

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
     collection,
+    documentId,
     getDocs,
     limit,
     onSnapshot,
@@ -52,6 +53,7 @@ const SEVERITY_STYLES = {
     info: 'border-slate-200 bg-white text-slate-700',
 };
 const RENTAL_INTERACTION_STYLE = 'border-emerald-200 bg-emerald-50 text-emerald-900';
+const PURCHASED_RENTAL_STYLE = 'border-sky-200 bg-sky-50 text-sky-900';
 const TRANSACTION_TIMELINE_EVENT_TYPES = new Set([
     'rental_paid',
     'charger_reserved',
@@ -93,10 +95,9 @@ const timeValue = (value) => {
     return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const eventTimeLabel = (event) => {
-    const value = eventTime(event);
+const activityTimeLabel = (value) => {
     if (!value) return 'Time unavailable';
-    const normalized = value instanceof Date ? value : new Date(value);
+    const normalized = value?.toDate?.() || (value instanceof Date ? value : new Date(value));
     if (Number.isNaN(normalized.getTime())) return 'Time unavailable';
     return normalized.toLocaleString(undefined, {
         month: 'short',
@@ -106,6 +107,8 @@ const eventTimeLabel = (event) => {
         second: '2-digit',
     });
 };
+
+const eventTimeLabel = (event) => activityTimeLabel(eventTime(event));
 
 const formatDuration = (durationMs) => {
     const totalMinutes = Math.max(0, Math.floor(Number(durationMs || 0) / 60000));
@@ -205,6 +208,9 @@ const normalizeActivityEvent = (event, fallbackSurface) => {
 
 const interactionTitle = (events, cardKind = '') => {
     if (cardKind === 'return') return 'Charger return';
+    if (cardKind === 'rental' && events.some((event) => event.type === 'charger_purchased')) {
+        return 'Rental closed — purchased';
+    }
     if (cardKind === 'rental') return 'Rental interaction';
     const kind = events.find((event) => event.interactionKind)?.interactionKind;
     if (kind === 'rental' || kind === 'rent') return 'Rental interaction';
@@ -236,7 +242,7 @@ const uniqueTimelineEvents = (events) => [...new Map(
     interactionSequence(left) - interactionSequence(right)
 ));
 
-const groupInteractionEvents = (activityEvents, relatedTimelineEvents = []) => {
+const groupInteractionEvents = (activityEvents, relatedTimelineEvents = [], rentalRecords = {}) => {
     const grouped = new Map();
     const items = [];
 
@@ -280,6 +286,7 @@ const groupInteractionEvents = (activityEvents, relatedTimelineEvents = []) => {
         if (timelinesByRental.has(group.transactionKey)) {
             group.events = timelinesByRental.get(group.transactionKey);
         }
+        group.rentalRecord = rentalRecords[group.transactionKey] || null;
     });
     return items.sort((left, right) => right.occurredAt - left.occurredAt);
 };
@@ -364,7 +371,7 @@ function ActivityRow({ event, open = false, onNavigateToDashboard }) {
     );
 }
 
-function InteractionCard({ events, cardEvent, cardKind, onNavigateToDashboard }) {
+function InteractionCard({ events, cardEvent, cardKind, rentalRecord, onNavigateToDashboard }) {
     const firstEvent = events[0];
     const lastEvent = events.at(-1);
     const displayEvent = cardEvent || firstEvent;
@@ -376,14 +383,19 @@ function InteractionCard({ events, cardEvent, cardKind, onNavigateToDashboard })
         event.source === 'rental' ||
         Boolean(event.transactionId)
     ));
-    const style = severity === 'info' && isRentalInteraction
-        ? RENTAL_INTERACTION_STYLE
-        : SEVERITY_STYLES[severity] || SEVERITY_STYLES.info;
+    const purchasedEvent = events.find((event) => event.type === 'charger_purchased');
+    const isPurchasedRental = Boolean(purchasedEvent);
+    const style = severity === 'info' && isPurchasedRental
+        ? PURCHASED_RENTAL_STYLE
+        : severity === 'info' && isRentalInteraction
+            ? RENTAL_INTERACTION_STYLE
+            : SEVERITY_STYLES[severity] || SEVERITY_STYLES.info;
     const transactionIds = [...new Set(events.map((event) => event.transactionId).filter(Boolean))];
     const completed = events.some((event) => [
         'interaction_completed',
         'charger_dispensed',
         'charger_returned',
+        'charger_purchased',
     ].includes(event.type));
     const failed = events.some((event) => ['interaction_failed', 'interaction_timed_out', 'charger_dispense_failed', 'payment_declined'].includes(event.type));
     const rentalStartedAt = events.find((event) => event.type === 'charger_rented');
@@ -391,6 +403,8 @@ function InteractionCard({ events, cardEvent, cardKind, onNavigateToDashboard })
     const rentalDurationMs = rentalStartedAt && rentalReturnedAt
         ? Math.max(0, timeValue(eventTime(rentalReturnedAt)) - timeValue(eventTime(rentalStartedAt)))
         : 0;
+    const rentalTime = rentalRecord?.rentalTime || purchasedEvent?.details?.rentalTime;
+    const overdueTime = rentalRecord?.overdueTime || purchasedEvent?.details?.overdueTime;
 
     return (
         <details className={`group rounded-lg border ${style}`}>
@@ -416,9 +430,11 @@ function InteractionCard({ events, cardEvent, cardKind, onNavigateToDashboard })
                 </div>
                 <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] opacity-75">
                     <span>{eventTimeLabel(displayEvent)}</span>
-                    <span>{events.length} steps</span>
+                    <span>{events.length} {events.length === 1 ? 'step' : 'steps'}</span>
                     {transactionIds.map((transactionId) => <span key={transactionId}>Transaction {transactionId}</span>)}
                     {rentalDurationMs > 0 && <span>Rental duration {formatDuration(rentalDurationMs)}</span>}
+                    {isPurchasedRental && rentalTime && <span>Rental {activityTimeLabel(rentalTime)}</span>}
+                    {isPurchasedRental && overdueTime && <span>Overdue {activityTimeLabel(overdueTime)}</span>}
                     <span className="font-semibold group-open:hidden">View timeline</span>
                 </div>
             </summary>
@@ -486,6 +502,7 @@ export default function ActivityPage({
     const [incidents, setIncidents] = useState([]);
     const [events, setEvents] = useState([]);
     const [relatedTimelineEvents, setRelatedTimelineEvents] = useState([]);
+    const [rentalRecords, setRentalRecords] = useState({});
     const [cursor, setCursor] = useState(null);
     const [hasMore, setHasMore] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -571,6 +588,7 @@ export default function ActivityPage({
         if (!selectedStation) {
             setEvents([]);
             setRelatedTimelineEvents([]);
+            setRentalRecords({});
             setCursor(null);
             setHasMore(false);
             setLoading(false);
@@ -595,7 +613,13 @@ export default function ActivityPage({
                 .map((event) => event.transactionId)
                 .filter(Boolean))]
                 .slice(0, 30);
+            const purchasedTransactionIds = [...new Set(nextEvents
+                .filter((event) => event.type === 'charger_purchased')
+                .map((event) => event.transactionId)
+                .filter(Boolean))]
+                .slice(0, 30);
             let nextRelatedEvents = [];
+            let nextRentalRecords = {};
             if (returnTransactionIds.length > 0) {
                 try {
                     const relatedSnapshot = await getDocs(query(
@@ -609,10 +633,31 @@ export default function ActivityPage({
                     console.warn('Unable to enrich returned rental timelines', timelineError);
                 }
             }
+            const rentalRecordIds = [...new Set([
+                ...returnTransactionIds,
+                ...purchasedTransactionIds,
+            ])].slice(0, 30);
+            if (rentalRecordIds.length > 0) {
+                try {
+                    const rentalSnapshot = await getDocs(query(
+                        collection(db, 'rentals'),
+                        where(documentId(), 'in', rentalRecordIds),
+                    ));
+                    nextRentalRecords = Object.fromEntries(rentalSnapshot.docs.map((document) => [
+                        document.id,
+                        { id: document.id, ...document.data() },
+                    ]));
+                } catch (rentalError) {
+                    console.warn('Unable to load rental timing details', rentalError);
+                }
+            }
             setEvents((previous) => append ? [...previous, ...nextEvents] : nextEvents);
             setRelatedTimelineEvents((previous) => append
                 ? uniqueTimelineEvents([...previous, ...nextRelatedEvents])
                 : nextRelatedEvents);
+            setRentalRecords((previous) => append
+                ? { ...previous, ...nextRentalRecords }
+                : nextRentalRecords);
             setCursor(snapshot.docs.at(-1) || null);
             setHasMore(snapshot.size === PAGE_SIZE);
         } catch (loadError) {
@@ -627,6 +672,7 @@ export default function ActivityPage({
     useEffect(() => {
         setEvents([]);
         setRelatedTimelineEvents([]);
+        setRentalRecords({});
         setCursor(null);
         loadEvents();
     }, [loadEvents]);
@@ -685,7 +731,8 @@ export default function ActivityPage({
     const visibleActivityItems = useMemo(() => groupInteractionEvents(
         visibleEvents,
         relatedTimelineEvents,
-    ), [relatedTimelineEvents, visibleEvents]);
+        rentalRecords,
+    ), [relatedTimelineEvents, rentalRecords, visibleEvents]);
     const seenScope = selectedStation || 'all-kiosks';
     const newestActivityByFilter = useMemo(() => Object.fromEntries(FILTERS.map(([filterValue]) => {
         const newest = [...visibleIncidents, ...events]
@@ -809,7 +856,7 @@ export default function ActivityPage({
                     ) : visibleActivityItems.length > 0 ? (
                         <div className="space-y-3">
                             {visibleActivityItems.map((item) => item.type === 'interaction'
-                                ? <InteractionCard key={`interaction:${item.key}`} events={item.events} cardEvent={item.cardEvent} cardKind={item.cardKind} onNavigateToDashboard={onNavigateToDashboard} />
+                                ? <InteractionCard key={`interaction:${item.key}`} events={item.events} cardEvent={item.cardEvent} cardKind={item.cardKind} rentalRecord={item.rentalRecord} onNavigateToDashboard={onNavigateToDashboard} />
                                 : <ActivityRow key={item.key} event={item.event} onNavigateToDashboard={onNavigateToDashboard} />)}
                         </div>
                     ) : (

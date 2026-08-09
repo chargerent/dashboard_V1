@@ -164,6 +164,36 @@ test("detects V2 module telemetry that stays stale", () => {
   assert.equal(candidates.some(({type}) => type === "kiosk_telemetry_overdue"), false);
 });
 
+test("starts module disconnect duration at the disconnect transition", () => {
+  const now = Date.now();
+  const staleConnectedAt = new Date(now - (16 * 60 * 60_000));
+  const kiosk = {
+    stationid: "FR8010",
+    mqtt: true,
+    modules: [{
+      id: "864253060998911",
+      lastUpdated: new Date(now - 11 * 60_000).toISOString(),
+    }],
+  };
+
+  const newlyDisconnected = watchdogCandidates(kiosk, {
+    moduleStates: {
+      "864253060998911": {connected: true, enteredAt: staleConnectedAt},
+    },
+  }, now).find(({type}) => type === "module_disconnected");
+  assert.equal(newlyDisconnected.enteredAt, now);
+  assert.equal(newlyDisconnected.durationMs, 0);
+
+  const disconnectedAt = new Date(now - 6 * 60_000);
+  const stillDisconnected = watchdogCandidates(kiosk, {
+    moduleStates: {
+      "864253060998911": {connected: false, enteredAt: disconnectedAt},
+    },
+  }, now).find(({type}) => type === "module_disconnected");
+  assert.equal(stillDisconnected.enteredAt, disconnectedAt.getTime());
+  assert.equal(stillDisconnected.durationMs, 6 * 60_000);
+});
+
 test("groups an overdue kiosk heartbeat with module activity", () => {
   const now = Date.now();
   const candidates = watchdogCandidates({
@@ -203,6 +233,46 @@ test("records paid, rented, and returned rental interactions", () => {
     type: "charger_returned",
     stationId: "US0092",
   }]);
+});
+
+test("UID rentals rely on physical vend audit and never appear paid", () => {
+  const rental = {
+    status: "rented",
+    source: "p68_uid",
+    paymentStatus: "uid_authorized",
+    rentalFlow: "p68-uid-postvend-v1",
+    rentalStationid: "FR0140",
+    rentalTime: "2026-08-09T03:36:39.561Z",
+    orderid: "UID:example",
+  };
+
+  assert.deepEqual(rentalInteractionCandidates(null, rental), []);
+
+  const returned = rentalInteractionCandidates(rental, {
+    ...rental,
+    status: "returned",
+    returnStationid: "FR0140",
+    returnTime: "2026-08-09T04:36:39.561Z",
+  });
+  assert.equal(returned.length, 1);
+  assert.equal(returned[0].type, "charger_returned");
+});
+
+test("records purchased rental timing on the closing event", () => {
+  const rentalTime = "2026-08-07T13:27:51.453Z";
+  const overdueTime = "2026-08-08T13:27:51.453Z";
+  const [purchased] = rentalInteractionCandidates({status: "rented"}, {
+    status: "purchased",
+    rentalStationid: "FR1010",
+    rentalTime,
+    overdueTime,
+    purchaseTime: "2026-08-08T13:29:25.000Z",
+    orderid: "413154bf-6392",
+  });
+
+  assert.equal(purchased.type, "charger_purchased");
+  assert.equal(purchased.interactionKind, "rental");
+  assert.deepEqual(purchased.details, {rentalTime, overdueTime});
 });
 
 test("correlates new rental audit events with one interaction", () => {

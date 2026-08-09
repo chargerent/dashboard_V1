@@ -7,6 +7,7 @@ import {
     createStationVersionMap,
     rentalHasLogError,
     rentalMatchesActiveFilters,
+    rentalMatchesSearchTerm,
 } from '../src/utils/rentalQueryFilters.js';
 import {
     isPendingRefundStatus,
@@ -232,6 +233,57 @@ test('secondary gateway, return type, and station-version filters remain combine
             filters,
             { getStationVersion: () => 'v1' }
         ),
+        false
+    );
+});
+
+test('active filters can narrow an already-searched rental result set', () => {
+    const searchResults = [
+        {
+            rentalStationid: 'US0089',
+            status: 'returned',
+            gateway: 'UID',
+            returnType: 'auto-return',
+            stationVersion: 'v2',
+        },
+        {
+            rentalStationid: 'US0089',
+            status: 'rented',
+            gateway: 'UID',
+            returnType: 'auto-return',
+            stationVersion: 'v2',
+        },
+        {
+            rentalStationid: 'US0108',
+            status: 'returned',
+            gateway: 'UID',
+            returnType: 'auto-return',
+            stationVersion: 'v2',
+        },
+    ];
+    const filters = {
+        status: 'returned',
+        gateway: 'uid',
+        returnType: 'auto-return',
+        version: 'v2',
+    };
+
+    const filtered = searchResults
+        .filter(rental => rentalMatchesSearchTerm(rental, 'US0089'))
+        .filter(rental => rentalMatchesActiveFilters(rental, filters, {
+            getStationVersion: item => item.stationVersion,
+        }));
+
+    assert.deepEqual(filtered, [searchResults[0]]);
+});
+
+test('four-digit searches remain exact card-last-four searches', () => {
+    assert.equal(
+        rentalMatchesSearchTerm({ card_last4: '6263', sn: '6263' }, '6263'),
+        true
+    );
+    assert.equal(
+        rentalMatchesSearchTerm({ card_last4: '1234', sn: '6263' }, '6263'),
         false
     );
 });
