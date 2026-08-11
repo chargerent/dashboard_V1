@@ -619,6 +619,11 @@ const SCREEN_UI_VISUAL_MODES = Object.freeze([
     label: 'Airport Board',
     description: 'A polished departures-board visual with terminal rows, ambient runway motion, and boarding-pass QR moments.',
   },
+  {
+    id: 'dot-grid-concierge',
+    label: 'Dot Grid Concierge',
+    description: 'A minimal animated dot field that responds to the conversation and transforms into QR codes.',
+  },
 ]);
 const SCREEN_UI_GOLF_QR_MODES = Object.freeze([
   {
@@ -871,6 +876,9 @@ function normalizeScreenUiVisualMode(value, fallback = DEFAULT_SCREEN_UI.visualM
     departures: 'airport-departure',
     'departure-board': 'airport-departure',
     terminal: 'airport-departure',
+    'dot-grid': 'dot-grid-concierge',
+    grid: 'dot-grid-concierge',
+    'grid-concierge': 'dot-grid-concierge',
   }[raw] || raw;
   return SCREEN_UI_VISUAL_MODES.some((mode) => mode.id === normalized) ? normalized : fallback;
 }
@@ -1825,6 +1833,7 @@ function createEmptyEventDraft(options = {}) {
     screenUiByStationId: {},
     topics: [],
     activations: [],
+    publicAssets: [],
     intake: createDefaultIntakeSettings({
       enabled: shouldCreateIntakeCode,
       sharedCode,
@@ -2847,6 +2856,27 @@ function normalizeDailyHours(value, eventDays = []) {
   }, {});
 }
 
+function normalizePublicAsset(asset) {
+  const source = asset && typeof asset === 'object' ? asset : {};
+
+  return {
+    id: String(source.id || source.assetId || '').trim(),
+    assetType: String(source.assetType || source.type || 'document').trim(),
+    label: String(source.label || source.fileName || 'Event document').trim(),
+    language: String(source.language || 'en').trim().toLowerCase().split(/[-_]/)[0],
+    slug: String(source.slug || '').trim(),
+    fileName: String(source.fileName || '').trim(),
+    publicUrl: String(source.publicUrl || source.url || '').trim(),
+    active: source.active !== false,
+  };
+}
+
+function normalizePublicAssets(value) {
+  return (Array.isArray(value) ? value : [])
+    .map(normalizePublicAsset)
+    .filter((asset) => asset.id && asset.publicUrl && asset.active);
+}
+
 function normalizeEvent(event) {
   const generalSource = event?.general && typeof event.general === 'object' ? event.general : {};
   const boothStationIds = Array.isArray(event?.boothStationIds)
@@ -2898,6 +2928,7 @@ function normalizeEvent(event) {
     ),
     topics: Array.isArray(event?.topics) ? event.topics.map(normalizeTopic) : [],
     activations: Array.isArray(event?.activations) ? event.activations.map(normalizeActivation) : [],
+    publicAssets: normalizePublicAssets(event?.publicAssets),
     intake: normalizeIntakeSettings(event?.intake),
     createdAt: normalizeTimestampValue(event?.createdAt),
     updatedAt: normalizeTimestampValue(event?.updatedAt),
@@ -4264,14 +4295,22 @@ function IntakeStatusActionButton({
   );
 }
 
+function inferMenuLanguage(fileName) {
+  return /(?:^|[-_ ])fr(?:\.pdf)?$/i.test(String(fileName || '')) ? 'fr' : 'en';
+}
+
 function DataManagementSubmissionCard({
   submission,
   saving,
   deleting,
+  publishing,
   onOpenFile,
+  onPublishFile,
+  onUnpublishFile,
   onUpdateSubmission,
   onDeleteSubmission,
 }) {
+  const [fileLanguages, setFileLanguages] = useState({});
   const contactDetails = [
     submission.participantName,
     submission.email,
@@ -4398,6 +4437,13 @@ function DataManagementSubmissionCard({
           <div className="mt-3 divide-y divide-gray-100 rounded-md border border-gray-200">
             {files.map((file) => {
               const textReady = file.extractionStatus === 'ready' && file.extractedTextPath;
+              const publicAsset = file.publicAsset?.id && file.publicAsset?.publicUrl
+                ? normalizePublicAsset(file.publicAsset)
+                : null;
+              const selectedLanguage = fileLanguages[file.id]
+                || publicAsset?.language
+                || inferMenuLanguage(file.fileName);
+              const filePublishing = publishing === `${submission.id}:${file.id}`;
 
               return (
                 <div key={file.id} className="grid gap-3 p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
@@ -4414,10 +4460,15 @@ function DataManagementSubmissionCard({
                         {file.extractionError && (
                           <p className="mt-2 text-xs font-semibold text-rose-700">{file.extractionError}</p>
                         )}
+                        {publicAsset && (
+                          <p className="mt-2 text-xs font-semibold text-emerald-700">
+                            Published for guest QR viewing · {publicAsset.language.toUpperCase()}
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex max-w-full flex-wrap items-center gap-2">
                     <button
                       type="button"
                       onClick={() => onOpenFile(submission.id, file.id, false)}
@@ -4435,6 +4486,55 @@ function DataManagementSubmissionCard({
                       <DocumentTextIcon className="h-4 w-4" aria-hidden="true" />
                       Text
                     </button>
+                    {submission.status === 'approved' && (
+                      <>
+                        <select
+                          value={selectedLanguage}
+                          onChange={(event) => setFileLanguages((current) => ({
+                            ...current,
+                            [file.id]: event.target.value,
+                          }))}
+                          disabled={filePublishing}
+                          aria-label={`Language for ${file.fileName || 'uploaded PDF'}`}
+                          className="rounded-md border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm"
+                        >
+                          <option value="en">English</option>
+                          <option value="fr">French</option>
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => onPublishFile(submission.id, file, selectedLanguage)}
+                          disabled={filePublishing || saving || deleting}
+                          className="inline-flex items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 shadow-sm transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:text-emerald-300"
+                        >
+                          {filePublishing && (
+                            <ArrowPathIcon className="h-4 w-4 animate-spin" aria-hidden="true" />
+                          )}
+                          {publicAsset ? 'Update public menu' : 'Publish QR menu'}
+                        </button>
+                      </>
+                    )}
+                    {publicAsset && (
+                      <>
+                        <a
+                          href={publicAsset.publicUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-2 rounded-md bg-emerald-700 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-600"
+                        >
+                          <ArrowTopRightOnSquareIcon className="h-4 w-4" aria-hidden="true" />
+                          Open public menu
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => onUnpublishFile(submission.id, file)}
+                          disabled={filePublishing || saving || deleting}
+                          className="inline-flex items-center rounded-md border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-700 shadow-sm transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:text-rose-300"
+                        >
+                          Unpublish
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               );
@@ -4498,6 +4598,7 @@ export default function AiBoothsPage({
     loading: false,
     saving: false,
     deleting: false,
+    publishing: '',
     error: '',
     submissions: [],
   });
@@ -4749,12 +4850,18 @@ export default function AiBoothsPage({
     const approvedCount = dataSubmissions.filter((submission) => (
       submission.status === 'approved'
     )).length;
+    const publishedCount = dataSubmissions.reduce((sum, submission) => (
+      sum + (Array.isArray(submission.files)
+        ? submission.files.filter((file) => file.publicAsset?.id && file.publicAsset?.publicUrl).length
+        : 0)
+    ), 0);
 
     return {
       submissions: dataSubmissions.length,
       pdfs: pdfCount,
       submitted: submittedCount,
       approved: approvedCount,
+      published: publishedCount,
     };
   }, [dataSubmissions]);
   const syncedKioskAgentCount = eventDraft.boothStationIds.filter((stationId) => (
@@ -4947,6 +5054,111 @@ export default function AiBoothsPage({
         state: 'error',
         message: error?.message || 'Unable to open intake file.',
       });
+    }
+  }
+
+  function applyPublishedDeployment(deployment) {
+    if (!deployment?.id) {
+      return;
+    }
+
+    const normalizedDeployment = normalizeEvent(deployment);
+    const updateCollection = (collection) => collection.map((item) => (
+      item.id === normalizedDeployment.id ? normalizedDeployment : item
+    ));
+
+    if (normalizedDeployment.deploymentType === DEPLOYMENT_TYPE_INSTALL) {
+      setInstalls(updateCollection);
+    } else {
+      setEvents(updateCollection);
+    }
+    setEventDraft((current) => (
+      current.id === normalizedDeployment.id
+        ? { ...current, publicAssets: normalizedDeployment.publicAssets }
+        : current
+    ));
+  }
+
+  async function handlePublishIntakeFile(submissionId, file, language) {
+    const publishingKey = `${submissionId}:${file.id}`;
+    setDataManagementState((current) => ({
+      ...current,
+      publishing: publishingKey,
+      error: '',
+    }));
+
+    try {
+      const response = await callFunctionWithAuth('aiBooths_publishIntakeFile', {
+        submissionId,
+        fileId: file.id,
+        assetType: 'menu',
+        language,
+      });
+      const updatedSubmission = response?.submission;
+      setDataManagementState((current) => ({
+        ...current,
+        publishing: '',
+        submissions: updatedSubmission?.id
+          ? current.submissions.map((submission) => (
+            submission.id === updatedSubmission.id ? updatedSubmission : submission
+          ))
+          : current.submissions,
+      }));
+      applyPublishedDeployment(response?.deployment);
+      setStatus({
+        state: 'success',
+        message: `${file.fileName || 'Menu'} is ready for public QR viewing.`,
+      });
+    } catch (error) {
+      console.error(error);
+      const message = error?.message || 'Unable to publish this menu.';
+      setDataManagementState((current) => ({
+        ...current,
+        publishing: '',
+        error: message,
+      }));
+      setStatus({ state: 'error', message });
+    }
+  }
+
+  async function handleUnpublishIntakeFile(submissionId, file) {
+    if (!window.confirm(`Remove the public QR link for ${file.fileName || 'this menu'}?`)) {
+      return;
+    }
+
+    const publishingKey = `${submissionId}:${file.id}`;
+    setDataManagementState((current) => ({
+      ...current,
+      publishing: publishingKey,
+      error: '',
+    }));
+
+    try {
+      const response = await callFunctionWithAuth('aiBooths_unpublishIntakeFile', {
+        submissionId,
+        fileId: file.id,
+      });
+      const updatedSubmission = response?.submission;
+      setDataManagementState((current) => ({
+        ...current,
+        publishing: '',
+        submissions: updatedSubmission?.id
+          ? current.submissions.map((submission) => (
+            submission.id === updatedSubmission.id ? updatedSubmission : submission
+          ))
+          : current.submissions,
+      }));
+      applyPublishedDeployment(response?.deployment);
+      setStatus({ state: 'success', message: 'Public menu link removed.' });
+    } catch (error) {
+      console.error(error);
+      const message = error?.message || 'Unable to unpublish this menu.';
+      setDataManagementState((current) => ({
+        ...current,
+        publishing: '',
+        error: message,
+      }));
+      setStatus({ state: 'error', message });
     }
   }
 
@@ -8110,11 +8322,12 @@ export default function AiBoothsPage({
 		            </div>
 		          </div>
 
-	          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+	          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
 	            <DataManagementStatCard label="Submissions" value={dataSubmissionStats.submissions} />
 	            <DataManagementStatCard label="PDFs" value={dataSubmissionStats.pdfs} />
 	            <DataManagementStatCard label="Submitted" value={dataSubmissionStats.submitted} />
 	            <DataManagementStatCard label="Approved" value={dataSubmissionStats.approved} />
+	            <DataManagementStatCard label="Public QR PDFs" value={dataSubmissionStats.published} />
 	          </div>
 
 	          {dataManagementState.error && (
@@ -8156,9 +8369,12 @@ export default function AiBoothsPage({
 	                <DataManagementSubmissionCard
 	                  key={submission.id}
 	                  submission={submission}
-	                  saving={dataManagementState.saving}
+	                  saving={dataManagementState.saving || Boolean(dataManagementState.publishing)}
 	                  deleting={dataManagementState.deleting}
+	                  publishing={dataManagementState.publishing}
 	                  onOpenFile={handleOpenIntakeFile}
+	                  onPublishFile={handlePublishIntakeFile}
+	                  onUnpublishFile={handleUnpublishIntakeFile}
 	                  onUpdateSubmission={handleUpdateIntakeSubmission}
 	                  onDeleteSubmission={handleDeleteIntakeSubmission}
 	                />
@@ -8239,7 +8455,7 @@ export default function AiBoothsPage({
                 <h2 className="mt-2 text-2xl font-semibold text-slate-900">Knowledge base view</h2>
               </div>
 
-              <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                 {SCREEN_UI_VISUAL_MODES.map((mode) => {
                   const isSelected = activeScreenUi.visualMode === mode.id;
                   const isGolfMode = mode.id === 'golf-scorecard';

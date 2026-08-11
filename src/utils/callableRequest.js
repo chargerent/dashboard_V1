@@ -40,6 +40,8 @@ const HTTP_FUNCTION_NAME_MAP = {
   aiBooths_createIntakeFileReadUrl: 'aiBooths_httpCreateIntakeFileReadUrl',
   aiBooths_updateIntakeSubmission: 'aiBooths_httpUpdateIntakeSubmission',
   aiBooths_deleteIntakeSubmission: 'aiBooths_httpDeleteIntakeSubmission',
+  aiBooths_publishIntakeFile: 'aiBooths_httpPublishIntakeFile',
+  aiBooths_unpublishIntakeFile: 'aiBooths_httpUnpublishIntakeFile',
   aiBooths_publishAgent: 'aiBooths_httpPublishAgent',
   aiBooths_publishInstall: 'aiBooths_httpPublishInstall',
   stationBinding_getNextStation: 'stationBinding_httpGetNextStation',

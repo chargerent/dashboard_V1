@@ -20,6 +20,15 @@ const {
   pruneOperationalHistory,
   runWatchdog: runKioskOperationalWatchdog,
 } = require("./kioskOperationalEvents");
+const {
+  buildPublicAssetId,
+  buildPublicAssetStoragePath,
+  inferPublicAssetDetails,
+  normalizePublicAsset,
+  normalizePublicAssetLanguage,
+  normalizePublicAssetType,
+  slugifyPublicAsset,
+} = require("./aiBoothPublicAssets");
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -49,6 +58,7 @@ const DEFAULT_AI_BOOTH_INTAKE_MAX_FILES = 8;
 const DEFAULT_AI_BOOTH_INTAKE_MAX_FILE_SIZE_MB = 20;
 const AI_BOOTH_EVENTS_COLLECTION = "aiBoothEvents";
 const AI_BOOTH_INSTALLS_COLLECTION = "aiBoothInstalls";
+const AI_BOOTH_PUBLIC_ASSETS_COLLECTION = "aiBoothPublicAssets";
 const EVENT_INTAKE_SUBMISSIONS_COLLECTION = "eventIntakeSubmissions";
 const UI_PROFILES_COLLECTION = "uiProfiles";
 const EVENT_INTAKE_STATUSES = new Set([
@@ -62,6 +72,9 @@ const EVENT_INTAKE_STATUSES = new Set([
 const STATION_RESERVATIONS_COLLECTION = "stationIdReservations";
 const DEFAULT_KIOSK_POWER_THRESHOLD = 80;
 const MAX_MEDIA_UPLOAD_BYTES = 250 * 1024 * 1024;
+const AI_BOOTH_PUBLIC_ASSET_BASE_URL = String(
+    process.env.AI_BOOTH_PUBLIC_ASSET_BASE_URL || "https://obailix.com/a",
+).replace(/\/+$/, "");
 const MAX_FIRMWARE_UPLOAD_BYTES = 512 * 1024 * 1024;
 const FIRMWARE_RELEASES_COLLECTION = "firmwareReleases";
 const FIRMWARE_CHANNELS_COLLECTION = "firmwareChannels";
@@ -1752,6 +1765,7 @@ function normalizeAiBoothIntakeStatus(value, fallback = "draft") {
 
 function serializeAiBoothIntakeFile(file) {
   const source = isPlainObject(file) ? file : {};
+  const publicAsset = isPlainObject(source.publicAsset) ? normalizePublicAsset(source.publicAsset) : null;
 
   return {
     id: cleanAiBoothText(source.id, 160),
@@ -1767,7 +1781,14 @@ function serializeAiBoothIntakeFile(file) {
     extractionStatus: cleanAiBoothText(source.extractionStatus || "pending", 80),
     extractionError: cleanAiBoothText(source.extractionError, 1000),
     uploadedAt: serializeTimestamp(source.uploadedAt),
+    publicAsset: publicAsset?.id && publicAsset.active ? publicAsset : null,
   };
+}
+
+function normalizeAiBoothPublicAssets(value) {
+  return (Array.isArray(value) ? value : [])
+      .map((asset) => normalizePublicAsset(asset))
+      .filter((asset) => asset.id && asset.publicUrl && asset.active);
 }
 
 function normalizeAiBoothIntakeLinks(value) {
@@ -1889,6 +1910,7 @@ function serializeAiBoothEvent(snapshot) {
     activations: Array.isArray(data.activations) ?
       data.activations.map((activation, index) => normalizeAiBoothActivation(activation, index)) :
       [],
+    publicAssets: normalizeAiBoothPublicAssets(data.publicAssets),
     golf: normalizeAiBoothGolfConfig(data.golf, general),
     intake: serializeAiBoothIntakeSettings(data.intake),
     agent: normalizeAiBoothAgent(data.agent, boothStationIds),
@@ -5265,6 +5287,19 @@ async function aiBoothsUpdateIntakeSubmissionImpl(data, authState) {
         "Submission status is invalid",
     );
   }
+  const hasPublishedFiles = (Array.isArray(existing.files) ? existing.files : [])
+      .some((file) => {
+        const publicAsset = isPlainObject(file?.publicAsset) ?
+          normalizePublicAsset(file.publicAsset) :
+          null;
+        return Boolean(publicAsset?.id && publicAsset.active);
+      });
+  if (requestedStatus !== "approved" && hasPublishedFiles) {
+    throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Unpublish this submission's guest PDFs before changing its approval status",
+    );
+  }
 
   const actor = cleanAiBoothText(
       authState?.profile?.email ||
@@ -5318,6 +5353,19 @@ async function aiBoothsDeleteIntakeSubmissionImpl(data) {
       existing.targetId || existing.installId || existing.eventId,
       existing.targetType || (existing.installId ? "install" : "event"),
   );
+  const hasPublishedFiles = (Array.isArray(existing.files) ? existing.files : [])
+      .some((file) => {
+        const publicAsset = isPlainObject(file?.publicAsset) ?
+          normalizePublicAsset(file.publicAsset) :
+          null;
+        return Boolean(publicAsset?.id && publicAsset.active);
+      });
+  if (hasPublishedFiles) {
+    throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Unpublish this submission's guest PDFs before deleting it",
+    );
+  }
   await deleteAiBoothIntakeSubmissionFiles(existing.files);
   await submissionRef.delete();
 
@@ -5370,6 +5418,256 @@ async function aiBoothsCreateIntakeFileReadUrlImpl(data) {
   });
 
   return {url, expiresInSeconds: 15 * 60};
+}
+
+function getFirebaseStorageDownloadToken(metadata = {}) {
+  return cleanAiBoothText(
+      metadata?.metadata?.firebaseStorageDownloadTokens ||
+      metadata?.metadata?.firebaseStorageDownloadToken,
+      500,
+  ).split(",")[0].trim();
+}
+
+function buildAiBoothPublicAssetUrl(assetId) {
+  return `${AI_BOOTH_PUBLIC_ASSET_BASE_URL}/${encodeURIComponent(assetId)}`;
+}
+
+function getIntakeFileForPublication(submission, fileId) {
+  const normalizedFileId = cleanAiBoothText(fileId, 160);
+  const files = Array.isArray(submission.files) ? submission.files : [];
+  const file = files.find((item) => cleanAiBoothText(item?.id, 160) === normalizedFileId);
+  if (!file) {
+    throw new functions.https.HttpsError("not-found", "Uploaded PDF was not found");
+  }
+  if (cleanAiBoothText(file.contentType || "application/pdf", 80) !== "application/pdf") {
+    throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Only approved PDF files can be published for guest QR viewing",
+    );
+  }
+  const storagePath = cleanAiBoothText(file.storagePath, 1000);
+  if (!storagePath.startsWith("intake/")) {
+    throw new functions.https.HttpsError("failed-precondition", "Intake PDF storage path is invalid");
+  }
+  return file;
+}
+
+async function aiBoothsPublishIntakeFileImpl(data, authState) {
+  const {submissionRef, submissionSnapshot} =
+    await getAiBoothIntakeSubmissionSnapshot(data?.submissionId);
+  const submission = submissionSnapshot.data() || {};
+  if (normalizeAiBoothIntakeStatus(submission.status) !== "approved") {
+    throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Approve the intake submission before publishing a guest QR asset",
+    );
+  }
+
+  const targetType = normalizeAiBoothDeploymentType(
+      submission.targetType || (submission.installId ? "install" : "event"),
+  );
+  const targetIdInput = submission.targetId || submission.installId || submission.eventId;
+  const {targetId, snapshot: deploymentSnapshot} =
+    await assertAiBoothDeploymentExists(targetIdInput, targetType);
+  const file = getIntakeFileForPublication(submission, data?.fileId);
+  const previousPublicAsset = isPlainObject(file.publicAsset) ?
+    normalizePublicAsset(file.publicAsset) :
+    null;
+  const inferred = inferPublicAssetDetails(file.fileName);
+  const assetType = normalizePublicAssetType(data?.assetType, inferred.assetType);
+  const language = normalizePublicAssetLanguage(data?.language, inferred.language);
+  const slug = slugifyPublicAsset(data?.slug || inferred.slug, assetType);
+  const label = cleanAiBoothText(data?.label || inferred.label || file.fileName, 240);
+  const assetInput = {targetType, targetId, assetType, language, slug};
+  const assetId = buildPublicAssetId(assetInput);
+  const storagePath = buildPublicAssetStoragePath(assetInput);
+  const bucket = getStorageBucket();
+  const sourceFile = bucket.file(cleanAiBoothText(file.storagePath, 1000));
+  const [sourceExists] = await sourceFile.exists();
+  if (!sourceExists) {
+    throw new functions.https.HttpsError("not-found", "Intake PDF is missing from storage");
+  }
+
+  const destinationFile = bucket.file(storagePath);
+  let downloadToken = "";
+  const [destinationExists] = await destinationFile.exists();
+  if (destinationExists) {
+    const [existingMetadata] = await destinationFile.getMetadata();
+    downloadToken = getFirebaseStorageDownloadToken(existingMetadata);
+  }
+  if (!downloadToken) {
+    downloadToken = crypto.randomUUID();
+  }
+
+  await sourceFile.copy(destinationFile);
+  await destinationFile.setMetadata({
+    contentType: "application/pdf",
+    contentDisposition: `inline; filename="${sanitizeFileName(file.fileName || `${slug}.pdf`)}"`,
+    cacheControl: "public,max-age=300",
+    metadata: {
+      firebaseStorageDownloadTokens: downloadToken,
+      sourceSubmissionId: submissionSnapshot.id,
+      sourceFileId: cleanAiBoothText(file.id, 160),
+      targetType,
+      targetId,
+      assetType,
+      language,
+      slug,
+    },
+  });
+  if (
+    previousPublicAsset?.id &&
+    previousPublicAsset.id !== assetId &&
+    previousPublicAsset.storagePath
+  ) {
+    await getStorageBucket(previousPublicAsset.bucketName || STORAGE_BUCKET)
+        .file(previousPublicAsset.storagePath)
+        .delete({ignoreNotFound: true});
+  }
+
+  const nowIso = new Date().toISOString();
+  const actor = {
+    uid: cleanAiBoothText(authState?.uid, 128),
+    username: cleanAiBoothText(authState?.profile?.username, 120),
+  };
+  const publicAsset = normalizePublicAsset({
+    id: assetId,
+    assetType,
+    label,
+    language,
+    slug,
+    fileName: cleanAiBoothText(file.fileName, 240),
+    contentType: "application/pdf",
+    size: Number(file.size || 0),
+    storagePath,
+    bucketName: STORAGE_BUCKET,
+    publicUrl: buildAiBoothPublicAssetUrl(assetId),
+    downloadUrl: buildStorageDownloadUrl(storagePath, downloadToken, STORAGE_BUCKET),
+    sourceSubmissionId: submissionSnapshot.id,
+    sourceFileId: cleanAiBoothText(file.id, 160),
+    active: true,
+    publishedAt: nowIso,
+    publishedBy: actor,
+  });
+
+  const nextFiles = (Array.isArray(submission.files) ? submission.files : []).map((item) => (
+    cleanAiBoothText(item?.id, 160) === cleanAiBoothText(file.id, 160) ?
+      {...item, publicAsset} :
+      item
+  ));
+  const deploymentData = deploymentSnapshot.data() || {};
+  const nextPublicAssets = [
+    ...normalizeAiBoothPublicAssets(deploymentData.publicAssets)
+        .filter((asset) => (
+          asset.id !== assetId && asset.id !== previousPublicAsset?.id
+        )),
+    publicAsset,
+  ].sort((left, right) => (
+    `${left.assetType}:${left.label}:${left.language}`
+        .localeCompare(`${right.assetType}:${right.label}:${right.language}`)
+  ));
+  const deploymentRef = deploymentSnapshot.ref;
+  const publicAssetRef = db.collection(AI_BOOTH_PUBLIC_ASSETS_COLLECTION).doc(assetId);
+  const batch = db.batch();
+  batch.set(publicAssetRef, {
+    ...publicAsset,
+    publishedAt: admin.firestore.FieldValue.serverTimestamp(),
+    publishedAtIso: nowIso,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, {merge: true});
+  if (previousPublicAsset?.id && previousPublicAsset.id !== assetId) {
+    batch.set(db.collection(AI_BOOTH_PUBLIC_ASSETS_COLLECTION).doc(previousPublicAsset.id), {
+      active: false,
+      replacedBy: assetId,
+      unpublishedAt: admin.firestore.FieldValue.serverTimestamp(),
+      unpublishedBy: actor,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, {merge: true});
+  }
+  batch.set(submissionRef, {
+    files: nextFiles,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, {merge: true});
+  batch.set(deploymentRef, {
+    publicAssets: nextPublicAssets,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedBy: actor,
+  }, {merge: true});
+  await batch.commit();
+
+  const savedSubmission = await submissionRef.get();
+  const savedDeployment = await deploymentRef.get();
+  return {
+    ok: true,
+    asset: publicAsset,
+    submission: serializeAiBoothIntakeSubmission(savedSubmission),
+    deployment: serializeAiBoothEvent(savedDeployment),
+  };
+}
+
+async function aiBoothsUnpublishIntakeFileImpl(data, authState) {
+  const {submissionRef, submissionSnapshot} =
+    await getAiBoothIntakeSubmissionSnapshot(data?.submissionId);
+  const submission = submissionSnapshot.data() || {};
+  const file = getIntakeFileForPublication(submission, data?.fileId);
+  const publicAsset = isPlainObject(file.publicAsset) ? normalizePublicAsset(file.publicAsset) : null;
+  if (!publicAsset?.id) {
+    throw new functions.https.HttpsError("failed-precondition", "This PDF is not published");
+  }
+
+  const targetType = normalizeAiBoothDeploymentType(
+      submission.targetType || (submission.installId ? "install" : "event"),
+  );
+  const targetIdInput = submission.targetId || submission.installId || submission.eventId;
+  const {snapshot: deploymentSnapshot} =
+    await assertAiBoothDeploymentExists(targetIdInput, targetType);
+  if (publicAsset.storagePath) {
+    await getStorageBucket(publicAsset.bucketName || STORAGE_BUCKET)
+        .file(publicAsset.storagePath)
+        .delete({ignoreNotFound: true});
+  }
+
+  const nextFiles = (Array.isArray(submission.files) ? submission.files : []).map((item) => {
+    if (cleanAiBoothText(item?.id, 160) !== cleanAiBoothText(file.id, 160)) {
+      return item;
+    }
+    const next = {...item};
+    delete next.publicAsset;
+    return next;
+  });
+  const nextPublicAssets = normalizeAiBoothPublicAssets(
+      deploymentSnapshot.data()?.publicAssets,
+  ).filter((asset) => asset.id !== publicAsset.id);
+  const actor = {
+    uid: cleanAiBoothText(authState?.uid, 128),
+    username: cleanAiBoothText(authState?.profile?.username, 120),
+  };
+  const batch = db.batch();
+  batch.set(submissionRef, {
+    files: nextFiles,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, {merge: true});
+  batch.set(deploymentSnapshot.ref, {
+    publicAssets: nextPublicAssets,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedBy: actor,
+  }, {merge: true});
+  batch.set(db.collection(AI_BOOTH_PUBLIC_ASSETS_COLLECTION).doc(publicAsset.id), {
+    active: false,
+    unpublishedAt: admin.firestore.FieldValue.serverTimestamp(),
+    unpublishedBy: actor,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, {merge: true});
+  await batch.commit();
+
+  const savedSubmission = await submissionRef.get();
+  const savedDeployment = await deploymentSnapshot.ref.get();
+  return {
+    ok: true,
+    assetId: publicAsset.id,
+    submission: serializeAiBoothIntakeSubmission(savedSubmission),
+    deployment: serializeAiBoothEvent(savedDeployment),
+  };
 }
 
 function buildAiBoothEventKioskInfoUpdate(eventId, general, boothContext, actor, deploymentType = "event") {
@@ -5546,6 +5844,9 @@ async function aiBoothsSaveEventImpl(data, authState, options = {}) {
     db.collection(collectionName).doc();
   const existingSnapshot = await eventRef.get();
   const existingData = existingSnapshot.exists ? existingSnapshot.data() || {} : {};
+  const publicAssets = normalizeAiBoothPublicAssets(
+      eventInput.publicAssets === undefined ? existingData.publicAssets : eventInput.publicAssets,
+  );
   const previousBoothStationIds = Array.isArray(existingData.boothStationIds) ?
     existingData.boothStationIds
         .map((value) => cleanAiBoothText(value, 80))
@@ -5593,6 +5894,7 @@ async function aiBoothsSaveEventImpl(data, authState, options = {}) {
     screenUiByStationId,
     topics,
     activations,
+    publicAssets,
     golf,
     agent,
     intake,
@@ -6455,6 +6757,7 @@ function buildAiBoothKnowledgeBaseMarkdown(
   const boothStationIds = Array.isArray(event.boothStationIds) ? event.boothStationIds : [];
   const topics = Array.isArray(event.topics) ? event.topics : [];
   const activations = Array.isArray(event.activations) ? event.activations : [];
+  const publicAssets = normalizeAiBoothPublicAssets(event.publicAssets);
   const topicText = topics.length > 0 ?
     topics.map(buildAiBoothTopicKnowledge).join("\n\n") :
     "No additional topics have been configured.";
@@ -6466,6 +6769,13 @@ function buildAiBoothKnowledgeBaseMarkdown(
       100000,
   ) || "No approved participant intake submissions have been added.";
   const intakeCount = Number(approvedIntakeKnowledge?.documentCount || 0);
+  const publicAssetText = publicAssets.length > 0 ?
+    publicAssets.map((asset) => {
+      const languageLabel = asset.language === "fr" ? "French" : "English";
+      const typeLabel = asset.assetType === "menu" ? "menu" : asset.assetType;
+      return `- ${asset.label} (${languageLabel} ${typeLabel}): ${asset.publicUrl}`;
+    }).join("\n") :
+    "No approved public resources have been published.";
 
   return cleanAiBoothText([
     `# ${eventName} AI Booth Knowledge`,
@@ -6519,6 +6829,10 @@ function buildAiBoothKnowledgeBaseMarkdown(
     "",
     deploymentType === "install" ? "## Temporary Notices / Activations" : "## Event Activations",
     activationText,
+    "",
+    "## Approved Public Resources",
+    "Use the exact HTTPS URL below with the show_qr tool when a guest asks to view that resource.",
+    publicAssetText,
     "",
     deploymentType === "install" ? "## Approved Client Maintenance Intake" : "## Approved Participant Intake",
     formatAiBoothKnowledgeLine("Approved submission count", String(intakeCount)),
@@ -9631,6 +9945,26 @@ exports.aiBooths_createIntakeFileReadUrl = functions.https.onCall(async (data, c
 exports.aiBooths_httpCreateIntakeFileReadUrl = handleHttpFunction(async (data, req) => {
   await assertCanManageAiBooths(req, data);
   return aiBoothsCreateIntakeFileReadUrlImpl(data);
+});
+
+exports.aiBooths_publishIntakeFile = functions.https.onCall(async (data, context) => {
+  const authState = await assertCanManageAiBoothsFromContext(context);
+  return aiBoothsPublishIntakeFileImpl(data, authState);
+});
+
+exports.aiBooths_httpPublishIntakeFile = handleHttpFunction(async (data, req) => {
+  const authState = await assertCanManageAiBooths(req, data);
+  return aiBoothsPublishIntakeFileImpl(data, authState);
+});
+
+exports.aiBooths_unpublishIntakeFile = functions.https.onCall(async (data, context) => {
+  const authState = await assertCanManageAiBoothsFromContext(context);
+  return aiBoothsUnpublishIntakeFileImpl(data, authState);
+});
+
+exports.aiBooths_httpUnpublishIntakeFile = handleHttpFunction(async (data, req) => {
+  const authState = await assertCanManageAiBooths(req, data);
+  return aiBoothsUnpublishIntakeFileImpl(data, authState);
 });
 
 exports.aiBooths_saveEvent = functions.runWith({
