@@ -79,6 +79,13 @@ function dashboardUrl() {
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
+const OBAILIX_CONCIERGE_WORKSPACE_URL = 'https://obailix.com/concierge';
+
+function openObailixConciergeWorkspace() {
+  if (typeof window === 'undefined') return;
+  window.open(OBAILIX_CONCIERGE_WORKSPACE_URL, '_blank', 'noopener,noreferrer');
+}
+
 function moduleMatchesResponse(module, moduleRef) {
   const moduleId = String(module?.id || '').trim();
   const responseId = String(moduleRef || '').trim();
@@ -2813,7 +2820,7 @@ function App() {
       language={language}
       setLanguage={setLanguage}
       onNavigateToAdmin={() => setPage('admin')}
-      onNavigateToAiBooths={() => setPage('ai-booths')}
+      onNavigateToAiBooths={openObailixConciergeWorkspace}
       onNavigateToBinding={() => setPage('binding')}
       onNavigateToRentals={(selection = '7days') => {
         if (!canViewRentalDetails) return;
@@ -2935,7 +2942,7 @@ function App() {
             onNavigateToTemplates={() => setPage('templates')}
             onNavigateToMedia={() => setPage('media')}
             onNavigateToUiProfiles={() => setPage('ui-profiles')}
-            onNavigateToAiBooths={() => setPage('ai-booths')}
+            onNavigateToAiBooths={openObailixConciergeWorkspace}
             onNavigateToPayouts={() => setPage('payouts')}
             currentUser={clientInfo}
             t={t}
