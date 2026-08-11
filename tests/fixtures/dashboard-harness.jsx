@@ -73,7 +73,7 @@ const makeRawKiosk = (index, timestamp) => {
     status: 'provisioned',
     timestamp,
     count: slots.filter((slot) => slot.status === 1 && slot.batteryLevel >= 80 && !slot.lock).length,
-    fversion: '478',
+    fversion: index === 0 ? '496' : index === 2 ? '500' : '478',
     hardware: {
       type: 'CK30',
       gateway: 'P68',
@@ -112,7 +112,7 @@ const makeRawKiosk = (index, timestamp) => {
         output: true,
         heartbeatOutput: true,
         lastUpdated: timestamp,
-        FW: 2,
+        FW: index === 0 ? 2 : index === 3 ? null : 1,
         slots,
       },
     },

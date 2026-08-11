@@ -932,7 +932,7 @@ return (
 
                                                 return (
                                                 <div key={kiosk.stationid}>
-                                                    <KioskPanel kiosk={kiosk} isExpanded={isExpanded || isEditing} onToggle={handleToggleDetails} onToggleEdit={handleToggleEditMode} mockNow={latestTimestamp} rentalData={stationRentalData} rentalDashboardStats={stationRentalDashboardTotals} clientInfo={clientInfo} t={t} onCommand={handleGeneralCommand} onShowRentalDetails={handleShowRentalDetails} urgentIncidents={urgentIncidentsByStation.get(kiosk.stationid) || EMPTY_INCIDENTS} onNavigateToActivity={onNavigateToActivity} />
+                                                    <KioskPanel kiosk={kiosk} isExpanded={isExpanded || isEditing} onToggle={handleToggleDetails} onToggleEdit={handleToggleEditMode} mockNow={latestTimestamp} rentalData={stationRentalData} rentalDashboardStats={stationRentalDashboardTotals} clientInfo={clientInfo} t={t} onCommand={handleGeneralCommand} onShowRentalDetails={handleShowRentalDetails} urgentIncidents={urgentIncidentsByStation.get(kiosk.stationid) || EMPTY_INCIDENTS} onNavigateToActivity={onNavigateToActivity} serverFlowVersion={serverFlowVersion} />
                                                     {isEditing && kioskToEdit ? (
                                                         <KioskEditPanel kiosk={kioskToEdit} onSave={handleKioskSave} clientInfo={clientInfo} isVisible={editingKioskId === kiosk.stationid} t={t} onCommand={handleGeneralCommand} />
                                                     ) : (

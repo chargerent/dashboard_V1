@@ -64,8 +64,14 @@ const ChargeTimeoutIndicator = () => (
 const isSlotInChargeTimeout = (module, slot, now) => {
     const state = module?.chargeControl?.[`slot${slot?.position}`];
     const blockedUntil = Number(state?.blockedUntil);
+    const numericStatus = Number(slot?.status);
+    const slotLooksEmpty = !slot ||
+        slot.sstat === '0C' ||
+        !hasNonZeroChargerId(slot?.sn) ||
+        (Number.isFinite(numericStatus) && numericStatus === 0);
 
-    return String(state?.blockedAction || '').trim().toLowerCase() === 'start' &&
+    return !slotLooksEmpty &&
+        String(state?.blockedAction || '').trim().toLowerCase() === 'start' &&
         Number.isFinite(blockedUntil) &&
         blockedUntil > now;
 };
@@ -142,6 +148,11 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     const chargeReadyThreshold = getKioskPowerThreshold(kiosk);
     const mockNowMs = mockNow instanceof Date ? mockNow.getTime() : Number(mockNow);
     const chargeTimeoutNow = Number.isFinite(mockNowMs) ? mockNowMs : mountedAt;
+    const isUiMode = String(kiosk.ui?.mode || '').trim().toUpperCase() === 'UI';
+    const displayedStateLabel = isUiMode ? 'UI State' : 'Terminal State';
+    const displayedState = isUiMode
+        ? kiosk.uistate
+        : kiosk.activity?.terminal?.currentState || kiosk.terminalState || kiosk.uistate;
     const uiProfileStatus = useMemo(() => resolveKioskUiProfileStatus(kiosk), [kiosk]);
     useEffect(() => installKioskInteractionDebugCapture(), []);
     const primaryMediaAsset = useMemo(() => {
@@ -665,8 +676,8 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                         <p className="truncate text-[11px] font-semibold text-white/80">{kiosk.ui?.mode || '---'}</p>
                     </div>
                     <div className="min-w-0">
-                        <p className="text-[9px] uppercase tracking-wide text-white/35">UI State</p>
-                        <p className="truncate text-[11px] font-semibold text-white/80">{kiosk.uistate || '---'}</p>
+                        <p className="text-[9px] uppercase tracking-wide text-white/35">{displayedStateLabel}</p>
+                        <p className="truncate text-[11px] font-semibold text-white/80">{displayedState || '---'}</p>
                     </div>
                     <div className="min-w-0">
                         <p className="text-[9px] uppercase tracking-wide text-white/35">SN</p>
@@ -1172,8 +1183,8 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                             <p className="text-xs text-white font-semibold truncate">{kiosk.ui?.mode || '---'}</p>
                         </div>
                         <div>
-                            <p className="text-[10px] text-gray-400 uppercase tracking-wider">UI State</p>
-                            <p className="text-xs text-white font-semibold truncate">{kiosk.uistate || '---'}</p>
+                            <p className="text-[10px] text-gray-400 uppercase tracking-wider">{displayedStateLabel}</p>
+                            <p className="text-xs text-white font-semibold truncate">{displayedState || '---'}</p>
                         </div>
                         <div>
                             <p className="text-[10px] text-gray-400 uppercase tracking-wider">SN</p>

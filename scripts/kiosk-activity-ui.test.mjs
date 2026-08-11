@@ -104,6 +104,14 @@ test('activity page paginates history and supports station deep links', async ()
     assert.match(activityPage, /normalizeActivityEvent\(event, selectedStationSurface\)/);
     assert.match(activityPage, /\[allowedStationIds, historyStartMs, selectedStation, selectedStationSurface\]/);
     assert.doesNotMatch(activityPage, /\[allowedStationIds, historyStartMs, selectedStation, stationsById\]/);
+    assert.match(activityPage, /return uiMode === 'ui' \? 'ui' : 'terminal'/);
+    assert.match(activityPage, /eventInteractionSurface\(event, isButtonPress \? fallbackSurface : 'ui'\)/);
+    assert.match(activityPage, /type === 'customer_button_state_changed'[\s\S]*sourceSurface: eventInteractionSurface\(event, 'terminal'\)/);
+    assert.match(activityPage, /event\.category === 'terminal' \|\| type === 'terminal_state_entered'[\s\S]*sourceSurface: 'terminal'/);
+    assert.match(activityPage, /const matchesInteractionSurface/);
+    assert.match(activityPage, /if \(TRANSACTION_TIMELINE_EVENT_TYPES\.has\(event\.type\)\) return true/);
+    assert.match(activityPage, /matchesInteractionSurface\(event, selectedStationSurface\)/);
+    assert.match(activityPage, /const newest = \[\.\.\.visibleIncidents, \.\.\.surfaceEvents\]/);
     assert.match(activityPage, /startAfter\(after\)/);
     assert.match(activityPage, /Load more/);
     assert.match(activityPage, /aria-label="Home"/);
@@ -115,6 +123,9 @@ test('activity page paginates history and supports station deep links', async ()
     assert.match(activityPage, /const groupInteractionEvents/);
     assert.match(activityPage, /const rentalTimelineKey/);
     assert.match(activityPage, /const TRANSACTION_TIMELINE_EVENT_TYPES = new Set/);
+    assert.match(activityPage, /const verifiedEventTransactionId = \(event\) =>/);
+    assert.match(activityPage, /TRANSACTION_TIMELINE_EVENT_TYPES\.has\(event\.type\)[\s\S]*event\.transactionId \|\| event\.details\?\.transactionId/);
+    assert.match(activityPage, /verifiedEventTransactionId\(event\) && `Transaction \$\{verifiedEventTransactionId\(event\)\}`/);
     assert.match(activityPage, /const PURCHASED_RENTAL_STYLE = 'border-sky-200 bg-sky-50 text-sky-900'/);
     assert.match(activityPage, /return 'Rental closed — purchased'/);
     assert.match(activityPage, /'charger_purchased'/);

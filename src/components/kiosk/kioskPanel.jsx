@@ -7,7 +7,27 @@ import RentalStats from '../Dashboard/RentalStats';
 import GatewayIcon from './GatewayIcon';
 import KioskStatusAlert from './KioskStatusAlert';
 
-function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rentalData, rentalDashboardStats, clientInfo, t, onCommand, onShowRentalDetails, urgentIncidents, onNavigateToActivity }) {
+const BrokenHeartIcon = ({ className = '' }) => (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+        <path
+            fillRule="evenodd"
+            clipRule="evenodd"
+            d="M12 21.35 10.55 20.03C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35ZM10.75 4.15 8.6 9.95l2.85 1.9-2.65 6.3 6.9-8.1-2.8-1.85 1.85-4.15-2.4 1.2-1.6-1.1Z"
+        />
+    </svg>
+);
+
+const getDisplayVersion = (version) => {
+    const normalizedVersion = String(version ?? '').trim();
+    return normalizedVersion ? normalizedVersion.split(/\s+/)[0] : '--';
+};
+
+const getNumericVersion = (version) => {
+    const parsedVersion = Number(version);
+    return Number.isFinite(parsedVersion) ? parsedVersion : null;
+};
+
+function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rentalData, rentalDashboardStats, clientInfo, t, onCommand, onShowRentalDetails, urgentIncidents, onNavigateToActivity, serverFlowVersion }) {
     const isOnline = isKioskOnline(kiosk, mockNow);
     const isV2Kiosk = isNewSchemaKiosk(kiosk);
     const canEditKiosk = isOnline || isV2Kiosk;
@@ -16,6 +36,23 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
     const hasPricing = kiosk.pricing && Object.keys(kiosk.pricing).length > 0;
     const isPricingOnlineDisabled = hasPricing && kiosk.pricing?.online === false;
     const fullPowerThreshold = getKioskPowerThreshold(kiosk);
+    const kioskFlowVersion = getDisplayVersion(kiosk.fversion);
+    const currentServerFlowVersion = getDisplayVersion(serverFlowVersion ?? clientInfo?.serverFlowVersion);
+    const kioskFlowNumber = getNumericVersion(kioskFlowVersion);
+    const currentServerFlowNumber = getNumericVersion(currentServerFlowVersion);
+    const flowVersionMatches = kioskFlowVersion !== '--'
+        && currentServerFlowVersion !== '--'
+        && kioskFlowVersion === currentServerFlowVersion;
+    const flowVersionIsBehind = kioskFlowNumber !== null
+        && currentServerFlowNumber !== null
+        && kioskFlowNumber < currentServerFlowNumber;
+    const flowVersionStatus = flowVersionIsBehind
+        ? 'behind'
+        : flowVersionMatches
+            ? 'current'
+            : kioskFlowNumber !== null && currentServerFlowNumber !== null && kioskFlowNumber > currentServerFlowNumber
+                ? 'ahead'
+                : 'unknown';
     
     const stats = useMemo(() => {
         let total = 0;
@@ -98,6 +135,15 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L14.732 3.732z" /></svg>
                             </button>
                         )}
+                        <span
+                            className={`shrink-0 text-[10px] font-medium leading-none ${flowVersionIsBehind ? 'text-orange-400' : 'text-gray-400'}`}
+                            data-kiosk-flow-version={kioskFlowVersion}
+                            data-flow-version-match={flowVersionMatches ? 'true' : 'false'}
+                            data-flow-version-status={flowVersionStatus}
+                            title={`Kiosk flow ${kioskFlowVersion}; current server flow ${currentServerFlowVersion}`}
+                        >
+                            F:{kioskFlowVersion}
+                        </span>
                     </div>
                     <div className="flex items-center gap-3">
                         <div className="flex items-center gap-1.5" title={t('gateway_type')}>
@@ -123,23 +169,24 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                                 return (
                                     <span
                                         key={module.id}
-                                        className={`inline-flex w-6 shrink-0 flex-col items-center ${showModuleChargeIndicator ? 'h-8 justify-start' : 'h-6 justify-center'}`}
+                                        className={`inline-flex w-5 shrink-0 flex-col items-center ${showModuleChargeIndicator ? 'h-7 justify-start' : 'h-5 justify-center'}`}
                                         title={moduleTitle}
                                         aria-label={moduleTitle}
+                                        data-module-firmware={moduleFw || 'unknown'}
+                                        data-heart-style={moduleFw === '2' ? 'solid' : 'broken'}
                                         role="img"
                                     >
-                                        <span className="relative inline-flex h-6 w-6 items-center justify-center">
-                                            <HeartIcon aria-hidden="true" className={`h-6 w-6 ${outputOk ? 'text-green-700' : 'text-red-700'}`} />
-                                            {showModuleFw && (
-                                                <span aria-hidden="true" className="pointer-events-none absolute inset-0 flex items-center justify-center text-[11px] font-black leading-none text-white">
-                                                    {moduleFw}
-                                                </span>
+                                        <span className="relative inline-flex h-5 w-5 items-center justify-center">
+                                            {moduleFw === '2' ? (
+                                                <HeartIcon aria-hidden="true" className={`h-5 w-5 ${outputOk ? 'text-green-700' : 'text-red-700'}`} />
+                                            ) : (
+                                                <BrokenHeartIcon className={`h-5 w-5 ${outputOk ? 'text-green-700' : 'text-red-700'}`} />
                                             )}
                                         </span>
                                         {showModuleChargeIndicator && (
                                             <BoltIcon
                                                 aria-hidden="true"
-                                                className={`-mt-1 h-3.5 w-3.5 ${moduleChargeEnabled ? 'text-green-500' : 'text-orange-500'}`}
+                                                className={`-mt-0.5 h-3 w-3 ${moduleChargeEnabled ? 'text-green-500' : 'text-orange-500'}`}
                                             />
                                         )}
                                     </span>

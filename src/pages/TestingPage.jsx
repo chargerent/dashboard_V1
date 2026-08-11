@@ -531,6 +531,7 @@ export default function TestingPage({
                             t={t}
                             onCommand={handleGeneralCommand}
                             onShowRentalDetails={handleShowRentalDetails}
+                            serverFlowVersion={serverFlowVersion}
                         />
 
                         {editingKioskId === selectedKiosk.stationid ? (

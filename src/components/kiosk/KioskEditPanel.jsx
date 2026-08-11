@@ -535,7 +535,7 @@ function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVe
                             'PURCHASE - MIXED DAY', 'LEASE - SIMPLE DAILY', 'LEASE - MIXED DAILY', 'EVENT - SIMPLE'
                         ]}
                     />
-                    <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-4">
+                    <div className="mt-4 max-w-xs">
                         <FormToggle label="Online" name="online" checked={formData.pricing?.online !== false} section="pricing" onDataChange={onDataChange} />
                     </div>
                     <div className="mt-4">

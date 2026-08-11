@@ -799,6 +799,8 @@ function App() {
   const [token, setToken] = useState(localStorage.getItem('dashboardToken'));
   const hasAuthToken = Boolean(token);
   const [clientInfo, setClientInfo] = useState(null);
+  const [serverFlowVersion, setServerFlowVersion] = useState('');
+  const [serverUiVersion, setServerUiVersion] = useState('');
   const [language, setLanguage] = useState('en');
   const [page, setPage] = useState(() => readActivityNavigation().page); // 'dashboard', 'activity', 'admin', 'media', 'binding', 'templates', 'kiosk-editor', 'rentals', 'chargers', 'provision', 'reporting', 'analytics', 'testing'
   const [activityInitialStation, setActivityInitialStation] = useState(() => readActivityNavigation().stationId);
@@ -1006,6 +1008,8 @@ function App() {
     localStorage.removeItem('dashboardToken');
     setToken(null);
     setClientInfo(null);
+    setServerFlowVersion('');
+    setServerUiVersion('');
     setLanguage('en');
     setPage('dashboard');
     setInitialStatusCheck(false);
@@ -1100,6 +1104,8 @@ function App() {
         localStorage.removeItem('dashboardToken');
         setToken(null);
         setClientInfo(null);
+        setServerFlowVersion('');
+        setServerUiVersion('');
         setLanguage('en');
         setInitialStatusCheck(false);
         setAllStationsData([]);
@@ -1159,10 +1165,12 @@ function App() {
     return () => unsub();
   }, [cancelDeferredAdminRentalLoad, handleLogout]);
 
-  useEffect(() => {
-    if (!hasAuthToken || !auth.currentUser) return;
+  const serverVersionListenerUid = clientInfo?.uid;
 
-    const subscribeServerVersion = ({ docId, fields, stateKey, label }) => (
+  useEffect(() => {
+    if (!hasAuthToken || !auth.currentUser || !serverVersionListenerUid) return;
+
+    const subscribeServerVersion = ({ docId, fields, setVersion, label }) => (
       onSnapshot(doc(db, 'server', docId), (snapshot) => {
         const nextVersion = getFirstVersionText(snapshot.data(), fields);
 
@@ -1170,16 +1178,7 @@ function App() {
           return;
         }
 
-        setClientInfo((prev) => {
-          if (!prev || prev[stateKey] === nextVersion) {
-            return prev;
-          }
-
-          return {
-            ...prev,
-            [stateKey]: nextVersion,
-          };
-        });
+        setVersion((prev) => prev === nextVersion ? prev : nextVersion);
       }, (error) => {
         console.warn(`Unable to subscribe to ${label}:`, error);
       })
@@ -1188,13 +1187,13 @@ function App() {
     const unsubscribeFlowVersion = subscribeServerVersion({
       docId: 'flow_current',
       fields: ['fversion', 'flowVersion', 'flowversion', 'version'],
-      stateKey: 'serverFlowVersion',
+      setVersion: setServerFlowVersion,
       label: 'server flow version',
     });
     const unsubscribeUiVersion = subscribeServerVersion({
       docId: 'ui_current',
       fields: ['uiVersion', 'uiversion', 'version'],
-      stateKey: 'serverUiVersion',
+      setVersion: setServerUiVersion,
       label: 'server UI version',
     });
 
@@ -1202,7 +1201,7 @@ function App() {
       unsubscribeFlowVersion();
       unsubscribeUiVersion();
     };
-  }, [hasAuthToken]);
+  }, [hasAuthToken, serverVersionListenerUid]);
 
   // Effect to handle token expiration when tab/PWA becomes visible again
   useEffect(() => {
@@ -2869,8 +2868,8 @@ function App() {
       lockingSlots={lockingSlots}
       initialStatusCheck={initialStatusCheck}
       setInitialStatusCheck={setInitialStatusCheck}
-      serverFlowVersion={clientInfo?.serverFlowVersion}
-      serverUiVersion={clientInfo?.serverUiVersion}
+      serverFlowVersion={serverFlowVersion || clientInfo?.serverFlowVersion}
+      serverUiVersion={serverUiVersion || clientInfo?.serverUiVersion}
       ignoredKiosksRef={ignoredKiosksRef}
       manageIgnoredKiosk={manageIgnoredKiosk}
       kiosksReady={kiosksReady}
@@ -3146,8 +3145,8 @@ function App() {
             commandStatus={commandStatus}
             setCommandStatus={setCommandStatus}
             firestoreError={firestoreError}
-            serverFlowVersion={clientInfo?.serverFlowVersion}
-            serverUiVersion={clientInfo?.serverUiVersion}
+            serverFlowVersion={serverFlowVersion || clientInfo?.serverFlowVersion}
+            serverUiVersion={serverUiVersion || clientInfo?.serverUiVersion}
             pendingSlots={pendingSlots}
             ejectingSlots={ejectingSlots}
             setEjectingSlots={setEjectingSlots}

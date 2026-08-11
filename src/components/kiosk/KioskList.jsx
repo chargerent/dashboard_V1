@@ -1,6 +1,6 @@
 import KioskPanel from './kioskPanel';
 
-const KioskList = ({ kiosks, expandedKioskId, onKioskToggle, onToggleEdit, mockNow, rentalData, clientInfo, t, onCommand, onShowRentalDetails }) => {
+const KioskList = ({ kiosks, expandedKioskId, onKioskToggle, onToggleEdit, mockNow, rentalData, clientInfo, t, onCommand, onShowRentalDetails, serverFlowVersion }) => {
     return (
         <div className="space-y-4">
             {kiosks.map(kiosk => (
@@ -16,6 +16,7 @@ const KioskList = ({ kiosks, expandedKioskId, onKioskToggle, onToggleEdit, mockN
                         t={t}
                         onCommand={onCommand}
                         onShowRentalDetails={onShowRentalDetails}
+                        serverFlowVersion={serverFlowVersion}
                     />
                 </div>
             ))}

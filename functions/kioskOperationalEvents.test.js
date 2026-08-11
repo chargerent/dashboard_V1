@@ -12,6 +12,7 @@ const {
   shouldMonitorKiosk,
   terminalPhase,
   uiStatePageSummary,
+  usesDirectSurfaceEvents,
   watchdogCandidates,
 } = require("./kioskOperationalEvents");
 
@@ -38,21 +39,21 @@ test("does not monitor a retired kiosk from a stale MQTT flag", () => {
   }, now), false);
 });
 
-test("records V1 MQTT, screen, button, and module transitions", () => {
+test("records legacy V1 MQTT, screen, button, and module transitions", () => {
   const now = timestamp(Date.now());
   const before = {
-    stationid: "US0118",
+    stationid: "US0018",
     mqtt: true,
     uistate: "startpage",
     button: "enabled",
-    modules: {1: {id: "US0118m1", serialstatus: true}},
+    modules: {1: {id: "US0018m1", serialstatus: true}},
   };
   const after = {
     ...before,
     mqtt: false,
     uistate: "payment credited",
     button: "disabled",
-    modules: {1: {id: "US0118m1", serialstatus: false}},
+    modules: {1: {id: "US0018m1", serialstatus: false}},
     interaction: {current: {
       id: "interaction-123",
       kind: "rental",
@@ -60,8 +61,8 @@ test("records V1 MQTT, screen, button, and module transitions", () => {
     }},
   };
   const {events} = diffKioskEvents(before, after, {
-    stationId: "US0118",
-    provisionId: "id-5446395998",
+    stationId: "US0018",
+    provisionId: "id-us0018",
     kioskGeneration: "v1",
   }, now);
   assert.deepEqual(events.map(({type}) => type), [
@@ -77,6 +78,33 @@ test("records V1 MQTT, screen, button, and module transitions", () => {
   assert.equal(events.find(({type}) => type === "ui_state_changed").sourceSurface, "ui");
   assert.equal(events.find(({type}) => type === "customer_button_state_changed").severity,
       "info");
+});
+
+test("does not infer duplicate UI or button events for direct-event kiosks", () => {
+  const now = timestamp(Date.now());
+  const before = {
+    stationid: "US0118",
+    mqtt: true,
+    uistate: "thankyoupage",
+    button: "disabled",
+    modules: {1: {id: "US0118m1", serialstatus: true}},
+  };
+  const after = {
+    ...before,
+    uistate: "startpage",
+    button: "enabled",
+  };
+  const {events} = diffKioskEvents(before, after, {
+    stationId: "US0118",
+    provisionId: "id-5446395998",
+    kioskGeneration: "v1",
+  }, now);
+  assert.deepEqual(events, []);
+  assert.equal(usesDirectSurfaceEvents(after), true);
+  assert.equal(usesDirectSurfaceEvents({
+    stationid: "US0099",
+    activity: {eventSchemaVersion: 2},
+  }), true);
 });
 
 test("labels every recorded kiosk page visit clearly", () => {

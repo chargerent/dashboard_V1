@@ -146,9 +146,8 @@ const pageVisitSummary = (value) => {
 };
 
 const kioskInteractionSurface = (kiosk) => {
-    const screen = String(kiosk?.hardware?.screen || '').toLowerCase();
-    const uiMode = String(kiosk?.ui?.mode || '').toLowerCase();
-    return /no screen|none|terminal only/.test(screen) || uiMode === 'media' ? 'terminal' : 'ui';
+    const uiMode = String(kiosk?.ui?.mode || '').trim().toLowerCase();
+    return uiMode === 'ui' ? 'ui' : 'terminal';
 };
 
 const eventInteractionSurface = (event, fallbackSurface = 'ui') => {
@@ -175,9 +174,9 @@ const normalizeActivityEvent = (event, fallbackSurface) => {
         };
     }
     if (type === 'ui_state_changed') {
-        const sourceSurface = eventInteractionSurface(event, fallbackSurface);
         const page = String(event.page || event.currentValue || '').trim();
         const isButtonPress = /^button[ _-]*pressed$/i.test(page);
+        const sourceSurface = eventInteractionSurface(event, isButtonPress ? fallbackSurface : 'ui');
         return {
             ...event,
             category: 'interaction',
@@ -188,10 +187,15 @@ const normalizeActivityEvent = (event, fallbackSurface) => {
         };
     }
     if (type === 'customer_button_state_changed') {
-        return { ...event, category: 'interaction', severity: 'info' };
+        return {
+            ...event,
+            category: 'interaction',
+            severity: 'info',
+            sourceSurface: eventInteractionSurface(event, 'terminal'),
+        };
     }
     if (event.category === 'terminal' || type === 'terminal_state_entered') {
-        return { ...event, category: 'interaction' };
+        return { ...event, category: 'interaction', sourceSurface: 'terminal' };
     }
     if (type === 'module_disconnected' || type === 'module_connected') {
         const moduleId = String(event.moduleId || '').trim();
@@ -204,6 +208,15 @@ const normalizeActivityEvent = (event, fallbackSurface) => {
     if (MODULE_EVENT_TYPES.has(type)) return { ...event, category: 'module' };
     if (CONNECTIVITY_EVENT_TYPES.has(type)) return { ...event, category: 'connectivity' };
     return event;
+};
+
+const matchesInteractionSurface = (event, kioskSurface) => {
+    if (event.category !== 'interaction') return true;
+    if (TRANSACTION_TIMELINE_EVENT_TYPES.has(event.type)) return true;
+
+    const eventSurface = String(event.sourceSurface || '').trim().toLowerCase();
+    if (eventSurface !== 'ui' && eventSurface !== 'terminal') return true;
+    return eventSurface === kioskSurface;
 };
 
 const interactionTitle = (events, cardKind = '') => {
@@ -220,8 +233,14 @@ const interactionTitle = (events, cardKind = '') => {
     return 'Kiosk interaction';
 };
 
+const verifiedEventTransactionId = (event) => (
+    TRANSACTION_TIMELINE_EVENT_TYPES.has(event.type)
+        ? event.transactionId || event.details?.transactionId || ''
+        : ''
+);
+
 const eventDetailLabels = (event) => [
-    (event.transactionId || event.details?.transactionId) && `Transaction ${event.transactionId || event.details.transactionId}`,
+    verifiedEventTransactionId(event) && `Transaction ${verifiedEventTransactionId(event)}`,
     (event.reservationId || event.details?.reservationId) && `Reservation ${event.reservationId || event.details.reservationId}`,
     event.moduleId && `Module ${event.moduleId}`,
     (event.slotId ?? event.slot) != null && `Slot ${event.slotId ?? event.slot}`,
@@ -723,11 +742,14 @@ export default function ActivityPage({
     const visibleIncidents = useMemo(() => operationalIncidents
         .filter((incident) => !selectedStation || incident.stationId === selectedStation)
         .sort((left, right) => Number(eventTime(right)) - Number(eventTime(left))), [operationalIncidents, selectedStation]);
-    const visibleEvents = useMemo(() => collapseRelatedModuleStates(collapseRepeatedStates([...events].sort((left, right) => (
+    const surfaceEvents = useMemo(() => events.filter((event) => (
+        matchesInteractionSurface(event, selectedStationSurface)
+    )), [events, selectedStationSurface]);
+    const visibleEvents = useMemo(() => collapseRelatedModuleStates(collapseRepeatedStates([...surfaceEvents].sort((left, right) => (
         timeValue(eventTime(right)) - timeValue(eventTime(left)) ||
         interactionSequence(left) - interactionSequence(right)
     ))))
-        .filter((event) => matchesFilter(event, filter)), [events, filter]);
+        .filter((event) => matchesFilter(event, filter)), [filter, surfaceEvents]);
     const visibleActivityItems = useMemo(() => groupInteractionEvents(
         visibleEvents,
         relatedTimelineEvents,
@@ -735,11 +757,11 @@ export default function ActivityPage({
     ), [relatedTimelineEvents, rentalRecords, visibleEvents]);
     const seenScope = selectedStation || 'all-kiosks';
     const newestActivityByFilter = useMemo(() => Object.fromEntries(FILTERS.map(([filterValue]) => {
-        const newest = [...visibleIncidents, ...events]
+        const newest = [...visibleIncidents, ...surfaceEvents]
             .filter((event) => matchesFilter(event, filterValue))
             .reduce((latest, event) => Math.max(latest, timeValue(unseenTime(event))), 0);
         return [filterValue, newest];
-    })), [events, visibleIncidents]);
+    })), [surfaceEvents, visibleIncidents]);
     const unseenFilters = useMemo(() => new Set(FILTERS
         .filter(([filterValue]) => newestActivityByFilter[filterValue] > Number(seenActivity?.[seenScope]?.[filterValue] || 0))
         .map(([filterValue]) => filterValue)), [newestActivityByFilter, seenActivity, seenScope]);

@@ -11,6 +11,7 @@ const CRITICAL_OFFLINE_WINDOW_MS = 30 * 60 * 1000;
 const ACTIVE_KIOSK_WINDOW_MS = 10 * 24 * 60 * 60 * 1000;
 const V2_STATION_PATTERN = /^((CA|FR|US)8\d{3}|(CAB|FRB|USB)\d{4})$/;
 const V2_TYPES = new Set(["CK24", "CK48", "CT3", "CT4", "CT8", "CT12"]);
+const DIRECT_SURFACE_EVENT_STATIONS = new Set(["US0118"]);
 
 const UI_STATE_POLICIES = [
   {pattern: /start|idle|home/i, timeoutMs: null, label: "Start"},
@@ -157,6 +158,12 @@ const comparableKioskState = (kiosk, nowMs = Date.now()) => ({
   ])),
 });
 
+const usesDirectSurfaceEvents = (kiosk) => {
+  const stationId = normalizeText(kiosk?.stationid).toUpperCase();
+  return Number(kiosk?.activity?.eventSchemaVersion || 0) >= 2 ||
+    DIRECT_SURFACE_EVENT_STATIONS.has(stationId);
+};
+
 const eventId = () => crypto.randomUUID();
 const stableEventId = (value) => crypto.createHash("sha256")
     .update(value)
@@ -187,6 +194,7 @@ const diffKioskEvents = (before, after, identity, now, nowMs = Date.now()) => {
   const previous = comparableKioskState(before || {}, nowMs);
   const current = comparableKioskState(after || {}, nowMs);
   const events = [];
+  const directSurfaceEvents = usesDirectSurfaceEvents(after);
 
   if (before && previous.mqtt !== current.mqtt) {
     events.push(buildPointEvent(identity, {
@@ -200,7 +208,7 @@ const diffKioskEvents = (before, after, identity, now, nowMs = Date.now()) => {
     }, now));
   }
 
-  if (before && previous.uiState !== current.uiState) {
+  if (before && !directSurfaceEvents && previous.uiState !== current.uiState) {
     const interaction = kioskInteractionContext(after);
     events.push(buildPointEvent(identity, {
       category: "interaction",
@@ -215,7 +223,7 @@ const diffKioskEvents = (before, after, identity, now, nowMs = Date.now()) => {
     }, now));
   }
 
-  if (before && previous.button !== current.button) {
+  if (before && !directSurfaceEvents && previous.button !== current.button) {
     const interaction = kioskInteractionContext(after);
     events.push(buildPointEvent(identity, {
       category: "interaction",
@@ -854,5 +862,6 @@ module.exports = {
   statePolicy,
   terminalPhase,
   uiStatePageSummary,
+  usesDirectSurfaceEvents,
   watchdogCandidates,
 };
