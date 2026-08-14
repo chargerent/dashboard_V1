@@ -12,6 +12,7 @@ const ENROLLMENT_TTL_MS = 15 * 60 * 1000;
 const ENROLLMENT_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const ENROLLMENT_CODE_LENGTH = 6;
 const LEGACY_ENROLLMENT_CODE_LENGTH = 8;
+const AGENT_RELEASE_HOST = "chargerentstations.com";
 const DEVICE_REQUEST_CLOCK_SKEW_MS = 2 * 60 * 1000;
 
 const ALLOWED_OPERATIONS = new Set([
@@ -147,6 +148,39 @@ function normalizeArguments(value, maxBytes = 16 * 1024) {
     invalidArgument("Command arguments are too large.");
   }
   return clean;
+}
+
+function normalizeAppUpdateArguments(value) {
+  const input = normalizeArguments(value);
+  let packageUrl;
+  try {
+    packageUrl = new URL(String(input.httpsUrl || "").trim());
+  } catch {
+    invalidArgument("A valid Agent update URL is required.");
+  }
+  if (packageUrl.protocol !== "https:" || packageUrl.hostname !== AGENT_RELEASE_HOST ||
+      packageUrl.port || packageUrl.username || packageUrl.password || packageUrl.search ||
+      packageUrl.hash ||
+      !/^\/portal\/mdm\/remote-agent-v\d+\.\d+\.\d+\.apk$/.test(packageUrl.pathname)) {
+    invalidArgument("Only official Chargerent Agent releases can be installed.");
+  }
+
+  const sha256 = String(input.sha256 || "").trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(sha256)) {
+    invalidArgument("A valid Agent package SHA-256 is required.");
+  }
+  const versionCode = Number(input.versionCode);
+  const versionName = String(input.versionName || "").trim();
+  if (!Number.isSafeInteger(versionCode) || versionCode < 1 ||
+      !/^\d+\.\d+\.\d+$/.test(versionName)) {
+    invalidArgument("A valid Agent release version is required.");
+  }
+  return {
+    httpsUrl: packageUrl.toString(),
+    sha256,
+    versionCode,
+    versionName,
+  };
 }
 
 function canonicalJson(value) {
@@ -658,11 +692,21 @@ async function sendCommand(data, authState, dependencies) {
   }
 
   const maxArgumentBytes = operation === "START_WEBRTC_SCREEN" ? 128 * 1024 : 16 * 1024;
-  const commandArguments = normalizeArguments(data?.arguments, maxArgumentBytes);
+  const commandArguments = operation === "INSTALL_APP_UPDATE" ?
+    normalizeAppUpdateArguments(data?.arguments) :
+    normalizeArguments(data?.arguments, maxArgumentBytes);
   if (HIGH_IMPACT_OPERATIONS.has(operation)) commandArguments.confirmed = true;
 
   const deviceRef = db.collection(DEVICES_COLLECTION).doc(deviceId);
   const authorizedDeviceSnapshot = await assertDeviceAccess(db, authState, deviceId);
+  if (operation === "INSTALL_APP_UPDATE") {
+    const installedVersionCode = Number(
+        authorizedDeviceSnapshot.data()?.inventory?.agentVersionCode || 0,
+    );
+    if (installedVersionCode > 0 && commandArguments.versionCode <= installedVersionCode) {
+      throw new HttpsError("failed-precondition", "This phone already has the current Agent release.");
+    }
+  }
   const authorizedStationId = String(
       authorizedDeviceSnapshot.data()?.stationId || "",
   ).trim().toUpperCase();
@@ -1036,6 +1080,7 @@ module.exports = {
   hasPhoneControlAccess,
   authenticateDeviceRequest,
   normalizeArguments,
+  normalizeAppUpdateArguments,
   normalizeDeviceId,
   normalizeEnrollmentCode,
   normalizeScreenUpdate,

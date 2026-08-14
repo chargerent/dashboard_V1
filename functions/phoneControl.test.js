@@ -17,6 +17,7 @@ const {
   enrollmentHash,
   hasPhoneControlAccess,
   normalizeArguments,
+  normalizeAppUpdateArguments,
   normalizeDeviceId,
   normalizeEnrollmentCode,
   normalizeScreenUpdate,
@@ -49,6 +50,28 @@ test("canonical JSON matches the Android sorted-key contract", () => {
       canonicalJson({offer: "a=https://example.com/path"}),
       "{\"offer\":\"a=https:\\/\\/example.com\\/path\"}",
   );
+});
+
+test("allows only versioned Chargerent Agent update packages", () => {
+  const update = normalizeAppUpdateArguments({
+    httpsUrl: "https://chargerentstations.com/portal/mdm/remote-agent-v1.2.0.apk",
+    sha256: "A".repeat(64),
+    versionCode: 15,
+    versionName: "1.2.0",
+  });
+  assert.equal(
+      update.httpsUrl,
+      "https://chargerentstations.com/portal/mdm/remote-agent-v1.2.0.apk",
+  );
+  assert.equal(update.sha256, "a".repeat(64));
+  assert.throws(() => normalizeAppUpdateArguments({
+    ...update,
+    httpsUrl: "https://example.com/remote-agent-v1.2.0.apk",
+  }), /Only official Chargerent Agent releases/);
+  assert.throws(() => normalizeAppUpdateArguments({
+    ...update,
+    sha256: "not-a-checksum",
+  }), /valid Agent package SHA-256/);
 });
 
 test("signs a command with an Android-compatible P-256 public key", () => {

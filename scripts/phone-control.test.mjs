@@ -10,6 +10,7 @@ import {
   phoneLocationMapUrls,
   phoneNetworkLabel,
   normalizePhoneDevice,
+  normalizeAgentRelease,
   phoneMatchesSearch,
   phoneTimestampToMillis,
 } from '../src/utils/phoneControl.js';
@@ -18,6 +19,23 @@ import {
   encodePointerPacket,
 } from '../src/utils/phoneWebRtc.js';
 
+test('validates the signed Agent release metadata used for updates', () => {
+  const release = normalizeAgentRelease({
+    packageName: 'com.chargerent.remoteagent',
+    versionName: '1.2.0',
+    versionCode: 15,
+    apkUrl: 'https://chargerentstations.com/portal/mdm/remote-agent-v1.2.0.apk',
+    apkSha256: 'A'.repeat(64),
+  });
+  assert.equal(release.versionCode, 15);
+  assert.equal(release.apkSha256, 'a'.repeat(64));
+  assert.throws(() => normalizeAgentRelease({
+    ...release,
+    packageName: 'com.chargerent.remoteagent',
+    apkUrl: 'https://example.com/remote-agent-v1.2.0.apk',
+  }), /approved Chargerent download location/);
+});
+
 test('normalizes kiosk assignment and Android inventory', () => {
   const device = normalizePhoneDevice({
     stationid: 'us0118',
@@ -25,6 +43,7 @@ test('normalizes kiosk assignment and Android inventory', () => {
     inventory: {
       manufacturer: 'Google',
       model: 'Pixel 6a',
+      agentVersionCode: 15,
       batteryPercent: 84,
       isDeviceOwner: true,
       network: 'wifi',
@@ -42,6 +61,7 @@ test('normalizes kiosk assignment and Android inventory', () => {
   assert.equal(device.stationId, 'US0118');
   assert.equal(device.lastSeenAtMs, 1_000_500);
   assert.equal(device.inventory.model, 'Pixel 6a');
+  assert.equal(device.inventory.agentVersionCode, 15);
   assert.equal(device.inventory.isDeviceOwner, true);
   assert.equal(device.inventory.wifiSsid, 'OurHome');
   assert.equal(device.location.latitude, 45.5019);

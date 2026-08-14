@@ -32,6 +32,7 @@ import {
   getKioskForPhone,
   getPhoneKioskCountryCode,
   getPhoneConnectionState,
+  normalizeAgentRelease,
   normalizePhoneDevice,
   phoneLocationMapUrls,
   phoneMatchesSearch,
@@ -136,6 +137,7 @@ function commandLabel(operation) {
 function commandActionLabel(operation, args = {}) {
   if (operation === 'SET_WIFI_ENABLED') return `Turn Wi-Fi ${args.enabled === true ? 'on' : 'off'}`;
   if (operation === 'SET_LOCATION_ENABLED') return `Turn GPS ${args.enabled === true ? 'on' : 'off'}`;
+  if (operation === 'INSTALL_APP_UPDATE' && args.versionName) return `Install Agent ${args.versionName}`;
   return commandLabel(operation);
 }
 
@@ -169,6 +171,15 @@ function phoneCommandConfirmationDetails(confirmation, device) {
     };
   }
 
+  if (operation === 'INSTALL_APP_UPDATE') {
+    const versionName = confirmation?.args?.versionName || 'update';
+    return {
+      title: `Install Agent ${versionName}`,
+      action: operation,
+      confirmationText: `Install Agent ${versionName} on the phone assigned to ${stationLabel}? Remote management will restart briefly while Android replaces the app.`,
+    };
+  }
+
   return {
     title: `Confirm ${commandLabel(operation)}`,
     action: operation,
@@ -196,8 +207,8 @@ function SummaryCard({ label, value, detail, tone = 'slate' }) {
 function FieldProvisioningCard() {
   const basePath = import.meta.env.BASE_URL || '/portal/';
   const [release, setRelease] = useState({
-    versionName: '1.1.1',
-    apkUrl: 'https://chargerentstations.com/portal/mdm/remote-agent-v1.1.1.apk',
+    versionName: '1.2.0',
+    apkUrl: 'https://chargerentstations.com/portal/mdm/remote-agent-v1.2.0.apk',
     qrImagePath: `${basePath}mdm/remote-agent-device-owner-qr.png`,
     qrPayloadPath: `${basePath}mdm/remote-agent-device-owner-payload.json`,
   });
@@ -210,7 +221,8 @@ function FieldProvisioningCard() {
         return response.json();
       })
       .then((metadata) => {
-        if (active) setRelease((current) => ({ ...current, ...metadata }));
+        const trustedRelease = normalizeAgentRelease(metadata);
+        if (active) setRelease((current) => ({ ...current, ...metadata, ...trustedRelease }));
       })
       .catch(() => {
         // The bundled release details remain usable when metadata refresh is unavailable.
@@ -252,6 +264,15 @@ function FieldProvisioningCard() {
       <a href={release.qrPayloadPath} target="_blank" rel="noreferrer" className="mt-3 block text-center text-[11px] font-semibold text-slate-400 hover:text-slate-600">View Android provisioning file</a>
     </div>
   );
+}
+
+async function fetchCurrentAgentRelease() {
+  const basePath = import.meta.env.BASE_URL || '/portal/';
+  const response = await fetch(`${basePath}mdm/remote-agent-provisioning.json`, {
+    cache: 'no-store',
+  });
+  if (!response.ok) throw new Error('Current Agent release information is unavailable.');
+  return normalizeAgentRelease(await response.json());
 }
 
 function Metric({ icon: Icon, label, value, active = null }) {
@@ -728,6 +749,7 @@ export default function PhoneControlPage({
   const [enrollmentStationId, setEnrollmentStationId] = useState('');
   const [enrollmentCode, setEnrollmentCode] = useState('');
   const [liveRequestedDeviceId, setLiveRequestedDeviceId] = useState('');
+  const [agentUpdateChecking, setAgentUpdateChecking] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   const isAdmin = currentUser?.isAdmin === true || currentUser?.role === 'admin' || currentUser?.username === 'chargerent';
@@ -917,6 +939,42 @@ export default function PhoneControlPage({
     }
     sendCommand(operation, args, false);
   }, [sendCommand]);
+
+  const requestAgentUpdate = useCallback(async () => {
+    if (!selectedDevice?.id || agentUpdateChecking) return;
+    setAgentUpdateChecking(true);
+    setCommandStatus({ state: 'sending', message: 'Checking for the latest Agent release…' });
+    try {
+      const release = await fetchCurrentAgentRelease();
+      const installedVersionCode = Number(selectedDevice.inventory.agentVersionCode || 0);
+      const sameNamedVersion = selectedDevice.inventory.agentVersion === release.versionName;
+      if ((installedVersionCode > 0 && installedVersionCode >= release.versionCode) ||
+          (!installedVersionCode && sameNamedVersion)) {
+        setCommandStatus({
+          state: 'success',
+          message: `Agent ${release.versionName} is already installed on ${selectedDevice.stationId || 'this phone'}.`,
+        });
+        return;
+      }
+      setCommandStatus(null);
+      setConfirmation({
+        operation: 'INSTALL_APP_UPDATE',
+        args: {
+          httpsUrl: release.apkUrl,
+          sha256: release.apkSha256,
+          versionCode: release.versionCode,
+          versionName: release.versionName,
+        },
+      });
+    } catch (error) {
+      setCommandStatus({
+        state: 'error',
+        message: humanizePhoneMessage(error?.message || 'Could not check for Agent updates.'),
+      });
+    } finally {
+      setAgentUpdateChecking(false);
+    }
+  }, [agentUpdateChecking, selectedDevice]);
 
   const startRealtimeScreen = useCallback(async (arguments_) => {
     if (!selectedDevice?.id) return;
@@ -1171,6 +1229,9 @@ export default function PhoneControlPage({
                           <WifiToggle enabled={selectedDevice.inventory.wifiEnabled} onToggle={() => requestCommand('SET_WIFI_ENABLED', { enabled: !selectedDevice.inventory.wifiEnabled })} disabled={!canControlSelected} />
                           <ActionButton icon={LockClosedIcon} onClick={() => requestCommand('LOCK_NOW')} disabled={!canControlSelected || selectedWebRtcActive} title={selectedWebRtcActive ? 'Stop the live stream before locking the phone' : ''} tone="amber">Lock</ActionButton>
                           <ActionButton icon={PowerIcon} onClick={() => requestCommand('REBOOT')} disabled={!canControlSelected} tone="red">Reboot</ActionButton>
+                          <ActionButton icon={ArrowPathIcon} onClick={requestAgentUpdate} disabled={!canControlSelected || agentUpdateChecking} tone="blue" className="col-span-2">
+                            {agentUpdateChecking ? 'Checking for update…' : 'Update Agent'}
+                          </ActionButton>
                         </div>
                       </section>
                       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">

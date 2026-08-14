@@ -14,6 +14,37 @@ export const HIGH_IMPACT_PHONE_OPERATIONS = new Set([
   'WIPE_DEVICE',
 ]);
 
+const AGENT_RELEASE_ORIGIN = 'https://chargerentstations.com';
+
+export function normalizeAgentRelease(metadata = {}) {
+  let apkUrl;
+  try {
+    apkUrl = new URL(String(metadata.apkUrl || '').trim());
+  } catch {
+    throw new Error('The Agent release URL is invalid.');
+  }
+  if (apkUrl.origin !== AGENT_RELEASE_ORIGIN || apkUrl.search || apkUrl.hash ||
+      !/^\/portal\/mdm\/remote-agent-v\d+\.\d+\.\d+\.apk$/.test(apkUrl.pathname)) {
+    throw new Error('The Agent release is not from the approved Chargerent download location.');
+  }
+
+  const versionName = String(metadata.versionName || '').trim();
+  const versionCode = Number(metadata.versionCode);
+  const apkSha256 = String(metadata.apkSha256 || '').trim().toLowerCase();
+  if (String(metadata.packageName || '') !== 'com.chargerent.remoteagent' ||
+      !/^\d+\.\d+\.\d+$/.test(versionName) ||
+      !Number.isSafeInteger(versionCode) || versionCode < 1 ||
+      !/^[0-9a-f]{64}$/.test(apkSha256)) {
+    throw new Error('The Agent release information is incomplete.');
+  }
+  return {
+    versionName,
+    versionCode,
+    apkUrl: apkUrl.toString(),
+    apkSha256,
+  };
+}
+
 export function phoneTimestampToMillis(value) {
   if (!value) return 0;
   if (typeof value.toMillis === 'function') return value.toMillis();
@@ -78,6 +109,9 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
       androidVersion: String(inventory.androidVersion || '').trim(),
       securityPatch: String(inventory.securityPatch || '').trim(),
       agentVersion: String(inventory.agentVersion || rawDevice.agentVersion || '').trim(),
+      agentVersionCode: Number.isSafeInteger(Number(inventory.agentVersionCode))
+        ? Number(inventory.agentVersionCode)
+        : 0,
       batteryPercent: Number.isFinite(Number(inventory.batteryPercent))
         ? Number(inventory.batteryPercent)
         : null,
