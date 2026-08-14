@@ -33,6 +33,7 @@ const {
   assignDevice: assignPhoneDevice,
   createEnrollment: createPhoneEnrollment,
   enrollDevice: enrollPhoneDevice,
+  getIceServers: getPhoneIceServers,
   getScreen: getPhoneScreen,
   listCommands: listPhoneCommands,
   listDevices: listPhoneDevices,
@@ -50,6 +51,7 @@ const EVENT_INTAKE_SECRET = defineSecret("EVENT_INTAKE_SECRET");
 const SLASH_GOLF_RAPIDAPI_KEY = defineSecret("SLASH_GOLF_RAPIDAPI_KEY");
 const GMAIL_APP_PASSWORD = defineSecret("GMAIL_APP_PASSWORD");
 const PHONE_CONTROL_SIGNING_PRIVATE_KEY = defineSecret("PHONE_CONTROL_SIGNING_PRIVATE_KEY");
+const TURN_SHARED_SECRET = defineSecret("TURN_SHARED_SECRET");
 const STORAGE_BUCKET = "node-red-alerts.firebasestorage.app";
 const STORAGE_BUCKET_CANDIDATES = Array.from(new Set([
   STORAGE_BUCKET,
@@ -9668,6 +9670,24 @@ exports.phoneControl_httpGetScreen = handleHttpFunction(async (data, req) => {
   const authState = await getAuthorizedProfileFromRequest(req, data);
   return getPhoneScreen(data, authState, {db});
 });
+
+exports.phoneControl_getIceServers = functions.runWith({
+  secrets: [TURN_SHARED_SECRET],
+}).https.onCall(async (data, context) => {
+  const authState = await getAuthorizedProfileFromContext(context);
+  return getPhoneIceServers(data, authState, {
+    db,
+    sharedSecret: TURN_SHARED_SECRET.value(),
+  });
+});
+
+exports.phoneControl_httpGetIceServers = handleHttpFunction(async (data, req) => {
+  const authState = await getAuthorizedProfileFromRequest(req, data);
+  return getPhoneIceServers(data, authState, {
+    db,
+    sharedSecret: TURN_SHARED_SECRET.value(),
+  });
+}, {secrets: [TURN_SHARED_SECRET]});
 
 exports.phoneControl_sendCommand = functions.runWith({
   secrets: [PHONE_CONTROL_SIGNING_PRIVATE_KEY],

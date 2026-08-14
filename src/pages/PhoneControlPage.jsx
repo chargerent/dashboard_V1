@@ -42,12 +42,12 @@ import {
   phoneTimestampToMillis,
 } from '../utils/phoneControl.js';
 import {
-  PHONE_WEBRTC_ICE_SERVERS,
   PHONE_WEBRTC_PROFILES,
   createWebRtcSessionId,
   encodeGlobalActionPacket,
   encodePointerPacket,
   mediaPoint,
+  normalizePhoneWebRtcIceServers,
   waitForIceGatheringComplete,
 } from '../utils/phoneWebRtc.js';
 
@@ -430,6 +430,8 @@ function RemoteScreen({
   canControl,
   canSendCommand,
   onCommand,
+  onPrepareRealtime,
+  onRealtimeError,
   onStartRealtime,
   onStopRealtime,
   onStartPreview,
@@ -446,6 +448,7 @@ function RemoteScreen({
   const videoRef = useRef(null);
   const imageRef = useRef(null);
   const sessionIdRef = useRef('');
+  const startAttemptRef = useRef(0);
   const pointerRef = useRef(null);
   const imageUrl = String(device?.screen?.dataUrl || device?.screen?.latestUrl || device?.screen?.imageUrl || '').trim();
   const screenWidth = Number(device?.screen?.width || 1080);
@@ -459,6 +462,7 @@ function RemoteScreen({
   const directControl = controlReady;
 
   const closePeer = useCallback((nextState = 'idle') => {
+    startAttemptRef.current += 1;
     channelRef.current?.close();
     peerRef.current?.close();
     channelRef.current = null;
@@ -505,50 +509,58 @@ function RemoteScreen({
   const startRealtime = async () => {
     if (!canControl || typeof window.RTCPeerConnection !== 'function') return;
     closePeer('preparing');
-    const sessionId = createWebRtcSessionId();
-    const peer = new window.RTCPeerConnection({ iceServers: PHONE_WEBRTC_ICE_SERVERS });
-    const channel = peer.createDataChannel('chargerent-control-v1', { ordered: true });
-    channel.binaryType = 'arraybuffer';
-    channel.onopen = () => {
-      setControlReady(true);
-      setRtcState('connected');
-    };
-    channel.onclose = () => {
-      setControlReady(false);
-      setRtcState((current) => current === 'stopped' ? current : 'disconnected');
-    };
-    channelRef.current = channel;
-    peerRef.current = peer;
-    sessionIdRef.current = sessionId;
-    peer.addTransceiver('video', { direction: 'recvonly' });
-    peer.ontrack = (event) => {
-      const [stream] = event.streams;
-      if (videoRef.current && stream) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play().catch(() => {});
-        setHasRemoteVideo(true);
-      }
-    };
-    peer.onconnectionstatechange = () => {
-      const state = peer.connectionState;
-      setRtcState(state);
-      if (['failed', 'closed'].includes(state)) closePeer(state);
-    };
+    const attemptId = startAttemptRef.current;
     try {
+      const iceServers = await onPrepareRealtime();
+      if (attemptId !== startAttemptRef.current) return;
+      const sessionId = createWebRtcSessionId();
+      const peer = new window.RTCPeerConnection({ iceServers });
+      const channel = peer.createDataChannel('chargerent-control-v1', { ordered: true });
+      channel.binaryType = 'arraybuffer';
+      channel.onopen = () => {
+        setControlReady(true);
+        setRtcState('connected');
+      };
+      channel.onclose = () => {
+        setControlReady(false);
+        setRtcState((current) => current === 'stopped' ? current : 'disconnected');
+      };
+      channelRef.current = channel;
+      peerRef.current = peer;
+      sessionIdRef.current = sessionId;
+      peer.addTransceiver('video', { direction: 'recvonly' });
+      peer.ontrack = (event) => {
+        const [stream] = event.streams;
+        if (videoRef.current && stream) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(() => {});
+          setHasRemoteVideo(true);
+        }
+      };
+      peer.onconnectionstatechange = () => {
+        const state = peer.connectionState;
+        setRtcState(state);
+        if (['failed', 'closed'].includes(state)) closePeer(state);
+      };
       setRtcState('creating_offer');
       await peer.setLocalDescription(await peer.createOffer());
       await waitForIceGatheringComplete(peer);
+      if (attemptId !== startAttemptRef.current) return;
       const queued = await onStartRealtime({
         sessionId,
         offerSdp: peer.localDescription?.sdp || '',
         durationSeconds: 300,
-        iceServers: PHONE_WEBRTC_ICE_SERVERS,
+        iceServers,
         profile: PHONE_WEBRTC_PROFILES[profileKey],
       });
+      if (attemptId !== startAttemptRef.current) return;
       if (!queued) closePeer('failed');
       else setRtcState('awaiting_device');
-    } catch {
-      closePeer('failed');
+    } catch (error) {
+      if (attemptId === startAttemptRef.current) {
+        closePeer('failed');
+        onRealtimeError(error);
+      }
     }
   };
 
@@ -1020,6 +1032,25 @@ export default function PhoneControlPage({
     return sendCommand('START_WEBRTC_SCREEN', arguments_, false);
   }, [selectedDevice, sendCommand]);
 
+  const prepareRealtimeScreen = useCallback(async () => {
+    if (!selectedDevice?.id) throw new Error('Select a managed phone first.');
+    setCommandStatus({state: 'sending', message: 'Preparing secure live connection…'});
+    const result = await callFunctionWithAuth('phoneControl_getIceServers', {
+      deviceId: selectedDevice.id,
+    }, {
+      timeoutMs: 15_000,
+      timeoutMessage: 'Secure live connection timed out. Please try again.',
+    });
+    return normalizePhoneWebRtcIceServers(result);
+  }, [selectedDevice]);
+
+  const reportRealtimeError = useCallback((error) => {
+    setCommandStatus({
+      state: 'error',
+      message: humanizePhoneMessage(error?.message || 'Could not start the secure live connection.'),
+    });
+  }, []);
+
   const stopRealtimeScreen = useCallback((sessionId) => {
     setLiveRequestedDeviceId('');
     sendCommand('STOP_WEBRTC_SCREEN', { sessionId }, false);
@@ -1251,6 +1282,8 @@ export default function PhoneControlPage({
                       canControl={canControlSelected && selectedDevice.inventory.remoteUiInputEnabled}
                       canSendCommand={canControlSelected}
                       onCommand={requestCommand}
+                      onPrepareRealtime={prepareRealtimeScreen}
+                      onRealtimeError={reportRealtimeError}
                       onStartRealtime={startRealtimeScreen}
                       onStopRealtime={stopRealtimeScreen}
                       onStartPreview={startLivePreview}

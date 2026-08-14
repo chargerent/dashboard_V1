@@ -19,6 +19,7 @@ import {
 import {
   encodeGlobalActionPacket,
   encodePointerPacket,
+  normalizePhoneWebRtcIceServers,
 } from '../src/utils/phoneWebRtc.js';
 
 test('validates the signed Agent release metadata used for updates', () => {
@@ -167,5 +168,26 @@ test('encodes the versioned binary WebRTC control protocol', () => {
   assert.deepEqual(
     [...new Uint8Array(encodeGlobalActionPacket('HOME'))],
     [1, 2, 2],
+  );
+});
+
+test('accepts only short-lived ICE configuration from the Chargerent relay', () => {
+  const servers = normalizePhoneWebRtcIceServers({
+    iceServers: [
+      { urls: ['stun:stun.l.google.com:19302'] },
+      {
+        urls: ['turns:turn.chargerentstations.com:5349?transport=tcp'],
+        username: '1700000600:operator:nonce',
+        credential: 'short-lived-credential',
+      },
+    ],
+  });
+  assert.equal(servers.length, 2);
+  assert.equal(servers[1].username, '1700000600:operator:nonce');
+  assert.throws(
+    () => normalizePhoneWebRtcIceServers({
+      iceServers: [{ urls: ['turns:example.com:5349'], username: 'u', credential: 'p' }],
+    }),
+    /Secure live connection is unavailable/,
   );
 });

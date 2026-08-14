@@ -1,6 +1,34 @@
-export const PHONE_WEBRTC_ICE_SERVERS = [
-  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-];
+const APPROVED_STUN_URLS = new Set([
+  'stun:stun.l.google.com:19302',
+  'stun:stun1.l.google.com:19302',
+]);
+
+const APPROVED_TURN_URLS = new Set([
+  'turns:turn.chargerentstations.com:5349?transport=tcp',
+  'turns:turn.chargerentstations.com:5349?transport=udp',
+]);
+
+export function normalizePhoneWebRtcIceServers(payload) {
+  const source = Array.isArray(payload?.iceServers) ? payload.iceServers : [];
+  const normalized = source.flatMap((server) => {
+    const urls = (Array.isArray(server?.urls) ? server.urls : [server?.urls])
+      .map((url) => String(url || '').trim())
+      .filter((url) => APPROVED_STUN_URLS.has(url) || APPROVED_TURN_URLS.has(url));
+    if (!urls.length) return [];
+    if (!urls.some((url) => APPROVED_TURN_URLS.has(url))) return [{ urls }];
+
+    const username = String(server?.username || '').trim();
+    const credential = String(server?.credential || '').trim();
+    if (!username || !credential || username.length > 180 || credential.length > 180) return [];
+    return [{ urls, username, credential }];
+  });
+
+  const hasTurn = normalized.some((server) => (
+    server.urls.some((url) => APPROVED_TURN_URLS.has(url))
+  ));
+  if (!hasTurn) throw new Error('Secure live connection is unavailable. Please try again.');
+  return normalized;
+}
 
 export const PHONE_WEBRTC_PROFILES = {
   low: { label: 'Data saver', longEdge: 480, fps: 15, bitrateKbps: 700 },

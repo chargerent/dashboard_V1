@@ -55,6 +55,7 @@ const HTTP_FUNCTION_NAME_MAP = {
   phoneControl_listDevices: 'phoneControl_httpListDevices',
   phoneControl_listCommands: 'phoneControl_httpListCommands',
   phoneControl_getScreen: 'phoneControl_httpGetScreen',
+  phoneControl_getIceServers: 'phoneControl_httpGetIceServers',
   phoneControl_sendCommand: 'phoneControl_httpSendCommand',
 };
 

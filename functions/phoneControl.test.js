@@ -13,6 +13,7 @@ const {
   canonicalJson,
   controllerPublicKeyBase64,
   createEnrollmentCode,
+  createTurnIceConfiguration,
   deviceIdFromPublicKey,
   enrollmentHash,
   hasPhoneControlAccess,
@@ -233,6 +234,38 @@ test("preserves the WebRTC SDP line terminator", () => {
     },
   });
   assert.equal(screen.webrtc.answerSdp, answerSdp);
+});
+
+test("creates short-lived authenticated TURN credentials", () => {
+  const now = 1_700_000_000_000;
+  const result = createTurnIceConfiguration(
+      "partner:user",
+      "test-turn-secret",
+      now,
+      "fixednonce",
+  );
+  const username = "1700000600:partner_user:fixednonce";
+  const expectedCredential = crypto.createHmac("sha1", "test-turn-secret")
+      .update(username)
+      .digest("base64");
+
+  assert.equal(result.expiresAt, 1_700_000_600_000);
+  assert.deepEqual(result.iceServers[0].urls, [
+    "stun:stun.l.google.com:19302",
+    "stun:stun1.l.google.com:19302",
+  ]);
+  assert.deepEqual(result.iceServers[1], {
+    urls: [
+      "turns:turn.chargerentstations.com:5349?transport=tcp",
+      "turns:turn.chargerentstations.com:5349?transport=udp",
+    ],
+    username,
+    credential: expectedCredential,
+  });
+  assert.throws(
+      () => createTurnIceConfiguration("partner", "", now, "fixednonce"),
+      /relay is not configured/,
+  );
 });
 
 test("a new live session resets the prior frame sequence", () => {

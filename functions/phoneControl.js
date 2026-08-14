@@ -14,6 +14,16 @@ const ENROLLMENT_CODE_LENGTH = 6;
 const LEGACY_ENROLLMENT_CODE_LENGTH = 8;
 const AGENT_RELEASE_HOST = "chargerentstations.com";
 const DEVICE_REQUEST_CLOCK_SKEW_MS = 2 * 60 * 1000;
+const TURN_CREDENTIAL_TTL_SECONDS = 10 * 60;
+const TURN_SERVER_HOST = "turn.chargerentstations.com";
+const PHONE_WEBRTC_STUN_URLS = [
+  "stun:stun.l.google.com:19302",
+  "stun:stun1.l.google.com:19302",
+];
+const PHONE_WEBRTC_TURN_URLS = [
+  `turns:${TURN_SERVER_HOST}:5349?transport=tcp`,
+  `turns:${TURN_SERVER_HOST}:5349?transport=udp`,
+];
 
 const ALLOWED_OPERATIONS = new Set([
   "PING",
@@ -607,6 +617,51 @@ async function getScreen(data, authState, dependencies) {
   };
 }
 
+function createTurnIceConfiguration(subject, sharedSecret, nowMs = Date.now(), nonce = "") {
+  const secret = String(sharedSecret || "").trim();
+  if (!secret || Buffer.byteLength(secret, "utf8") > 1024) {
+    throw new HttpsError(
+        "failed-precondition",
+        "Secure live-screen relay is not configured.",
+    );
+  }
+  const safeSubject = String(subject || "controller")
+      .replace(/[^A-Za-z0-9._-]/g, "_")
+      .slice(0, 80) || "controller";
+  const credentialNonce = String(nonce || crypto.randomBytes(8).toString("hex"))
+      .replace(/[^A-Za-z0-9._-]/g, "")
+      .slice(0, 32);
+  const expiresAtSeconds = Math.floor(Number(nowMs) / 1000) +
+    TURN_CREDENTIAL_TTL_SECONDS;
+  const username = `${expiresAtSeconds}:${safeSubject}:${credentialNonce}`;
+  const credential = crypto.createHmac("sha1", secret)
+      .update(username, "utf8")
+      .digest("base64");
+
+  return {
+    expiresAt: expiresAtSeconds * 1000,
+    iceServers: [
+      {urls: PHONE_WEBRTC_STUN_URLS},
+      {
+        urls: PHONE_WEBRTC_TURN_URLS,
+        username,
+        credential,
+      },
+    ],
+  };
+}
+
+async function getIceServers(data, authState, dependencies) {
+  const {db, sharedSecret} = dependencies;
+  const deviceId = normalizeDeviceId(data?.deviceId);
+  await assertDeviceAccess(db, authState, deviceId);
+  return {
+    ok: true,
+    deviceId,
+    ...createTurnIceConfiguration(authState?.uid, sharedSecret),
+  };
+}
+
 async function createEnrollment(data, authState, dependencies) {
   const {db, admin, privateKeyPem} = dependencies;
   const stationId = normalizeStationId(data?.stationId);
@@ -1087,10 +1142,12 @@ module.exports = {
   controllerPublicKeyBase64,
   createEnrollment,
   createEnrollmentCode,
+  createTurnIceConfiguration,
   deviceIdFromPublicKey,
   enrollDevice,
   enrollmentHash,
   getScreen,
+  getIceServers,
   hasPhoneControlAccess,
   authenticateDeviceRequest,
   normalizeArguments,
