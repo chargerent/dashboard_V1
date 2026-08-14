@@ -918,8 +918,18 @@ function normalizeAiBoothVisualMode(value, fallback = DEFAULT_AI_BOOTH_SCREEN_UI
     "airport-board": "airport-departure",
     "departure-board": "airport-departure",
     terminal: "airport-departure",
+    "tennis-face": "tennis-ball-face",
+    "tennis-ball": "tennis-ball-face",
+    "tennis-concierge": "tennis-ball-face",
+    mascot: "tennis-ball-face",
   }[raw] || raw;
-  return ["knowledge-web", "golf-scorecard", "southwest-heart", "airport-departure"].includes(normalized) ? normalized : fallback;
+  return [
+    "knowledge-web",
+    "golf-scorecard",
+    "southwest-heart",
+    "airport-departure",
+    "tennis-ball-face",
+  ].includes(normalized) ? normalized : fallback;
 }
 
 function normalizeAiBoothGolfQrMode(value, fallback = DEFAULT_AI_BOOTH_SCREEN_UI.golfQrMode) {
