@@ -428,6 +428,7 @@ function PhoneLocationCard({ device, now, onRefresh, onToggleLocation, locationE
 function RemoteScreen({
   device,
   canControl,
+  canInput,
   canSendCommand,
   onCommand,
   onPrepareRealtime,
@@ -588,7 +589,7 @@ function RemoteScreen({
   );
 
   const handlePointerDown = (event) => {
-    if (!canControl || (!hasRemoteVideo && !imageUrl)) return;
+    if (!canInput || (!hasRemoteVideo && !imageUrl)) return;
     const point = pointerPoint(event);
     if (!point) return;
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -612,7 +613,7 @@ function RemoteScreen({
 
   const handlePointerUp = (event) => {
     const start = pointerRef.current;
-    if (!canControl || !start) return;
+    if (!canInput || !start) return;
     const end = pointerPoint(event);
     pointerRef.current = null;
     if (!end) return;
@@ -738,7 +739,7 @@ function RemoteScreen({
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             onPointerCancel={cancelPointer}
-            disabled={!canControl}
+            disabled={!canInput}
             className="h-full w-full touch-none cursor-crosshair select-none disabled:cursor-default"
           >
             <video
@@ -765,17 +766,17 @@ function RemoteScreen({
             <option key={key} value={key}>{profile.label}</option>
           ))}
         </select>
-        <button type="button" onClick={liveActive ? onStopPreview : onStartPreview} disabled={!canControl} className="min-h-9 rounded-lg border border-slate-700 px-3 text-[11px] font-bold text-slate-300 hover:bg-slate-900 disabled:opacity-40">
+        <button type="button" onClick={liveActive ? onStopPreview : onStartPreview} disabled={!canSendCommand} className="min-h-9 rounded-lg border border-slate-700 px-3 text-[11px] font-bold text-slate-300 hover:bg-slate-900 disabled:opacity-40">
           {liveActive ? 'Stop preview' : 'Fallback preview'}
         </button>
       </div>
 
       <div className="mx-auto mt-3 grid max-w-[360px] grid-cols-3 gap-2">
-        <ActionButton icon={ArrowUturnLeftIcon} onClick={() => globalAction('BACK')} disabled={!canControl}>Back</ActionButton>
-        <ActionButton icon={HomeIcon} onClick={() => globalAction('HOME')} disabled={!canControl}>Home</ActionButton>
-        <ActionButton icon={Squares2X2Icon} onClick={() => globalAction('RECENTS')} disabled={!canControl}>Recent</ActionButton>
-        <ActionButton icon={ArrowUpIcon} onClick={swipeUp} disabled={!canControl} className="!gap-1 !px-2 !text-[11px] whitespace-nowrap">Swipe up</ActionButton>
-        <ActionButton icon={ArrowDownIcon} onClick={swipeDown} disabled={!canControl} className="!gap-1 !px-2 !text-[11px] whitespace-nowrap">Swipe down</ActionButton>
+        <ActionButton icon={ArrowUturnLeftIcon} onClick={() => globalAction('BACK')} disabled={!canInput}>Back</ActionButton>
+        <ActionButton icon={HomeIcon} onClick={() => globalAction('HOME')} disabled={!canInput}>Home</ActionButton>
+        <ActionButton icon={Squares2X2Icon} onClick={() => globalAction('RECENTS')} disabled={!canInput}>Recent</ActionButton>
+        <ActionButton icon={ArrowUpIcon} onClick={swipeUp} disabled={!canInput} className="!gap-1 !px-2 !text-[11px] whitespace-nowrap">Swipe up</ActionButton>
+        <ActionButton icon={ArrowDownIcon} onClick={swipeDown} disabled={!canInput} className="!gap-1 !px-2 !text-[11px] whitespace-nowrap">Swipe down</ActionButton>
         <ActionButton icon={WifiIcon} onClick={() => onCommand('OPEN_TETHER_SETTINGS')} disabled={!canSendCommand} tone="blue" className="!gap-1 !px-2 !text-[11px] whitespace-nowrap">Tethering</ActionButton>
       </div>
       <p className="mt-3 text-center text-[10px] leading-4 text-slate-500">
@@ -1291,7 +1292,8 @@ export default function PhoneControlPage({
                   <div className="grid gap-4 lg:grid-cols-[minmax(280px,0.75fr)_minmax(0,1.25fr)]">
                     <RemoteScreen
                       device={selectedDevice}
-                      canControl={canControlSelected && selectedDevice.inventory.remoteUiInputEnabled}
+                      canControl={canControlSelected}
+                      canInput={canControlSelected && selectedDevice.inventory.remoteUiInputEnabled}
                       canSendCommand={canControlSelected}
                       onCommand={requestCommand}
                       onPrepareRealtime={prepareRealtimeScreen}
