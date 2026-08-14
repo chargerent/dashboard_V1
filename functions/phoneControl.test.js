@@ -12,11 +12,13 @@ const {
   canonicalCommandPayload,
   canonicalJson,
   controllerPublicKeyBase64,
+  createEnrollmentCode,
   deviceIdFromPublicKey,
   enrollmentHash,
   hasPhoneControlAccess,
   normalizeArguments,
   normalizeDeviceId,
+  normalizeEnrollmentCode,
   normalizeScreenUpdate,
   normalizeStationId,
   signCommand,
@@ -78,6 +80,21 @@ test("signs a command with an Android-compatible P-256 public key", () => {
 test("enrollment codes are stored as deterministic hashes", () => {
   assert.equal(enrollmentHash("ABCD-EFGH"), enrollmentHash("ABCDEFGH"));
   assert.equal(enrollmentHash("ABCDEFGH").length, 64);
+});
+
+test("creates short, unambiguous enrollment codes", () => {
+  for (let index = 0; index < 100; index += 1) {
+    assert.match(createEnrollmentCode(), /^[A-HJ-NP-Z2-9]{3}-[A-HJ-NP-Z2-9]{3}$/);
+  }
+});
+
+test("accepts new short codes and pending legacy codes", () => {
+  assert.equal(normalizeEnrollmentCode(" abc-def "), "ABCDEF");
+  assert.equal(normalizeEnrollmentCode("ABCD-EFGH"), "ABCDEFGH");
+  assert.throws(
+      () => normalizeEnrollmentCode("AB-CD"),
+      /Enter the 6-character enrollment code/,
+  );
 });
 
 test("allows the same phone to resume a committed enrollment", () => {

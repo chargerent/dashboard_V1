@@ -10,6 +10,8 @@ const ASSIGNMENTS_COLLECTION = "phoneKioskAssignments";
 const COMMAND_TTL_MS = 2 * 60 * 1000;
 const ENROLLMENT_TTL_MS = 15 * 60 * 1000;
 const ENROLLMENT_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const ENROLLMENT_CODE_LENGTH = 6;
+const LEGACY_ENROLLMENT_CODE_LENGTH = 8;
 const DEVICE_REQUEST_CLOCK_SKEW_MS = 2 * 60 * 1000;
 
 const ALLOWED_OPERATIONS = new Set([
@@ -213,10 +215,18 @@ function signCommand(command, privateKeyPem) {
 
 function createEnrollmentCode() {
   let code = "";
-  for (let index = 0; index < 8; index += 1) {
+  for (let index = 0; index < ENROLLMENT_CODE_LENGTH; index += 1) {
     code += ENROLLMENT_ALPHABET[crypto.randomInt(ENROLLMENT_ALPHABET.length)];
   }
-  return `${code.slice(0, 4)}-${code.slice(4)}`;
+  return `${code.slice(0, 3)}-${code.slice(3)}`;
+}
+
+function normalizeEnrollmentCode(value) {
+  const normalizedCode = String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (![ENROLLMENT_CODE_LENGTH, LEGACY_ENROLLMENT_CODE_LENGTH].includes(normalizedCode.length)) {
+    invalidArgument("Enter the 6-character enrollment code shown in the dashboard.");
+  }
+  return normalizedCode;
 }
 
 function enrollmentHash(code) {
@@ -726,9 +736,7 @@ async function sendCommand(data, authState, dependencies) {
 
 async function enrollDevice(data, dependencies) {
   const {db, admin, privateKeyPem} = dependencies;
-  const rawCode = String(data?.enrollmentCode || "").trim().toUpperCase();
-  const normalizedCode = rawCode.replace(/[^A-Z0-9]/g, "");
-  if (normalizedCode.length !== 8) invalidArgument("A valid enrollment code is required.");
+  const normalizedCode = normalizeEnrollmentCode(data?.enrollmentCode);
 
   const publicKeyBase64 = String(data?.publicKey || "").trim();
   parseDevicePublicKey(publicKeyBase64);
@@ -1020,6 +1028,7 @@ module.exports = {
   canonicalJson,
   controllerPublicKeyBase64,
   createEnrollment,
+  createEnrollmentCode,
   deviceIdFromPublicKey,
   enrollDevice,
   enrollmentHash,
@@ -1028,6 +1037,7 @@ module.exports = {
   authenticateDeviceRequest,
   normalizeArguments,
   normalizeDeviceId,
+  normalizeEnrollmentCode,
   normalizeScreenUpdate,
   normalizeStationId,
   listCommands,
