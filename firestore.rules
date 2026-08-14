@@ -5,7 +5,9 @@ service cloud.firestore {
     function isAdmin() {
       return request.auth != null && (
         request.auth.token.role == 'admin' ||
-        request.auth.token.username == 'chargerent'
+        request.auth.token.username == 'chargerent' ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.username == 'chargerent'
       );
     }
 
@@ -36,6 +38,28 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Managed kiosk phones contain precise location and administrative state.
+    // Dashboard clients may only read them as an admin; all writes go through
+    // Cloud Functions so commands are validated, confirmed, and signed.
+    match /phoneDevices/{docId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /phoneDeviceCommands/{docId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /phoneKioskAssignments/{docId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /phoneDeviceEnrollments/{docId} {
+      allow read, write: if false;
+    }
+
     // Login lockout state — public read so LoginPage can check before auth
     // Writes are only via Cloud Functions (Admin SDK bypasses these rules)
     match /loginAttempts/{username} {
@@ -53,7 +77,11 @@ service cloud.firestore {
     match /{collection}/{document=**} {
       allow read: if request.auth != null &&
         collection != 'kioskEvents' &&
-        collection != 'kioskIncidents'; // signed-in only, except admin activity data above
+        collection != 'kioskIncidents' &&
+        collection != 'phoneDevices' &&
+        collection != 'phoneDeviceCommands' &&
+        collection != 'phoneKioskAssignments' &&
+        collection != 'phoneDeviceEnrollments'; // signed-in only, except protected data above
       allow write: if false;
     }
   }

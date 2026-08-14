@@ -50,6 +50,12 @@ const HTTP_FUNCTION_NAME_MAP = {
   stationBinding_bindModule: 'stationBinding_httpBindModule',
   stationBinding_unbindModule: 'stationBinding_httpUnbindModule',
   stationBinding_moveModule: 'stationBinding_httpMoveModule',
+  phoneControl_createEnrollment: 'phoneControl_httpCreateEnrollment',
+  phoneControl_assignDevice: 'phoneControl_httpAssignDevice',
+  phoneControl_listDevices: 'phoneControl_httpListDevices',
+  phoneControl_listCommands: 'phoneControl_httpListCommands',
+  phoneControl_getScreen: 'phoneControl_httpGetScreen',
+  phoneControl_sendCommand: 'phoneControl_httpSendCommand',
 };
 
 function shouldUseLocalFunctionProxy() {
@@ -94,6 +100,7 @@ export async function callFunctionWithAuth(functionName, data = {}, options = {}
     timeoutMessage = '',
     abortController = null,
     abortMessage = '',
+    forceRefreshToken = true,
   } = options;
 
   const url = getCallableUrl(functionName);
@@ -110,7 +117,7 @@ export async function callFunctionWithAuth(functionName, data = {}, options = {}
 
   let idToken = '';
   try {
-    idToken = await auth.currentUser.getIdToken(true);
+    idToken = await auth.currentUser.getIdToken(forceRefreshToken);
   } catch (error) {
     if (timeoutId) {
       globalThis.clearTimeout(timeoutId);

@@ -1,0 +1,201 @@
+const PHONE_ONLINE_WINDOW_MS = 90 * 1000;
+
+export const PHONE_KIOSK_COUNTRIES = [
+  { code: 'CA', label: 'Canada' },
+  { code: 'FR', label: 'France' },
+  { code: 'US', label: 'US' },
+];
+
+export const HIGH_IMPACT_PHONE_OPERATIONS = new Set([
+  'REBOOT',
+  'REQUEST_BUGREPORT',
+  'INSTALL_SYSTEM_UPDATE',
+  'INSTALL_APP_UPDATE',
+  'WIPE_DEVICE',
+]);
+
+export function phoneTimestampToMillis(value) {
+  if (!value) return 0;
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (typeof value.toDate === 'function') return value.toDate().getTime();
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'object' && Number.isFinite(Number(value.seconds))) {
+    return Number(value.seconds) * 1000 + Math.floor(Number(value.nanoseconds || 0) / 1e6);
+  }
+
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) return numeric;
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
+  const inventory = rawDevice.inventory && typeof rawDevice.inventory === 'object'
+    ? rawDevice.inventory
+    : {};
+  const stationId = String(
+    rawDevice.stationId || rawDevice.stationid || rawDevice.assignment?.stationId || '',
+  ).trim().toUpperCase();
+  const lastSeenAtMs = phoneTimestampToMillis(
+    rawDevice.lastSeenAt || rawDevice.heartbeatAt || inventory.collectedAt,
+  );
+  const rawLocation = rawDevice.location && typeof rawDevice.location === 'object'
+    ? rawDevice.location
+    : {};
+  const latitude = Number(rawLocation.latitude);
+  const longitude = Number(rawLocation.longitude);
+  const hasCoordinates = Number.isFinite(latitude) && latitude >= -90 && latitude <= 90 &&
+    Number.isFinite(longitude) && longitude >= -180 && longitude <= 180;
+
+  return {
+    id: String(rawDevice.deviceId || documentId || '').trim(),
+    stationId,
+    assignmentState: stationId ? 'assigned' : 'unassigned',
+    displayName: String(rawDevice.displayName || rawDevice.name || '').trim(),
+    enrollmentState: String(rawDevice.enrollmentState || rawDevice.status || 'pending').toLowerCase(),
+    lastSeenAtMs,
+    lastSeenAt: rawDevice.lastSeenAt || rawDevice.heartbeatAt || null,
+    lastCommand: rawDevice.lastCommand || null,
+    screen: rawDevice.screen && typeof rawDevice.screen === 'object' ? rawDevice.screen : {},
+    location: {
+      latitude: hasCoordinates ? latitude : null,
+      longitude: hasCoordinates ? longitude : null,
+      accuracyMeters: Number.isFinite(Number(rawLocation.accuracyMeters))
+        ? Number(rawLocation.accuracyMeters)
+        : null,
+      altitudeMeters: Number.isFinite(Number(rawLocation.altitudeMeters))
+        ? Number(rawLocation.altitudeMeters)
+        : null,
+      provider: String(rawLocation.provider || '').trim(),
+      source: String(rawLocation.source || '').trim(),
+      stale: rawLocation.stale === true,
+      capturedAtMs: phoneTimestampToMillis(rawLocation.capturedAt),
+      receivedAtMs: phoneTimestampToMillis(rawLocation.receivedAt),
+    },
+    inventory: {
+      manufacturer: String(inventory.manufacturer || '').trim(),
+      model: String(inventory.model || rawDevice.model || 'Android phone').trim(),
+      androidVersion: String(inventory.androidVersion || '').trim(),
+      securityPatch: String(inventory.securityPatch || '').trim(),
+      agentVersion: String(inventory.agentVersion || rawDevice.agentVersion || '').trim(),
+      batteryPercent: Number.isFinite(Number(inventory.batteryPercent))
+        ? Number(inventory.batteryPercent)
+        : null,
+      batteryCharging: inventory.batteryCharging === true,
+      network: String(inventory.network || 'offline').toLowerCase(),
+      wifiSsid: String(inventory.wifiSsid || '').trim(),
+      wifiEnabled: inventory.wifiEnabled === true,
+      bluetoothEnabled: inventory.bluetoothEnabled === true,
+      locationEnabled: inventory.locationEnabled === true,
+      remoteUiInputEnabled: inventory.remoteUiInputEnabled === true,
+      isDeviceOwner: inventory.isDeviceOwner === true,
+      storageAvailableBytes: Number(inventory.storageAvailableBytes || 0),
+      storageTotalBytes: Number(inventory.storageTotalBytes || 0),
+    },
+    raw: rawDevice,
+  };
+}
+
+export function getPhoneConnectionState(device, now = Date.now()) {
+  if (!device?.lastSeenAtMs) return 'never';
+  return now - device.lastSeenAtMs <= PHONE_ONLINE_WINDOW_MS ? 'online' : 'offline';
+}
+
+export function phoneMatchesSearch(device, kiosk, searchTerm) {
+  const needle = String(searchTerm || '').trim().toLowerCase();
+  if (!needle) return true;
+
+  return [
+    device?.stationId,
+    device?.displayName,
+    device?.id,
+    device?.inventory?.manufacturer,
+    device?.inventory?.model,
+    device?.inventory?.wifiSsid,
+    kiosk?.info?.location,
+    kiosk?.info?.place,
+    kiosk?.info?.client,
+    kiosk?.info?.account,
+  ].some((value) => String(value || '').toLowerCase().includes(needle));
+}
+
+export function phoneNetworkLabel(inventory = {}) {
+  const network = String(inventory.network || 'offline').trim().toLowerCase();
+  const wifiSsid = String(inventory.wifiSsid || '').trim();
+  if (network === 'wifi') return wifiSsid ? `Wi-Fi · ${wifiSsid}` : 'Wi-Fi';
+  return network ? network.charAt(0).toUpperCase() + network.slice(1) : 'Offline';
+}
+
+export function phoneLocationMapUrls(location = {}) {
+  if (location.latitude == null || location.latitude === '' ||
+      location.longitude == null || location.longitude === '') return null;
+  const latitude = Number(location.latitude);
+  const longitude = Number(location.longitude);
+  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 ||
+      !Number.isFinite(longitude) || longitude < -180 || longitude > 180) return null;
+
+  const accuracy = Math.max(0, Number(location.accuracyMeters || 0));
+  const latitudeDelta = Math.max(0.004, Math.min(0.08, accuracy / 111_000 * 4));
+  const longitudeScale = Math.max(0.2, Math.cos(latitude * Math.PI / 180));
+  const longitudeDelta = Math.min(0.12, latitudeDelta / longitudeScale);
+  const bbox = [
+    longitude - longitudeDelta,
+    latitude - latitudeDelta,
+    longitude + longitudeDelta,
+    latitude + latitudeDelta,
+  ].map((value) => value.toFixed(6)).join(',');
+  const marker = `${latitude.toFixed(6)},${longitude.toFixed(6)}`;
+  return {
+    embed: `https://www.openstreetmap.org/export/embed.html?bbox=${encodeURIComponent(bbox)}&layer=mapnik&marker=${encodeURIComponent(marker)}`,
+    external: `https://www.openstreetmap.org/?mlat=${encodeURIComponent(latitude)}&mlon=${encodeURIComponent(longitude)}#map=16/${encodeURIComponent(latitude)}/${encodeURIComponent(longitude)}`,
+  };
+}
+
+export function formatPhoneRelativeTime(timestampMs, now = Date.now()) {
+  if (!timestampMs) return 'Never connected';
+  const elapsedSeconds = Math.max(0, Math.round((now - timestampMs) / 1000));
+  if (elapsedSeconds < 10) return 'Just now';
+  if (elapsedSeconds < 60) return `${elapsedSeconds}s ago`;
+  const elapsedMinutes = Math.round(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
+  const elapsedHours = Math.round(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours}h ago`;
+  return `${Math.round(elapsedHours / 24)}d ago`;
+}
+
+export function createPhoneCommandRequestId(operation, deviceId, now = Date.now()) {
+  const operationPart = String(operation || 'command').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  const devicePart = String(deviceId || 'device').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 18);
+  const randomPart = Math.random().toString(36).slice(2, 9);
+  return `phone-${operationPart}-${devicePart}-${now}-${randomPart}`;
+}
+
+export function getKioskForPhone(device, kiosks = []) {
+  if (!device?.stationId) return null;
+  return kiosks.find((kiosk) => (
+    String(kiosk?.stationid || kiosk?.stationId || '').trim().toUpperCase() === device.stationId
+  )) || null;
+}
+
+export function getPhoneKioskCountryCode(kiosk) {
+  const explicitCountry = String(kiosk?.info?.country || kiosk?.country || '')
+    .trim()
+    .toUpperCase();
+  const countryAliases = {
+    CA: 'CA',
+    CAN: 'CA',
+    CANADA: 'CA',
+    FR: 'FR',
+    FRA: 'FR',
+    FRANCE: 'FR',
+    US: 'US',
+    USA: 'US',
+    'UNITED STATES': 'US',
+    'UNITED STATES OF AMERICA': 'US',
+  };
+  if (countryAliases[explicitCountry]) return countryAliases[explicitCountry];
+
+  const stationId = String(kiosk?.stationid || kiosk?.stationId || '').trim().toUpperCase();
+  const stationPrefix = stationId.match(/^(CA|FR|US)/)?.[1] || '';
+  return countryAliases[stationPrefix] || '';
+}

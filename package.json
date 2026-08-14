@@ -16,6 +16,7 @@
     "test:kiosk-ui-profile": "node --test scripts/kiosk-ui-profile-status.test.mjs",
     "test:kiosk-operational-events": "node --test functions/kioskOperationalEvents.test.js",
     "test:kiosk-activity-ui": "node --test scripts/kiosk-activity-ui.test.mjs",
+    "test:phone-control": "node --test scripts/phone-control.test.mjs",
     "test:ui-resilience": "playwright test --config=playwright.resilience.config.js",
     "preview": "vite preview",
     "sync:mergin-map": "node ./scripts/sync-mergin-course-map.mjs"

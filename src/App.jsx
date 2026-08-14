@@ -54,6 +54,7 @@ const UiProfilesPage = lazy(() => import('./pages/UiProfilesPage.jsx'));
 const AiBoothsPage = lazy(() => import('./pages/AiBoothsPage.jsx'));
 const PayoutsPage = lazy(() => import('./pages/PayoutsPage.jsx'));
 const ActivityPage = lazy(() => import('./pages/ActivityPage.jsx'));
+const PhoneControlPage = lazy(() => import('./pages/PhoneControlPage.jsx'));
 
 function readActivityNavigation() {
   if (typeof window === 'undefined') return { page: 'dashboard', stationId: '' };
@@ -599,6 +600,7 @@ function buildClientInfoFromProfile(profile, uid) {
     testing: false,
     media: false,
     ui_editor: false,
+    phone_control: false,
   };
 
   const defaultCommands = {
@@ -643,6 +645,7 @@ function buildClientInfoFromProfile(profile, uid) {
       search: true,
       media: true,
       ui_editor: true,
+      phone_control: true,
       binding: false,
       testing: false,
     };
@@ -2836,6 +2839,7 @@ function App() {
         setPage('chargers');
       }}
       onNavigateToActivity={onNavigateToActivity}
+      onNavigateToPhoneControl={() => setPage('phone-control')}
       operationalActivityEnabled={clientInfo?.isAdmin === true}
       initialSearch={dashboardSearchTerm}
       onNavigateToReporting={() => {
@@ -2907,6 +2911,7 @@ function App() {
     const hasReportingAccess = clientInfo.isAdmin || clientInfo.features?.reporting === true;
     const hasMediaAccess = clientInfo.isAdmin || clientInfo.features?.media === true;
     const hasUiProfilesAccess = clientInfo.isAdmin || clientInfo.features?.ui_editor === true || clientInfo.commands?.['client edit'] === true;
+    const hasPhoneControlAccess = clientInfo.isAdmin || clientInfo.features?.phone_control === true;
     const canOpenAdminTools = clientInfo.isAdmin || clientInfo.commands?.['client edit'] === true || hasMediaAccess || hasUiProfilesAccess;
     const hasAiBoothsAccess = canOpenAdminTools;
     const isRegularReportingUser = !clientInfo.isAdmin && clientInfo.role !== 'partner';
@@ -2924,6 +2929,20 @@ function App() {
             allStationsData={dedupedStationsData}
             initialStationId={activityInitialStation}
             onStationChange={onActivityStationChange}
+          />
+        );
+      case 'phone-control':
+        if (!hasPhoneControlAccess) {
+          return dashboard;
+        }
+
+        return (
+          <PhoneControlPage
+            onLogout={handleLogout}
+            onNavigateToDashboard={() => setPage('dashboard')}
+            currentUser={clientInfo}
+            allStationsData={dedupedStationsData}
+            t={t}
           />
         );
       case 'admin':

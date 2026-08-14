@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "packageName": "com.chargerent.remoteagent",
+  "deviceAdminComponent": "com.chargerent.remoteagent/.admin.RemoteDeviceAdminReceiver",
+  "versionName": "1.0.0",
+  "versionCode": 10,
+  "apkUrl": "https://chargerentstations.com/portal/mdm/remote-agent-v1.0.0.apk",
+  "apkSha256": "21800b540c4e8387fea0700e661576fca91dea026018af664a99b10412314b8d",
+  "provisioningChecksum": "IYALVAxOg4f-oHAOZhV2_Kkd6gJgGK9mSpmxBBIxS40",
+  "qrImagePath": "/portal/mdm/remote-agent-device-owner-qr.png",
+  "qrPayloadPath": "/portal/mdm/remote-agent-device-owner-payload.json",
+  "generatedAt": "2026-08-14T02:48:13.896Z"
+}

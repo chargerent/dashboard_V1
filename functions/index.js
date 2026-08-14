@@ -29,6 +29,19 @@ const {
   normalizePublicAssetType,
   slugifyPublicAsset,
 } = require("./aiBoothPublicAssets");
+const {
+  assignDevice: assignPhoneDevice,
+  createEnrollment: createPhoneEnrollment,
+  enrollDevice: enrollPhoneDevice,
+  getScreen: getPhoneScreen,
+  listCommands: listPhoneCommands,
+  listDevices: listPhoneDevices,
+  pollDeviceCommand: pollPhoneDeviceCommand,
+  recordCommandResult: recordPhoneCommandResult,
+  recordHeartbeat: recordPhoneHeartbeat,
+  recordScreenUpdate: recordPhoneScreenUpdate,
+  sendCommand: sendPhoneCommand,
+} = require("./phoneControl");
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -36,6 +49,7 @@ const ELEVENLABS_API_KEY = defineSecret("ELEVENLABS_API_KEY");
 const EVENT_INTAKE_SECRET = defineSecret("EVENT_INTAKE_SECRET");
 const SLASH_GOLF_RAPIDAPI_KEY = defineSecret("SLASH_GOLF_RAPIDAPI_KEY");
 const GMAIL_APP_PASSWORD = defineSecret("GMAIL_APP_PASSWORD");
+const PHONE_CONTROL_SIGNING_PRIVATE_KEY = defineSecret("PHONE_CONTROL_SIGNING_PRIVATE_KEY");
 const STORAGE_BUCKET = "node-red-alerts.firebasestorage.app";
 const STORAGE_BUCKET_CANDIDATES = Array.from(new Set([
   STORAGE_BUCKET,
@@ -9543,6 +9557,110 @@ exports.admin_sendLoginInvite = functions.runWith({
   const authState = await assertAdminFromContext(context);
   return sendLoginInviteImpl(data, authState);
 });
+
+exports.phoneControl_createEnrollment = functions.runWith({
+  secrets: [PHONE_CONTROL_SIGNING_PRIVATE_KEY],
+}).https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  return createPhoneEnrollment(data, authState, {
+    db,
+    admin,
+    privateKeyPem: PHONE_CONTROL_SIGNING_PRIVATE_KEY.value(),
+  });
+});
+
+exports.phoneControl_httpCreateEnrollment = handleHttpFunction(async (data, req) => {
+  const authState = await assertAdmin(req, data);
+  return createPhoneEnrollment(data, authState, {
+    db,
+    admin,
+    privateKeyPem: PHONE_CONTROL_SIGNING_PRIVATE_KEY.value(),
+  });
+}, {secrets: [PHONE_CONTROL_SIGNING_PRIVATE_KEY]});
+
+exports.phoneControl_assignDevice = functions.https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  return assignPhoneDevice(data, authState, {db, admin});
+});
+
+exports.phoneControl_httpAssignDevice = handleHttpFunction(async (data, req) => {
+  const authState = await assertAdmin(req, data);
+  return assignPhoneDevice(data, authState, {db, admin});
+});
+
+exports.phoneControl_listDevices = functions.https.onCall(async (data, context) => {
+  const authState = await getAuthorizedProfileFromContext(context);
+  return listPhoneDevices(data, authState, {db});
+});
+
+exports.phoneControl_httpListDevices = handleHttpFunction(async (data, req) => {
+  const authState = await getAuthorizedProfileFromRequest(req, data);
+  return listPhoneDevices(data, authState, {db});
+});
+
+exports.phoneControl_listCommands = functions.https.onCall(async (data, context) => {
+  const authState = await getAuthorizedProfileFromContext(context);
+  return listPhoneCommands(data, authState, {db});
+});
+
+exports.phoneControl_httpListCommands = handleHttpFunction(async (data, req) => {
+  const authState = await getAuthorizedProfileFromRequest(req, data);
+  return listPhoneCommands(data, authState, {db});
+});
+
+exports.phoneControl_getScreen = functions.https.onCall(async (data, context) => {
+  const authState = await getAuthorizedProfileFromContext(context);
+  return getPhoneScreen(data, authState, {db});
+});
+
+exports.phoneControl_httpGetScreen = handleHttpFunction(async (data, req) => {
+  const authState = await getAuthorizedProfileFromRequest(req, data);
+  return getPhoneScreen(data, authState, {db});
+});
+
+exports.phoneControl_sendCommand = functions.runWith({
+  secrets: [PHONE_CONTROL_SIGNING_PRIVATE_KEY],
+}).https.onCall(async (data, context) => {
+  const authState = await getAuthorizedProfileFromContext(context);
+  return sendPhoneCommand(data, authState, {
+    db,
+    admin,
+    privateKeyPem: PHONE_CONTROL_SIGNING_PRIVATE_KEY.value(),
+  });
+});
+
+exports.phoneControl_httpSendCommand = handleHttpFunction(async (data, req) => {
+  const authState = await getAuthorizedProfileFromRequest(req, data);
+  return sendPhoneCommand(data, authState, {
+    db,
+    admin,
+    privateKeyPem: PHONE_CONTROL_SIGNING_PRIVATE_KEY.value(),
+  });
+}, {secrets: [PHONE_CONTROL_SIGNING_PRIVATE_KEY]});
+
+exports.phoneControl_deviceEnroll = handleHttpFunction(async (data) => (
+  enrollPhoneDevice(data, {
+    db,
+    admin,
+    privateKeyPem: PHONE_CONTROL_SIGNING_PRIVATE_KEY.value(),
+  })
+), {secrets: [PHONE_CONTROL_SIGNING_PRIVATE_KEY]});
+
+exports.phoneControl_deviceHeartbeat = handleHttpFunction(async (data, req) => (
+  recordPhoneHeartbeat(data, req, {db, admin})
+));
+
+exports.phoneControl_devicePoll = handleHttpFunction(async (data, req) => (
+  pollPhoneDeviceCommand(data, req, {db, admin})
+));
+
+exports.phoneControl_deviceResult = handleHttpFunction(async (data, req) => (
+  recordPhoneCommandResult(data, req, {db, admin})
+));
+
+exports.phoneControl_deviceScreen = handleHttpFunction(async (data, req) => (
+  recordPhoneScreenUpdate(data, req, {db, admin})
+));
 
 exports.payouts_generateMonthlyReports = functions.runWith(PAYOUT_GENERATOR_RUNTIME).https.onCall(async (data, context) => {
   const authState = await assertAdminFromContext(context);

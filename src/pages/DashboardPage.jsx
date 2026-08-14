@@ -18,7 +18,7 @@ import { filterProvisionedStations, filterStationsForClient, isKioskOnline, isKi
 import GlobalRentalActivity from '../components/Dashboard/GlobalRentalActivity';
 import LocationSummary from '../components/Dashboard/LocationSummary';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
-import { CheckCircleIcon, CpuChipIcon, ExclamationTriangleIcon, QrCodeIcon, SparklesIcon } from '@heroicons/react/24/outline';
+import { CheckCircleIcon, CpuChipIcon, DevicePhoneMobileIcon, ExclamationTriangleIcon, QrCodeIcon, SparklesIcon } from '@heroicons/react/24/outline';
 import useKioskCommandFlow from '../hooks/useKioskCommandFlow';
 import { callFunctionWithAuth } from '../utils/callableRequest';
 import { aggregateRentalDashboardStats } from '../utils/rentalDashboardStats';
@@ -109,7 +109,7 @@ const buildStationStatusIssues = (kiosk, referenceTime) => {
     return issues;
 };
 
-export default function DashboardPage({ _token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToAiBooths, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToActivity, onNavigateToReporting, onNavigateToTesting, rentalData, rentalDashboardStatsByStationId, useRentalDashboardSummaries = false, allStationsData, _setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, _setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, _ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, _setNgrokInfo, manageIgnoredKiosk, kiosksReady, sshConnectivityByStation = {}, ngrokConnectivityByStation = {}, initialSearch = '', sessionWarningOpen = false, sessionCountdown = 60, onStayLoggedIn, operationalActivityEnabled = false }) {
+export default function DashboardPage({ _token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToAiBooths, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToActivity, onNavigateToPhoneControl, onNavigateToReporting, onNavigateToTesting, rentalData, rentalDashboardStatsByStationId, useRentalDashboardSummaries = false, allStationsData, _setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, _setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, _ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, _setNgrokInfo, manageIgnoredKiosk, kiosksReady, sshConnectivityByStation = {}, ngrokConnectivityByStation = {}, initialSearch = '', sessionWarningOpen = false, sessionCountdown = 60, onStayLoggedIn, operationalActivityEnabled = false }) {
     const [loading, setLoading] = useState(!kiosksReady);
     const [urgentIncidents, setUrgentIncidents] = useState([]);
     const [error] = useState(null);
@@ -137,6 +137,7 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     const hasBindingAccess = clientInfo?.username === 'chargerent' || clientInfo?.features?.binding === true || clientInfo?.commands?.binding === true;
     const hasTestingAccess = clientInfo?.username === 'chargerent' || clientInfo?.features?.testing === true;
     const canOpenAdminTools = isAdminUser || clientInfo?.commands?.['client edit'] === true || clientInfo?.features?.media === true || clientInfo?.features?.ui_editor === true;
+    const hasPhoneControlAccess = isAdminUser || clientInfo?.features?.phone_control === true;
     const visibleStationIds = useMemo(() => new Set(
         visibleStationsData.map((station) => String(station.stationid || '').trim()).filter(Boolean)
     ), [visibleStationsData]);
@@ -771,6 +772,16 @@ return (
                             <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h4l2.25-6 4.5 12L16 12h5" />
                             </svg>
+                        </button>
+                    )}
+                    {hasPhoneControlAccess && (
+                        <button
+                            onClick={onNavigateToPhoneControl}
+                            className="rounded-md bg-violet-100 p-2 text-violet-700 transition-colors hover:bg-violet-200"
+                            title="Phone Control"
+                            aria-label="Phone Control"
+                        >
+                            <DevicePhoneMobileIcon className="h-6 w-6" />
                         </button>
                     )}
                     {(clientInfo.features.rentals || isAdminUser) && (
