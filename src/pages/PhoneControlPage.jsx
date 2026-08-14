@@ -446,6 +446,7 @@ function RemoteScreen({
   const peerRef = useRef(null);
   const channelRef = useRef(null);
   const videoRef = useRef(null);
+  const remoteStreamRef = useRef(null);
   const imageRef = useRef(null);
   const sessionIdRef = useRef('');
   const startAttemptRef = useRef(0);
@@ -471,11 +472,20 @@ function RemoteScreen({
     pointerRef.current = null;
     setControlReady(false);
     if (videoRef.current) videoRef.current.srcObject = null;
+    remoteStreamRef.current = null;
     setHasRemoteVideo(false);
     setRtcState(nextState);
   }, []);
 
   useEffect(() => () => closePeer(), [closePeer, device?.id]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    const stream = remoteStreamRef.current;
+    if (!hasRemoteVideo || !video || !stream) return;
+    video.srcObject = stream;
+    video.play().catch(() => {});
+  }, [hasRemoteVideo]);
 
   useEffect(() => {
     const peer = peerRef.current;
@@ -534,9 +544,8 @@ function RemoteScreen({
         const stream = announcedStream || (event.track && typeof window.MediaStream === 'function'
           ? new window.MediaStream([event.track])
           : null);
-        if (videoRef.current && stream) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.play().catch(() => {});
+        if (stream) {
+          remoteStreamRef.current = stream;
           setHasRemoteVideo(true);
         }
       };
