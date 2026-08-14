@@ -18,6 +18,7 @@ const {
   hasPhoneControlAccess,
   normalizeArguments,
   normalizeAppUpdateArguments,
+  normalizeHotspotArguments,
   normalizeDeviceId,
   normalizeEnrollmentCode,
   normalizeScreenUpdate,
@@ -28,10 +29,16 @@ const {
 test("allowlists fixed remote screen and tethering controls", () => {
   assert.equal(ALLOWED_OPERATIONS.has("UI_SWIPE"), true);
   assert.equal(ALLOWED_OPERATIONS.has("OPEN_TETHER_SETTINGS"), true);
+  assert.equal(ALLOWED_OPERATIONS.has("SET_ALWAYS_ON_HOTSPOT"), true);
   assert.equal(ALLOWED_OPERATIONS.has("START_WEBRTC_SCREEN"), true);
   assert.equal(ALLOWED_OPERATIONS.has("SET_WEBRTC_PROFILE"), true);
   assert.equal(ALLOWED_OPERATIONS.has("STOP_WEBRTC_SCREEN"), true);
   assert.equal(ALLOWED_OPERATIONS.has("WAKE_AND_UNLOCK"), true);
+});
+
+test("requires a boolean always-on hotspot setting", () => {
+  assert.deepEqual(normalizeHotspotArguments({enabled: true}), {enabled: true});
+  assert.throws(() => normalizeHotspotArguments({enabled: "true"}), /enabled value/);
 });
 
 test("normalizes managed phone identifiers", () => {

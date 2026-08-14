@@ -119,6 +119,13 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
       network: String(inventory.network || 'offline').toLowerCase(),
       wifiSsid: String(inventory.wifiSsid || '').trim(),
       wifiEnabled: inventory.wifiEnabled === true,
+      hotspotSupported: inventory.hotspotSupported === true,
+      hotspotControlGranted: inventory.hotspotControlGranted === true,
+      hotspotAlwaysOn: inventory.hotspotAlwaysOn === true,
+      hotspotActive: inventory.hotspotActive === true,
+      hotspotState: String(inventory.hotspotState || 'unknown').trim().toLowerCase(),
+      hotspotLastError: String(inventory.hotspotLastError || '').trim(),
+      hotspotUpdatedAt: phoneTimestampToMillis(inventory.hotspotUpdatedAt),
       bluetoothEnabled: inventory.bluetoothEnabled === true,
       locationEnabled: inventory.locationEnabled === true,
       remoteUiInputEnabled: inventory.remoteUiInputEnabled === true,
@@ -158,6 +165,17 @@ export function phoneNetworkLabel(inventory = {}) {
   const wifiSsid = String(inventory.wifiSsid || '').trim();
   if (network === 'wifi') return wifiSsid ? `Wi-Fi · ${wifiSsid}` : 'Wi-Fi';
   return network ? network.charAt(0).toUpperCase() + network.slice(1) : 'Offline';
+}
+
+export function phoneHotspotLabel(inventory = {}) {
+  if (inventory.hotspotSupported !== true) return 'Unsupported';
+  if (inventory.hotspotAlwaysOn !== true) return 'Disabled';
+  if (inventory.hotspotControlGranted !== true) return 'Permission needed';
+  if (inventory.hotspotActive === true) return 'On · Always-on';
+  const state = String(inventory.hotspotState || '').trim().toLowerCase();
+  if (state === 'starting') return 'Starting';
+  if (state === 'retrying') return 'Retrying';
+  return 'Waiting to start';
 }
 
 export function phoneLocationMapUrls(location = {}) {

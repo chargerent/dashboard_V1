@@ -35,6 +35,7 @@ import {
   normalizeAgentRelease,
   normalizePhoneDevice,
   phoneLocationMapUrls,
+  phoneHotspotLabel,
   phoneMatchesSearch,
   phoneNetworkLabel,
   phoneTimestampToMillis,
@@ -75,6 +76,7 @@ const COMMAND_STYLES = {
 const CONFIRMATION_REQUIRED_PHONE_OPERATIONS = new Set([
   ...HIGH_IMPACT_PHONE_OPERATIONS,
   'SET_WIFI_ENABLED',
+  'SET_ALWAYS_ON_HOTSPOT',
 ]);
 
 const PHONE_COMMAND_LABELS = {
@@ -83,6 +85,7 @@ const PHONE_COMMAND_LABELS = {
   GET_LOCATION: 'Refresh location',
   SET_LOCATION_ENABLED: 'GPS',
   SET_WIFI_ENABLED: 'Wi-Fi',
+  SET_ALWAYS_ON_HOTSPOT: 'Always-on hotspot',
   OPEN_TETHER_SETTINGS: 'Open tethering settings',
   SET_BLUETOOTH_ENABLED: 'Bluetooth',
   LOCK_NOW: 'Lock phone',
@@ -137,6 +140,7 @@ function commandLabel(operation) {
 function commandActionLabel(operation, args = {}) {
   if (operation === 'SET_WIFI_ENABLED') return `Turn Wi-Fi ${args.enabled === true ? 'on' : 'off'}`;
   if (operation === 'SET_LOCATION_ENABLED') return `Turn GPS ${args.enabled === true ? 'on' : 'off'}`;
+  if (operation === 'SET_ALWAYS_ON_HOTSPOT') return `${args.enabled === true ? 'Enable' : 'Disable'} always-on hotspot`;
   if (operation === 'INSTALL_APP_UPDATE' && args.versionName) return `Install Agent ${args.versionName}`;
   return commandLabel(operation);
 }
@@ -168,6 +172,17 @@ function phoneCommandConfirmationDetails(confirmation, device) {
       confirmationText: enabling
         ? `Turn Wi-Fi on for the phone assigned to ${stationLabel}? It will attempt to reconnect to a saved network.`
         : `Turn Wi-Fi off for the phone assigned to ${stationLabel}? It may become unreachable if Wi-Fi is its only network connection.`,
+    };
+  }
+
+  if (operation === 'SET_ALWAYS_ON_HOTSPOT') {
+    const enabling = confirmation?.args?.enabled === true;
+    return {
+      title: `${enabling ? 'Enable' : 'Disable'} Always-on Hotspot`,
+      action: operation,
+      confirmationText: enabling
+        ? `Keep hotspot on for the phone assigned to ${stationLabel}? Agent will start it and restore it after shutdowns or reboots.`
+        : `Disable always-on hotspot for the phone assigned to ${stationLabel}? Devices using that hotspot may lose their network connection.`,
     };
   }
 
@@ -207,8 +222,8 @@ function SummaryCard({ label, value, detail, tone = 'slate' }) {
 function FieldProvisioningCard() {
   const basePath = import.meta.env.BASE_URL || '/portal/';
   const [release, setRelease] = useState({
-    versionName: '1.2.0',
-    apkUrl: 'https://chargerentstations.com/portal/mdm/remote-agent-v1.2.0.apk',
+    versionName: '1.2.2',
+    apkUrl: 'https://chargerentstations.com/portal/mdm/remote-agent-v1.2.2.apk',
     qrImagePath: `${basePath}mdm/remote-agent-device-owner-qr.png`,
     qrPayloadPath: `${basePath}mdm/remote-agent-device-owner-payload.json`,
   });
@@ -255,6 +270,7 @@ function FieldProvisioningCard() {
         <li><span className="font-bold text-slate-800">2.</span> Tap the same empty area six times, then connect to Wi-Fi.</li>
         <li><span className="font-bold text-slate-800">3.</span> Scan this QR and wait for Android to install Agent.</li>
         <li><span className="font-bold text-slate-800">4.</span> Enter the one-time kiosk code created below.</li>
+        <li><span className="font-bold text-slate-800">5.</span> Open Agent and approve always-on hotspot access.</li>
       </ol>
 
       <div className="mt-4 grid grid-cols-2 gap-2">
@@ -293,6 +309,7 @@ function ActionButton({ children, icon: Icon, onClick, disabled = false, tone = 
     blue: 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100',
     amber: 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100',
     red: 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100',
+    green: 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
   };
 
   return (
@@ -1191,12 +1208,19 @@ export default function PhoneControlPage({
                       </div>}
                     </div>
 
-                    <div className="mt-5 grid grid-cols-2 gap-2 md:grid-cols-4">
+                    <div className="mt-5 grid grid-cols-2 gap-2 md:grid-cols-5">
                       <Metric icon={Battery100Icon} label="Battery" value={selectedDevice.inventory.batteryPercent == null ? 'Unknown' : `${selectedDevice.inventory.batteryPercent}%${selectedDevice.inventory.batteryCharging ? ' · Charging' : ''}`} />
                       <Metric icon={SignalIcon} label="Network" value={phoneNetworkLabel(selectedDevice.inventory)} active={selectedDevice.inventory.network !== 'offline'} />
+                      <Metric icon={WifiIcon} label="Hotspot" value={phoneHotspotLabel(selectedDevice.inventory)} active={selectedDevice.inventory.hotspotActive} />
                       <Metric icon={DevicePhoneMobileIcon} label="Phone" value={`${selectedDevice.inventory.model}${selectedDevice.inventory.androidVersion ? ` · Android ${selectedDevice.inventory.androidVersion}` : ''}`} />
                       <Metric icon={BoltIcon} label="Agent" value={selectedDevice.inventory.agentVersion ? `v${selectedDevice.inventory.agentVersion}` : selectedDevice.enrollmentState} active={selectedDevice.enrollmentState === 'enrolled'} />
                     </div>
+
+                    {selectedDevice.inventory.hotspotLastError && selectedDevice.inventory.hotspotAlwaysOn && !selectedDevice.inventory.hotspotActive && (
+                      <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+                        Hotspot: {humanizePhoneMessage(selectedDevice.inventory.hotspotLastError)}
+                      </p>
+                    )}
 
                   </section>
 
@@ -1229,6 +1253,20 @@ export default function PhoneControlPage({
                           <WifiToggle enabled={selectedDevice.inventory.wifiEnabled} onToggle={() => requestCommand('SET_WIFI_ENABLED', { enabled: !selectedDevice.inventory.wifiEnabled })} disabled={!canControlSelected} />
                           <ActionButton icon={LockClosedIcon} onClick={() => requestCommand('LOCK_NOW')} disabled={!canControlSelected || selectedWebRtcActive} title={selectedWebRtcActive ? 'Stop the live stream before locking the phone' : ''} tone="amber">Lock</ActionButton>
                           <ActionButton icon={PowerIcon} onClick={() => requestCommand('REBOOT')} disabled={!canControlSelected} tone="red">Reboot</ActionButton>
+                          <ActionButton
+                            icon={WifiIcon}
+                            onClick={() => requestCommand('SET_ALWAYS_ON_HOTSPOT', { enabled: !selectedDevice.inventory.hotspotAlwaysOn })}
+                            disabled={!canControlSelected || !selectedDevice.inventory.hotspotSupported || !selectedDevice.inventory.hotspotControlGranted}
+                            title={!selectedDevice.inventory.hotspotSupported
+                              ? 'Always-on hotspot requires Android 16 or newer'
+                              : !selectedDevice.inventory.hotspotControlGranted
+                                ? 'Open Agent on the phone and approve always-on hotspot first'
+                                : ''}
+                            tone={selectedDevice.inventory.hotspotAlwaysOn ? 'green' : 'blue'}
+                            className="col-span-2"
+                          >
+                            Always-on hotspot: {selectedDevice.inventory.hotspotAlwaysOn ? 'On' : 'Off'}
+                          </ActionButton>
                           <ActionButton icon={ArrowPathIcon} onClick={requestAgentUpdate} disabled={!canControlSelected || agentUpdateChecking} tone="blue" className="col-span-2">
                             {agentUpdateChecking ? 'Checking for update…' : 'Update Agent'}
                           </ActionButton>

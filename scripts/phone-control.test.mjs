@@ -9,6 +9,7 @@ import {
   getPhoneConnectionState,
   phoneLocationMapUrls,
   phoneNetworkLabel,
+  phoneHotspotLabel,
   normalizePhoneDevice,
   normalizeAgentRelease,
   phoneMatchesSearch,
@@ -48,6 +49,11 @@ test('normalizes kiosk assignment and Android inventory', () => {
       isDeviceOwner: true,
       network: 'wifi',
       wifiSsid: 'OurHome',
+      hotspotSupported: true,
+      hotspotControlGranted: true,
+      hotspotAlwaysOn: true,
+      hotspotActive: true,
+      hotspotState: 'on',
     },
     location: {
       latitude: 45.5019,
@@ -64,6 +70,7 @@ test('normalizes kiosk assignment and Android inventory', () => {
   assert.equal(device.inventory.agentVersionCode, 15);
   assert.equal(device.inventory.isDeviceOwner, true);
   assert.equal(device.inventory.wifiSsid, 'OurHome');
+  assert.equal(device.inventory.hotspotActive, true);
   assert.equal(device.location.latitude, 45.5019);
   assert.equal(device.location.capturedAtMs, 1234);
 });
@@ -71,6 +78,17 @@ test('normalizes kiosk assignment and Android inventory', () => {
 test('formats Wi-Fi names and safe OpenStreetMap links', () => {
   assert.equal(phoneNetworkLabel({ network: 'wifi', wifiSsid: 'OurHome' }), 'Wi-Fi · OurHome');
   assert.equal(phoneNetworkLabel({ network: 'cellular' }), 'Cellular');
+  assert.equal(phoneHotspotLabel({
+    hotspotSupported: true,
+    hotspotControlGranted: true,
+    hotspotAlwaysOn: true,
+    hotspotActive: true,
+  }), 'On · Always-on');
+  assert.equal(phoneHotspotLabel({
+    hotspotSupported: true,
+    hotspotControlGranted: false,
+    hotspotAlwaysOn: true,
+  }), 'Permission needed');
   const urls = phoneLocationMapUrls({
     latitude: 45.5019,
     longitude: -73.5674,

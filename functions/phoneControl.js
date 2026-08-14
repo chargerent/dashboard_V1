@@ -21,6 +21,7 @@ const ALLOWED_OPERATIONS = new Set([
   "GET_LOCATION",
   "SET_LOCATION_ENABLED",
   "SET_WIFI_ENABLED",
+  "SET_ALWAYS_ON_HOTSPOT",
   "OPEN_TETHER_SETTINGS",
   "SET_BLUETOOTH_ENABLED",
   "LOCK_NOW",
@@ -181,6 +182,14 @@ function normalizeAppUpdateArguments(value) {
     versionCode,
     versionName,
   };
+}
+
+function normalizeHotspotArguments(value) {
+  const input = normalizeArguments(value);
+  if (typeof input.enabled !== "boolean") {
+    invalidArgument("Always-on hotspot requires an enabled value.");
+  }
+  return {enabled: input.enabled};
 }
 
 function canonicalJson(value) {
@@ -692,9 +701,14 @@ async function sendCommand(data, authState, dependencies) {
   }
 
   const maxArgumentBytes = operation === "START_WEBRTC_SCREEN" ? 128 * 1024 : 16 * 1024;
-  const commandArguments = operation === "INSTALL_APP_UPDATE" ?
-    normalizeAppUpdateArguments(data?.arguments) :
-    normalizeArguments(data?.arguments, maxArgumentBytes);
+  let commandArguments;
+  if (operation === "INSTALL_APP_UPDATE") {
+    commandArguments = normalizeAppUpdateArguments(data?.arguments);
+  } else if (operation === "SET_ALWAYS_ON_HOTSPOT") {
+    commandArguments = normalizeHotspotArguments(data?.arguments);
+  } else {
+    commandArguments = normalizeArguments(data?.arguments, maxArgumentBytes);
+  }
   if (HIGH_IMPACT_OPERATIONS.has(operation)) commandArguments.confirmed = true;
 
   const deviceRef = db.collection(DEVICES_COLLECTION).doc(deviceId);
@@ -1081,6 +1095,7 @@ module.exports = {
   authenticateDeviceRequest,
   normalizeArguments,
   normalizeAppUpdateArguments,
+  normalizeHotspotArguments,
   normalizeDeviceId,
   normalizeEnrollmentCode,
   normalizeScreenUpdate,
