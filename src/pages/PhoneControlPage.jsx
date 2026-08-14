@@ -227,13 +227,13 @@ function FieldProvisioningCard() {
           <h3 className="text-sm font-black text-slate-900">Factory setup QR</h3>
           <p className="mt-1 text-xs leading-5 text-slate-500">Reusable Device Owner setup for factory-reset Android phones.</p>
         </div>
-        <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-bold text-emerald-700">Remote Agent {release.versionName}</span>
+        <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-bold text-emerald-700">Agent {release.versionName}</span>
       </div>
 
       <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-center">
         <img
           src={release.qrImagePath}
-          alt="Remote Agent Android Device Owner provisioning QR code"
+          alt="Agent Android Device Owner provisioning QR code"
           className="mx-auto aspect-square w-full max-w-[220px] rounded-lg bg-white"
         />
       </div>
@@ -241,7 +241,7 @@ function FieldProvisioningCard() {
       <ol className="mt-4 space-y-2 text-xs leading-5 text-slate-600">
         <li><span className="font-bold text-slate-800">1.</span> Factory-reset the phone and stop at the first Welcome screen.</li>
         <li><span className="font-bold text-slate-800">2.</span> Tap the same empty area six times, then connect to Wi-Fi.</li>
-        <li><span className="font-bold text-slate-800">3.</span> Scan this QR and wait for Android to install Remote Agent.</li>
+        <li><span className="font-bold text-slate-800">3.</span> Scan this QR and wait for Android to install Agent.</li>
         <li><span className="font-bold text-slate-800">4.</span> Enter the one-time kiosk code created below.</li>
       </ol>
 
@@ -1072,7 +1072,7 @@ export default function PhoneControlPage({
 
               {isAdmin && <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                 <h3 className="text-sm font-black text-slate-900">Enroll a kiosk phone</h3>
-                <p className="mt-1 text-xs leading-5 text-slate-500">Create a one-time code tied to a kiosk, then enter it in Remote Agent.</p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">Create a one-time code tied to a kiosk, then enter it in Agent.</p>
                 <div className="mt-3 grid grid-cols-3 rounded-lg bg-slate-100 p-1" role="group" aria-label="Enrollment kiosk country">
                   {PHONE_KIOSK_COUNTRIES.map((country) => (
                     <button
