@@ -5,9 +5,9 @@
   "versionName": "1.0.1",
   "versionCode": 11,
   "apkUrl": "https://chargerentstations.com/portal/mdm/remote-agent-v1.0.1.apk",
-  "apkSha256": "e90cbbb21e700e390fe17c466a43db6fb575d786d151e18fa5007618b152f0bb",
-  "provisioningChecksum": "6Qy7sh5wDjkP4XxGakPbb7V114bRUeGPpQB2GLFS8Ls",
+  "apkSha256": "1c8c40be180ea68aaac4856d0ff3d36bf243b4e3d3cbcdd271cf10911f4340c5",
+  "provisioningChecksum": "HIxAvhgOpoqqxIVtD_PTa_JDtOPTy83Scc8QkR9DQMU",
   "qrImagePath": "/portal/mdm/remote-agent-device-owner-qr.png",
   "qrPayloadPath": "/portal/mdm/remote-agent-device-owner-payload.json",
-  "generatedAt": "2026-08-14T03:22:00.073Z"
+  "generatedAt": "2026-08-14T03:24:42.235Z"
 }
