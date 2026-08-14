@@ -7,6 +7,7 @@ import {
   getKioskForPhone,
   getPhoneKioskCountryCode,
   getPhoneConnectionState,
+  isPhoneWebRtcActive,
   phoneLocationMapUrls,
   phoneNetworkLabel,
   phoneHotspotLabel,
@@ -112,6 +113,13 @@ test('keeps live screen session metadata in the normalized phone', () => {
 
   assert.equal(device.screen.live.active, true);
   assert.equal(device.screen.live.expiresAt, 12345);
+});
+
+test('expires stale WebRTC permission waits instead of leaving live screen starting', () => {
+  const now = 50_000;
+  assert.equal(isPhoneWebRtcActive({ state: 'awaiting_permission', expiresAt: now + 1_000 }, now), true);
+  assert.equal(isPhoneWebRtcActive({ state: 'awaiting_permission', expiresAt: now - 1 }, now), false);
+  assert.equal(isPhoneWebRtcActive({ state: 'stopped', expiresAt: now + 1_000 }, now), false);
 });
 
 test('computes connection status and relative time', () => {

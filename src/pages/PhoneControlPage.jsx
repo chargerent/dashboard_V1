@@ -32,6 +32,7 @@ import {
   getKioskForPhone,
   getPhoneKioskCountryCode,
   getPhoneConnectionState,
+  isPhoneWebRtcActive,
   normalizeAgentRelease,
   normalizePhoneDevice,
   phoneLocationMapUrls,
@@ -454,8 +455,7 @@ function RemoteScreen({
   const webRtc = device?.screen?.webrtc || {};
   const serverRtcState = String(webRtc.state || '');
   const webRtcExpiresAt = phoneTimestampToMillis(webRtc.expiresAt);
-  const webRtcActive = ['awaiting_permission', 'starting', 'connecting', 'connected', 'disconnected']
-    .includes(serverRtcState) && webRtcExpiresAt > now;
+  const webRtcActive = isPhoneWebRtcActive(webRtc, now);
   const directControl = controlReady;
 
   const closePeer = useCallback((nextState = 'idle') => {
@@ -486,6 +486,15 @@ function RemoteScreen({
       closePeer(serverRtcState);
     }
   }, [closePeer, serverRtcState, webRtc.answerSdp, webRtc.sessionId]);
+
+  useEffect(() => {
+    const expirableState = ['awaiting_permission', 'starting', 'connecting', 'connected', 'disconnected']
+      .includes(serverRtcState);
+    if (expirableState && webRtc.sessionId === sessionIdRef.current &&
+        webRtcExpiresAt > 0 && webRtcExpiresAt <= now) {
+      closePeer('expired');
+    }
+  }, [closePeer, now, serverRtcState, webRtc.sessionId, webRtcExpiresAt]);
 
   const sendDirect = (packet) => {
     if (channelRef.current?.readyState !== 'open') return false;
@@ -673,8 +682,9 @@ function RemoteScreen({
 
   const realtimeStarting = liveRequested ||
     ['preparing', 'creating_offer', 'awaiting_device', 'new', 'connecting'].includes(rtcState) ||
-    ['awaiting_permission', 'starting', 'connecting'].includes(serverRtcState);
-  const realtimeConnected = rtcState === 'connected' || serverRtcState === 'connected';
+    (webRtcActive && ['awaiting_permission', 'starting', 'connecting'].includes(serverRtcState));
+  const realtimeConnected = webRtcActive &&
+    (rtcState === 'connected' || serverRtcState === 'connected');
   return (
     <section className="rounded-xl border border-slate-200 bg-slate-950 p-3 shadow-inner">
       <div className="mx-auto mb-3 flex w-full max-w-[240px] gap-2">
@@ -689,6 +699,12 @@ function RemoteScreen({
         </button>
         <ActionButton icon={DevicePhoneMobileIcon} onClick={() => onCommand('CAPTURE_SCREEN')} disabled={!canSendCommand} tone="blue" className="flex-1 !px-2">Capture</ActionButton>
       </div>
+
+      {!device.inventory.remoteUiInputEnabled && (
+        <p className="mx-auto mb-3 max-w-[360px] rounded-lg border border-amber-500/40 bg-amber-400/10 px-3 py-2 text-center text-[11px] font-semibold leading-4 text-amber-200">
+          Remote control is off on this phone. Open Android Settings → Accessibility → Agent and enable Remote UI control.
+        </p>
+      )}
 
       <div className="mx-auto flex aspect-[9/19.5] max-h-[520px] max-w-[240px] items-center justify-center overflow-hidden rounded-[1.5rem] border-4 border-slate-700 bg-black">
         {hasRemoteVideo || imageUrl ? (
@@ -856,13 +872,21 @@ export default function PhoneControlPage({
         const liveActive = nextScreen.live?.active === true &&
           phoneTimestampToMillis(nextScreen.live?.expiresAt) > Date.now();
         const webRtcState = String(nextScreen.webrtc?.state || '');
-        const webRtcActive = ['awaiting_permission', 'starting', 'connecting', 'connected', 'disconnected']
-          .includes(webRtcState) && phoneTimestampToMillis(nextScreen.webrtc?.expiresAt) > Date.now();
+        const webRtcExpiresAt = phoneTimestampToMillis(nextScreen.webrtc?.expiresAt);
+        const webRtcActive = isPhoneWebRtcActive(nextScreen.webrtc, Date.now());
+        const webRtcExpired = ['awaiting_permission', 'starting', 'connecting', 'disconnected']
+          .includes(webRtcState) && webRtcExpiresAt > 0 && webRtcExpiresAt <= Date.now();
         if (liveActive || webRtcActive) {
           nextDelayMs = webRtcActive ? 1_000 : 1_500;
           setLiveRequestedDeviceId('');
-        } else if (['failed', 'permission_denied', 'expired', 'projection_stopped', 'stopped'].includes(webRtcState)) {
+        } else if (webRtcExpired || ['failed', 'permission_denied', 'expired', 'projection_stopped', 'stopped'].includes(webRtcState)) {
           nextDelayMs = 5_000;
+          if (webRtcExpired && liveRequestedDeviceId === selectedDeviceId) {
+            setCommandStatus({
+              state: 'error',
+              message: 'Live screen timed out before Android approved screen sharing.',
+            });
+          }
           setLiveRequestedDeviceId('');
         }
       } catch (error) {
@@ -914,10 +938,7 @@ export default function PhoneControlPage({
   const selectedKiosk = selectedDevice ? getKioskForPhone(selectedDevice, accessibleKiosks) : null;
   const selectedConnection = getPhoneConnectionState(selectedDevice, now);
   const canControlSelected = hasPhoneControlAccess && selectedConnection === 'online' && selectedDevice?.enrollmentState === 'enrolled';
-  const selectedWebRtcState = String(selectedDevice?.screen?.webrtc?.state || '');
-  const selectedWebRtcActive = ['awaiting_permission', 'starting', 'connecting', 'connected', 'disconnected']
-    .includes(selectedWebRtcState) &&
-    phoneTimestampToMillis(selectedDevice?.screen?.webrtc?.expiresAt) > now;
+  const selectedWebRtcActive = isPhoneWebRtcActive(selectedDevice?.screen?.webrtc, now);
 
   useEffect(() => {
     setAssignmentStationId(selectedDevice?.stationId || '');

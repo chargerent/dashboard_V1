@@ -1,4 +1,11 @@
 const PHONE_ONLINE_WINDOW_MS = 90 * 1000;
+const ACTIVE_PHONE_WEBRTC_STATES = new Set([
+  'awaiting_permission',
+  'starting',
+  'connecting',
+  'connected',
+  'disconnected',
+]);
 
 export const PHONE_KIOSK_COUNTRIES = [
   { code: 'CA', label: 'Canada' },
@@ -58,6 +65,11 @@ export function phoneTimestampToMillis(value) {
   if (Number.isFinite(numeric) && numeric > 0) return numeric;
   const parsed = Date.parse(String(value));
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+export function isPhoneWebRtcActive(webRtc = {}, now = Date.now()) {
+  return ACTIVE_PHONE_WEBRTC_STATES.has(String(webRtc.state || '')) &&
+    phoneTimestampToMillis(webRtc.expiresAt) > now;
 }
 
 export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
