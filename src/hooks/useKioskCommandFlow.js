@@ -168,7 +168,7 @@ export default function useKioskCommandFlow({
         case 'eject all':
           targetKiosk.modules.forEach((module) => {
             module.slots.forEach((slot) => {
-              if (slot.sn && slot.sn !== 0 && !slot.isLocked) {
+              if (slot.sn && slot.sn !== 0) {
                 trackSlotForEject(module.id, slot.position, slot.sn);
               }
             });
@@ -351,6 +351,8 @@ export default function useKioskCommandFlow({
       confirmationText = t('rent_confirmation');
     } else if (action === 'eject count') {
       confirmationText = `${t('eject_count_confirmation')} ${details.slotid} ${t('chargers')}?`;
+    } else if (action === 'moduleorderchange') {
+      confirmationText = details?.confirmationText || 'Move this module to the new physical position?';
     }
 
     commandDetailsPayload.action = action;

@@ -470,6 +470,7 @@ export const normalizeKioskData = (kiosks) => {
             uiProfileReportedAt: kiosk.uiProfileReportedAt || null,
             aiBoothRuntime: kiosk.aiBoothRuntime || null,
             registration: kiosk.registration || null,
+            moduleDisplayOrder: Array.isArray(kiosk.hardware?.moduleOrder) ? kiosk.hardware.moduleOrder : [],
             modules: normalizedModules.sort((a, b) => a.id.localeCompare(b.id)),
             uistate: kiosk.uistate,
             terminalState: kiosk.terminalState || kiosk.terminalstate || null,

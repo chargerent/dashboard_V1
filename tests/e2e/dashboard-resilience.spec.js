@@ -21,30 +21,20 @@ test('fixture loads the real dashboard without authentication or backend command
   await expect(page.locator('[data-kiosk-control-panel="true"]')).toHaveCount(0);
 });
 
-test('main kiosk cards show whether their flow matches the current server flow', async ({ page }) => {
-  const matchingFlow = page.locator('[data-kiosk-flow-version="496"]').first();
-  await expect(matchingFlow).toHaveText('F:496');
-  await expect(matchingFlow).toHaveAttribute('data-flow-version-match', 'true');
-  await expect(matchingFlow).toHaveAttribute('data-flow-version-status', 'current');
-  await expect(matchingFlow).toHaveClass(/text-gray-400/);
+test('new-schema kiosk cards omit legacy flow badges and show module firmware health', async ({ page }) => {
+  await expect(page.locator('[data-kiosk-flow-version]')).toHaveCount(0);
   await expect(page.locator('[data-module-firmware="2"]').first()).toHaveAttribute('data-heart-style', 'solid');
 
   const search = page.getByRole('textbox', { name: /search by location/i });
   await search.fill('US9002');
-  const outdatedFlow = page.locator('[data-kiosk-flow-version="478"]').first();
-  await expect(outdatedFlow).toHaveText('F:478');
-  await expect(outdatedFlow).toHaveAttribute('data-flow-version-match', 'false');
-  await expect(outdatedFlow).toHaveAttribute('data-flow-version-status', 'behind');
-  await expect(outdatedFlow).toHaveClass(/text-orange-400/);
-  await expect(page.locator('[data-module-firmware="1"]').first()).toHaveAttribute('data-heart-style', 'broken');
+  await expect(page.locator('[data-kiosk-flow-version]')).toHaveCount(0);
+  await expect(page.locator('[data-module-firmware="1"]').first()).toHaveAttribute('data-heart-style', 'solid');
 
   await search.fill('US9003');
-  const aheadFlow = page.locator('[data-kiosk-flow-version="500"]').first();
-  await expect(aheadFlow).toHaveAttribute('data-flow-version-status', 'ahead');
-  await expect(aheadFlow).toHaveClass(/text-gray-400/);
+  await expect(page.locator('[data-kiosk-flow-version]')).toHaveCount(0);
 
   await search.fill('US9004');
-  await expect(page.locator('[data-module-firmware="unknown"]').first()).toHaveAttribute('data-heart-style', 'broken');
+  await expect(page.locator('[data-module-firmware="unknown"]').first()).toHaveAttribute('data-heart-style', 'solid');
 });
 
 test('desktop-only reporting and analytics controls are absent on mobile', async ({ page }) => {

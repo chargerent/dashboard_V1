@@ -363,6 +363,7 @@ const FIREBASE_SAVE_ACTIONS = {
   hardwarechange: 'hardware',
   pricechange: 'pricing',
   uichange: 'ui',
+  moduleorderchange: 'hardware',
 };
 
 const COMMAND_SOCKET_OPEN_TIMEOUT_MS = 3000;

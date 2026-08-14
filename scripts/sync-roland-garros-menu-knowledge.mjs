@@ -55,7 +55,7 @@ async function elevenLabsRequest(apiKey, pathname, options = {}) {
 function buildMenuKnowledge(eventName, publicAssets) {
   const menuLines = publicAssets.map((asset) => {
     const language = asset.language === "fr" ? "French" : "English";
-    return `- ${asset.label} (${language} menu): ${asset.publicUrl}`;
+    return `- ${asset.label} (${language} menu): ${asset.qrUrl || asset.publicUrl}`;
   });
 
   return [
@@ -183,14 +183,17 @@ async function main() {
       throw new Error("The new menu knowledge document was not attached to the agent.");
     }
 
-    for (const oldDocument of [...oldMenuEntries, ...existingMenuDocuments]) {
-      if (oldDocument?.id && oldDocument.id !== document.id) {
+    const retiredMenuDocumentIds = new Set(
+      [...oldMenuEntries, ...existingMenuDocuments]
+        .map((oldDocument) => oldDocument?.id)
+        .filter((oldId) => oldId && oldId !== document.id),
+    );
+    for (const oldDocumentId of retiredMenuDocumentIds) {
         await elevenLabsRequest(
           apiKey,
-          `/v1/convai/knowledge-base/${encodeURIComponent(oldDocument.id)}?force=true`,
+          `/v1/convai/knowledge-base/${encodeURIComponent(oldDocumentId)}?force=true`,
           { method: "DELETE" },
         );
-      }
     }
 
     const existingAgent = event.agent || {};

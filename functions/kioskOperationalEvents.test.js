@@ -172,6 +172,67 @@ test("tracks P68 approved, vend, and credit terminal phases", () => {
   }}}), "credit_pending");
 });
 
+test("monitors only the configured customer interaction surface", () => {
+  const now = Date.now();
+  const staleStateMonitor = {
+    uiStateEnteredAt: new Date(now - 5 * 60_000),
+    terminalPhaseEnteredAt: new Date(now - 5 * 60_000),
+    mqttStateEnteredAt: new Date(now),
+  };
+  const pendingVend = {
+    paymentApproved: true,
+    commandSentAt: new Date(now - 5 * 60_000).toISOString(),
+  };
+
+  const terminalOnly = watchdogCandidates({
+    stationid: "US0008",
+    hardware: {type: "CT10", screen: "no screen", gateway: "PAYTERP68"},
+    ui: {mode: "media"},
+    mqtt: true,
+    lastUpdate: new Date(now).toISOString(),
+    uistate: "button pressed",
+    vend: {pending: pendingVend},
+  }, staleStateMonitor, now);
+  assert.equal(terminalOnly.some(({type}) => type === "ui_state_overdue"), false);
+  assert.equal(terminalOnly.some(({type}) => type === "terminal_state_overdue"), true);
+
+  const uiOnly = watchdogCandidates({
+    stationid: "FR1002",
+    hardware: {type: "CT10", screen: "7in", gateway: "PAYTERP68"},
+    ui: {mode: "UI"},
+    mqtt: true,
+    lastUpdate: new Date(now).toISOString(),
+    uistate: "paymentpage",
+    vend: {pending: pendingVend},
+  }, staleStateMonitor, now);
+  assert.equal(uiOnly.some(({type}) => type === "ui_state_overdue"), true);
+  assert.equal(uiOnly.some(({type}) => type === "terminal_state_overdue"), false);
+});
+
+test("does not report stale UI or terminal states while kiosk telemetry is offline", () => {
+  const now = Date.now();
+  const candidates = watchdogCandidates({
+    stationid: "US0008",
+    hardware: {type: "CT10", screen: "no screen", gateway: "PAYTERP68"},
+    ui: {mode: "media"},
+    mqtt: true,
+    lastUpdate: new Date(now - 15 * 60_000).toISOString(),
+    uistate: "button pressed",
+    vend: {pending: {
+      paymentApproved: true,
+      commandSentAt: new Date(now - 15 * 60_000).toISOString(),
+    }},
+  }, {
+    uiStateEnteredAt: new Date(now - 15 * 60_000),
+    terminalPhaseEnteredAt: new Date(now - 15 * 60_000),
+    mqttStateEnteredAt: new Date(now),
+  }, now);
+
+  assert.equal(candidates.some(({type}) => type === "kiosk_telemetry_overdue"), true);
+  assert.equal(candidates.some(({type}) => type === "ui_state_overdue"), false);
+  assert.equal(candidates.some(({type}) => type === "terminal_state_overdue"), false);
+});
+
 test("detects V2 module telemetry that stays stale", () => {
   const now = Date.now();
   const candidates = watchdogCandidates({

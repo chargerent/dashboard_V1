@@ -489,11 +489,15 @@ const watchdogCandidates = (kiosk, monitor, nowMs) => {
   const candidates = [];
   const v2Kiosk = isV2Kiosk(kiosk);
   const modules = normalizeModules(kiosk);
+  const interactionSurface = kioskInteractionSurface(kiosk);
   const uiState = normalizeText(kiosk?.uistate);
   const policy = statePolicy(uiState);
   const enteredAt = asMillis(monitor?.uiStateEnteredAt) ?? nowMs;
   const phase = terminalPhase(kiosk);
   const terminalEnteredAt = asMillis(monitor?.terminalPhaseEnteredAt) ?? nowMs;
+  const kioskLastSeen = asMillis(kiosk?.lastUpdate ?? kiosk?.timestamp);
+  const telemetryOverdue = kioskLastSeen != null && nowMs - kioskLastSeen > ONLINE_WINDOW_MS;
+  const kioskOffline = kiosk?.mqtt === false || telemetryOverdue;
 
   if (kiosk?.mqtt === false) {
     candidates.push({
@@ -508,7 +512,6 @@ const watchdogCandidates = (kiosk, monitor, nowMs) => {
     });
   }
 
-  const kioskLastSeen = asMillis(kiosk?.lastUpdate ?? kiosk?.timestamp);
   if (kioskLastSeen && nowMs - kioskLastSeen > ONLINE_WINDOW_MS &&
       (!v2Kiosk || modules.length === 0)) {
     candidates.push({
@@ -524,7 +527,8 @@ const watchdogCandidates = (kiosk, monitor, nowMs) => {
     });
   }
 
-  if (uiState && policy.timeoutMs != null && nowMs - enteredAt > policy.timeoutMs) {
+  if (!kioskOffline && interactionSurface === "ui" && uiState &&
+      policy.timeoutMs != null && nowMs - enteredAt > policy.timeoutMs) {
     candidates.push({
       key: "ui-state-overdue",
       category: "interaction",
@@ -543,7 +547,8 @@ const watchdogCandidates = (kiosk, monitor, nowMs) => {
     });
   }
 
-  if (phase !== "idle" && nowMs - terminalEnteredAt > 120_000) {
+  if (!kioskOffline && interactionSurface === "terminal" && phase !== "idle" &&
+      nowMs - terminalEnteredAt > 120_000) {
     candidates.push({
       key: `terminal-${phase}`,
       category: "terminal",

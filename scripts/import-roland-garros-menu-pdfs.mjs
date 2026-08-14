@@ -34,6 +34,20 @@ const MENU_LABELS = new Map([
   ["la-terrasse-francaise", "La Terrasse Française"],
   ["match-point-sushi", "Match Point Sushi"],
 ]);
+const MENU_QR_CODES = new Map([
+  ["ace-pizza", "rga"],
+  ["baseline-coffee", "rgb"],
+  ["court-side-coffee", "rgc"],
+  ["green-set", "rgg"],
+  ["la-terrasse-francaise", "rgt"],
+  ["match-point-sushi", "rgs"],
+]);
+
+function buildMenuQrAssetId(slug, language) {
+  const code = MENU_QR_CODES.get(slug);
+  if (!code) throw new Error(`No compact QR code is configured for menu slug: ${slug}`);
+  return `${code}${language === "fr" ? "f" : "e"}`;
+}
 
 function buildDownloadUrl(storagePath, downloadToken) {
   return (
@@ -194,6 +208,8 @@ async function uploadMenu(bucket, menu, nowIso, actor) {
     storagePath: menu.publicStoragePath,
     bucketName: STORAGE_BUCKET,
     publicUrl: `${PUBLIC_ASSET_BASE_URL}/${menu.assetId}`,
+    qrAssetId: buildMenuQrAssetId(menu.assetInput.slug, menu.assetInput.language),
+    qrUrl: `${PUBLIC_ASSET_BASE_URL}/${buildMenuQrAssetId(menu.assetInput.slug, menu.assetInput.language)}`,
     downloadUrl: buildDownloadUrl(menu.publicStoragePath, downloadToken),
     sourceSubmissionId: SUBMISSION_ID,
     sourceFileId: menu.fileId,
@@ -227,7 +243,8 @@ async function main() {
 
   console.log(`${APPLY ? "Applying" : "Dry run for"} ${menus.length} Roland-Garros menu PDFs:`);
   for (const menu of menus) {
-    console.log(`- ${menu.fileName} -> ${PUBLIC_ASSET_BASE_URL}/${menu.assetId}`);
+    const qrAssetId = buildMenuQrAssetId(menu.assetInput.slug, menu.assetInput.language);
+    console.log(`- ${menu.fileName} -> ${PUBLIC_ASSET_BASE_URL}/${menu.assetId} (QR: ${PUBLIC_ASSET_BASE_URL}/${qrAssetId})`);
   }
   if (!APPLY) {
     console.log("No data was changed. Re-run with --apply after reviewing this list.");
@@ -269,6 +286,15 @@ async function main() {
   for (const asset of publicAssets) {
     batch.set(db.collection("aiBoothPublicAssets").doc(asset.id), {
       ...asset,
+      publishedAt: admin.firestore.FieldValue.serverTimestamp(),
+      publishedAtIso: nowIso,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    batch.set(db.collection("aiBoothPublicAssets").doc(asset.qrAssetId), {
+      ...asset,
+      id: asset.qrAssetId,
+      aliasOf: asset.id,
+      publicUrl: asset.qrUrl,
       publishedAt: admin.firestore.FieldValue.serverTimestamp(),
       publishedAtIso: nowIso,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),

@@ -135,15 +135,17 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L14.732 3.732z" /></svg>
                             </button>
                         )}
-                        <span
-                            className={`shrink-0 text-[10px] font-medium leading-none ${flowVersionIsBehind ? 'text-orange-400' : 'text-gray-400'}`}
-                            data-kiosk-flow-version={kioskFlowVersion}
-                            data-flow-version-match={flowVersionMatches ? 'true' : 'false'}
-                            data-flow-version-status={flowVersionStatus}
-                            title={`Kiosk flow ${kioskFlowVersion}; current server flow ${currentServerFlowVersion}`}
-                        >
-                            F:{kioskFlowVersion}
-                        </span>
+                        {!isV2Kiosk && (
+                            <span
+                                className={`shrink-0 text-[10px] font-medium leading-none ${flowVersionIsBehind ? 'text-orange-400' : 'text-gray-400'}`}
+                                data-kiosk-flow-version={kioskFlowVersion}
+                                data-flow-version-match={flowVersionMatches ? 'true' : 'false'}
+                                data-flow-version-status={flowVersionStatus}
+                                title={`Kiosk flow ${kioskFlowVersion}; current server flow ${currentServerFlowVersion}`}
+                            >
+                                F:{kioskFlowVersion}
+                            </span>
+                        )}
                     </div>
                     <div className="flex items-center gap-3">
                         <div className="flex items-center gap-1.5" title={t('gateway_type')}>
@@ -173,11 +175,11 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                                         title={moduleTitle}
                                         aria-label={moduleTitle}
                                         data-module-firmware={moduleFw || 'unknown'}
-                                        data-heart-style={moduleFw === '2' ? 'solid' : 'broken'}
+                                        data-heart-style={isV2Kiosk || moduleFw === '2' ? 'solid' : 'broken'}
                                         role="img"
                                     >
                                         <span className="relative inline-flex h-5 w-5 items-center justify-center">
-                                            {moduleFw === '2' ? (
+                                            {isV2Kiosk || moduleFw === '2' ? (
                                                 <HeartIcon aria-hidden="true" className={`h-5 w-5 ${outputOk ? 'text-green-700' : 'text-red-700'}`} />
                                             ) : (
                                                 <BrokenHeartIcon className={`h-5 w-5 ${outputOk ? 'text-green-700' : 'text-red-700'}`} />

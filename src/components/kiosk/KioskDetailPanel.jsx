@@ -138,6 +138,7 @@ const resolvePlaylistAssetKind = (asset) => {
 // --- Main Detail Panel Component ---
 function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSlots, ejectingSlots, failedEjectSlots, lockingSlots, t, onCommand, onNavigateToChargers, serverUiVersion, serverFlowVersion, clientInfo, mockNow }) {
     const [mountedAt] = useState(() => Date.now());
+    const [selectedModuleId, setSelectedModuleId] = useState(() => String(kiosk.modules?.[0]?.id || ''));
     const isOnline = isKioskOnline(kiosk, mockNow);
     const isV2Kiosk = isNewSchemaKiosk(kiosk);
     const stationId = kiosk.stationid;
@@ -196,9 +197,22 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
             title: rawVersion,
         };
     }, [kiosk.hardware?.firmwareVersion, kiosk.hardware?.fotaVersion, kiosk.hardware?.mcuVersion]);
+    const orderedModules = useMemo(() => {
+        const modules = Array.isArray(kiosk.modules) ? kiosk.modules : [];
+        const savedOrder = Array.isArray(kiosk.moduleDisplayOrder) ? kiosk.moduleDisplayOrder : [];
+        if (savedOrder.length === 0) return modules;
+
+        const ordered = savedOrder
+            .map((moduleId) => modules.find((module) => moduleIdsMatch(module?.id, moduleId)))
+            .filter(Boolean);
+        const remaining = modules.filter((module) => (
+            !ordered.some((orderedModule) => moduleIdsMatch(orderedModule?.id, module?.id))
+        ));
+        return [...ordered, ...remaining];
+    }, [kiosk.moduleDisplayOrder, kiosk.modules]);
     const moduleEntries = useMemo(() => (
-        Array.isArray(kiosk.modules)
-            ? kiosk.modules
+        Array.isArray(orderedModules)
+            ? orderedModules
                 .map((module) => {
                     const moduleId = String(module?.id || '').trim();
                     const firmwareVersion = formatModuleFirmwareVersion(
@@ -217,11 +231,46 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                 })
                 .filter((entry) => entry.moduleId)
             : []
-    ), [formatFotaVersion, kiosk.modules, mockNow, t]);
+    ), [formatFotaVersion, mockNow, orderedModules, t]);
     const moduleIds = useMemo(() => (
         moduleEntries.map((entry) => entry.moduleId)
     ), [moduleEntries]);
+    const hasMultipleModules = isV2Kiosk && orderedModules.length > 1;
+    const selectedModule = hasMultipleModules
+        ? orderedModules.find((module) => moduleIdsMatch(module?.id, selectedModuleId)) || orderedModules[0]
+        : orderedModules[0];
+    const visibleModules = hasMultipleModules && selectedModule ? [selectedModule] : orderedModules;
     const showModuleIdCards = isV2Kiosk && moduleIds.length > 0 && !showInlineModuleIds;
+    useEffect(() => {
+        if (!hasMultipleModules) {
+            setSelectedModuleId(String(orderedModules[0]?.id || ''));
+            return;
+        }
+
+        if (!orderedModules.some((module) => moduleIdsMatch(module?.id, selectedModuleId))) {
+            setSelectedModuleId(String(orderedModules[0]?.id || ''));
+        }
+    }, [hasMultipleModules, orderedModules, selectedModuleId]);
+    const handleMoveModule = useCallback((moduleId, direction) => {
+        const currentIndex = orderedModules.findIndex((module) => moduleIdsMatch(module?.id, moduleId));
+        const nextIndex = currentIndex + direction;
+        if (currentIndex < 0 || nextIndex < 0 || nextIndex >= orderedModules.length) return;
+
+        const nextModules = orderedModules.slice();
+        [nextModules[currentIndex], nextModules[nextIndex]] = [nextModules[nextIndex], nextModules[currentIndex]];
+        const nextOrder = nextModules.map((module) => String(module.id));
+        const directionLabel = direction < 0 ? 'up' : 'down';
+        onCommand(kiosk.stationid, 'moduleorderchange', moduleId, null, null, {
+            kiosk: {
+                ...kiosk,
+                hardware: {
+                    ...kiosk.hardware,
+                    moduleOrder: nextOrder,
+                },
+            },
+            confirmationText: `Move module ${moduleId} ${directionLabel} to match its physical position?`,
+        });
+    }, [kiosk, onCommand, orderedModules]);
     const formatChargeRate = useCallback((rate) => {
         const numericRate = Number(rate);
         if (!Number.isFinite(numericRate) || numericRate <= 0) {
@@ -264,8 +313,8 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         onNavigateToChargers(String(chargerSn));
     }, [onNavigateToChargers, stationId]);
     const compactHeaderModules = useMemo(() => (
-        Array.isArray(kiosk.modules)
-            ? kiosk.modules.map((module, index) => {
+        Array.isArray(orderedModules)
+            ? orderedModules.map((module, index) => {
                 const estimatedPctPerMinute = Number(module?.chargeMetrics?.estimatedPctPerMinute);
                 const activeChargingSlots = Array.isArray(module?.slots)
                     ? module.slots.filter((slot) => (
@@ -307,7 +356,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                 };
             })
             : []
-    ), [chargeReadyThreshold, formatChargeRate, formatEtaToReady, formatFotaVersion, kiosk.modules, mockNow, t]);
+    ), [chargeReadyThreshold, formatChargeRate, formatEtaToReady, formatFotaVersion, mockNow, orderedModules, t]);
     const showLegacySideIndicators = !kiosk.isNewSchema;
 
     const ejectingSet = useMemo(
@@ -612,7 +661,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     };
 
     const renderModule = (module, { reverseOrder = false, className = '' } = {}) => (
-        <div className={`${module.output === false ? 'bg-red-100' : 'bg-white'} p-2 rounded-lg shadow-inner ${getModuleTypeOutlineClass(module)} ${className}`}>
+        <div key={module.id} className={`${module.output === false ? 'bg-red-100' : 'bg-white'} p-2 rounded-lg shadow-inner ${getModuleTypeOutlineClass(module)} ${className}`}>
             <div className="flex flex-col gap-1">
                 {module.slots.slice().sort((a, b) => reverseOrder ? b.position - a.position : a.position - b.position).map(slot => {
                     const style = getSlotStyle(slot, module);
@@ -689,24 +738,9 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     };
 
     const renderCompactTowerHeader = () => {
-        const qrFallback = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(
-            `<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220" viewBox="0 0 220 220">
-                <rect width="220" height="220" rx="18" fill="#f3f4f6"/>
-                <rect x="26" y="26" width="168" height="168" rx="14" fill="#ffffff" stroke="#d1d5db" stroke-width="4"/>
-                <text x="110" y="106" text-anchor="middle" font-family="monospace" font-size="16" fill="#6b7280">QR</text>
-                <text x="110" y="132" text-anchor="middle" font-family="monospace" font-size="14" fill="#4b5563">${kiosk.stationid || '---'}</text>
-            </svg>`
-        )}`;
-
         return (
             <div className="bg-white p-4 rounded-lg shadow-inner">
-                <div className="flex items-stretch gap-3">
-                    <img
-                        src={qrFallback}
-                        alt={`${stationId} QR`}
-                        className="h-[118px] w-[118px] shrink-0 rounded-md object-cover sm:h-[128px] sm:w-[128px]"
-                    />
-                    <div className="min-w-0 flex-[1.1]">
+                <div className="min-w-0">
                         <div className="flex flex-col gap-2">
                             {(compactHeaderModules.length > 0 ? compactHeaderModules : [{
                                 key: stationId || 'placeholder',
@@ -718,10 +752,55 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                 fotaVersionTitle: 'No FOTA version reported',
                                 avgChargeRate: '--',
                                 etaToReady: '--',
-                            }]).map((module) => (
-                                <div key={module.key} className="flex min-h-[118px] flex-col justify-between rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 shadow-sm sm:min-h-[128px]">
+                            }]).map((module, moduleIndex) => {
+                                const isSelected = !hasMultipleModules || moduleIdsMatch(module.moduleId, selectedModule?.id);
+                                return (
+                                <div
+                                    key={module.key}
+                                    role={hasMultipleModules ? 'button' : undefined}
+                                    tabIndex={hasMultipleModules ? 0 : undefined}
+                                    aria-pressed={hasMultipleModules ? isSelected : undefined}
+                                    onClick={hasMultipleModules ? () => setSelectedModuleId(module.moduleId) : undefined}
+                                    onKeyDown={hasMultipleModules ? (event) => {
+                                        if (event.key === 'Enter' || event.key === ' ') {
+                                            event.preventDefault();
+                                            setSelectedModuleId(module.moduleId);
+                                        }
+                                    } : undefined}
+                                    className={`flex min-h-[118px] flex-col justify-between rounded-lg border px-3 py-2 shadow-sm sm:min-h-[128px] ${isSelected ? 'border-sky-500 bg-sky-50 ring-2 ring-sky-200' : 'border-gray-200 bg-gray-50'} ${hasMultipleModules ? 'cursor-pointer transition hover:border-sky-300 hover:bg-sky-50/60' : ''}`}
+                                >
                                     <div className="px-0.5 py-0.5 text-xs">
                                         <div className="font-mono text-xs text-gray-700">{module.moduleId}</div>
+                                        {hasMultipleModules && canUpdateModules && (
+                                            <div className="mt-1 flex gap-1">
+                                                <button
+                                                    type="button"
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        handleMoveModule(module.moduleId, -1);
+                                                    }}
+                                                    disabled={moduleIndex === 0}
+                                                    className="flex h-6 w-7 items-center justify-center rounded border border-gray-200 bg-white text-sm text-gray-600 hover:border-sky-300 hover:text-sky-700 disabled:cursor-not-allowed disabled:opacity-30"
+                                                    title={`Move ${module.moduleId} up`}
+                                                    aria-label={`Move ${module.moduleId} up`}
+                                                >
+                                                    ↑
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        handleMoveModule(module.moduleId, 1);
+                                                    }}
+                                                    disabled={moduleIndex === compactHeaderModules.length - 1}
+                                                    className="flex h-6 w-7 items-center justify-center rounded border border-gray-200 bg-white text-sm text-gray-600 hover:border-sky-300 hover:text-sky-700 disabled:cursor-not-allowed disabled:opacity-30"
+                                                    title={`Move ${module.moduleId} down`}
+                                                    aria-label={`Move ${module.moduleId} down`}
+                                                >
+                                                    ↓
+                                                </button>
+                                            </div>
+                                        )}
                                         {showModuleFirmwareMetadata && (
                                             <>
                                                 <div className="mt-1 flex items-center gap-2 font-mono text-[10px] text-gray-500">
@@ -758,9 +837,9 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                         )}
                                     </div>
                                 </div>
-                            ))}
+                                );
+                            })}
                         </div>
-                    </div>
                 </div>
             </div>
         );
@@ -771,7 +850,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
             <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
                 <div className="w-full flex flex-col gap-3">
                     {renderCompactTowerHeader()}
-                    {kiosk.modules[0] && renderModule(kiosk.modules[0], { className: 'w-full' })}
+                    {visibleModules[0] && renderModule(visibleModules[0], { className: 'w-full' })}
                 </div>
             </div>
         );
@@ -960,7 +1039,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     );
 
     const renderCompactTower = (minimumGroups) => {
-        const { slotsByPosition, maxPosition } = buildCompactSlotMap(kiosk.modules);
+        const { slotsByPosition, maxPosition } = buildCompactSlotMap(visibleModules);
         const groupCount = Math.max(minimumGroups, Math.ceil(maxPosition / 4) || 0);
 
         return (
@@ -1056,7 +1135,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     };
 
     const renderCT8 = () => {
-        const { slotsByPosition } = buildCompactSlotMap(kiosk.modules);
+        const { slotsByPosition } = buildCompactSlotMap(visibleModules);
 
         return (
             <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
@@ -1078,7 +1157,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     const renderCK24 = () => {
         // CK24 uses the same six 2×2 module placements as the right column of CK48.
         // Its flat slot positions 1–24 map to logical module indices 0–5.
-        const { slotsByPosition } = buildCompactSlotMap(kiosk.modules);
+        const { slotsByPosition } = buildCompactSlotMap(visibleModules);
         const rightColumnIndices = [0, 1, 2, 3, 4, 5];
 
         return (
@@ -1107,7 +1186,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         // Visual layout: 12 logical modules arranged in 2 columns (right: 0–5, left: 6–11).
         // Within each logical module the 4 slots are displayed in a 2×2 grid using
         // the order [2, 0, 3, 1] applied as: position = moduleIndex * 4 + slotOrder + 1
-        const { slotsByPosition } = buildCompactSlotMap(kiosk.modules);
+        const { slotsByPosition } = buildCompactSlotMap(visibleModules);
         const leftColumnIndices = [6, 7, 8, 9, 10, 11];
         const rightColumnIndices = [0, 1, 2, 3, 4, 5];
 
@@ -1143,7 +1222,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         return (
             <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
                 <div className="w-full flex flex-col gap-3">
-                    {kiosk.modules[0] && renderModule(kiosk.modules[0])}
+                    {visibleModules[0] && renderModule(visibleModules[0])}
                     {renderPaymentTerminal('CT10')}
                 </div>
             </div>
@@ -1155,8 +1234,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
             <div className="w-full flex flex-col gap-3">
                 {renderPaymentTerminal('CK20')}
-                {kiosk.modules[0] && renderModule(kiosk.modules[0], { reverseOrder: true })}
-                {kiosk.modules[1] && renderModule(kiosk.modules[1], { reverseOrder: true })}
+                {visibleModules.map((module) => renderModule(module, { reverseOrder: true }))}
             </div>
         </div>
     )};
@@ -1165,10 +1243,9 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         return (
         <div className="p-2 flex flex-col items-center max-h-[60vh] md:max-h-none overflow-y-auto">
             <div className="w-full flex flex-col gap-3">
-                {kiosk.modules[0] && renderModule(kiosk.modules[0], { reverseOrder: true })}
+                {visibleModules[0] && renderModule(visibleModules[0], { reverseOrder: true })}
                 {renderPaymentTerminal('CK30')}
-                {kiosk.modules[1] && renderModule(kiosk.modules[1], { reverseOrder: true })}
-                {kiosk.modules[2] && renderModule(kiosk.modules[2], { reverseOrder: true })}
+                {visibleModules.slice(1).map((module) => renderModule(module, { reverseOrder: true }))}
             </div>
         </div>
     )};
@@ -1193,13 +1270,10 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                     </div>
                 </div>
                 <div className="w-full grid grid-cols-2 gap-2">
-                    {kiosk.modules[1] && renderModule(kiosk.modules[1], { reverseOrder: true })}
-                    {kiosk.modules[0] && renderModule(kiosk.modules[0], { reverseOrder: true })}
+                    {visibleModules.slice(0, 2).reverse().map((module) => renderModule(module, { reverseOrder: true }))}
                 </div>
                 <div className="w-full grid grid-cols-3 gap-2">
-                    {kiosk.modules[2] && renderModule(kiosk.modules[2], { reverseOrder: true })}
-                    {kiosk.modules[3] && renderModule(kiosk.modules[3], { reverseOrder: true })}
-                    {kiosk.modules[4] && renderModule(kiosk.modules[4], { reverseOrder: true })}
+                    {visibleModules.slice(2, 5).map((module) => renderModule(module, { reverseOrder: true }))}
                 </div>
             </div>
         );
@@ -1255,10 +1329,53 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                             <span>{t('module_view')}:</span>
                         </div>
                         <div className="flex flex-wrap gap-2 px-4 py-3">
-                            {moduleEntries.map((entry) => (
+                            {moduleEntries.map((entry, moduleIndex) => (
                                 canUpdateModules ? (
-                                    <div key={entry.moduleId} className="flex min-w-[122px] flex-col gap-2 rounded-md bg-gray-100 px-3 py-2">
+                                    <div
+                                        key={entry.moduleId}
+                                        role={hasMultipleModules ? 'button' : undefined}
+                                        tabIndex={hasMultipleModules ? 0 : undefined}
+                                        aria-pressed={hasMultipleModules ? moduleIdsMatch(entry.moduleId, selectedModule?.id) : undefined}
+                                        onClick={hasMultipleModules ? () => setSelectedModuleId(entry.moduleId) : undefined}
+                                        onKeyDown={hasMultipleModules ? (event) => {
+                                            if (event.key === 'Enter' || event.key === ' ') {
+                                                event.preventDefault();
+                                                setSelectedModuleId(entry.moduleId);
+                                            }
+                                        } : undefined}
+                                        className={`flex min-w-[122px] flex-col gap-2 rounded-md border px-3 py-2 ${moduleIdsMatch(entry.moduleId, selectedModule?.id) ? 'border-sky-500 bg-sky-50 ring-2 ring-sky-200' : 'border-transparent bg-gray-100'} ${hasMultipleModules ? 'cursor-pointer transition hover:border-sky-300 hover:bg-sky-50/60' : ''}`}
+                                    >
                                         <span className="font-mono text-xs text-gray-700">{entry.moduleId}</span>
+                                        {hasMultipleModules && (
+                                            <div className="flex gap-1">
+                                                <button
+                                                    type="button"
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        handleMoveModule(entry.moduleId, -1);
+                                                    }}
+                                                    disabled={moduleIndex === 0}
+                                                    className="flex h-6 w-7 items-center justify-center rounded border border-gray-200 bg-white text-sm text-gray-600 hover:border-sky-300 hover:text-sky-700 disabled:cursor-not-allowed disabled:opacity-30"
+                                                    title={`Move ${entry.moduleId} up`}
+                                                    aria-label={`Move ${entry.moduleId} up`}
+                                                >
+                                                    ↑
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={(event) => {
+                                                        event.stopPropagation();
+                                                        handleMoveModule(entry.moduleId, 1);
+                                                    }}
+                                                    disabled={moduleIndex === moduleEntries.length - 1}
+                                                    className="flex h-6 w-7 items-center justify-center rounded border border-gray-200 bg-white text-sm text-gray-600 hover:border-sky-300 hover:text-sky-700 disabled:cursor-not-allowed disabled:opacity-30"
+                                                    title={`Move ${entry.moduleId} down`}
+                                                    aria-label={`Move ${entry.moduleId} down`}
+                                                >
+                                                    ↓
+                                                </button>
+                                            </div>
+                                        )}
                                         {showModuleFirmwareMetadata && (
                                             <>
                                                 <span className="font-mono text-[10px] text-gray-500">
@@ -1274,7 +1391,10 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                         )}
                                         <button
                                             type="button"
-                                            onClick={() => handleModuleUpdate(entry.moduleId)}
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+                                                handleModuleUpdate(entry.moduleId);
+                                            }}
                                             disabled={!entry.moduleOnline}
                                             className="inline-flex items-center justify-center rounded-md border border-sky-200 bg-sky-50 px-2 py-1 text-[11px] font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-200 disabled:text-gray-400"
                                         >
@@ -1282,7 +1402,14 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                         </button>
                                     </div>
                                 ) : (
-                                    <div key={entry.moduleId} className="flex min-w-[122px] flex-col rounded bg-gray-200 px-2 py-1 font-mono text-xs text-gray-700">
+                                    <button
+                                        key={entry.moduleId}
+                                        type="button"
+                                        onClick={hasMultipleModules ? () => setSelectedModuleId(entry.moduleId) : undefined}
+                                        disabled={!hasMultipleModules}
+                                        aria-pressed={hasMultipleModules ? moduleIdsMatch(entry.moduleId, selectedModule?.id) : undefined}
+                                        className={`flex min-w-[122px] flex-col rounded border px-2 py-1 text-left font-mono text-xs text-gray-700 ${moduleIdsMatch(entry.moduleId, selectedModule?.id) ? 'border-sky-500 bg-sky-50 ring-2 ring-sky-200' : 'border-transparent bg-gray-200'} ${hasMultipleModules ? 'cursor-pointer transition hover:border-sky-300 hover:bg-sky-50/60' : ''}`}
+                                    >
                                         <span>{entry.moduleId}</span>
                                         {showModuleFirmwareMetadata && (
                                             <>
@@ -1292,7 +1419,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                                 </span>
                                             </>
                                         )}
-                                    </div>
+                                    </button>
                                 )
                             ))}
                         </div>

@@ -625,6 +625,11 @@ const SCREEN_UI_VISUAL_MODES = Object.freeze([
     label: 'Dot Grid Concierge',
     description: 'A minimal animated dot field that responds to the conversation and transforms into QR codes.',
   },
+  {
+    id: 'tennis-ball-face',
+    label: 'Tennis Concierge',
+    description: 'A friendly tennis-ball character that responds to speech and spins to reveal scannable QR codes.',
+  },
 ]);
 const SCREEN_UI_GOLF_QR_MODES = Object.freeze([
   {
@@ -880,6 +885,10 @@ function normalizeScreenUiVisualMode(value, fallback = DEFAULT_SCREEN_UI.visualM
     'dot-grid': 'dot-grid-concierge',
     grid: 'dot-grid-concierge',
     'grid-concierge': 'dot-grid-concierge',
+    'tennis-face': 'tennis-ball-face',
+    'tennis-ball': 'tennis-ball-face',
+    'tennis-concierge': 'tennis-ball-face',
+    mascot: 'tennis-ball-face',
   }[raw] || raw;
   return SCREEN_UI_VISUAL_MODES.some((mode) => mode.id === normalized) ? normalized : fallback;
 }

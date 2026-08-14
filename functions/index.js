@@ -918,12 +918,17 @@ function normalizeAiBoothVisualMode(value, fallback = DEFAULT_AI_BOOTH_SCREEN_UI
     "airport-board": "airport-departure",
     "departure-board": "airport-departure",
     terminal: "airport-departure",
+    "tennis-face": "tennis-ball-face",
+    "tennis-ball": "tennis-ball-face",
+    "tennis-concierge": "tennis-ball-face",
+    mascot: "tennis-ball-face",
   }[raw] || raw;
   return [
     "knowledge-web",
     "golf-scorecard",
     "southwest-heart",
     "airport-departure",
+    "tennis-ball-face",
   ].includes(normalized) ? normalized : fallback;
 }
 
@@ -2525,6 +2530,30 @@ function collectV2ModuleIds(modules) {
   return Array.from(ids);
 }
 
+function syncModuleOrder(hardware, moduleIds) {
+  const currentHardware = isPlainObject(hardware) ? hardware : {};
+  const savedOrder = Array.isArray(currentHardware.moduleOrder) ?
+    currentHardware.moduleOrder.map(normalizeModuleId).filter(Boolean) :
+    [];
+  const activeModuleIds = Array.isArray(moduleIds) ?
+    moduleIds.map(normalizeModuleId).filter(Boolean) :
+    [];
+  const orderedIds = savedOrder.filter((savedId) =>
+    activeModuleIds.some((moduleId) => moduleIdsMatch(savedId, moduleId)),
+  );
+
+  activeModuleIds.forEach((moduleId) => {
+    if (!orderedIds.some((savedId) => moduleIdsMatch(savedId, moduleId))) {
+      orderedIds.push(moduleId);
+    }
+  });
+
+  return {
+    ...currentHardware,
+    moduleOrder: orderedIds,
+  };
+}
+
 function recalculateKioskTotals(kiosk) {
   const configuredPower = Number(kiosk?.hardware?.power);
   const fullThreshold = Number.isFinite(configuredPower) ?
@@ -2597,6 +2626,7 @@ function recalculateKioskTotals(kiosk) {
   const moduleIds = collectV2ModuleIds(normalizedModules);
   if (moduleIds.length > 0) {
     nextKiosk.moduleIds = moduleIds;
+    nextKiosk.hardware = syncModuleOrder(nextKiosk.hardware, moduleIds);
   }
 
   return nextKiosk;
@@ -9377,6 +9407,7 @@ async function stationBindingMoveModuleImpl(data, authState) {
     db.collection("kiosks").doc(destinationProvisionid) :
     destinationDoc.ref;
   const pendingRef = db.collection("pending").doc(moduleId);
+  const rebindRef = db.collection("moduleRebindCommands").doc();
 
   await db.runTransaction(async (transaction) => {
     const reads = [transaction.get(sourceRef), transaction.get(pendingRef)];
@@ -9506,6 +9537,19 @@ async function stationBindingMoveModuleImpl(data, authState) {
     if (pendingSnap?.exists) {
       transaction.delete(pendingRef);
     }
+
+    transaction.set(rebindRef, {
+      commandId: rebindRef.id,
+      moduleId,
+      sourceStationid,
+      destinationStationid,
+      destinationProvisionid,
+      state: "pending",
+      attempts: 0,
+      requestedAt: admin.firestore.FieldValue.serverTimestamp(),
+      requestedBy: authState.uid,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
   });
 
   const followingStation = createNewStation ?
@@ -9523,6 +9567,8 @@ async function stationBindingMoveModuleImpl(data, authState) {
     destinationStationid,
     destinationProvisionid,
     moduleId,
+    rebindCommandId: rebindRef.id,
+    reconnectState: "pending",
     createNewStation,
     qrUrl: buildQrUrl(destinationStationid),
     nextStationid: followingStation,
