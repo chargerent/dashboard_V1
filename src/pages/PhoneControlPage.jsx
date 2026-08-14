@@ -222,8 +222,8 @@ function SummaryCard({ label, value, detail, tone = 'slate' }) {
 function FieldProvisioningCard() {
   const basePath = import.meta.env.BASE_URL || '/portal/';
   const [release, setRelease] = useState({
-    versionName: '1.2.3',
-    apkUrl: 'https://chargerentstations.com/portal/mdm/remote-agent-v1.2.3.apk',
+    versionName: '1.2.4',
+    apkUrl: 'https://chargerentstations.com/portal/mdm/remote-agent-v1.2.4.apk',
     qrImagePath: `${basePath}mdm/remote-agent-device-owner-qr.png`,
     qrPayloadPath: `${basePath}mdm/remote-agent-device-owner-payload.json`,
   });
