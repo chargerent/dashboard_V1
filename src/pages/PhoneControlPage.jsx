@@ -530,7 +530,10 @@ function RemoteScreen({
       sessionIdRef.current = sessionId;
       peer.addTransceiver('video', { direction: 'recvonly' });
       peer.ontrack = (event) => {
-        const [stream] = event.streams;
+        const [announcedStream] = event.streams;
+        const stream = announcedStream || (event.track && typeof window.MediaStream === 'function'
+          ? new window.MediaStream([event.track])
+          : null);
         if (videoRef.current && stream) {
           videoRef.current.srcObject = stream;
           videoRef.current.play().catch(() => {});
