@@ -31,6 +31,9 @@ const ALLOWED_OPERATIONS = new Set([
   "GET_LOCATION",
   "SET_LOCATION_ENABLED",
   "SET_WIFI_ENABLED",
+  "SCAN_WIFI_NETWORKS",
+  "CONNECT_WIFI",
+  "OPEN_CAPTIVE_PORTAL",
   "SET_ALWAYS_ON_HOTSPOT",
   "OPEN_TETHER_SETTINGS",
   "SET_BLUETOOTH_ENABLED",
@@ -230,6 +233,59 @@ function normalizeHotspotArguments(value) {
     invalidArgument("Always-on hotspot requires an enabled value.");
   }
   return {enabled: input.enabled};
+}
+
+function parseCommandEncryptionPublicKey(publicKeyBase64) {
+  try {
+    const publicKey = crypto.createPublicKey({
+      key: Buffer.from(String(publicKeyBase64 || ""), "base64"),
+      type: "spki",
+      format: "der",
+    });
+    const details = publicKey.asymmetricKeyDetails || {};
+    if (publicKey.asymmetricKeyType !== "rsa" || Number(details.modulusLength || 0) < 2048) {
+      invalidArgument("The phone command-encryption key is invalid.");
+    }
+    return publicKey;
+  } catch (error) {
+    if (error instanceof HttpsError) throw error;
+    throw new HttpsError(
+        "failed-precondition",
+        "Update Agent on this phone before joining Wi-Fi remotely.",
+    );
+  }
+}
+
+function normalizeConnectWifiArguments(value, publicKeyBase64) {
+  const input = normalizeArguments(value);
+  const ssid = String(input.ssid || "").trim();
+  const ssidBytes = Buffer.byteLength(ssid, "utf8");
+  if (!ssid || ssidBytes > 32) invalidArgument("Choose a valid Wi-Fi network name.");
+
+  const requestedSecurity = String(input.security || "").trim().toLowerCase();
+  const security = requestedSecurity === "wpa2_wpa3" ? "wpa2" : requestedSecurity;
+  if (!["open", "wpa2", "wpa3"].includes(security)) {
+    invalidArgument("This Wi-Fi security type cannot be joined remotely.");
+  }
+
+  const normalized = {ssid, security};
+  if (security === "open") return normalized;
+
+  const passphrase = String(input.passphrase || "");
+  const passphraseBytes = Buffer.byteLength(passphrase, "utf8");
+  if (passphraseBytes < 8 || passphraseBytes > 63) {
+    invalidArgument("Wi-Fi passwords must contain 8 to 63 characters.");
+  }
+  const encrypted = crypto.publicEncrypt({
+    key: parseCommandEncryptionPublicKey(publicKeyBase64),
+    padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+    oaepHash: "sha256",
+  }, Buffer.from(JSON.stringify({passphrase}), "utf8"));
+  normalized.encryptedCredentials = {
+    algorithm: "RSA-OAEP-256",
+    ciphertext: encrypted.toString("base64"),
+  };
+  return normalized;
 }
 
 function canonicalJson(value) {
@@ -557,6 +613,14 @@ function safeDeviceData(snapshot) {
   };
 }
 
+function safeCommandArguments(operation, arguments_) {
+  const commandArguments = arguments_ && typeof arguments_ === "object" ? arguments_ : {};
+  return operation === "CONNECT_WIFI" ? {
+    ssid: String(commandArguments.ssid || ""),
+    security: String(commandArguments.security || ""),
+  } : commandArguments;
+}
+
 function safeCommandData(snapshot) {
   const data = snapshot.data() || {};
   return {
@@ -564,7 +628,7 @@ function safeCommandData(snapshot) {
     deviceId: String(data.deviceId || ""),
     stationId: String(data.stationId || "").trim().toUpperCase(),
     operation: String(data.operation || ""),
-    arguments: data.arguments && typeof data.arguments === "object" ? data.arguments : {},
+    arguments: safeCommandArguments(data.operation, data.arguments),
     status: String(data.status || "queued"),
     result: data.result && typeof data.result === "object" ? data.result : {},
     error: String(data.error || ""),
@@ -781,10 +845,18 @@ async function sendCommand(data, authState, dependencies) {
   const requestId = normalizeRequestId(data?.requestId);
   const operation = normalizeOperation(data?.operation);
   const confirmed = data?.confirmed === true;
+  if (operation === "CONNECT_WIFI" && !isPhoneControlAdmin(authState)) {
+    throw new HttpsError(
+        "permission-denied",
+        "Only Chargerent administrators can join a phone to Wi-Fi.",
+    );
+  }
   if (HIGH_IMPACT_OPERATIONS.has(operation) && !confirmed) {
     throw new HttpsError("failed-precondition", `${operation} requires explicit confirmation.`);
   }
 
+  const deviceRef = db.collection(DEVICES_COLLECTION).doc(deviceId);
+  const authorizedDeviceSnapshot = await assertDeviceAccess(db, authState, deviceId);
   const maxArgumentBytes = operation === "START_WEBRTC_SCREEN" ? 128 * 1024 : 16 * 1024;
   let commandArguments;
   if (operation === "INSTALL_APP_UPDATE") {
@@ -793,13 +865,16 @@ async function sendCommand(data, authState, dependencies) {
     commandArguments = normalizeHotspotArguments(data?.arguments);
   } else if (operation === "START_WEBRTC_SCREEN") {
     commandArguments = normalizeWebRtcStartArguments(data?.arguments);
+  } else if (operation === "CONNECT_WIFI") {
+    commandArguments = normalizeConnectWifiArguments(
+        data?.arguments,
+        authorizedDeviceSnapshot.data()?.inventory?.commandEncryptionPublicKey,
+    );
   } else {
     commandArguments = normalizeArguments(data?.arguments, maxArgumentBytes);
   }
   if (HIGH_IMPACT_OPERATIONS.has(operation)) commandArguments.confirmed = true;
 
-  const deviceRef = db.collection(DEVICES_COLLECTION).doc(deviceId);
-  const authorizedDeviceSnapshot = await assertDeviceAccess(db, authState, deviceId);
   if (operation === "INSTALL_APP_UPDATE") {
     const installedVersionCode = Number(
         authorizedDeviceSnapshot.data()?.inventory?.agentVersionCode || 0,
@@ -1031,6 +1106,7 @@ async function pollDeviceCommand(_data, req, dependencies) {
     if (Number(data.expiresAt || 0) < Date.now()) {
       transaction.set(commandRef, {
         status: "expired",
+        arguments: safeCommandArguments(data.operation, data.arguments),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, {merge: true});
       transaction.set(authState.deviceRef, {activeCommandId: null}, {merge: true});
@@ -1083,13 +1159,20 @@ async function recordCommandResult(data, req, dependencies) {
       throw new HttpsError("not-found", "Phone command was not found.");
     }
     const commandData = commandSnapshot.data() || {};
-    transaction.set(commandRef, {
+    const commandUpdate = {
       status,
       result,
       error: errorMessage || null,
       completedAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    }, {merge: true});
+    };
+    if (commandData.operation === "CONNECT_WIFI") {
+      commandUpdate.arguments = safeCommandArguments(
+          commandData.operation,
+          commandData.arguments,
+      );
+    }
+    transaction.set(commandRef, commandUpdate, {merge: true});
 
     const deviceUpdate = {
       activeCommandId: deviceSnapshot.data()?.activeCommandId === commandId ? null :
@@ -1100,6 +1183,15 @@ async function recordCommandResult(data, req, dependencies) {
     };
     if (status === "completed" && commandData.operation === "GET_INVENTORY") {
       deviceUpdate.inventory = result;
+    }
+    if (status === "completed" && ["SCAN_WIFI_NETWORKS", "CONNECT_WIFI"].includes(
+        commandData.operation,
+    )) {
+      const currentInventory = deviceSnapshot.data()?.inventory;
+      deviceUpdate.inventory = {
+        ...(currentInventory && typeof currentInventory === "object" ? currentInventory : {}),
+        ...result,
+      };
     }
     if (status === "completed" && commandData.operation === "GET_LOCATION") {
       deviceUpdate.location = {...result, receivedAt: Date.now()};
@@ -1184,6 +1276,7 @@ module.exports = {
   authenticateDeviceRequest,
   normalizeArguments,
   normalizeAppUpdateArguments,
+  normalizeConnectWifiArguments,
   normalizeHotspotArguments,
   normalizeWebRtcStartArguments,
   normalizeDeviceId,

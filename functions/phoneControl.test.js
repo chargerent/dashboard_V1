@@ -19,6 +19,7 @@ const {
   hasPhoneControlAccess,
   normalizeArguments,
   normalizeAppUpdateArguments,
+  normalizeConnectWifiArguments,
   normalizeHotspotArguments,
   normalizeWebRtcStartArguments,
   normalizeDeviceId,
@@ -32,10 +33,44 @@ test("allowlists fixed remote screen and tethering controls", () => {
   assert.equal(ALLOWED_OPERATIONS.has("UI_SWIPE"), true);
   assert.equal(ALLOWED_OPERATIONS.has("OPEN_TETHER_SETTINGS"), true);
   assert.equal(ALLOWED_OPERATIONS.has("SET_ALWAYS_ON_HOTSPOT"), true);
+  assert.equal(ALLOWED_OPERATIONS.has("SCAN_WIFI_NETWORKS"), true);
+  assert.equal(ALLOWED_OPERATIONS.has("CONNECT_WIFI"), true);
+  assert.equal(ALLOWED_OPERATIONS.has("OPEN_CAPTIVE_PORTAL"), true);
   assert.equal(ALLOWED_OPERATIONS.has("START_WEBRTC_SCREEN"), true);
   assert.equal(ALLOWED_OPERATIONS.has("SET_WEBRTC_PROFILE"), true);
   assert.equal(ALLOWED_OPERATIONS.has("STOP_WEBRTC_SCREEN"), true);
   assert.equal(ALLOWED_OPERATIONS.has("WAKE_AND_UNLOCK"), true);
+});
+
+test("encrypts Wi-Fi credentials for only the enrolled phone", () => {
+  const {privateKey, publicKey} = crypto.generateKeyPairSync("rsa", {modulusLength: 2048});
+  const publicKeyBase64 = publicKey.export({type: "spki", format: "der"}).toString("base64");
+  const normalized = normalizeConnectWifiArguments({
+    ssid: "Chargerent Test",
+    security: "wpa3",
+    passphrase: "private-password",
+  }, publicKeyBase64);
+
+  assert.equal(normalized.ssid, "Chargerent Test");
+  assert.equal(normalized.security, "wpa3");
+  assert.equal(Object.hasOwn(normalized, "passphrase"), false);
+  assert.equal(JSON.stringify(normalized).includes("private-password"), false);
+  const plaintext = crypto.privateDecrypt({
+    key: privateKey,
+    padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+    oaepHash: "sha256",
+  }, Buffer.from(normalized.encryptedCredentials.ciphertext, "base64"));
+  assert.deepEqual(JSON.parse(plaintext.toString("utf8")), {passphrase: "private-password"});
+
+  assert.deepEqual(normalizeConnectWifiArguments({
+    ssid: "Guest Wi-Fi",
+    security: "open",
+  }, ""), {ssid: "Guest Wi-Fi", security: "open"});
+  assert.throws(() => normalizeConnectWifiArguments({
+    ssid: "Secure Wi-Fi",
+    security: "wpa2",
+    passphrase: "short",
+  }, publicKeyBase64), /8 to 63/);
 });
 
 test("requires a boolean always-on hotspot setting", () => {

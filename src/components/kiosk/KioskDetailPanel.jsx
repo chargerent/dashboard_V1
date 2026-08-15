@@ -303,6 +303,71 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         });
         onCommand(kiosk.stationid, 'update module', moduleId);
     }, [kiosk.stationid, onCommand]);
+    const renderModuleQuickActions = (moduleId) => {
+        const actions = [
+            {
+                action: 'reboot module',
+                enabled: clientInfo.commands.reboot,
+                label: `Reboot module ${moduleId}`,
+                className: 'hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700',
+                icon: (
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                ),
+            },
+            {
+                action: 'eject module',
+                enabled: clientInfo.commands.eject,
+                label: `Eject all chargers from module ${moduleId}`,
+                className: 'hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700',
+                icon: <path strokeLinecap="round" strokeLinejoin="round" d="M7 11l5-5m0 0l5 5m-5-5v12M5 21h14" />,
+            },
+            {
+                action: 'lock module',
+                enabled: clientInfo.commands.lock,
+                label: `Lock all slots in module ${moduleId}`,
+                className: 'hover:border-red-300 hover:bg-red-50 hover:text-red-700',
+                icon: (
+                    <>
+                        <rect x="5" y="10" width="14" height="10" rx="2" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 10V7a4 4 0 018 0v3" />
+                    </>
+                ),
+            },
+        ].filter((item) => item.enabled);
+
+        if (actions.length === 0) return null;
+
+        return (
+            <div className="flex shrink-0 items-center gap-1" data-kiosk-module-actions={moduleId}>
+                {actions.map((item) => (
+                    <button
+                        key={item.action}
+                        type="button"
+                        title={item.label}
+                        aria-label={item.label}
+                        data-kiosk-action={item.action}
+                        data-kiosk-stationid={stationId}
+                        data-kiosk-moduleid={moduleId}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            logKioskInteraction('module-quick-action-click-handler', {
+                                stationId,
+                                moduleId,
+                                action: item.action,
+                            }, event);
+                            onCommand(stationId, item.action, moduleId);
+                        }}
+                        disabled={!isOnline}
+                        className={`flex h-6 w-6 items-center justify-center rounded border border-gray-200 bg-white text-gray-500 transition disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-300 ${item.className}`}
+                    >
+                        <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                            {item.icon}
+                        </svg>
+                    </button>
+                ))}
+            </div>
+        );
+    };
     const handleNavigateToCharger = useCallback((event, chargerSn) => {
         event.stopPropagation();
         logKioskInteraction('charger-link-click-handler', {
@@ -770,7 +835,10 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                     className={`flex min-h-[118px] flex-col justify-between rounded-lg border px-3 py-2 shadow-sm sm:min-h-[128px] ${isSelected ? 'border-sky-500 bg-sky-50 ring-2 ring-sky-200' : 'border-gray-200 bg-gray-50'} ${hasMultipleModules ? 'cursor-pointer transition hover:border-sky-300 hover:bg-sky-50/60' : ''}`}
                                 >
                                     <div className="px-0.5 py-0.5 text-xs">
-                                        <div className="font-mono text-xs text-gray-700">{module.moduleId}</div>
+                                        <div className="flex items-start justify-between gap-2">
+                                            <div className="min-w-0 truncate font-mono text-xs text-gray-700">{module.moduleId}</div>
+                                            {renderModuleQuickActions(module.moduleId)}
+                                        </div>
                                         {hasMultipleModules && canUpdateModules && (
                                             <div className="mt-1 flex gap-1">
                                                 <button
@@ -1345,7 +1413,10 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                         } : undefined}
                                         className={`flex min-w-[122px] flex-col gap-2 rounded-md border px-3 py-2 ${moduleIdsMatch(entry.moduleId, selectedModule?.id) ? 'border-sky-500 bg-sky-50 ring-2 ring-sky-200' : 'border-transparent bg-gray-100'} ${hasMultipleModules ? 'cursor-pointer transition hover:border-sky-300 hover:bg-sky-50/60' : ''}`}
                                     >
-                                        <span className="font-mono text-xs text-gray-700">{entry.moduleId}</span>
+                                        <div className="flex items-start justify-between gap-2">
+                                            <span className="min-w-0 truncate font-mono text-xs text-gray-700">{entry.moduleId}</span>
+                                            {renderModuleQuickActions(entry.moduleId)}
+                                        </div>
                                         {hasMultipleModules && (
                                             <div className="flex gap-1">
                                                 <button
@@ -1402,15 +1473,24 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                         </button>
                                     </div>
                                 ) : (
-                                    <button
+                                    <div
                                         key={entry.moduleId}
-                                        type="button"
+                                        role={hasMultipleModules ? 'button' : undefined}
+                                        tabIndex={hasMultipleModules ? 0 : undefined}
                                         onClick={hasMultipleModules ? () => setSelectedModuleId(entry.moduleId) : undefined}
-                                        disabled={!hasMultipleModules}
+                                        onKeyDown={hasMultipleModules ? (event) => {
+                                            if (event.key === 'Enter' || event.key === ' ') {
+                                                event.preventDefault();
+                                                setSelectedModuleId(entry.moduleId);
+                                            }
+                                        } : undefined}
                                         aria-pressed={hasMultipleModules ? moduleIdsMatch(entry.moduleId, selectedModule?.id) : undefined}
                                         className={`flex min-w-[122px] flex-col rounded border px-2 py-1 text-left font-mono text-xs text-gray-700 ${moduleIdsMatch(entry.moduleId, selectedModule?.id) ? 'border-sky-500 bg-sky-50 ring-2 ring-sky-200' : 'border-transparent bg-gray-200'} ${hasMultipleModules ? 'cursor-pointer transition hover:border-sky-300 hover:bg-sky-50/60' : ''}`}
                                     >
-                                        <span>{entry.moduleId}</span>
+                                        <div className="flex items-start justify-between gap-2">
+                                            <span className="min-w-0 truncate">{entry.moduleId}</span>
+                                            {renderModuleQuickActions(entry.moduleId)}
+                                        </div>
                                         {showModuleFirmwareMetadata && (
                                             <>
                                                 <span className="text-[10px] text-gray-500">{entry.firmwareLabel}</span>
@@ -1419,7 +1499,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                                 </span>
                                             </>
                                         )}
-                                    </button>
+                                    </div>
                                 )
                             ))}
                         </div>

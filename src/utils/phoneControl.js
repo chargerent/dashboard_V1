@@ -52,6 +52,30 @@ export function normalizeAgentRelease(metadata = {}) {
   };
 }
 
+export function isPhoneAgentUpdateAvailable(inventory = {}, release = {}) {
+  const installedVersionCode = Number(inventory.agentVersionCode);
+  const releaseVersionCode = Number(release.versionCode);
+  if (Number.isSafeInteger(installedVersionCode) && installedVersionCode > 0 &&
+      Number.isSafeInteger(releaseVersionCode) && releaseVersionCode > 0) {
+    return installedVersionCode < releaseVersionCode;
+  }
+
+  const installedParts = String(inventory.agentVersion || '').trim().split('.').map(Number);
+  const releaseParts = String(release.versionName || '').trim().split('.').map(Number);
+  if (installedParts.length !== 3 || releaseParts.length !== 3 ||
+      installedParts.some((part) => !Number.isSafeInteger(part) || part < 0) ||
+      releaseParts.some((part) => !Number.isSafeInteger(part) || part < 0)) {
+    return false;
+  }
+
+  for (let index = 0; index < releaseParts.length; index += 1) {
+    if (installedParts[index] !== releaseParts[index]) {
+      return installedParts[index] < releaseParts[index];
+    }
+  }
+  return false;
+}
+
 export function phoneTimestampToMillis(value) {
   if (!value) return 0;
   if (typeof value.toMillis === 'function') return value.toMillis();
@@ -95,6 +119,41 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
   const longitude = Number(rawLocation.longitude);
   const hasCoordinates = Number.isFinite(latitude) && latitude >= -90 && latitude <= 90 &&
     Number.isFinite(longitude) && longitude >= -180 && longitude <= 180;
+  const availableWifiNetworks = (Array.isArray(inventory.availableWifiNetworks)
+    ? inventory.availableWifiNetworks
+    : [])
+    .flatMap((network) => {
+      if (!network || typeof network !== 'object' || Array.isArray(network)) return [];
+      const ssid = String(network.ssid || '').trim();
+      if (!ssid) return [];
+      const signalLevel = Number(network.signalLevel);
+      const signalDbm = Number(network.signalDbm);
+      const frequencyMhz = Number(network.frequencyMhz);
+      return [{
+        ssid,
+        security: String(network.security || 'unknown').trim().toLowerCase(),
+        signalLevel: Number.isFinite(signalLevel) ? Math.max(0, Math.min(4, signalLevel)) : null,
+        signalDbm: Number.isFinite(signalDbm) ? signalDbm : null,
+        frequencyMhz: Number.isFinite(frequencyMhz) ? frequencyMhz : null,
+        band: String(network.band || '').trim(),
+        connected: network.connected === true,
+        joinSupported: network.joinSupported === true,
+      }];
+    })
+    .slice(0, 20);
+
+  const optionalNumber = (value) => {
+    if (value === null || value === undefined || value === '') return null;
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : null;
+  };
+  const connectedWifiNetwork = availableWifiNetworks.find((network) => network.connected) || null;
+  const activeNetworkIsWifi = String(inventory.network || '').trim().toLowerCase() === 'wifi';
+  const wifiSsid = String(inventory.wifiSsid || connectedWifiNetwork?.ssid || '').trim();
+  const wifiConnected = inventory.wifiConnected === true || activeNetworkIsWifi || Boolean(connectedWifiNetwork);
+  const wifiMetric = (inventoryValue, connectedValue) => (
+    optionalNumber(inventoryValue) ?? optionalNumber(connectedValue)
+  );
 
   return {
     id: String(rawDevice.deviceId || documentId || '').trim(),
@@ -135,8 +194,34 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
         : null,
       batteryCharging: inventory.batteryCharging === true,
       network: String(inventory.network || 'offline').toLowerCase(),
-      wifiSsid: String(inventory.wifiSsid || '').trim(),
+      networkStatus: String(inventory.networkStatus || '').trim().toLowerCase(),
+      networkValidated: inventory.networkValidated === true,
+      networkCaptivePortal: inventory.networkCaptivePortal === true,
+      phoneNumber: String(inventory.phoneNumber || '').trim(),
+      wifiSsid,
       wifiEnabled: inventory.wifiEnabled === true,
+      wifiConnected,
+      wifiValidated: inventory.wifiValidated === true || (
+        wifiConnected && activeNetworkIsWifi && inventory.networkValidated === true
+      ),
+      wifiCaptivePortal: inventory.wifiCaptivePortal === true || (
+        wifiConnected && activeNetworkIsWifi && inventory.networkCaptivePortal === true
+      ),
+      wifiRssiDbm: wifiMetric(inventory.wifiRssiDbm, connectedWifiNetwork?.signalDbm),
+      wifiSignalLevel: wifiMetric(inventory.wifiSignalLevel, connectedWifiNetwork?.signalLevel),
+      wifiFrequencyMhz: wifiMetric(inventory.wifiFrequencyMhz, connectedWifiNetwork?.frequencyMhz),
+      wifiBand: String(inventory.wifiBand || connectedWifiNetwork?.band || '').trim(),
+      wifiLinkSpeedMbps: optionalNumber(inventory.wifiLinkSpeedMbps),
+      wifiStandard: String(inventory.wifiStandard || '').trim(),
+      wifiSecurity: String(inventory.wifiSecurity || connectedWifiNetwork?.security || '').trim().toLowerCase(),
+      cellularCarrier: String(inventory.cellularCarrier || '').trim(),
+      cellularTechnology: String(inventory.cellularTechnology || '').trim(),
+      cellularDataConnected: inventory.cellularDataConnected === true,
+      cellularSignalLevel: optionalNumber(inventory.cellularSignalLevel),
+      cellularSignalDbm: optionalNumber(inventory.cellularSignalDbm),
+      availableWifiNetworks,
+      availableWifiScannedAt: phoneTimestampToMillis(inventory.availableWifiScannedAt),
+      commandEncryptionReady: Boolean(String(inventory.commandEncryptionPublicKey || '').trim()),
       hotspotSupported: inventory.hotspotSupported === true,
       hotspotControlGranted: inventory.hotspotControlGranted === true,
       hotspotAlwaysOn: inventory.hotspotAlwaysOn === true,

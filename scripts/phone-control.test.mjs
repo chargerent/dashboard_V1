@@ -8,6 +8,7 @@ import {
   getPhoneKioskCountryCode,
   getPhoneConnectionState,
   isPhoneWebRtcActive,
+  isPhoneAgentUpdateAvailable,
   isPhoneRemoteInputAvailable,
   phoneLocationMapUrls,
   phoneNetworkLabel,
@@ -40,6 +41,25 @@ test('validates the signed Agent release metadata used for updates', () => {
   }), /approved Chargerent download location/);
 });
 
+test('detects Agent updates from version codes with semantic fallback', () => {
+  assert.equal(isPhoneAgentUpdateAvailable(
+    { agentVersion: '1.2.7', agentVersionCode: 22 },
+    { versionName: '1.2.8', versionCode: 23 },
+  ), true);
+  assert.equal(isPhoneAgentUpdateAvailable(
+    { agentVersion: '1.2.8', agentVersionCode: 23 },
+    { versionName: '1.2.8', versionCode: 23 },
+  ), false);
+  assert.equal(isPhoneAgentUpdateAvailable(
+    { agentVersion: '1.9.9' },
+    { versionName: '2.0.0' },
+  ), true);
+  assert.equal(isPhoneAgentUpdateAvailable(
+    { agentVersion: 'unknown' },
+    { versionName: '2.0.0' },
+  ), false);
+});
+
 test('normalizes kiosk assignment and Android inventory', () => {
   const device = normalizePhoneDevice({
     stationid: 'us0118',
@@ -51,7 +71,25 @@ test('normalizes kiosk assignment and Android inventory', () => {
       batteryPercent: 84,
       isDeviceOwner: true,
       network: 'wifi',
+      networkStatus: 'online',
+      phoneNumber: '+33612345678',
       wifiSsid: 'OurHome',
+      wifiSignalLevel: 4,
+      wifiRssiDbm: -48,
+      cellularCarrier: 'Example Mobile',
+      cellularTechnology: '5G',
+      cellularSignalLevel: 3,
+      cellularSignalDbm: -92,
+      commandEncryptionPublicKey: 'public-key',
+      availableWifiNetworks: [{
+        ssid: 'OurHome',
+        security: 'wpa2_wpa3',
+        signalLevel: 4,
+        signalDbm: -48,
+        band: '5 GHz',
+        connected: true,
+        joinSupported: true,
+      }],
       hotspotSupported: true,
       hotspotControlGranted: true,
       hotspotAlwaysOn: true,
@@ -73,9 +111,47 @@ test('normalizes kiosk assignment and Android inventory', () => {
   assert.equal(device.inventory.agentVersionCode, 15);
   assert.equal(device.inventory.isDeviceOwner, true);
   assert.equal(device.inventory.wifiSsid, 'OurHome');
+  assert.equal(device.inventory.phoneNumber, '+33612345678');
+  assert.equal(device.inventory.networkStatus, 'online');
+  assert.equal(device.inventory.wifiSignalLevel, 4);
+  assert.equal(device.inventory.cellularTechnology, '5G');
+  assert.equal(device.inventory.commandEncryptionReady, true);
+  assert.equal(device.inventory.availableWifiNetworks[0].security, 'wpa2_wpa3');
   assert.equal(device.inventory.hotspotActive, true);
   assert.equal(device.location.latitude, 45.5019);
   assert.equal(device.location.capturedAtMs, 1234);
+});
+
+test('uses the connected scan entry when Android redacts the Wi-Fi summary', () => {
+  const device = normalizePhoneDevice({
+    inventory: {
+      network: 'wifi',
+      networkStatus: 'online',
+      networkValidated: true,
+      wifiEnabled: true,
+      wifiConnected: false,
+      wifiSsid: '',
+      availableWifiNetworks: [{
+        ssid: 'OurHome',
+        security: 'wpa2',
+        signalLevel: 4,
+        signalDbm: -37,
+        frequencyMhz: 2452,
+        band: '2.4 GHz',
+        connected: true,
+        joinSupported: true,
+      }],
+    },
+  }, 'phone-redacted-wifi');
+
+  assert.equal(device.inventory.wifiConnected, true);
+  assert.equal(device.inventory.wifiValidated, true);
+  assert.equal(device.inventory.wifiSsid, 'OurHome');
+  assert.equal(device.inventory.wifiSignalLevel, 4);
+  assert.equal(device.inventory.wifiRssiDbm, -37);
+  assert.equal(device.inventory.wifiFrequencyMhz, 2452);
+  assert.equal(device.inventory.wifiBand, '2.4 GHz');
+  assert.equal(device.inventory.wifiSecurity, 'wpa2');
 });
 
 test('formats Wi-Fi names and safe OpenStreetMap links', () => {
