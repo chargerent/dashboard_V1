@@ -1658,12 +1658,22 @@ async function recordCommandResult(data, req, dependencies) {
   const errorMessage = String(data?.error || "").trim().slice(0, 1000);
   const commandRef = db.collection(COMMANDS_COLLECTION).doc(commandId);
 
-  await db.runTransaction(async (transaction) => {
+  const recorded = await db.runTransaction(async (transaction) => {
     const [deviceSnapshot, commandSnapshot] = await Promise.all([
       transaction.get(authState.deviceRef),
       transaction.get(commandRef),
     ]);
-    if (!commandSnapshot.exists || commandSnapshot.data()?.deviceId !== authState.deviceId) {
+    // Older Agents persist an update result across reboot. If that command was
+    // already removed, acknowledge the authenticated orphan so the Agent can
+    // clear its local queue and resume polling. A command belonging to another
+    // device must still be rejected.
+    if (!commandSnapshot.exists) {
+      transaction.set(authState.deviceRef, {
+        lastSeenAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, {merge: true});
+      return false;
+    }
+    if (commandSnapshot.data()?.deviceId !== authState.deviceId) {
       throw new HttpsError("not-found", "Phone command was not found.");
     }
     const commandData = commandSnapshot.data() || {};
@@ -1775,8 +1785,9 @@ async function recordCommandResult(data, req, dependencies) {
       if (screenUpdate) deviceUpdate.screen = screenUpdate;
     }
     transaction.set(authState.deviceRef, deviceUpdate, {merge: true});
+    return true;
   });
-  return {ok: true};
+  return {ok: true, recorded};
 }
 
 async function recordScreenUpdate(data, req, dependencies) {
