@@ -8,6 +8,7 @@ import {
   getPhoneKioskCountryCode,
   getPhoneConnectionState,
   isPhoneWebRtcActive,
+  isPhoneRemoteInputAvailable,
   phoneLocationMapUrls,
   phoneNetworkLabel,
   phoneHotspotLabel,
@@ -121,6 +122,18 @@ test('expires stale WebRTC permission waits instead of leaving live screen start
   assert.equal(isPhoneWebRtcActive({ state: 'awaiting_permission', expiresAt: now + 1_000 }, now), true);
   assert.equal(isPhoneWebRtcActive({ state: 'awaiting_permission', expiresAt: now - 1 }, now), false);
   assert.equal(isPhoneWebRtcActive({ state: 'stopped', expiresAt: now + 1_000 }, now), false);
+});
+
+test('uses current WebRTC input availability while heartbeat inventory catches up', () => {
+  const now = 2_000_000;
+  assert.equal(isPhoneRemoteInputAvailable({
+    inventory: { remoteUiInputEnabled: false },
+    screen: { webrtc: { state: 'connected', expiresAt: now + 60_000, inputAvailable: true } },
+  }, now), true);
+  assert.equal(isPhoneRemoteInputAvailable({
+    inventory: { remoteUiInputEnabled: false },
+    screen: { webrtc: { state: 'stopped', expiresAt: now + 60_000, inputAvailable: true } },
+  }, now), false);
 });
 
 test('computes connection status and relative time', () => {

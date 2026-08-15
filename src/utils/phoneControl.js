@@ -72,6 +72,12 @@ export function isPhoneWebRtcActive(webRtc = {}, now = Date.now()) {
     phoneTimestampToMillis(webRtc.expiresAt) > now;
 }
 
+export function isPhoneRemoteInputAvailable(device = {}, now = Date.now()) {
+  if (device?.inventory?.remoteUiInputEnabled === true) return true;
+  const webRtc = device?.screen?.webrtc || {};
+  return webRtc.inputAvailable === true && isPhoneWebRtcActive(webRtc, now);
+}
+
 export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
   const inventory = rawDevice.inventory && typeof rawDevice.inventory === 'object'
     ? rawDevice.inventory

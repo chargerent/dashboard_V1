@@ -34,6 +34,7 @@ import {
   getPhoneKioskCountryCode,
   getPhoneConnectionState,
   isPhoneWebRtcActive,
+  isPhoneRemoteInputAvailable,
   normalizeAgentRelease,
   normalizePhoneDevice,
   phoneLocationMapUrls,
@@ -439,6 +440,7 @@ function RemoteScreen({
   onStartPreview,
   onStopPreview,
   liveRequested,
+  remoteInputAvailable,
   now,
 }) {
   const [profileKey, setProfileKey] = useState('balanced');
@@ -732,7 +734,7 @@ function RemoteScreen({
         <ActionButton icon={DevicePhoneMobileIcon} onClick={() => onCommand('CAPTURE_SCREEN')} disabled={!canSendCommand} tone="blue" className="flex-1 !px-2">Capture</ActionButton>
       </div>
 
-      {!device.inventory.remoteUiInputEnabled && (
+      {!remoteInputAvailable && (
         <p className="mx-auto mb-3 max-w-[360px] rounded-lg border border-amber-500/40 bg-amber-400/10 px-3 py-2 text-center text-[11px] font-semibold leading-4 text-amber-200">
           Remote control is off on this phone. Open Android Settings → Accessibility → Agent and enable Remote UI control.
         </p>
@@ -984,6 +986,7 @@ export default function PhoneControlPage({
   const selectedConnection = getPhoneConnectionState(selectedDevice, now);
   const canControlSelected = hasPhoneControlAccess && selectedConnection === 'online' && selectedDevice?.enrollmentState === 'enrolled';
   const selectedWebRtcActive = isPhoneWebRtcActive(selectedDevice?.screen?.webrtc, now);
+  const selectedRemoteInputAvailable = isPhoneRemoteInputAvailable(selectedDevice, now);
 
   useEffect(() => {
     setAssignmentStationId(selectedDevice?.stationId || '');
@@ -1128,7 +1131,8 @@ export default function PhoneControlPage({
   const onlineCount = devices.filter((device) => getPhoneConnectionState(device, now) === 'online').length;
   const unassignedCount = devices.filter((device) => !device.stationId).length;
   const attentionCount = devices.filter((device) => (
-    getPhoneConnectionState(device, now) !== 'online' || !device.inventory.isDeviceOwner || !device.inventory.remoteUiInputEnabled
+    getPhoneConnectionState(device, now) !== 'online' || !device.inventory.isDeviceOwner ||
+    !isPhoneRemoteInputAvailable(device, now)
   )).length;
 
   if (!hasPhoneControlAccess) {
@@ -1313,7 +1317,7 @@ export default function PhoneControlPage({
                     <RemoteScreen
                       device={selectedDevice}
                       canControl={canControlSelected}
-                      canInput={canControlSelected && selectedDevice.inventory.remoteUiInputEnabled}
+                      canInput={canControlSelected && selectedRemoteInputAvailable}
                       canSendCommand={canControlSelected}
                       onCommand={requestCommand}
                       onPrepareRealtime={prepareRealtimeScreen}
@@ -1323,6 +1327,7 @@ export default function PhoneControlPage({
                       onStartPreview={startLivePreview}
                       onStopPreview={stopLivePreview}
                       liveRequested={liveRequestedDeviceId === selectedDevice.id}
+                      remoteInputAvailable={selectedRemoteInputAvailable}
                       now={now}
                     />
 
