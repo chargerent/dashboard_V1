@@ -76,6 +76,7 @@ const ALLOWED_OPERATIONS = new Set([
   "STOP_WEBRTC_SCREEN",
   "INSTALL_SYSTEM_UPDATE",
   "INSTALL_APP_UPDATE",
+  "INSTALL_PAYMENT_APP",
   "WIPE_DEVICE",
 ]);
 
@@ -85,6 +86,7 @@ const HIGH_IMPACT_OPERATIONS = new Set([
   "REQUEST_BUGREPORT",
   "INSTALL_SYSTEM_UPDATE",
   "INSTALL_APP_UPDATE",
+  "INSTALL_PAYMENT_APP",
   "WIPE_DEVICE",
 ]);
 
@@ -237,6 +239,33 @@ function normalizeAppUpdateArguments(value) {
     versionCode,
     versionName,
   };
+}
+
+function normalizePaymentAppArguments(value) {
+  const input = normalizeArguments(value);
+  let packageUrl;
+  try {
+    packageUrl = new URL(String(input.httpsUrl || "").trim());
+  } catch {
+    invalidArgument("A valid payment app URL is required.");
+  }
+  if (packageUrl.protocol !== "https:" || packageUrl.hostname !== AGENT_RELEASE_HOST ||
+      packageUrl.port || packageUrl.username || packageUrl.password || packageUrl.search ||
+      packageUrl.hash ||
+      !/^\/portal\/mdm\/chargerent-payment-v\d+\.\d+\.\d+(?:-[a-z0-9-]+)?\.apk$/.test(
+          packageUrl.pathname,
+      )) {
+    invalidArgument("Only official Chargerent payment releases can be installed.");
+  }
+  const sha256 = String(input.sha256 || "").trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(sha256)) {
+    invalidArgument("A valid payment package SHA-256 is required.");
+  }
+  const packageName = String(input.packageName || "").trim();
+  if (!/^com\.chargerent\.kiosk(?:\.[A-Za-z0-9_]+)*$/.test(packageName)) {
+    invalidArgument("A valid Chargerent payment package is required.");
+  }
+  return {httpsUrl: packageUrl.toString(), sha256, packageName};
 }
 
 function normalizeHotspotArguments(value) {
@@ -1364,6 +1393,8 @@ async function sendCommand(data, authState, dependencies) {
   let commandArguments;
   if (operation === "INSTALL_APP_UPDATE") {
     commandArguments = normalizeAppUpdateArguments(data?.arguments);
+  } else if (operation === "INSTALL_PAYMENT_APP") {
+    commandArguments = normalizePaymentAppArguments(data?.arguments);
   } else if (["SET_HOTSPOT_ENABLED", "SET_ALWAYS_ON_HOTSPOT"].includes(operation)) {
     commandArguments = normalizeHotspotArguments(data?.arguments);
   } else if (operation === "START_WEBRTC_SCREEN") {
@@ -1859,6 +1890,7 @@ module.exports = {
   authenticateDeviceRequest,
   normalizeArguments,
   normalizeAppUpdateArguments,
+  normalizePaymentAppArguments,
   normalizeConnectWifiArguments,
   normalizeHotspotArguments,
   normalizeTerminalLockdownArguments,
