@@ -7,6 +7,7 @@ import {
   Battery100Icon,
   BoltIcon,
   DevicePhoneMobileIcon,
+  ExclamationTriangleIcon,
   HomeIcon,
   LockClosedIcon,
   LockOpenIcon,
@@ -462,6 +463,12 @@ function RemoteScreen({
   const webRtcExpiresAt = phoneTimestampToMillis(webRtc.expiresAt);
   const webRtcActive = isPhoneWebRtcActive(webRtc, now);
   const directControl = controlReady;
+  const realtimeFailureMessage = !liveRequested && {
+    failed: webRtc.error || 'Live screen could not connect. Refresh the dashboard and try again.',
+    permission_denied: 'Android did not allow screen sharing. Start live again to retry.',
+    expired: 'The live screen request expired. Start live again to retry.',
+    projection_stopped: 'Android stopped screen sharing. Start live again to retry.',
+  }[serverRtcState];
 
   const closePeer = useCallback((nextState = 'idle') => {
     startAttemptRef.current += 1;
@@ -732,7 +739,13 @@ function RemoteScreen({
       )}
 
       <div className="mx-auto flex aspect-[9/19.5] max-h-[520px] max-w-[240px] items-center justify-center overflow-hidden rounded-[1.5rem] border-4 border-slate-700 bg-black">
-        {hasRemoteVideo || imageUrl ? (
+        {realtimeFailureMessage ? (
+          <div className="px-5 text-center">
+            <ExclamationTriangleIcon className="mx-auto h-12 w-12 text-red-400" />
+            <p className="mt-3 text-xs font-bold text-red-300">Live screen unavailable</p>
+            <p className="mt-1 text-[11px] leading-4 text-slate-400">{humanizePhoneMessage(realtimeFailureMessage)}</p>
+          </div>
+        ) : hasRemoteVideo || imageUrl ? (
           <button
             type="button"
             onPointerDown={handlePointerDown}
@@ -910,6 +923,13 @@ export default function PhoneControlPage({
             setCommandStatus({
               state: 'error',
               message: 'Live screen timed out before Android approved screen sharing.',
+            });
+          } else if (liveRequestedDeviceId === selectedDeviceId && webRtcState !== 'stopped') {
+            setCommandStatus({
+              state: 'error',
+              message: humanizePhoneMessage(
+                nextScreen.webrtc?.error || 'Live screen could not connect. Refresh the dashboard and try again.',
+              ),
             });
           }
           setLiveRequestedDeviceId('');

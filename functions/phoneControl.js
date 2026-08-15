@@ -161,6 +161,36 @@ function normalizeArguments(value, maxBytes = 16 * 1024) {
   return clean;
 }
 
+function normalizeWebRtcStartArguments(value) {
+  const input = normalizeArguments(value, 128 * 1024);
+  const source = Array.isArray(input.iceServers) ? input.iceServers : [];
+  let hasTurn = false;
+  const iceServers = source.flatMap((server) => {
+    if (!server || Array.isArray(server) || typeof server !== "object") return [];
+    const urls = (Array.isArray(server.urls) ? server.urls : [server.urls])
+        .map((url) => String(url || "").trim())
+        .filter((url) => PHONE_WEBRTC_STUN_URLS.includes(url) || PHONE_WEBRTC_TURN_URLS.includes(url));
+    if (!urls.length) return [];
+
+    const includesTurn = urls.some((url) => PHONE_WEBRTC_TURN_URLS.includes(url));
+    if (!includesTurn) return [{urls}];
+
+    const username = String(server.username || "").trim();
+    const credential = String(server.credential || "").trim();
+    if (!username || !credential || username.length > 180 || credential.length > 180) return [];
+    hasTurn = true;
+    return [{urls, username, credential}];
+  });
+
+  if (!hasTurn) {
+    throw new HttpsError(
+        "failed-precondition",
+        "This dashboard is out of date. Refresh the page before starting live screen.",
+    );
+  }
+  return {...input, iceServers};
+}
+
 function normalizeAppUpdateArguments(value) {
   const input = normalizeArguments(value);
   let packageUrl;
@@ -761,6 +791,8 @@ async function sendCommand(data, authState, dependencies) {
     commandArguments = normalizeAppUpdateArguments(data?.arguments);
   } else if (operation === "SET_ALWAYS_ON_HOTSPOT") {
     commandArguments = normalizeHotspotArguments(data?.arguments);
+  } else if (operation === "START_WEBRTC_SCREEN") {
+    commandArguments = normalizeWebRtcStartArguments(data?.arguments);
   } else {
     commandArguments = normalizeArguments(data?.arguments, maxArgumentBytes);
   }
@@ -1153,6 +1185,7 @@ module.exports = {
   normalizeArguments,
   normalizeAppUpdateArguments,
   normalizeHotspotArguments,
+  normalizeWebRtcStartArguments,
   normalizeDeviceId,
   normalizeEnrollmentCode,
   normalizeScreenUpdate,

@@ -20,6 +20,7 @@ const {
   normalizeArguments,
   normalizeAppUpdateArguments,
   normalizeHotspotArguments,
+  normalizeWebRtcStartArguments,
   normalizeDeviceId,
   normalizeEnrollmentCode,
   normalizeScreenUpdate,
@@ -40,6 +41,31 @@ test("allowlists fixed remote screen and tethering controls", () => {
 test("requires a boolean always-on hotspot setting", () => {
   assert.deepEqual(normalizeHotspotArguments({enabled: true}), {enabled: true});
   assert.throws(() => normalizeHotspotArguments({enabled: "true"}), /enabled value/);
+});
+
+test("requires the Chargerent relay before starting a WebRTC screen", () => {
+  const normalized = normalizeWebRtcStartArguments({
+    sessionId: "webrtc-test-session",
+    offerSdp: "v=0",
+    iceServers: [
+      {urls: ["stun:stun.l.google.com:19302", "stun:untrusted.example:19302"]},
+      {
+        urls: ["turns:turn.chargerentstations.com:5349?transport=tcp"],
+        username: "1700000600:operator:nonce",
+        credential: "short-lived-credential",
+      },
+    ],
+  });
+  assert.deepEqual(normalized.iceServers[0].urls, ["stun:stun.l.google.com:19302"]);
+  assert.equal(normalized.iceServers[1].username, "1700000600:operator:nonce");
+  assert.throws(
+      () => normalizeWebRtcStartArguments({
+        sessionId: "webrtc-stale-session",
+        offerSdp: "v=0",
+        iceServers: [{urls: ["stun:stun.l.google.com:19302"]}],
+      }),
+      /dashboard is out of date/,
+  );
 });
 
 test("normalizes managed phone identifiers", () => {
