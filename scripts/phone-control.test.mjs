@@ -12,6 +12,7 @@ import {
   isPhoneRemoteInputAvailable,
   phoneLocationMapUrls,
   phoneNetworkLabel,
+  phoneSignalLevelFromDbm,
   phoneHotspotLabel,
   normalizePhoneDevice,
   normalizeAgentRelease,
@@ -63,6 +64,16 @@ test('detects Agent updates from version codes with semantic fallback', () => {
 test('normalizes kiosk assignment and Android inventory', () => {
   const device = normalizePhoneDevice({
     stationid: 'us0118',
+    terminal: {
+      enabled: true,
+      state: 'ready',
+      stationId: 'US0118',
+      provisionId: 'provision-1',
+      moduleId: 'module-1',
+      stripeLocationId: 'tml_test',
+      lockdownEnabled: true,
+      lockdownState: 'locked',
+    },
     lastSeenAt: { seconds: 1_000, nanoseconds: 500_000_000 },
     inventory: {
       manufacturer: 'Google',
@@ -81,6 +92,10 @@ test('normalizes kiosk assignment and Android inventory', () => {
       cellularSignalLevel: 3,
       cellularSignalDbm: -92,
       commandEncryptionPublicKey: 'public-key',
+      terminalPackageInstalled: true,
+      terminalLockdownDesired: true,
+      terminalLockdownPermitted: true,
+      terminalLockdownActive: true,
       availableWifiNetworks: [{
         ssid: 'OurHome',
         security: 'wpa2_wpa3',
@@ -106,6 +121,10 @@ test('normalizes kiosk assignment and Android inventory', () => {
 
   assert.equal(device.id, 'phone-1');
   assert.equal(device.stationId, 'US0118');
+  assert.equal(device.terminal.enabled, true);
+  assert.equal(device.terminal.state, 'ready');
+  assert.equal(device.terminal.provisionId, 'provision-1');
+  assert.equal(device.terminal.lockdownState, 'locked');
   assert.equal(device.lastSeenAtMs, 1_000_500);
   assert.equal(device.inventory.model, 'Pixel 6a');
   assert.equal(device.inventory.agentVersionCode, 15);
@@ -116,6 +135,8 @@ test('normalizes kiosk assignment and Android inventory', () => {
   assert.equal(device.inventory.wifiSignalLevel, 4);
   assert.equal(device.inventory.cellularTechnology, '5G');
   assert.equal(device.inventory.commandEncryptionReady, true);
+  assert.equal(device.inventory.terminalPackageInstalled, true);
+  assert.equal(device.inventory.terminalLockdownActive, true);
   assert.equal(device.inventory.availableWifiNetworks[0].security, 'wpa2_wpa3');
   assert.equal(device.inventory.hotspotActive, true);
   assert.equal(device.location.latitude, 45.5019);
@@ -178,6 +199,14 @@ test('formats Wi-Fi names and safe OpenStreetMap links', () => {
   assert.equal(phoneLocationMapUrls({ latitude: 200, longitude: 0 }), null);
   assert.equal(phoneLocationMapUrls({ latitude: null, longitude: null }), null);
   assert.equal(phoneLocationMapUrls({ latitude: '', longitude: '' }), null);
+});
+
+test('derives signal bars from the displayed dBm value', () => {
+  assert.equal(phoneSignalLevelFromDbm(-45, 'wifi'), 4);
+  assert.equal(phoneSignalLevelFromDbm(-65, 'wifi'), 2);
+  assert.equal(phoneSignalLevelFromDbm(-82, 'wifi'), 0);
+  assert.equal(phoneSignalLevelFromDbm(-92, 'cellular'), 3);
+  assert.equal(phoneSignalLevelFromDbm(null, 'cellular'), null);
 });
 
 test('keeps live screen session metadata in the normalized phone', () => {

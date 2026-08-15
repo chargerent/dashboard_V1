@@ -5,6 +5,7 @@ const test = require("node:test");
 
 const {
   ALLOWED_OPERATIONS,
+  HIGH_IMPACT_OPERATIONS,
   authenticateDeviceRequest,
   canAccessKiosk,
   canResumeEnrollment,
@@ -15,24 +16,30 @@ const {
   createEnrollmentCode,
   createTurnIceConfiguration,
   deviceIdFromPublicKey,
+  encryptCommandSecret,
   enrollmentHash,
   hasPhoneControlAccess,
   normalizeArguments,
   normalizeAppUpdateArguments,
   normalizeConnectWifiArguments,
   normalizeHotspotArguments,
+  normalizeTerminalLockdownArguments,
   normalizeWebRtcStartArguments,
   normalizeDeviceId,
   normalizeEnrollmentCode,
   normalizeScreenUpdate,
   normalizeStationId,
+  provisionTerminalConfigForKiosk,
   signCommand,
+  terminalCommandArguments,
+  terminalConfigForKiosk,
 } = require("./phoneControl");
 
 test("allowlists fixed remote screen and tethering controls", () => {
   assert.equal(ALLOWED_OPERATIONS.has("UI_SWIPE"), true);
   assert.equal(ALLOWED_OPERATIONS.has("OPEN_TETHER_SETTINGS"), true);
   assert.equal(ALLOWED_OPERATIONS.has("SET_ALWAYS_ON_HOTSPOT"), true);
+  assert.equal(ALLOWED_OPERATIONS.has("SET_HOTSPOT_ENABLED"), true);
   assert.equal(ALLOWED_OPERATIONS.has("SCAN_WIFI_NETWORKS"), true);
   assert.equal(ALLOWED_OPERATIONS.has("CONNECT_WIFI"), true);
   assert.equal(ALLOWED_OPERATIONS.has("OPEN_CAPTIVE_PORTAL"), true);
@@ -40,6 +47,24 @@ test("allowlists fixed remote screen and tethering controls", () => {
   assert.equal(ALLOWED_OPERATIONS.has("SET_WEBRTC_PROFILE"), true);
   assert.equal(ALLOWED_OPERATIONS.has("STOP_WEBRTC_SCREEN"), true);
   assert.equal(ALLOWED_OPERATIONS.has("WAKE_AND_UNLOCK"), true);
+  assert.equal(ALLOWED_OPERATIONS.has("SET_TERMINAL_LOCKDOWN"), true);
+  assert.equal(ALLOWED_OPERATIONS.has("POWER_OFF"), true);
+  assert.equal(HIGH_IMPACT_OPERATIONS.has("POWER_OFF"), true);
+});
+
+test("derives payment-app lockdown from the assigned terminal", () => {
+  assert.deepEqual(normalizeTerminalLockdownArguments({enabled: false}, {
+    terminal: {enabled: true, packageName: "com.chargerent.kiosk"},
+  }), {
+    enabled: false,
+    packageName: "com.chargerent.kiosk",
+  });
+  assert.throws(() => normalizeTerminalLockdownArguments({enabled: true}, {
+    terminal: {enabled: false},
+  }), /Enable the Stripe terminal assignment/);
+  assert.throws(() => normalizeTerminalLockdownArguments({enabled: "true"}, {
+    terminal: {enabled: true},
+  }), /enabled value/);
 });
 
 test("encrypts Wi-Fi credentials for only the enrolled phone", () => {
@@ -71,6 +96,167 @@ test("encrypts Wi-Fi credentials for only the enrolled phone", () => {
     security: "wpa2",
     passphrase: "short",
   }, publicKeyBase64), /8 to 63/);
+});
+
+test("builds encrypted CA8019 terminal provisioning without persisting the token", () => {
+  const {privateKey, publicKey} = crypto.generateKeyPairSync("rsa", {modulusLength: 2048});
+  const publicKeyBase64 = publicKey.export({type: "spki", format: "der"}).toString("base64");
+  const config = terminalConfigForKiosk("CA8019", {
+    id: "id-9987807816",
+    data: () => ({
+      info: {
+        address: "2334 Marine Drive",
+        city: "Oakville",
+        state: "ON",
+        zip: "L6L 4B1.",
+        country: "CA",
+        location: "Test Kiosk",
+      },
+      hardware: {gateway: "STRIPE", gatewayoptions: "FULLPRICE"},
+      pricing: {
+        text: "LEASE - SIMPLE DAILY",
+        currency: "US",
+        symbol: "$",
+        kioskmode: "PURCHASE",
+        initialperiod: 24,
+        authamount: 1,
+        dailyprice: 1,
+        buyprice: 1,
+        overdue: 30,
+      },
+      modules: [{
+        moduleid: "100049231111490591",
+        slots: [{position: 1}, {position: 2}, {position: 3}],
+      }],
+    }),
+  });
+  assert.equal(config.packageName, "com.chargerent.kiosk.test.debug");
+  assert.equal(config.stripeAccountCountry, "CA");
+  assert.equal(config.stripeLocationId, "");
+  assert.deepEqual(config.stripeLocationAddress, {
+    line1: "2334 Marine Drive",
+    city: "Oakville",
+    postal_code: "L6L 4B1",
+    country: "CA",
+    state: "ON",
+  });
+  assert.equal(config.moduleId, "100049231111490591");
+  assert.deepEqual(config.slotNumbers, [1, 2, 3]);
+
+  const installationToken = "installation-token-that-must-not-be-persisted";
+  const encryptedSecrets = encryptCommandSecret({installationToken}, publicKeyBase64);
+  const arguments_ = terminalCommandArguments({
+    ...config,
+    stripeLocationId: "tml_canada_test",
+  }, encryptedSecrets);
+  assert.equal(JSON.stringify(arguments_).includes(installationToken), false);
+  assert.equal(arguments_.restrictions.terminal_enabled, true);
+  assert.equal(arguments_.restrictions.provision_id, "id-9987807816");
+  assert.equal(arguments_.restrictions.stripe_account_country, "CA");
+  assert.equal(arguments_.restrictions.stripe_location_id, "tml_canada_test");
+  const plaintext = crypto.privateDecrypt({
+    key: privateKey,
+    padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+    oaepHash: "sha256",
+  }, Buffer.from(arguments_.encryptedSecrets.ciphertext, "base64"));
+  assert.deepEqual(JSON.parse(plaintext.toString("utf8")), {installationToken});
+});
+
+test("creates and reuses a Stripe Terminal location from the kiosk address", async () => {
+  const created = [];
+  const kioskData = {
+    info: {
+      address: "4514 Conchita Way",
+      city: "Tarzana",
+      state: "CA",
+      zip: "91356",
+      country: "US",
+      location: "Tarzana Pilot",
+    },
+    hardware: {gateway: "STRIPE", gatewayoptions: "FULLPRICE"},
+    pricing: {
+      text: "LEASE - SIMPLE DAILY",
+      currency: "US",
+      kioskmode: "PURCHASE",
+      initialperiod: 24,
+      authamount: 1,
+      dailyprice: 1,
+      buyprice: 1,
+      overdue: 30,
+    },
+    modules: [{moduleid: "module-us", slots: [{position: 1}]}],
+  };
+  const kiosk = {
+    id: "id-us-terminal",
+    data: () => kioskData,
+  };
+  const options = {
+    getStripeClient: ({accountCountry, mode}) => {
+      assert.equal(accountCountry, "US");
+      assert.equal(mode, "test");
+      return {
+        terminal: {
+          locations: {
+            create: async (body, requestOptions) => {
+              created.push({body, requestOptions});
+              return {id: "tml_us_test"};
+            },
+          },
+        },
+      };
+    },
+  };
+  const config = await provisionTerminalConfigForKiosk("US8019", kiosk, options);
+  assert.equal(config.stripeAccountCountry, "US");
+  assert.equal(config.stripeLocationId, "tml_us_test");
+  assert.equal(created.length, 1);
+  assert.deepEqual(created[0].body.address, {
+    line1: "4514 Conchita Way",
+    city: "Tarzana",
+    postal_code: "91356",
+    country: "US",
+    state: "CA",
+  });
+  assert.equal(created[0].body.metadata.chargerent_station_id, "US8019");
+  assert.match(created[0].requestOptions.idempotencyKey, /^chargerent-terminal-location-test-US-/);
+
+  kioskData.paymentTerminal = {
+    stripeLocations: {
+      test_US: {
+        locationId: config.stripeLocationId,
+        addressHash: config.stripeLocationAddressHash,
+        accountCountry: "US",
+        stripeMode: "test",
+      },
+    },
+  };
+  const reused = await provisionTerminalConfigForKiosk("US8019", kiosk, options);
+  assert.equal(reused.stripeLocationId, "tml_us_test");
+  assert.equal(created.length, 1);
+});
+
+test("rejects unsupported countries, address mismatches, and incomplete addresses", () => {
+  const kiosk = (country, address = "1 Main Street") => ({
+    id: "id-terminal",
+    data: () => ({
+      info: {address, city: "Paris", zip: "75001", country},
+      hardware: {gateway: "STRIPE", gatewayoptions: "FULLPRICE"},
+      pricing: {
+        text: "LEASE - SIMPLE DAILY",
+        currency: "FR",
+        kioskmode: "PURCHASE",
+        initialperiod: 24,
+        authamount: 1,
+        dailyprice: 1,
+        buyprice: 1,
+        overdue: 30,
+      },
+      modules: [{moduleid: "module-1", slots: [{position: 1}]}],
+    }),
+  });
+  assert.throws(() => terminalConfigForKiosk("GB8009", kiosk("GB")), /does not identify/);
+  assert.throws(() => terminalConfigForKiosk("US8009", kiosk("FR")), /FR address/);
+  assert.throws(() => terminalConfigForKiosk("FR8009", kiosk("FR", "")), /complete physical address/);
 });
 
 test("requires a boolean always-on hotspot setting", () => {

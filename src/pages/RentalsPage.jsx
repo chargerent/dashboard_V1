@@ -293,6 +293,16 @@ const humanizeCode = (value) => {
         .replace(/\b\w/g, character => character.toUpperCase());
 };
 
+const SweepReturnIcon = ({ className = '' }) => (
+    <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M19 4 11.5 11.5" />
+        <path d="m10 13.2 2.8 2.8" />
+        <path d="M7.6 13.8c-1.8 1.7-2.9 3.7-3.4 6.2 2.5-.5 4.5-1.6 6.2-3.4" />
+        <path d="m8.2 13.2 3.6 3.6" />
+        <path d="M16.6 6.4 17.8 5.2" />
+    </svg>
+);
+
 const formatDetailParts = (...parts) => parts
     .filter(part => part !== null && part !== undefined && String(part).trim() !== '')
     .map(part => String(part));
@@ -374,11 +384,22 @@ const PROCESS_EVENT_PHASES = {
     'charger-dispensed': LOG_PHASE.vendOutcome,
     'vend-failed': LOG_PHASE.vendOutcome,
     'physical-return-after-purchase': LOG_PHASE.usage,
+    'heartbeat-return-detected-no-act': LOG_PHASE.usage,
+    'heartbeat_return_detected_no_act': LOG_PHASE.usage,
 };
 
 const HIDDEN_PROCESS_EVENTS = new Set([
     'apollo-pending-lifecycle-migrated',
 ]);
+
+const SWEEP_HEARTBEAT_RETURN_EVENTS = new Set([
+    'heartbeat-return-detected-no-act',
+    'heartbeat_return_detected_no_act',
+]);
+
+const isSweepHeartbeatReturnEvent = (event) => (
+    SWEEP_HEARTBEAT_RETURN_EVENTS.has(event)
+);
 
 const INTERMEDIATE_PROCESS_EVENTS = new Set([
     'apollo-pending-timeout-detected',
@@ -513,6 +534,7 @@ const resolveProcessEventTitle = (entry, t, attempts = []) => {
     if (event === 'vend-timeout-confirmed-present') return 'Slot verified: charger still present';
     if (event === 'vend-timeout-recovered') return 'Dispense confirmed after timeout';
     if (event === 'motor-error-recovered') return 'Dispense confirmed after motor error';
+    if (isSweepHeartbeatReturnEvent(event)) return 'Sweep return detected';
     if (event === 'vend-failed') return t('final_vend_failure');
 
     return humanizeCode(firstPresent(entry?.title, entry?.event, entry?.type)) || t('process_log');
@@ -523,6 +545,7 @@ const resolveProcessEventStatus = (entry) => {
     const event = normalizeProcessEvent(entry);
 
     if (event === 'dispense-requested') return 'pending';
+    if (isSweepHeartbeatReturnEvent(event)) return 'sweep';
 
     if (
         event === 'vend-act-timeout-detected' ||
@@ -588,11 +611,25 @@ const processEntryCountsAsError = (entry) => {
 
 const buildBackendProcessDetails = (entry, rental, t) => {
     const amountCents = firstPresent(entry?.amountCents, entry?.authorizedAmountCents, entry?.finalAmountCents);
+    const event = normalizeProcessEvent(entry);
+    const chargerSn = firstPresent(entry?.chargerid, entry?.sn, entry?.requestedSn);
     const hostReference = firstPresent(
         entry?.authorizationHostReference,
         entry?.aprivaHostTransactionId,
         entry?.host_transaction_id
     );
+
+    if (isSweepHeartbeatReturnEvent(event)) {
+        return formatDetailParts(
+            entry?.stationid ? `${t('station')}: ${entry.stationid}` : '',
+            entry?.moduleid ? `M: ${entry.moduleid}` : '',
+            entry?.slotid != null ? `S: ${entry.slotid}` : '',
+            chargerSn ? `${t('charger_sn')}: ${chargerSn}` : '',
+            entry?.returnType ? humanizeCode(entry.returnType) : '',
+            entry?.reason ? `${t('reason')}: ${humanizeCode(entry.reason)}` : '',
+            entry?.note || ''
+        );
+    }
 
     return formatDetailParts(
         entry?.action ? `${t('actions')}: ${humanizeCode(entry.action)}` : '',
@@ -1232,6 +1269,11 @@ const logStatusStyles = {
         icon: InformationCircleIcon,
         iconClass: 'text-gray-500',
         rowClass: 'border-gray-100 bg-gray-50',
+    },
+    sweep: {
+        icon: SweepReturnIcon,
+        iconClass: 'text-emerald-600',
+        rowClass: 'border-emerald-100 bg-emerald-50',
     },
 };
 

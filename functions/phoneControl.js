@@ -1,11 +1,19 @@
 /* eslint-env node */
 const crypto = require("node:crypto");
 const {HttpsError} = require("firebase-functions/v2/https");
+const {resolveKioskOffer} = require("./kioskTerminal");
 
 const DEVICES_COLLECTION = "phoneDevices";
 const COMMANDS_COLLECTION = "phoneDeviceCommands";
 const ENROLLMENTS_COLLECTION = "phoneDeviceEnrollments";
 const ASSIGNMENTS_COLLECTION = "phoneKioskAssignments";
+const KIOSK_INSTALLATIONS_COLLECTION = "kioskInstallations";
+
+const TERMINAL_PACKAGE_NAME = "com.chargerent.kiosk";
+const TERMINAL_TEST_PACKAGE_NAME = "com.chargerent.kiosk.test.debug";
+const TERMINAL_AGENT_MIN_VERSION_CODE = 29;
+const TERMINAL_STRIPE_MODE = "test";
+const TERMINAL_ACCOUNT_COUNTRIES = new Set(["US", "CA", "FR"]);
 
 const COMMAND_TTL_MS = 2 * 60 * 1000;
 const ENROLLMENT_TTL_MS = 15 * 60 * 1000;
@@ -31,6 +39,7 @@ const ALLOWED_OPERATIONS = new Set([
   "GET_LOCATION",
   "SET_LOCATION_ENABLED",
   "SET_WIFI_ENABLED",
+  "SET_HOTSPOT_ENABLED",
   "SCAN_WIFI_NETWORKS",
   "CONNECT_WIFI",
   "OPEN_CAPTIVE_PORTAL",
@@ -40,6 +49,7 @@ const ALLOWED_OPERATIONS = new Set([
   "LOCK_NOW",
   "WAKE_AND_UNLOCK",
   "REBOOT",
+  "POWER_OFF",
   "SET_UPDATE_POLICY",
   "SET_SCREEN_BRIGHTNESS",
   "SET_SCREEN_TIMEOUT",
@@ -47,6 +57,7 @@ const ALLOWED_OPERATIONS = new Set([
   "SET_TIME_ZONE",
   "SET_KEYGUARD_DISABLED",
   "SET_KIOSK_ALLOWLIST",
+  "SET_TERMINAL_LOCKDOWN",
   "SET_APP_HIDDEN",
   "SET_APP_SUSPENDED",
   "SET_RUNTIME_PERMISSION",
@@ -70,6 +81,7 @@ const ALLOWED_OPERATIONS = new Set([
 
 const HIGH_IMPACT_OPERATIONS = new Set([
   "REBOOT",
+  "POWER_OFF",
   "REQUEST_BUGREPORT",
   "INSTALL_SYSTEM_UPDATE",
   "INSTALL_APP_UPDATE",
@@ -235,6 +247,24 @@ function normalizeHotspotArguments(value) {
   return {enabled: input.enabled};
 }
 
+function normalizeTerminalLockdownArguments(value, device = {}) {
+  if (typeof value?.enabled !== "boolean") {
+    invalidArgument("A terminal lockdown enabled value is required.");
+  }
+  const terminal = device.terminal && typeof device.terminal === "object" ?
+    device.terminal : {};
+  if (terminal.enabled !== true) {
+    throw new HttpsError(
+        "failed-precondition",
+        "Enable the Stripe terminal assignment before changing payment-app lockdown.",
+    );
+  }
+  return {
+    enabled: value.enabled,
+    packageName: String(terminal.packageName || TERMINAL_PACKAGE_NAME),
+  };
+}
+
 function parseCommandEncryptionPublicKey(publicKeyBase64) {
   try {
     const publicKey = crypto.createPublicKey({
@@ -254,6 +284,18 @@ function parseCommandEncryptionPublicKey(publicKeyBase64) {
         "Update Agent on this phone before joining Wi-Fi remotely.",
     );
   }
+}
+
+function encryptCommandSecret(secret, publicKeyBase64) {
+  const encrypted = crypto.publicEncrypt({
+    key: parseCommandEncryptionPublicKey(publicKeyBase64),
+    padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
+    oaepHash: "sha256",
+  }, Buffer.from(JSON.stringify(secret), "utf8"));
+  return {
+    algorithm: "RSA-OAEP-256",
+    ciphertext: encrypted.toString("base64"),
+  };
 }
 
 function normalizeConnectWifiArguments(value, publicKeyBase64) {
@@ -276,16 +318,225 @@ function normalizeConnectWifiArguments(value, publicKeyBase64) {
   if (passphraseBytes < 8 || passphraseBytes > 63) {
     invalidArgument("Wi-Fi passwords must contain 8 to 63 characters.");
   }
-  const encrypted = crypto.publicEncrypt({
-    key: parseCommandEncryptionPublicKey(publicKeyBase64),
-    padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-    oaepHash: "sha256",
-  }, Buffer.from(JSON.stringify({passphrase}), "utf8"));
-  normalized.encryptedCredentials = {
-    algorithm: "RSA-OAEP-256",
-    ciphertext: encrypted.toString("base64"),
-  };
+  normalized.encryptedCredentials = encryptCommandSecret({passphrase}, publicKeyBase64);
   return normalized;
+}
+
+function normalizeTerminalCountry(value) {
+  const normalized = String(value || "").trim().toUpperCase();
+  const aliases = {
+    USA: "US",
+    "UNITED STATES": "US",
+    CANADA: "CA",
+    FRANCE: "FR",
+  };
+  return aliases[normalized] || normalized;
+}
+
+function terminalAccountCountry(stationId, kiosk) {
+  const stationCountry = String(stationId || "").trim().toUpperCase().slice(0, 2);
+  if (!TERMINAL_ACCOUNT_COUNTRIES.has(stationCountry)) {
+    throw new HttpsError(
+        "failed-precondition",
+        `${stationId} does not identify a supported US, Canadian, or French Stripe account.`,
+    );
+  }
+  const addressCountry = normalizeTerminalCountry(kiosk?.info?.country || kiosk?.country);
+  if (addressCountry && addressCountry !== stationCountry) {
+    throw new HttpsError(
+        "failed-precondition",
+        `${stationId} has a ${addressCountry} address but requires the ${stationCountry} Stripe account.`,
+    );
+  }
+  return stationCountry;
+}
+
+function terminalAddressForKiosk(stationId, kiosk) {
+  const info = kiosk?.info && typeof kiosk.info === "object" ? kiosk.info : {};
+  const country = terminalAccountCountry(stationId, kiosk);
+  const address = {
+    line1: String(info.address || kiosk?.address || "").trim().replace(/[\s,;]+$/, ""),
+    city: String(info.city || kiosk?.city || "").trim(),
+    postal_code: String(info.zip || info.postalcode || kiosk?.zip || kiosk?.postalcode || "")
+        .trim().replace(/[.,;]+$/, ""),
+    country,
+  };
+  const state = String(info.state || kiosk?.state || "").trim();
+  if (state) address.state = state;
+  const required = ["line1", "city", "postal_code"];
+  if (new Set(["US", "CA"]).has(country)) required.push("state");
+  const missing = required.filter((field) => !address[field]);
+  if (missing.length) {
+    throw new HttpsError(
+        "failed-precondition",
+        `${stationId} needs a complete physical address before terminal assignment.`,
+    );
+  }
+  return address;
+}
+
+function terminalAddressHash(address) {
+  return crypto.createHash("sha256")
+      .update(canonicalJson(address), "utf8")
+      .digest("hex");
+}
+
+function terminalLocationCacheKey(stripeMode, accountCountry) {
+  return `${String(stripeMode || "").toLowerCase()}_${accountCountry}`;
+}
+
+function cachedTerminalLocation(kiosk, cacheKey, addressHash) {
+  const locations = kiosk?.paymentTerminal?.stripeLocations;
+  const cached = locations && typeof locations === "object" ? locations[cacheKey] : null;
+  const locationId = String(cached?.locationId || "").trim();
+  return locationId.startsWith("tml_") && cached?.addressHash === addressHash ?
+    {locationId, ...cached} : null;
+}
+
+async function ensureStripeTerminalLocation(config, kiosk, stripe) {
+  if (!stripe?.terminal?.locations?.create) {
+    throw new HttpsError(
+        "failed-precondition",
+        `The ${config.stripeAccountCountry} Stripe ${config.stripeMode} account is not configured.`,
+    );
+  }
+  const cached = cachedTerminalLocation(
+      kiosk,
+      config.stripeLocationCacheKey,
+      config.stripeLocationAddressHash,
+  );
+  if (cached) {
+    if (!stripe.terminal.locations.retrieve) return cached;
+    try {
+      const location = await stripe.terminal.locations.retrieve(cached.locationId);
+      if (location && location.id && location.deleted !== true) return cached;
+    } catch (error) {
+      if (Number(error?.statusCode || error?.status) !== 404) throw error;
+    }
+  }
+
+  const location = await stripe.terminal.locations.create({
+    display_name: config.stripeLocationDisplayName,
+    address: config.stripeLocationAddress,
+    metadata: {
+      chargerent_station_id: config.stationId,
+      chargerent_provision_id: config.provisionId,
+      chargerent_account_country: config.stripeAccountCountry,
+      chargerent_address_hash: config.stripeLocationAddressHash,
+    },
+  }, {
+    idempotencyKey: `chargerent-terminal-location-${config.stripeMode}-` +
+      `${config.stripeAccountCountry}-${config.provisionId}-${config.stripeLocationAddressHash.slice(0, 24)}`,
+  });
+  const locationId = String(location?.id || "").trim();
+  if (!locationId.startsWith("tml_")) {
+    throw new HttpsError(
+        "internal",
+        "Stripe did not return a valid Terminal location.",
+    );
+  }
+  return {
+    locationId,
+    accountCountry: config.stripeAccountCountry,
+    stripeMode: config.stripeMode,
+    addressHash: config.stripeLocationAddressHash,
+    displayName: config.stripeLocationDisplayName,
+  };
+}
+
+function terminalConfigForKiosk(stationId, kioskSnapshot, options = {}) {
+  const kiosk = kioskSnapshot.data() || {};
+  const modules = Array.isArray(kiosk.modules) ? kiosk.modules : [];
+  const module = modules.find((candidate) => (
+    candidate && String(candidate.moduleid || candidate.moduleId || candidate.id || "").trim()
+  ));
+  const moduleId = String(module?.moduleid || module?.moduleId || module?.id || "").trim();
+  if (!moduleId) {
+    throw new HttpsError(
+        "failed-precondition",
+        `${stationId} has no V2 module available for terminal assignment.`,
+    );
+  }
+  const configuredSlots = Array.isArray(module?.slots) ? module.slots : [];
+  const slotNumbers = configuredSlots
+      .map((slot, index) => Number(slot?.position || slot?.slot || slot?.id || index + 1))
+      .filter((slot) => Number.isInteger(slot) && slot > 0);
+  if (!slotNumbers.length) {
+    throw new HttpsError(
+        "failed-precondition",
+      `${stationId} has no V2 slots available for terminal assignment.`,
+    );
+  }
+  const offer = resolveKioskOffer({
+    stationId,
+    provisionId: kioskSnapshot.id,
+    moduleId,
+  }, kiosk);
+  const stripeMode = String(options.stripeMode || TERMINAL_STRIPE_MODE).trim().toLowerCase();
+  if (!new Set(["test", "live"]).has(stripeMode)) {
+    throw new HttpsError("failed-precondition", "A valid Stripe terminal mode is required.");
+  }
+  const stripeAccountCountry = terminalAccountCountry(stationId, kiosk);
+  const stripeLocationAddress = terminalAddressForKiosk(stationId, kiosk);
+  const stripeLocationAddressHash = terminalAddressHash(stripeLocationAddress);
+  const stripeLocationCacheKey = terminalLocationCacheKey(stripeMode, stripeAccountCountry);
+  const place = String(kiosk.info?.location || kiosk.info?.place || "Chargerent").trim();
+  return {
+    packageName: String(options.packageName ||
+      (stripeMode === "test" ? TERMINAL_TEST_PACKAGE_NAME : TERMINAL_PACKAGE_NAME))
+        .trim().slice(0, 160),
+    stationId,
+    provisionId: kioskSnapshot.id,
+    moduleId,
+    slotNumbers: [...new Set(slotNumbers)].sort((left, right) => left - right),
+    stripeMode,
+    stripeAccountCountry,
+    stripeLocationId: "",
+    stripeLocationAddress,
+    stripeLocationAddressHash,
+    stripeLocationCacheKey,
+    stripeLocationDisplayName: `${stationId} - ${place}`.slice(0, 100),
+    amountCents: offer.paymentAmountCents,
+    currency: offer.currency,
+    pricingPlan: offer.planCode,
+    gatewayOption: offer.gatewayOption,
+  };
+}
+
+async function provisionTerminalConfigForKiosk(stationId, kioskSnapshot, options = {}) {
+  if (typeof options.getStripeClient !== "function") {
+    throw new HttpsError("failed-precondition", "Regional Stripe accounts are not configured.");
+  }
+  const config = terminalConfigForKiosk(stationId, kioskSnapshot, options);
+  const stripe = options.getStripeClient({
+    accountCountry: config.stripeAccountCountry,
+    mode: config.stripeMode,
+  });
+  const location = await ensureStripeTerminalLocation(config, kioskSnapshot.data() || {}, stripe);
+  return {
+    ...config,
+    stripeLocationId: location.locationId,
+    stripeLocationRecord: location,
+  };
+}
+
+function terminalCommandArguments(config, encryptedSecrets) {
+  const restrictions = {
+    terminal_enabled: true,
+    station_id: config.stationId,
+    provision_id: config.provisionId,
+    module_id: config.moduleId,
+    slot_count: config.slotNumbers.length,
+    currency: config.currency,
+    test_amount_cents: config.amountCents,
+    stripe_account_country: config.stripeAccountCountry,
+    stripe_location_id: config.stripeLocationId,
+  };
+  return {
+    packageName: config.packageName,
+    restrictions,
+    encryptedSecrets,
+  };
 }
 
 function canonicalJson(value) {
@@ -597,6 +848,7 @@ function timestampToMillis(value) {
 
 function safeDeviceData(snapshot) {
   const data = snapshot.data() || {};
+  const terminal = data.terminal && typeof data.terminal === "object" ? data.terminal : {};
   return {
     id: snapshot.id,
     deviceId: String(data.deviceId || snapshot.id),
@@ -606,6 +858,22 @@ function safeDeviceData(snapshot) {
     inventory: data.inventory && typeof data.inventory === "object" ? data.inventory : {},
     location: data.location && typeof data.location === "object" ? data.location : {},
     screen: data.screen && typeof data.screen === "object" ? data.screen : {},
+    terminal: {
+      enabled: terminal.enabled === true,
+      state: String(terminal.state || (terminal.enabled ? "pending" : "disabled")),
+      stationId: String(terminal.stationId || "").trim().toUpperCase(),
+      provisionId: String(terminal.provisionId || ""),
+      moduleId: String(terminal.moduleId || ""),
+      stripeLocationId: String(terminal.stripeLocationId || ""),
+      stripeAccountCountry: String(terminal.stripeAccountCountry || ""),
+      stripeMode: String(terminal.stripeMode || ""),
+      packageName: String(terminal.packageName || ""),
+      lockdownEnabled: terminal.lockdownEnabled === true,
+      lockdownState: String(terminal.lockdownState ||
+        (terminal.lockdownEnabled ? "pending" : "unlocked")),
+      message: String(terminal.message || ""),
+      updatedAt: timestampToMillis(terminal.updatedAt),
+    },
     lastCommand: data.lastCommand && typeof data.lastCommand === "object" ? data.lastCommand : null,
     lastSeenAt: timestampToMillis(data.lastSeenAt),
     enrolledAt: timestampToMillis(data.enrolledAt),
@@ -615,10 +883,19 @@ function safeDeviceData(snapshot) {
 
 function safeCommandArguments(operation, arguments_) {
   const commandArguments = arguments_ && typeof arguments_ === "object" ? arguments_ : {};
-  return operation === "CONNECT_WIFI" ? {
-    ssid: String(commandArguments.ssid || ""),
-    security: String(commandArguments.security || ""),
-  } : commandArguments;
+  if (operation === "CONNECT_WIFI") {
+    return {
+      ssid: String(commandArguments.ssid || ""),
+      security: String(commandArguments.security || ""),
+    };
+  }
+  if (operation === "SET_APP_RESTRICTIONS") {
+    return {
+      packageName: String(commandArguments.packageName || ""),
+      restrictions: commandArguments.restrictions || {},
+    };
+  }
+  return commandArguments;
 }
 
 function safeCommandData(snapshot) {
@@ -794,48 +1071,271 @@ async function createEnrollment(data, authState, dependencies) {
 }
 
 async function assignDevice(data, authState, dependencies) {
-  const {db, admin} = dependencies;
+  const {db, admin, privateKeyPem, getStripeClient} = dependencies;
   const deviceId = normalizeDeviceId(data?.deviceId);
   const stationId = normalizeStationId(data?.stationId);
-  await findKiosk(db, stationId);
+  if (typeof data?.terminalEnabled !== "boolean") {
+    invalidArgument("Choose whether this phone will run the payment terminal.");
+  }
+  const terminalEnabled = data.terminalEnabled;
+  const kioskSnapshot = await findKiosk(db, stationId);
 
   const deviceRef = db.collection(DEVICES_COLLECTION).doc(deviceId);
   const targetRef = db.collection(ASSIGNMENTS_COLLECTION).doc(stationId);
+  const initialDeviceSnapshot = await deviceRef.get();
+  if (!initialDeviceSnapshot.exists) {
+    throw new HttpsError("not-found", "Managed phone was not found.");
+  }
+  const initialDevice = initialDeviceSnapshot.data() || {};
+  const previousStationId = String(initialDevice.stationId || "").trim().toUpperCase();
+  const currentTerminal = initialDevice.terminal && typeof initialDevice.terminal === "object" ?
+    initialDevice.terminal : {};
+  const previousInstallationId = String(currentTerminal.installationId || "").trim();
+  const requiresTerminalCommand = terminalEnabled || currentTerminal.enabled === true;
+
+  let terminalConfig = null;
+  let installationId = "";
+  let command = null;
+  if (terminalEnabled) {
+    const installedAgentVersionCode = Number(initialDevice.inventory?.agentVersionCode || 0);
+    if (installedAgentVersionCode < TERMINAL_AGENT_MIN_VERSION_CODE) {
+      throw new HttpsError(
+          "failed-precondition",
+          "Update this phone to Chargerent Agent 1.2.14 before enabling the payment terminal.",
+      );
+    }
+    terminalConfig = await provisionTerminalConfigForKiosk(stationId, kioskSnapshot, {
+      getStripeClient,
+      stripeMode: dependencies.stripeMode,
+      packageName: dependencies.packageName,
+    });
+    const encryptionPublicKey = initialDevice.inventory?.commandEncryptionPublicKey;
+    const installationToken = crypto.randomBytes(32).toString("base64url");
+    installationId = crypto.createHash("sha256").update(installationToken).digest("hex");
+    const commandArguments = terminalCommandArguments(
+        terminalConfig,
+        encryptCommandSecret({installationToken}, encryptionPublicKey),
+    );
+    const issuedAt = Date.now();
+    command = {
+      id: `terminal-${deviceId}-${issuedAt}-${crypto.randomBytes(4).toString("hex")}`,
+      deviceId,
+      operation: "SET_APP_RESTRICTIONS",
+      arguments: commandArguments,
+      issuedAt,
+      expiresAt: issuedAt + COMMAND_TTL_MS,
+    };
+    command.signature = signCommand(command, privateKeyPem);
+  } else if (requiresTerminalCommand) {
+    const issuedAt = Date.now();
+    command = {
+      id: `terminal-${deviceId}-${issuedAt}-${crypto.randomBytes(4).toString("hex")}`,
+      deviceId,
+      operation: "SET_APP_RESTRICTIONS",
+      arguments: {
+        packageName: String(currentTerminal.packageName || TERMINAL_PACKAGE_NAME),
+        restrictions: {terminal_enabled: false},
+      },
+      issuedAt,
+      expiresAt: issuedAt + COMMAND_TTL_MS,
+    };
+    command.signature = signCommand(command, privateKeyPem);
+  }
+
+  const previousRef = previousStationId && previousStationId !== stationId ?
+    db.collection(ASSIGNMENTS_COLLECTION).doc(previousStationId) : null;
+  const kioskRef = kioskSnapshot.ref;
+  const previousInstallationRef = previousInstallationId ?
+    db.collection(KIOSK_INSTALLATIONS_COLLECTION).doc(previousInstallationId) : null;
+  const installationRef = installationId ?
+    db.collection(KIOSK_INSTALLATIONS_COLLECTION).doc(installationId) : null;
+  const commandRef = command ? db.collection(COMMANDS_COLLECTION).doc(command.id) : null;
+  const initialActiveCommandId = String(initialDevice.activeCommandId || "").trim();
+  const activeCommandRef = initialActiveCommandId ?
+    db.collection(COMMANDS_COLLECTION).doc(initialActiveCommandId) : null;
 
   await db.runTransaction(async (transaction) => {
-    const [deviceSnapshot, targetSnapshot] = await Promise.all([
+    const reads = await Promise.all([
       transaction.get(deviceRef),
       transaction.get(targetRef),
+      transaction.get(kioskRef),
+      previousRef ? transaction.get(previousRef) : Promise.resolve(null),
+      previousInstallationRef ? transaction.get(previousInstallationRef) : Promise.resolve(null),
+      activeCommandRef ? transaction.get(activeCommandRef) : Promise.resolve(null),
     ]);
+    const [
+      deviceSnapshot,
+      targetSnapshot,
+      transactionKioskSnapshot,
+      previousSnapshot,
+      previousInstallationSnapshot,
+      activeCommandSnapshot,
+    ] = reads;
     if (!deviceSnapshot.exists) {
       throw new HttpsError("not-found", "Managed phone was not found.");
+    }
+    if (!transactionKioskSnapshot.exists) {
+      throw new HttpsError("not-found", `Kiosk ${stationId} was not found.`);
+    }
+    if (terminalEnabled) {
+      const currentConfig = terminalConfigForKiosk(stationId, {
+        id: transactionKioskSnapshot.id,
+        data: () => transactionKioskSnapshot.data() || {},
+      }, {
+        stripeMode: terminalConfig.stripeMode,
+        packageName: terminalConfig.packageName,
+      });
+      if (currentConfig.moduleId !== terminalConfig.moduleId ||
+          currentConfig.stripeAccountCountry !== terminalConfig.stripeAccountCountry ||
+          currentConfig.stripeLocationAddressHash !== terminalConfig.stripeLocationAddressHash ||
+          currentConfig.amountCents !== terminalConfig.amountCents ||
+          currentConfig.currency !== terminalConfig.currency) {
+        throw new HttpsError(
+            "aborted",
+            "The kiosk configuration changed while the terminal was being assigned. Try again.",
+        );
+      }
+    }
+    const transactionDevice = deviceSnapshot.data() || {};
+    if (String(transactionDevice.stationId || "").trim().toUpperCase() !== previousStationId ||
+        String(transactionDevice.terminal?.installationId || "").trim() !== previousInstallationId ||
+        String(transactionDevice.activeCommandId || "").trim() !== initialActiveCommandId) {
+      throw new HttpsError("aborted", "The phone changed while it was being assigned. Try again.");
     }
     const existingDeviceId = String(targetSnapshot.data()?.deviceId || "");
     if (existingDeviceId && existingDeviceId !== deviceId) {
       throw new HttpsError("already-exists", `${stationId} already has another managed phone.`);
     }
-
-    const previousStationId = String(deviceSnapshot.data()?.stationId || "").trim().toUpperCase();
-    if (previousStationId && previousStationId !== stationId) {
-      const previousRef = db.collection(ASSIGNMENTS_COLLECTION).doc(previousStationId);
-      const previousSnapshot = await transaction.get(previousRef);
+    if (command && activeCommandSnapshot &&
+        ["queued", "delivered", "running"].includes(activeCommandSnapshot.data()?.status)) {
+      throw new HttpsError(
+          "failed-precondition",
+          "Wait for the current phone command to finish before changing terminal assignment.",
+      );
+    }
+    if (previousRef) {
       if (previousSnapshot.data()?.deviceId === deviceId) transaction.delete(previousRef);
     }
+    if (previousInstallationRef && previousInstallationSnapshot?.exists) {
+      transaction.set(previousInstallationRef, {
+        active: false,
+        revokedAt: admin.firestore.FieldValue.serverTimestamp(),
+        revokedReason: "phone-terminal-reassigned",
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, {merge: true});
+    }
+
+    const terminalState = terminalEnabled ? {
+      enabled: true,
+      state: "provisioning",
+      stationId,
+      provisionId: terminalConfig.provisionId,
+      moduleId: terminalConfig.moduleId,
+      stripeLocationId: terminalConfig.stripeLocationId,
+      stripeAccountCountry: terminalConfig.stripeAccountCountry,
+      stripeMode: terminalConfig.stripeMode,
+      packageName: terminalConfig.packageName,
+      lockdownEnabled: true,
+      lockdownState: "provisioning",
+      installationId,
+      commandId: command.id,
+      message: "Terminal configuration queued for the phone.",
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    } : {
+      enabled: false,
+      state: "disabled",
+      stationId,
+      packageName: String(currentTerminal.packageName || TERMINAL_PACKAGE_NAME),
+      lockdownEnabled: false,
+      lockdownState: command ? "unlocking" : "unlocked",
+      commandId: command?.id || "",
+      message: command ? "Terminal removal queued for the phone." : "Terminal is disabled.",
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
 
     transaction.set(targetRef, {
       stationId,
       deviceId,
+      terminalEnabled,
+      terminal: terminalState,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedBy: authState.uid,
     });
     transaction.set(deviceRef, {
       stationId,
+      terminal: terminalState,
+      activeCommandId: command?.id || transactionDevice.activeCommandId || null,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedBy: authState.uid,
     }, {merge: true});
+    if (terminalEnabled) {
+      const transactionKiosk = transactionKioskSnapshot.data() || {};
+      const paymentTerminal = transactionKiosk.paymentTerminal &&
+        typeof transactionKiosk.paymentTerminal === "object" ?
+        transactionKiosk.paymentTerminal : {};
+      const stripeLocations = paymentTerminal.stripeLocations &&
+        typeof paymentTerminal.stripeLocations === "object" ?
+        paymentTerminal.stripeLocations : {};
+      transaction.set(kioskRef, {
+        paymentTerminal: {
+          ...paymentTerminal,
+          accountCountry: terminalConfig.stripeAccountCountry,
+          stripeMode: terminalConfig.stripeMode,
+          stripeLocations: {
+            ...stripeLocations,
+            [terminalConfig.stripeLocationCacheKey]: {
+              ...terminalConfig.stripeLocationRecord,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+          },
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+      }, {merge: true});
+    }
+    if (installationRef) {
+      transaction.create(installationRef, {
+        active: true,
+        deviceId,
+        stationId,
+        provisionId: terminalConfig.provisionId,
+        moduleId: terminalConfig.moduleId,
+        slotNumbers: terminalConfig.slotNumbers,
+        stripeMode: terminalConfig.stripeMode,
+        stripeAccountCountry: terminalConfig.stripeAccountCountry,
+        stripeLocationId: terminalConfig.stripeLocationId,
+        amountCents: terminalConfig.amountCents,
+        currency: terminalConfig.currency,
+        pricingSource: "kiosk",
+        pricingPlan: terminalConfig.pricingPlan,
+        gatewayOption: terminalConfig.gatewayOption,
+        packageName: terminalConfig.packageName,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+    if (commandRef) {
+      transaction.create(commandRef, {
+        ...command,
+        stationId,
+        status: "queued",
+        confirmed: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdBy: authState.uid,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
   });
 
-  return {ok: true, stationId, deviceId, message: `Phone assigned to ${stationId}.`};
+  return {
+    ok: true,
+    stationId,
+    deviceId,
+    terminalEnabled,
+    terminalState: terminalEnabled ? "provisioning" : "disabled",
+    message: terminalEnabled ?
+      `Phone assigned to ${stationId}; terminal provisioning was queued.` :
+      `Phone assigned to ${stationId}; payment terminal is disabled.`,
+  };
 }
 
 async function sendCommand(data, authState, dependencies) {
@@ -845,10 +1345,13 @@ async function sendCommand(data, authState, dependencies) {
   const requestId = normalizeRequestId(data?.requestId);
   const operation = normalizeOperation(data?.operation);
   const confirmed = data?.confirmed === true;
-  if (operation === "CONNECT_WIFI" && !isPhoneControlAdmin(authState)) {
+  if (["CONNECT_WIFI", "SET_TERMINAL_LOCKDOWN"].includes(operation) &&
+      !isPhoneControlAdmin(authState)) {
     throw new HttpsError(
         "permission-denied",
-        "Only Chargerent administrators can join a phone to Wi-Fi.",
+        operation === "CONNECT_WIFI" ?
+          "Only Chargerent administrators can join a phone to Wi-Fi." :
+          "Only Chargerent administrators can change payment-app lockdown.",
     );
   }
   if (HIGH_IMPACT_OPERATIONS.has(operation) && !confirmed) {
@@ -861,7 +1364,7 @@ async function sendCommand(data, authState, dependencies) {
   let commandArguments;
   if (operation === "INSTALL_APP_UPDATE") {
     commandArguments = normalizeAppUpdateArguments(data?.arguments);
-  } else if (operation === "SET_ALWAYS_ON_HOTSPOT") {
+  } else if (["SET_HOTSPOT_ENABLED", "SET_ALWAYS_ON_HOTSPOT"].includes(operation)) {
     commandArguments = normalizeHotspotArguments(data?.arguments);
   } else if (operation === "START_WEBRTC_SCREEN") {
     commandArguments = normalizeWebRtcStartArguments(data?.arguments);
@@ -869,6 +1372,11 @@ async function sendCommand(data, authState, dependencies) {
     commandArguments = normalizeConnectWifiArguments(
         data?.arguments,
         authorizedDeviceSnapshot.data()?.inventory?.commandEncryptionPublicKey,
+    );
+  } else if (operation === "SET_TERMINAL_LOCKDOWN") {
+    commandArguments = normalizeTerminalLockdownArguments(
+        data?.arguments,
+        authorizedDeviceSnapshot.data(),
     );
   } else {
     commandArguments = normalizeArguments(data?.arguments, maxArgumentBytes);
@@ -1166,7 +1674,7 @@ async function recordCommandResult(data, req, dependencies) {
       completedAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
-    if (commandData.operation === "CONNECT_WIFI") {
+    if (["CONNECT_WIFI", "SET_APP_RESTRICTIONS"].includes(commandData.operation)) {
       commandUpdate.arguments = safeCommandArguments(
           commandData.operation,
           commandData.arguments,
@@ -1195,6 +1703,68 @@ async function recordCommandResult(data, req, dependencies) {
     }
     if (status === "completed" && commandData.operation === "GET_LOCATION") {
       deviceUpdate.location = {...result, receivedAt: Date.now()};
+    }
+    if (commandData.operation === "SET_APP_RESTRICTIONS") {
+      const currentTerminal = deviceSnapshot.data()?.terminal;
+      if (currentTerminal?.commandId === commandId) {
+        const requestedEnabled = commandData.arguments?.restrictions?.terminal_enabled === true;
+        deviceUpdate.terminal = {
+          ...currentTerminal,
+          enabled: requestedEnabled,
+          state: status === "completed" ? (requestedEnabled ? "ready" : "disabled") : "error",
+          lockdownEnabled: status === "completed" && requestedEnabled,
+          lockdownState: status === "completed" ?
+            (requestedEnabled ? "locked" : "unlocked") : "error",
+          message: status === "completed" ?
+            (requestedEnabled ? "Payment terminal configured on the phone." :
+              "Payment terminal removed from the phone.") :
+            (errorMessage || "The phone could not apply terminal configuration."),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+        const assignmentRef = db.collection(ASSIGNMENTS_COLLECTION)
+            .doc(String(commandData.stationId || "").trim().toUpperCase());
+        transaction.set(assignmentRef, {
+          terminalEnabled: requestedEnabled,
+          terminal: deviceUpdate.terminal,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, {merge: true});
+        if (status !== "completed" && currentTerminal.installationId) {
+          transaction.set(
+              db.collection(KIOSK_INSTALLATIONS_COLLECTION).doc(currentTerminal.installationId),
+              {
+                active: false,
+                revokedAt: admin.firestore.FieldValue.serverTimestamp(),
+                revokedReason: "phone-terminal-configuration-failed",
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              },
+              {merge: true},
+          );
+        }
+      }
+    }
+    if (commandData.operation === "SET_TERMINAL_LOCKDOWN") {
+      const currentTerminal = deviceSnapshot.data()?.terminal;
+      if (currentTerminal?.enabled === true) {
+        const requestedEnabled = commandData.arguments?.enabled === true;
+        deviceUpdate.terminal = {
+          ...currentTerminal,
+          lockdownEnabled: status === "completed" ? requestedEnabled :
+            currentTerminal.lockdownEnabled === true,
+          lockdownState: status === "completed" ?
+            (requestedEnabled ? "locked" : "unlocked") : "error",
+          message: status === "completed" ?
+            (requestedEnabled ? "Payment app locked to the screen." :
+              "Payment app unlocked for maintenance.") :
+            (errorMessage || "The phone could not change payment-app lockdown."),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+        const assignmentRef = db.collection(ASSIGNMENTS_COLLECTION)
+            .doc(String(commandData.stationId || "").trim().toUpperCase());
+        transaction.set(assignmentRef, {
+          terminal: deviceUpdate.terminal,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, {merge: true});
+      }
     }
     if (status === "completed") {
       const screenUpdate = completedCommandScreenUpdate(
@@ -1268,6 +1838,8 @@ module.exports = {
   createEnrollmentCode,
   createTurnIceConfiguration,
   deviceIdFromPublicKey,
+  ensureStripeTerminalLocation,
+  encryptCommandSecret,
   enrollDevice,
   enrollmentHash,
   getScreen,
@@ -1278,6 +1850,7 @@ module.exports = {
   normalizeAppUpdateArguments,
   normalizeConnectWifiArguments,
   normalizeHotspotArguments,
+  normalizeTerminalLockdownArguments,
   normalizeWebRtcStartArguments,
   normalizeDeviceId,
   normalizeEnrollmentCode,
@@ -1291,4 +1864,9 @@ module.exports = {
   recordScreenUpdate,
   sendCommand,
   signCommand,
+  provisionTerminalConfigForKiosk,
+  terminalAccountCountry,
+  terminalAddressForKiosk,
+  terminalCommandArguments,
+  terminalConfigForKiosk,
 };

@@ -15,11 +15,22 @@ export const PHONE_KIOSK_COUNTRIES = [
 
 export const HIGH_IMPACT_PHONE_OPERATIONS = new Set([
   'REBOOT',
+  'POWER_OFF',
   'REQUEST_BUGREPORT',
   'INSTALL_SYSTEM_UPDATE',
   'INSTALL_APP_UPDATE',
   'WIPE_DEVICE',
 ]);
+
+export function phoneSignalLevelFromDbm(value, type = 'wifi') {
+  if (value === null || value === undefined || value === '') return null;
+  const dbm = Number(value);
+  if (!Number.isFinite(dbm)) return null;
+  const thresholds = String(type).toLowerCase() === 'cellular'
+    ? [-115, -105, -95, -85]
+    : [-80, -70, -60, -50];
+  return thresholds.reduce((level, threshold) => (dbm >= threshold ? level + 1 : level), 0);
+}
 
 const AGENT_RELEASE_ORIGIN = 'https://chargerentstations.com';
 
@@ -115,6 +126,9 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
   const rawLocation = rawDevice.location && typeof rawDevice.location === 'object'
     ? rawDevice.location
     : {};
+  const rawTerminal = rawDevice.terminal && typeof rawDevice.terminal === 'object'
+    ? rawDevice.terminal
+    : {};
   const latitude = Number(rawLocation.latitude);
   const longitude = Number(rawLocation.longitude);
   const hasCoordinates = Number.isFinite(latitude) && latitude >= -90 && latitude <= 90 &&
@@ -165,6 +179,22 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
     lastSeenAt: rawDevice.lastSeenAt || rawDevice.heartbeatAt || null,
     lastCommand: rawDevice.lastCommand || null,
     screen: rawDevice.screen && typeof rawDevice.screen === 'object' ? rawDevice.screen : {},
+    terminal: {
+      enabled: rawTerminal.enabled === true,
+      state: String(rawTerminal.state || (rawTerminal.enabled ? 'pending' : 'disabled')).trim().toLowerCase(),
+      stationId: String(rawTerminal.stationId || '').trim().toUpperCase(),
+      provisionId: String(rawTerminal.provisionId || '').trim(),
+      moduleId: String(rawTerminal.moduleId || '').trim(),
+      stripeLocationId: String(rawTerminal.stripeLocationId || '').trim(),
+      stripeAccountCountry: String(rawTerminal.stripeAccountCountry || '').trim().toUpperCase(),
+      stripeMode: String(rawTerminal.stripeMode || '').trim().toLowerCase(),
+      packageName: String(rawTerminal.packageName || '').trim(),
+      lockdownEnabled: rawTerminal.lockdownEnabled === true,
+      lockdownState: String(rawTerminal.lockdownState ||
+        (rawTerminal.lockdownEnabled ? 'pending' : 'unlocked')).trim().toLowerCase(),
+      message: String(rawTerminal.message || '').trim(),
+      updatedAtMs: phoneTimestampToMillis(rawTerminal.updatedAt),
+    },
     location: {
       latitude: hasCoordinates ? latitude : null,
       longitude: hasCoordinates ? longitude : null,
@@ -222,6 +252,10 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
       availableWifiNetworks,
       availableWifiScannedAt: phoneTimestampToMillis(inventory.availableWifiScannedAt),
       commandEncryptionReady: Boolean(String(inventory.commandEncryptionPublicKey || '').trim()),
+      terminalPackageInstalled: inventory.terminalPackageInstalled === true,
+      terminalLockdownDesired: inventory.terminalLockdownDesired === true,
+      terminalLockdownPermitted: inventory.terminalLockdownPermitted === true,
+      terminalLockdownActive: inventory.terminalLockdownActive === true,
       hotspotSupported: inventory.hotspotSupported === true,
       hotspotControlGranted: inventory.hotspotControlGranted === true,
       hotspotAlwaysOn: inventory.hotspotAlwaysOn === true,

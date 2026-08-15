@@ -6,6 +6,7 @@ import {
   ArrowUturnLeftIcon,
   Battery100Icon,
   BoltIcon,
+  CreditCardIcon,
   DevicePhoneMobileIcon,
   ExclamationTriangleIcon,
   HomeIcon,
@@ -45,6 +46,7 @@ import {
   phoneHotspotLabel,
   phoneMatchesSearch,
   phoneNetworkLabel,
+  phoneSignalLevelFromDbm,
   phoneTimestampToMillis,
 } from '../utils/phoneControl.js';
 import {
@@ -64,6 +66,8 @@ const FILTERS = [
   { value: 'unassigned', label: 'Unassigned' },
 ];
 
+const TERMINAL_AGENT_MIN_VERSION_CODE = 29;
+
 const STATE_STYLES = {
   online: { dot: 'bg-emerald-500', badge: 'bg-emerald-100 text-emerald-700', label: 'Online' },
   offline: { dot: 'bg-red-500', badge: 'bg-red-100 text-red-700', label: 'Offline' },
@@ -80,9 +84,18 @@ const COMMAND_STYLES = {
   expired: 'bg-slate-100 text-slate-600',
 };
 
+const TERMINAL_STYLES = {
+  ready: { badge: 'bg-emerald-100 text-emerald-700', label: 'Terminal ready' },
+  provisioning: { badge: 'bg-blue-100 text-blue-700', label: 'Terminal provisioning' },
+  error: { badge: 'bg-red-100 text-red-700', label: 'Terminal error' },
+  pending: { badge: 'bg-amber-100 text-amber-700', label: 'Terminal pending' },
+  disabled: { badge: 'bg-slate-100 text-slate-600', label: 'Phone only' },
+};
+
 const CONFIRMATION_REQUIRED_PHONE_OPERATIONS = new Set([
   ...HIGH_IMPACT_PHONE_OPERATIONS,
   'SET_WIFI_ENABLED',
+  'SET_HOTSPOT_ENABLED',
   'SET_ALWAYS_ON_HOTSPOT',
 ]);
 
@@ -92,6 +105,7 @@ const PHONE_COMMAND_LABELS = {
   GET_LOCATION: 'Refresh location',
   SET_LOCATION_ENABLED: 'GPS',
   SET_WIFI_ENABLED: 'Wi-Fi',
+  SET_HOTSPOT_ENABLED: 'Hotspot',
   SCAN_WIFI_NETWORKS: 'Scan Wi-Fi networks',
   CONNECT_WIFI: 'Join Wi-Fi network',
   OPEN_CAPTIVE_PORTAL: 'Open Wi-Fi sign-in',
@@ -101,6 +115,7 @@ const PHONE_COMMAND_LABELS = {
   LOCK_NOW: 'Lock phone',
   WAKE_AND_UNLOCK: 'Wake and unlock',
   REBOOT: 'Reboot phone',
+  POWER_OFF: 'Shut down phone',
   SET_UPDATE_POLICY: 'Update policy',
   SET_SCREEN_BRIGHTNESS: 'Screen brightness',
   SET_SCREEN_TIMEOUT: 'Screen timeout',
@@ -108,6 +123,7 @@ const PHONE_COMMAND_LABELS = {
   SET_TIME_ZONE: 'Time zone',
   SET_KEYGUARD_DISABLED: 'Lock screen',
   SET_KIOSK_ALLOWLIST: 'Kiosk apps',
+  SET_TERMINAL_LOCKDOWN: 'Payment app lockdown',
   SET_APP_HIDDEN: 'App visibility',
   SET_APP_SUSPENDED: 'App suspension',
   SET_RUNTIME_PERMISSION: 'App permission',
@@ -153,7 +169,10 @@ function commandActionLabel(operation, args = {}) {
   if (operation === 'SCAN_WIFI_NETWORKS') return 'Scan nearby Wi-Fi networks';
   if (operation === 'CONNECT_WIFI') return `Join ${args.ssid || 'Wi-Fi network'}`;
   if (operation === 'OPEN_CAPTIVE_PORTAL') return 'Open public Wi-Fi sign-in';
+  if (operation === 'SET_HOTSPOT_ENABLED') return `Turn hotspot ${args.enabled === true ? 'on' : 'off'}`;
   if (operation === 'SET_ALWAYS_ON_HOTSPOT') return `${args.enabled === true ? 'Enable' : 'Disable'} always-on hotspot`;
+  if (operation === 'SET_TERMINAL_LOCKDOWN') return `${args.enabled === true ? 'Lock' : 'Unlock'} payment app`;
+  if (operation === 'POWER_OFF') return 'Shut down phone';
   if (operation === 'INSTALL_APP_UPDATE' && args.versionName) return `Install Agent ${args.versionName}`;
   return commandLabel(operation);
 }
@@ -177,6 +196,14 @@ function phoneCommandConfirmationDetails(confirmation, device) {
     };
   }
 
+  if (operation === 'POWER_OFF') {
+    return {
+      title: 'Confirm Phone Shutdown',
+      action: operation,
+      confirmationText: `Shut down the phone assigned to ${stationLabel}? It will remain offline and cannot be turned back on remotely; someone must press its physical power button.`,
+    };
+  }
+
   if (operation === 'SET_WIFI_ENABLED') {
     const enabling = confirmation?.args?.enabled === true;
     return {
@@ -196,6 +223,18 @@ function phoneCommandConfirmationDetails(confirmation, device) {
       confirmationText: enabling
         ? `Keep hotspot on for the phone assigned to ${stationLabel}? Agent will start it and restore it after shutdowns or reboots.`
         : `Disable always-on hotspot for the phone assigned to ${stationLabel}? Devices using that hotspot may lose their network connection.`,
+    };
+  }
+
+  if (operation === 'SET_HOTSPOT_ENABLED') {
+    const enabling = confirmation?.args?.enabled === true;
+    const disablesAlwaysOn = !enabling && device?.inventory?.hotspotAlwaysOn;
+    return {
+      title: `Confirm Hotspot ${enabling ? 'On' : 'Off'}`,
+      action: operation,
+      confirmationText: enabling
+        ? `Turn hotspot on for the phone assigned to ${stationLabel}? This starts it now without enabling automatic recovery.`
+        : `Turn hotspot off for the phone assigned to ${stationLabel}? Connected devices will lose access${disablesAlwaysOn ? ' and Always-on will also be disabled' : ''}.`,
     };
   }
 
@@ -440,7 +479,7 @@ async function fetchCurrentAgentRelease() {
   return normalizeAgentRelease(await response.json());
 }
 
-function Metric({ icon: Icon, label, value, detail = '', active = null }) {
+function Metric({ icon: Icon, label, value, detail = '', detailTone = 'slate', active = null }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
       <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
@@ -448,7 +487,7 @@ function Metric({ icon: Icon, label, value, detail = '', active = null }) {
         {label}
       </div>
       <p className="mt-1 truncate text-sm font-bold text-slate-800">{value}</p>
-      {detail && <p className="mt-0.5 truncate text-[11px] font-semibold text-slate-500">{detail}</p>}
+      {detail && <p className={`mt-0.5 truncate text-[11px] font-semibold ${detailTone === 'red' ? 'text-red-600' : 'text-slate-500'}`}>{detail}</p>}
     </div>
   );
 }
@@ -520,26 +559,27 @@ function ActionButton({ children, icon: Icon, onClick, disabled = false, tone = 
   );
 }
 
-function WifiToggle({ enabled, onToggle, disabled = false }) {
+function WifiToggle({ enabled, onToggle, disabled = false, className = '', label = 'Wi-Fi', icon: Icon = WifiIcon, compact = false, title = '' }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={enabled}
-      aria-label={`Wi-Fi ${enabled ? 'on' : 'off'}`}
+      aria-label={`${label} ${enabled ? 'on' : 'off'}`}
+      title={title}
       onClick={onToggle}
       disabled={disabled}
-      className="flex min-h-10 items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40"
+      className={`flex min-h-10 min-w-0 items-center justify-between ${compact ? 'gap-2 px-2' : 'gap-3 px-3'} rounded-lg border border-slate-200 bg-slate-50 text-xs font-bold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 ${className}`}
     >
-      <span className="flex items-center gap-2">
-        <WifiIcon className="h-4 w-4" />
-        Wi-Fi
+      <span className="flex min-w-0 items-center gap-2">
+        <Icon className="h-4 w-4 shrink-0" />
+        <span className="truncate">{label}</span>
       </span>
-      <span className="grid min-w-[5.5rem] grid-cols-2 rounded-lg border border-slate-300 bg-slate-200 p-0.5">
-        <span className={`rounded-md px-2 py-1 text-center transition ${enabled ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'}`}>
+      <span className={`grid shrink-0 grid-cols-2 rounded-lg border border-slate-300 bg-slate-200 p-0.5 ${compact ? 'min-w-[4.75rem]' : 'min-w-[5.5rem]'}`}>
+        <span className={`rounded-md ${compact ? 'px-1.5' : 'px-2'} py-1 text-center transition ${enabled ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500'}`}>
           On
         </span>
-        <span className={`rounded-md px-2 py-1 text-center transition ${enabled ? 'text-slate-500' : 'bg-white text-slate-700 shadow-sm'}`}>
+        <span className={`rounded-md ${compact ? 'px-1.5' : 'px-2'} py-1 text-center transition ${enabled ? 'text-slate-500' : 'bg-white text-slate-700 shadow-sm'}`}>
           Off
         </span>
       </span>
@@ -618,12 +658,14 @@ function PhoneLocationCard({ device, now, onRefresh, onToggleLocation, locationE
   );
 }
 
-function NetworkSignalBars({ level, label }) {
-  const normalizedLevel = Number.isFinite(Number(level))
+function NetworkSignalBars({ dbm, type = 'wifi', level, label, active = true }) {
+  const dbmLevel = phoneSignalLevelFromDbm(dbm, type);
+  const fallbackLevel = Number.isFinite(Number(level))
     ? Math.max(0, Math.min(4, Number(level)))
     : -1;
+  const normalizedLevel = active ? (dbmLevel ?? fallbackLevel) : -1;
   return (
-    <span className="inline-flex h-4 items-end gap-0.5" role="img" aria-label={label}>
+    <span className={`inline-flex h-4 items-end gap-0.5 ${active ? '' : 'opacity-60'}`} role="img" aria-label={label}>
       {[1, 2, 3, 4].map((bar) => (
         <span
           key={bar}
@@ -750,7 +792,19 @@ function WifiJoinModal({ network, onClose, onJoin }) {
   );
 }
 
-function PhoneNetworkCard({ device, now, canControl, canJoin, isAdmin, onScan, onJoin, onOpenCaptivePortal }) {
+function PhoneNetworkCard({
+  device,
+  now,
+  canControl,
+  canJoin,
+  isAdmin,
+  onScan,
+  onJoin,
+  onOpenCaptivePortal,
+  onWifiToggle,
+  onToggleHotspot,
+  onToggleAlwaysOnHotspot,
+}) {
   const inventory = device?.inventory || {};
   const networks = inventory.availableWifiNetworks || [];
   const networkToolsReady = inventory.commandEncryptionReady;
@@ -798,21 +852,51 @@ function PhoneNetworkCard({ device, now, canControl, canJoin, isAdmin, onScan, o
         </div>
       </div>
 
+      <div className="grid grid-cols-2 gap-2 border-t border-slate-100 bg-slate-50/60 px-3 pt-3">
+        <WifiToggle
+          enabled={inventory.hotspotActive}
+          icon={WifiIcon}
+          onToggle={onToggleHotspot}
+          disabled={!canControl || !inventory.hotspotSupported || !inventory.hotspotControlGranted}
+          title={!inventory.hotspotSupported
+            ? 'Hotspot control requires Android 16 or newer'
+            : !inventory.hotspotControlGranted
+              ? 'Open Agent on the phone and approve hotspot control first'
+              : ''}
+          label="Hotspot"
+          compact
+        />
+        <WifiToggle
+          enabled={inventory.hotspotAlwaysOn}
+          onToggle={onToggleAlwaysOnHotspot}
+          disabled={!canControl || !inventory.hotspotSupported || !inventory.hotspotControlGranted}
+          label="Always on"
+          icon={ArrowPathIcon}
+          compact
+        />
+        {inventory.hotspotLastError && inventory.hotspotAlwaysOn && !inventory.hotspotActive && (
+          <p className="col-span-2 mt-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800">
+            {humanizePhoneMessage(inventory.hotspotLastError)}
+          </p>
+        )}
+      </div>
+
       <div className="grid gap-2 border-t border-slate-100 bg-slate-50/60 p-3 sm:grid-cols-2">
         <div className="rounded-lg border border-slate-200 bg-white p-3">
           <div className="flex items-center justify-between gap-3">
             <span className="flex items-center gap-2 text-xs font-bold text-slate-700"><WifiIcon className="h-4 w-4 text-blue-600" />Wi-Fi</span>
-            <NetworkSignalBars level={inventory.wifiSignalLevel} label={`Wi-Fi ${wifiSignalText}`} />
+            <NetworkSignalBars dbm={inventory.wifiRssiDbm} level={inventory.wifiSignalLevel} active={inventory.wifiEnabled && inventory.wifiConnected} label={`Wi-Fi ${wifiSignalText}`} />
           </div>
           <p className="mt-2 truncate text-sm font-black text-slate-900">{inventory.wifiSsid || (inventory.wifiConnected ? 'Connected' : inventory.wifiEnabled ? 'Not connected' : 'Wi-Fi is off')}</p>
           <p className="mt-1 text-[11px] text-slate-500">
             {[wifiSignalText, inventory.wifiBand, inventory.wifiLinkSpeedMbps == null ? '' : `${inventory.wifiLinkSpeedMbps} Mbps`].filter(Boolean).join(' · ')}
           </p>
+          <WifiToggle enabled={inventory.wifiEnabled} onToggle={onWifiToggle} disabled={!canControl} className="mt-3 w-full" />
         </div>
         <div className="rounded-lg border border-slate-200 bg-white p-3">
           <div className="flex items-center justify-between gap-3">
             <span className="flex items-center gap-2 text-xs font-bold text-slate-700"><SignalIcon className="h-4 w-4 text-blue-600" />Cellular</span>
-            <NetworkSignalBars level={inventory.cellularSignalLevel} label={`Cellular ${cellularSignalText}`} />
+            <NetworkSignalBars dbm={inventory.cellularSignalDbm} type="cellular" level={inventory.cellularSignalLevel} active={inventory.cellularSignalDbm != null} label={`Cellular ${cellularSignalText}`} />
           </div>
           <p className="mt-2 truncate text-sm font-black text-slate-900">{inventory.cellularCarrier || 'Carrier unavailable'}</p>
           <p className="mt-1 text-[11px] text-slate-500">
@@ -834,7 +918,7 @@ function PhoneNetworkCard({ device, now, canControl, canJoin, isAdmin, onScan, o
           <div className="mt-2 max-h-64 space-y-1.5 overflow-y-auto pr-1">
             {networks.map((network, index) => (
               <div key={`${network.ssid}-${network.security}-${index}`} className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${network.connected ? 'border-blue-200 bg-blue-50' : 'border-slate-200 bg-white'}`}>
-                <NetworkSignalBars level={network.signalLevel} label={`${network.ssid} ${network.signalDbm == null ? '' : `${network.signalDbm} dBm`}`} />
+                <NetworkSignalBars dbm={network.signalDbm} level={network.signalLevel} active={inventory.wifiEnabled} label={`${network.ssid} ${network.signalDbm == null ? '' : `${network.signalDbm} dBm`}`} />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-xs font-bold text-slate-800">{network.ssid}</p>
                   <p className="mt-0.5 truncate text-[10px] text-slate-500">{[wifiSecurityLabel(network.security), network.band, network.signalDbm == null ? '' : `${network.signalDbm} dBm`].filter(Boolean).join(' · ')}</p>
@@ -1232,6 +1316,10 @@ function RemoteScreen({
         <ActionButton icon={ArrowDownIcon} onClick={swipeDown} disabled={!canInput} className="!gap-1 !px-2 !text-[11px] whitespace-nowrap">Swipe down</ActionButton>
         <ActionButton icon={WifiIcon} onClick={() => onCommand('OPEN_TETHER_SETTINGS')} disabled={!canSendCommand} tone="blue" className="!gap-1 !px-2 !text-[11px] whitespace-nowrap">Tethering</ActionButton>
       </div>
+      <div className="mx-auto mt-2 grid max-w-[360px] grid-cols-2 gap-2">
+        <ActionButton icon={LockOpenIcon} onClick={() => onCommand('WAKE_AND_UNLOCK')} disabled={!canSendCommand} tone="blue">Unlock</ActionButton>
+        <ActionButton icon={LockClosedIcon} onClick={() => onCommand('LOCK_NOW')} disabled={!canSendCommand || webRtcActive} title={webRtcActive ? 'Stop the live stream before locking the phone' : ''} tone="amber">Lock</ActionButton>
+      </div>
       <p className="mt-3 text-center text-[10px] leading-4 text-slate-500">
         The phone stays awake during live sessions. Android ends screen sharing if the hardware or dashboard Lock control is used.
       </p>
@@ -1256,6 +1344,7 @@ export default function PhoneControlPage({
   const [commandStatus, setCommandStatus] = useState(null);
   const [confirmation, setConfirmation] = useState(null);
   const [assignmentStationId, setAssignmentStationId] = useState('');
+  const [assignmentTerminalEnabled, setAssignmentTerminalEnabled] = useState(false);
   const [enrollmentCountry, setEnrollmentCountry] = useState('CA');
   const [enrollmentStationId, setEnrollmentStationId] = useState('');
   const [enrollmentCode, setEnrollmentCode] = useState('');
@@ -1357,7 +1446,7 @@ export default function PhoneControlPage({
       });
       setCommands((Array.isArray(response?.commands) ? response.commands : [])
         .sort((left, right) => commandTimestamp(right) - commandTimestamp(left))
-        .slice(0, 6));
+        .slice(0, 3));
     } catch (error) {
       console.error('Unable to load phone command activity', error);
     }
@@ -1460,13 +1549,46 @@ export default function PhoneControlPage({
   const selectedDevice = devices.find((device) => device.id === selectedDeviceId) || null;
   const selectedKiosk = selectedDevice ? getKioskForPhone(selectedDevice, accessibleKiosks) : null;
   const selectedConnection = getPhoneConnectionState(selectedDevice, now);
+  const selectedTerminalStyle = TERMINAL_STYLES[selectedDevice?.terminal?.state] ||
+    (selectedDevice?.terminal?.enabled ? TERMINAL_STYLES.pending : TERMINAL_STYLES.disabled);
+  const selectedTerminalAgentReady = Number(selectedDevice?.inventory?.agentVersionCode || 0) >=
+    TERMINAL_AGENT_MIN_VERSION_CODE;
+  const selectedTerminalLocked = selectedDevice?.inventory?.terminalLockdownActive === true ||
+    selectedDevice?.terminal?.lockdownEnabled === true;
+  const assignmentUnchanged = assignmentStationId === selectedDevice?.stationId &&
+    assignmentTerminalEnabled === (selectedDevice?.terminal?.enabled === true);
   const canControlSelected = hasPhoneControlAccess && selectedConnection === 'online' && selectedDevice?.enrollmentState === 'enrolled';
-  const selectedWebRtcActive = isPhoneWebRtcActive(selectedDevice?.screen?.webrtc, now);
   const selectedRemoteInputAvailable = isPhoneRemoteInputAvailable(selectedDevice, now);
+  const selectedModelCohort = useMemo(() => {
+    if (!selectedDevice) return null;
+    const manufacturer = String(selectedDevice.inventory.manufacturer || '').trim().toLowerCase();
+    const model = String(selectedDevice.inventory.model || '').trim().toLowerCase();
+    if (!model) return null;
+    const members = devices.filter((device) => (
+      String(device.inventory.manufacturer || '').trim().toLowerCase() === manufacturer &&
+      String(device.inventory.model || '').trim().toLowerCase() === model
+    ));
+    const reportedVersions = members
+      .map((device) => String(device.inventory.androidVersion || '').trim())
+      .filter(Boolean);
+    const versions = [...new Set(reportedVersions)]
+      .sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+    return {
+      count: members.length,
+      versions,
+      aligned: reportedVersions.length === members.length && versions.length === 1,
+    };
+  }, [devices, selectedDevice]);
+  const selectedModelVersionDetail = selectedModelCohort?.count === 1
+    ? 'Only managed phone of this model'
+    : selectedModelCohort?.aligned
+      ? `Android ${selectedModelCohort.versions[0] || 'version unknown'} aligned across ${selectedModelCohort.count} phones`
+      : `Version mismatch: ${selectedModelCohort?.versions.join(', ') || 'one or more unknown'}`;
 
   useEffect(() => {
     setAssignmentStationId(selectedDevice?.stationId || '');
-  }, [selectedDevice?.id, selectedDevice?.stationId]);
+    setAssignmentTerminalEnabled(selectedDevice?.terminal?.enabled === true);
+  }, [selectedDevice?.id, selectedDevice?.stationId, selectedDevice?.terminal?.enabled]);
 
   const sendCommand = useCallback(async (operation, args = {}, confirmed = false) => {
     if (!selectedDevice?.id) return;
@@ -1590,8 +1712,10 @@ export default function PhoneControlPage({
       const result = await callFunctionWithAuth('phoneControl_assignDevice', {
         deviceId: selectedDevice.id,
         stationId: assignmentStationId,
+        terminalEnabled: assignmentTerminalEnabled,
       });
       setCommandStatus({ state: 'success', message: result?.message || `Phone assigned to ${assignmentStationId}.` });
+      await loadDevices(false);
     } catch (error) {
       setCommandStatus({ state: 'error', message: error?.message || 'Phone assignment failed.' });
     }
@@ -1724,7 +1848,14 @@ export default function PhoneControlPage({
                         </div>
                         <p className="mt-1 truncate text-xs text-slate-500">{kiosk?.info?.location || kiosk?.info?.place || device.displayName || device.id}</p>
                       </div>
-                      <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold ${style.badge}`}>{style.label}</span>
+                      <div className="flex shrink-0 flex-col items-end gap-1">
+                        <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${style.badge}`}>{style.label}</span>
+                        {device.terminal.enabled && (
+                          <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${TERMINAL_STYLES[device.terminal.state]?.badge || TERMINAL_STYLES.pending.badge}`}>
+                            {TERMINAL_STYLES[device.terminal.state]?.label || TERMINAL_STYLES.pending.label}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <div className="mt-3 flex items-center justify-between gap-3 border-t border-slate-200/80 pt-3 text-xs text-slate-500">
                       <span className="truncate font-semibold">{device.inventory.model}</span>
@@ -1750,16 +1881,61 @@ export default function PhoneControlPage({
                           <h2 className="text-2xl font-black text-slate-900">{selectedDevice.stationId || 'Unassigned phone'}</h2>
                           <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${STATE_STYLES[selectedConnection].badge}`}>{STATE_STYLES[selectedConnection].label}</span>
                           <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${selectedDevice.inventory.isDeviceOwner ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}`}>{selectedDevice.inventory.isDeviceOwner ? 'Device Owner' : 'Owner missing'}</span>
+                          <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${selectedTerminalStyle.badge}`}>{selectedTerminalStyle.label}</span>
                         </div>
                         <p className="mt-1 text-sm text-slate-500">{selectedKiosk?.info?.location || selectedKiosk?.info?.place || 'No kiosk location'}{selectedKiosk?.info?.client ? ` · ${selectedKiosk.info.client}` : ''}</p>
                         <p className="mt-1 font-mono text-[11px] text-slate-400">{selectedDevice.id}</p>
                       </div>
-                      {isAdmin && <div className="flex min-w-[260px] gap-2">
-                        <select value={assignmentStationId} onChange={(event) => setAssignmentStationId(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                          <option value="">Assign to kiosk</option>
-                          {kioskOptions.map((kiosk) => <option key={kiosk.stationId} value={kiosk.stationId} disabled={assignedStationIds.has(kiosk.stationId) && kiosk.stationId !== selectedDevice.stationId}>{kiosk.stationId}</option>)}
-                        </select>
-                        <button type="button" onClick={assignSelectedPhone} disabled={!assignmentStationId || assignmentStationId === selectedDevice.stationId} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40">Assign</button>
+                      {isAdmin && <div className="min-w-[300px] rounded-xl border border-slate-200 bg-slate-50 p-3">
+                        <div className="flex gap-2">
+                          <select value={assignmentStationId} onChange={(event) => setAssignmentStationId(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
+                            <option value="">Assign to kiosk</option>
+                            {kioskOptions.map((kiosk) => <option key={kiosk.stationId} value={kiosk.stationId} disabled={assignedStationIds.has(kiosk.stationId) && kiosk.stationId !== selectedDevice.stationId}>{kiosk.stationId}</option>)}
+                          </select>
+                          <button type="button" onClick={assignSelectedPhone} disabled={!assignmentStationId || assignmentUnchanged} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40">Save</button>
+                        </div>
+                        <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                          <input
+                            type="checkbox"
+                            checked={assignmentTerminalEnabled}
+                            onChange={(event) => setAssignmentTerminalEnabled(event.target.checked)}
+                            disabled={(!selectedDevice.inventory.commandEncryptionReady || !selectedTerminalAgentReady) && !selectedDevice.terminal.enabled}
+                            className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600"
+                          />
+                          <span className="min-w-0">
+                            <span className="flex items-center gap-1.5 text-xs font-black text-slate-800"><CreditCardIcon className="h-4 w-4 text-blue-600" />Run Stripe terminal on this phone</span>
+                            <span className="mt-0.5 block text-[10px] leading-4 text-slate-500">
+                              {selectedDevice.inventory.commandEncryptionReady && selectedTerminalAgentReady
+                                ? 'Provision this phone with the selected kiosk’s payment and V2 module configuration.'
+                                : 'Update to Chargerent Agent 1.2.14 before enabling terminal provisioning and lockdown.'}
+                            </span>
+                          </span>
+                        </label>
+                        {selectedDevice.terminal.enabled && (
+                          <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                            <div className="min-w-0">
+                              <p className="text-xs font-black text-slate-800">Payment app lockdown</p>
+                              <p className="mt-0.5 text-[10px] leading-4 text-slate-500">
+                                {selectedTerminalLocked
+                                  ? 'Customers cannot leave the Chargerent payment app.'
+                                  : 'Maintenance access is open until you lock the payment app again.'}
+                              </p>
+                              <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                                {selectedDevice.terminal.stripeAccountCountry || selectedDevice.stationId.slice(0, 2)} Stripe
+                                {selectedDevice.terminal.stripeMode ? ` · ${selectedDevice.terminal.stripeMode}` : ''}
+                                {selectedDevice.terminal.stripeLocationId ? ` · ${selectedDevice.terminal.stripeLocationId}` : ''}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => requestCommand('SET_TERMINAL_LOCKDOWN', { enabled: !selectedTerminalLocked })}
+                              disabled={!canControlSelected || !selectedTerminalAgentReady}
+                              className={`shrink-0 rounded-lg px-3 py-2 text-[11px] font-black text-white disabled:cursor-not-allowed disabled:opacity-40 ${selectedTerminalLocked ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'}`}
+                            >
+                              {selectedTerminalLocked ? 'Unlock app' : 'Lock app'}
+                            </button>
+                          </div>
+                        )}
                       </div>}
                     </div>
 
@@ -1773,7 +1949,13 @@ export default function PhoneControlPage({
                         active={selectedDevice.inventory.network !== 'offline'}
                       />
                       <Metric icon={WifiIcon} label="Hotspot" value={phoneHotspotLabel(selectedDevice.inventory)} active={selectedDevice.inventory.hotspotActive} />
-                      <Metric icon={DevicePhoneMobileIcon} label="Phone" value={`${selectedDevice.inventory.model}${selectedDevice.inventory.androidVersion ? ` · Android ${selectedDevice.inventory.androidVersion}` : ''}`} />
+                      <Metric
+                        icon={DevicePhoneMobileIcon}
+                        label="Phone"
+                        value={`${selectedDevice.inventory.model}${selectedDevice.inventory.androidVersion ? ` · Android ${selectedDevice.inventory.androidVersion}` : ''}`}
+                        detail={selectedModelVersionDetail}
+                        detailTone={selectedModelCohort?.aligned === false ? 'red' : 'slate'}
+                      />
                       <AgentMetric
                         inventory={selectedDevice.inventory}
                         release={agentRelease}
@@ -1783,12 +1965,6 @@ export default function PhoneControlPage({
                         onUpdate={requestAgentUpdate}
                       />
                     </div>
-
-                    {selectedDevice.inventory.hotspotLastError && selectedDevice.inventory.hotspotAlwaysOn && !selectedDevice.inventory.hotspotActive && (
-                      <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
-                        Hotspot: {humanizePhoneMessage(selectedDevice.inventory.hotspotLastError)}
-                      </p>
-                    )}
 
                   </section>
 
@@ -1811,6 +1987,12 @@ export default function PhoneControlPage({
                     />
 
                     <div className="space-y-4">
+                      <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                        <div className="grid grid-cols-2 gap-2">
+                          <ActionButton icon={ArrowPathIcon} onClick={() => requestCommand('REBOOT')} disabled={!canControlSelected} tone="amber">Reboot</ActionButton>
+                          <ActionButton icon={PowerIcon} onClick={() => requestCommand('POWER_OFF')} disabled={!canControlSelected} tone="red">Shut down</ActionButton>
+                        </div>
+                      </section>
                       <PhoneLocationCard
                         device={selectedDevice}
                         now={now}
@@ -1819,28 +2001,6 @@ export default function PhoneControlPage({
                         locationEnabled={selectedDevice.inventory.locationEnabled}
                         canRefresh={canControlSelected}
                       />
-                      <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-                        <div className="grid grid-cols-2 gap-2">
-                          <ActionButton icon={LockOpenIcon} onClick={() => requestCommand('WAKE_AND_UNLOCK')} disabled={!canControlSelected} tone="blue">Unlock</ActionButton>
-                          <WifiToggle enabled={selectedDevice.inventory.wifiEnabled} onToggle={() => requestCommand('SET_WIFI_ENABLED', { enabled: !selectedDevice.inventory.wifiEnabled })} disabled={!canControlSelected} />
-                          <ActionButton icon={LockClosedIcon} onClick={() => requestCommand('LOCK_NOW')} disabled={!canControlSelected || selectedWebRtcActive} title={selectedWebRtcActive ? 'Stop the live stream before locking the phone' : ''} tone="amber">Lock</ActionButton>
-                          <ActionButton icon={PowerIcon} onClick={() => requestCommand('REBOOT')} disabled={!canControlSelected} tone="red">Reboot</ActionButton>
-                          <ActionButton
-                            icon={WifiIcon}
-                            onClick={() => requestCommand('SET_ALWAYS_ON_HOTSPOT', { enabled: !selectedDevice.inventory.hotspotAlwaysOn })}
-                            disabled={!canControlSelected || !selectedDevice.inventory.hotspotSupported || !selectedDevice.inventory.hotspotControlGranted}
-                            title={!selectedDevice.inventory.hotspotSupported
-                              ? 'Always-on hotspot requires Android 16 or newer'
-                              : !selectedDevice.inventory.hotspotControlGranted
-                                ? 'Open Agent on the phone and approve always-on hotspot first'
-                                : ''}
-                            tone={selectedDevice.inventory.hotspotAlwaysOn ? 'green' : 'blue'}
-                            className="col-span-2"
-                          >
-                            Always-on hotspot: {selectedDevice.inventory.hotspotAlwaysOn ? 'On' : 'Off'}
-                          </ActionButton>
-                        </div>
-                      </section>
                       <PhoneNetworkCard
                         device={selectedDevice}
                         now={now}
@@ -1850,6 +2010,9 @@ export default function PhoneControlPage({
                         onScan={() => requestCommand('SCAN_WIFI_NETWORKS')}
                         onJoin={setWifiJoinNetwork}
                         onOpenCaptivePortal={() => requestCommand('OPEN_CAPTIVE_PORTAL')}
+                        onWifiToggle={() => requestCommand('SET_WIFI_ENABLED', { enabled: !selectedDevice.inventory.wifiEnabled })}
+                        onToggleHotspot={() => requestCommand('SET_HOTSPOT_ENABLED', { enabled: !selectedDevice.inventory.hotspotActive })}
+                        onToggleAlwaysOnHotspot={() => requestCommand('SET_ALWAYS_ON_HOTSPOT', { enabled: !selectedDevice.inventory.hotspotAlwaysOn })}
                       />
                       <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                       <h3 className="text-base font-black text-slate-900">Command activity</h3>

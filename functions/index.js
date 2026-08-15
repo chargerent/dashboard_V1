@@ -5,8 +5,17 @@ const {onDocumentWritten} = require("firebase-functions/v2/firestore");
 const {defineSecret} = require("firebase-functions/params");
 const crypto = require("node:crypto");
 const admin = require("firebase-admin");
+const Stripe = require("stripe");
+const mqtt = require("mqtt");
 const {rbcOpenApi} = require("./rbcOpenRouting/api");
 const {preserveProvisionedUiMode} = require("./uiProfileSnapshot");
+const {
+  createFirestoreKioskTerminalStore,
+  createKioskTerminalHandler,
+  createKioskTerminalService,
+  settleStripeReturn,
+} = require("./kioskTerminal");
+const {createMqttBesiterGateway} = require("./besiterGateway");
 const {
   DASHBOARD_STATS_SCHEMA_VERSION,
   applyRentalProjection,
@@ -52,6 +61,8 @@ const SLASH_GOLF_RAPIDAPI_KEY = defineSecret("SLASH_GOLF_RAPIDAPI_KEY");
 const GMAIL_APP_PASSWORD = defineSecret("GMAIL_APP_PASSWORD");
 const PHONE_CONTROL_SIGNING_PRIVATE_KEY = defineSecret("PHONE_CONTROL_SIGNING_PRIVATE_KEY");
 const TURN_SHARED_SECRET = defineSecret("TURN_SHARED_SECRET");
+const STRIPE_TEST_SECRET_KEY = defineSecret("STRIPE_TEST_SECRET_KEY");
+const BESITER_MQTT_CREDENTIALS = defineSecret("BESITER_MQTT_CREDENTIALS");
 const STORAGE_BUCKET = "node-red-alerts.firebasestorage.app";
 const STORAGE_BUCKET_CANDIDATES = Array.from(new Set([
   STORAGE_BUCKET,
@@ -522,6 +533,60 @@ const functions = {
     };
   },
 };
+
+const stripeTestClients = new Map();
+let besiterTerminalGateway = null;
+
+function getStripeTestClient(options = {}) {
+  const accountCountry = String(options.accountCountry || options.stripeAccountCountry || "US")
+      .trim().toUpperCase();
+  const mode = String(options.mode || options.stripeMode || "test").trim().toLowerCase();
+  if (mode !== "test" || !new Set(["US", "CA", "FR"]).has(accountCountry)) {
+    throw new Error("A supported test Stripe account country is required.");
+  }
+  const cacheKey = `${mode}:${accountCountry}`;
+  if (stripeTestClients.has(cacheKey)) return stripeTestClients.get(cacheKey);
+  const secretKey = String(STRIPE_TEST_SECRET_KEY.value() || "").trim();
+  if (!secretKey.startsWith("sk_test_")) {
+    throw new Error("STRIPE_TEST_SECRET_KEY must contain a Stripe test-mode secret key.");
+  }
+  const client = new Stripe(secretKey, {
+    appInfo: {
+      name: "Chargerent Kiosk Terminal",
+      version: "0.1.0",
+    },
+    maxNetworkRetries: 2,
+  });
+  stripeTestClients.set(cacheKey, client);
+  return client;
+}
+
+function getBesiterTerminalGateway() {
+  if (besiterTerminalGateway) return besiterTerminalGateway;
+  besiterTerminalGateway = createMqttBesiterGateway({
+    brokerUrl: "mqtt://34.56.244.66:1883",
+    credentials: BESITER_MQTT_CREDENTIALS.value(),
+    connect: mqtt.connect,
+  });
+  return besiterTerminalGateway;
+}
+
+const besiterTerminalGatewayProxy = {
+  requestAvailability(request) {
+    return getBesiterTerminalGateway().requestAvailability(request);
+  },
+  sendVend(request) {
+    return getBesiterTerminalGateway().sendVend(request);
+  },
+};
+
+const kioskTerminalStore = createFirestoreKioskTerminalStore(db);
+const kioskTerminalService = createKioskTerminalService({
+  store: kioskTerminalStore,
+  getStripeClient: getStripeTestClient,
+  besiterGateway: besiterTerminalGatewayProxy,
+});
+const kioskTerminalHandler = createKioskTerminalHandler(kioskTerminalService);
 
 function setCorsHeaders(req, res) {
   const origin = req.headers.origin || "*";
@@ -9631,15 +9696,31 @@ exports.phoneControl_httpCreateEnrollment = handleHttpFunction(async (data, req)
   });
 }, {secrets: [PHONE_CONTROL_SIGNING_PRIVATE_KEY]});
 
-exports.phoneControl_assignDevice = functions.https.onCall(async (data, context) => {
+exports.phoneControl_assignDevice = functions.runWith({
+  secrets: [PHONE_CONTROL_SIGNING_PRIVATE_KEY, STRIPE_TEST_SECRET_KEY],
+}).https.onCall(async (data, context) => {
   const authState = await assertAdminFromContext(context);
-  return assignPhoneDevice(data, authState, {db, admin});
+  return assignPhoneDevice(data, authState, {
+    db,
+    admin,
+    privateKeyPem: PHONE_CONTROL_SIGNING_PRIVATE_KEY.value(),
+    getStripeClient: getStripeTestClient,
+    stripeMode: "test",
+    packageName: "com.chargerent.kiosk.test.debug",
+  });
 });
 
 exports.phoneControl_httpAssignDevice = handleHttpFunction(async (data, req) => {
   const authState = await assertAdmin(req, data);
-  return assignPhoneDevice(data, authState, {db, admin});
-});
+  return assignPhoneDevice(data, authState, {
+    db,
+    admin,
+    privateKeyPem: PHONE_CONTROL_SIGNING_PRIVATE_KEY.value(),
+    getStripeClient: getStripeTestClient,
+    stripeMode: "test",
+    packageName: "com.chargerent.kiosk.test.debug",
+  });
+}, {secrets: [PHONE_CONTROL_SIGNING_PRIVATE_KEY, STRIPE_TEST_SECRET_KEY]});
 
 exports.phoneControl_listDevices = functions.https.onCall(async (data, context) => {
   const authState = await getAuthorizedProfileFromContext(context);
@@ -10424,6 +10505,24 @@ exports.stationBinding_moveModule = functions.https.onCall(async (data, context)
 exports.stationBinding_httpMoveModule = handleHttpFunction(async (data, req) => {
   const authState = await assertAdmin(req, data);
   return stationBindingMoveModuleImpl(data, authState);
+});
+
+exports.kioskTerminalApi = functions.runWith({
+  secrets: [STRIPE_TEST_SECRET_KEY, BESITER_MQTT_CREDENTIALS],
+}).https.onRequest(kioskTerminalHandler);
+
+exports.kioskTerminal_settleStripeReturn = onDocumentWritten({
+  document: "rentals/{rentalId}",
+  secrets: [STRIPE_TEST_SECRET_KEY],
+}, async (event) => {
+  if (!event.data.after.exists) return;
+  const rentalId = event.params.rentalId;
+  await settleStripeReturn({
+    rental: event.data.after.data() || {},
+    rentalId,
+    getStripeClient: getStripeTestClient,
+    store: kioskTerminalStore,
+  });
 });
 
 exports.rbcOpenApi = rbcOpenApi;
