@@ -8,6 +8,15 @@ const RETURNS_COLLECTION = "kioskTerminalReturns";
 const RESERVATION_TTL_MS = 3 * 60 * 1000;
 const RETURN_SESSION_TTL_MS = 2 * 60 * 1000;
 const VEND_RESULT_TTL_MS = 2 * 60 * 1000;
+const SHARED_TEST_ACCOUNT_CURRENCY_OVERRIDES = Object.freeze({
+  US: "usd",
+  FR: "usd",
+});
+const KIOSK_CURRENCY_CODES = Object.freeze({
+  usd: "US",
+  cad: "CA",
+  eur: "FR",
+});
 
 class KioskTerminalError extends Error {
   constructor(status, code, message) {
@@ -24,6 +33,14 @@ function fail(status, code, message) {
 
 function cleanString(value, maxLength = 160) {
   return String(value || "").trim().slice(0, maxLength);
+}
+
+function normalizeStripeAccountCountry(value) {
+  const country = cleanString(value, 2).toUpperCase();
+  if (!new Set(["US", "CA", "FR"]).has(country)) {
+    fail(503, "stripe-account-not-configured", "The kiosk Stripe account is not configured.");
+  }
+  return country;
 }
 
 function tokenHash(token) {
@@ -51,7 +68,7 @@ function requestBody(req) {
     try {
       const parsed = JSON.parse(body);
       return parsed && typeof parsed === "object" ? parsed : {};
-    } catch (_error) {
+    } catch {
       fail(400, "invalid-json", "The request body must be valid JSON.");
     }
   }
@@ -149,11 +166,26 @@ function formatMoney(cents, currency) {
   }).format(cents / 100);
 }
 
+function terminalPaymentCurrency(installation, configuredCurrency) {
+  const stripeMode = cleanString(installation && installation.stripeMode, 10).toLowerCase();
+  const accountCountry = normalizeStripeAccountCountry(
+      installation && installation.stripeAccountCountry,
+  );
+  if (stripeMode === "test" && SHARED_TEST_ACCOUNT_CURRENCY_OVERRIDES[accountCountry]) {
+    return SHARED_TEST_ACCOUNT_CURRENCY_OVERRIDES[accountCountry];
+  }
+  return configuredCurrency;
+}
+
 function resolveKioskOffer(installation, kiosk) {
   const pricing = kiosk && typeof kiosk.pricing === "object" ? kiosk.pricing : {};
   const hardware = kiosk && typeof kiosk.hardware === "object" ? kiosk.hardware : {};
   const {planCode, planLabel} = normalizePricingPlan(pricing.text);
-  const currency = normalizeKioskCurrency(pricing.currency);
+  const configuredCurrency = normalizeKioskCurrency(pricing.currency);
+  const currency = terminalPaymentCurrency(installation, configuredCurrency);
+  const configuredKioskCurrency = cleanString(pricing.currency, 10).toUpperCase();
+  const kioskCurrency = currency === configuredCurrency ?
+    configuredKioskCurrency : (KIOSK_CURRENCY_CODES[currency] || currency.toUpperCase());
   const gatewayOption = cleanString(
       hardware.gatewayoptions || hardware.gatewayOptions,
       40,
@@ -227,8 +259,13 @@ function resolveKioskOffer(installation, kiosk) {
     planLabel,
     gatewayOption,
     currency,
-    kioskCurrency: cleanString(pricing.currency, 10).toUpperCase(),
-    symbol: cleanString(pricing.symbol, 8) || paymentAmount.replace(/[\d\s.,-]/g, ""),
+    kioskCurrency,
+    configuredCurrency,
+    configuredKioskCurrency,
+    testCurrencyOverride: currency !== configuredCurrency,
+    symbol: currency === configuredCurrency ?
+      (cleanString(pricing.symbol, 8) || paymentAmount.replace(/[\d\s.,-]/g, "")) :
+      paymentAmount.replace(/[\d\s.,-]/g, ""),
     paymentAmountCents,
     paymentAmount,
     depositAmountCents: fullPrice ? paymentAmountCents : null,
@@ -346,15 +383,9 @@ async function settleStripeReturn({
   }
   const interaction = typeof store.getInteractionByPaymentIntentId === "function" ?
     await store.getInteractionByPaymentIntentId(paymentIntentId) : null;
-  const stationId = cleanString(
-      rental.stripeStationId || rental.rentalStationid || rental.stationid ||
-      interaction?.stationId,
-      40,
-  ).toUpperCase();
-  const stripeAccountCountry = cleanString(
-      rental.stripeAccountCountry || interaction?.stripeAccountCountry || stationId.slice(0, 2),
-      2,
-  ).toUpperCase();
+  const stripeAccountCountry = normalizeStripeAccountCountry(
+      rental.stripeAccountCountry || interaction?.stripeAccountCountry,
+  );
   const stripeMode = cleanString(
       rental.stripeMode || interaction?.stripeMode || "test",
       10,
@@ -423,13 +454,7 @@ function validateInstallation(installation) {
   if (cleanString(installation.stripeMode).toLowerCase() !== "test") {
     fail(503, "stripe-mode-mismatch", "This pilot endpoint requires Stripe test mode.");
   }
-  const stripeAccountCountry = cleanString(
-      installation.stripeAccountCountry || installation.stationId.slice(0, 2),
-      2,
-  ).toUpperCase();
-  if (!new Set(["US", "CA", "FR"]).has(stripeAccountCountry)) {
-    fail(503, "stripe-account-not-configured", "The kiosk Stripe account is not configured.");
-  }
+  const stripeAccountCountry = normalizeStripeAccountCountry(installation.stripeAccountCountry);
   if (!cleanString(installation.stripeLocationId, 160).startsWith("tml_")) {
     fail(503, "stripe-location-not-configured", "The kiosk Stripe location is not configured.");
   }
@@ -471,6 +496,53 @@ function createFirestoreKioskTerminalStore(db) {
     async getInstallation(id) {
       const snapshot = await db.collection(INSTALLATIONS_COLLECTION).doc(id).get();
       return snapshot.exists ? {id: snapshot.id, ...snapshot.data()} : null;
+    },
+
+    async confirmInstallation(installation, report, now) {
+      const installationRef = db.collection(INSTALLATIONS_COLLECTION).doc(installation.id);
+      const deviceRef = db.collection("phoneDevices").doc(installation.deviceId);
+      const assignmentRef = db.collection("phoneKioskAssignments").doc(installation.stationId);
+      await db.runTransaction(async (transaction) => {
+        const [installationSnapshot, deviceSnapshot] = await Promise.all([
+          transaction.get(installationRef),
+          transaction.get(deviceRef),
+        ]);
+        if (!installationSnapshot.exists || installationSnapshot.data()?.active !== true) {
+          fail(403, "installation-disabled", "This kiosk installation is disabled.");
+        }
+        const device = deviceSnapshot.data() || {};
+        const terminal = device.terminal && typeof device.terminal === "object" ?
+          device.terminal : {};
+        if (terminal.installationId !== installation.id ||
+            cleanString(device.stationId, 40).toUpperCase() !== installation.stationId) {
+          fail(409, "installation-reassigned", "This phone was assigned to another kiosk.");
+        }
+        const terminalUpdate = {
+          ...terminal,
+          enabled: true,
+          state: "ready",
+          lockdownEnabled: true,
+          message: `Payment app confirmed ${installation.stationId} configuration.`,
+          confirmedAt: now,
+          updatedAt: now,
+        };
+        transaction.set(installationRef, {
+          confirmationState: "confirmed",
+          confirmedAt: now,
+          lastSeenAt: now,
+          deviceReportedConfig: report,
+          updatedAt: now,
+        }, {merge: true});
+        transaction.set(deviceRef, {
+          terminal: terminalUpdate,
+          updatedAt: now,
+        }, {merge: true});
+        transaction.set(assignmentRef, {
+          terminalEnabled: true,
+          terminal: terminalUpdate,
+          updatedAt: now,
+        }, {merge: true});
+      });
     },
 
     async verifyKiosk(installation) {
@@ -695,11 +767,9 @@ function createKioskTerminalService({
   }
 
   function stripe(primary = {}, fallback = {}) {
-    const stationId = cleanString(primary.stationId || fallback.stationId, 40).toUpperCase();
-    const accountCountry = cleanString(
-        primary.stripeAccountCountry || fallback.stripeAccountCountry || stationId.slice(0, 2),
-        2,
-    ).toUpperCase();
+    const accountCountry = normalizeStripeAccountCountry(
+        primary.stripeAccountCountry || fallback.stripeAccountCountry,
+    );
     const mode = cleanString(
         primary.stripeMode || fallback.stripeMode || "test",
         10,
@@ -707,7 +777,7 @@ function createKioskTerminalService({
     let client;
     try {
       client = getStripeClient({accountCountry, mode});
-    } catch (_error) {
+    } catch {
       fail(
           503,
           "stripe-account-not-configured",
@@ -739,6 +809,30 @@ function createKioskTerminalService({
   }
 
   return {
+    async confirmInstallation(req) {
+      const body = requestBody(req);
+      const installation = await authorize(req, body);
+      const report = {
+        stationId: cleanString(body.stationId, 40).toUpperCase(),
+        provisionId: cleanString(body.provisionId, 100),
+        moduleId: cleanString(body.moduleId, 100),
+        slotCount: Number(body.slotCount),
+        currency: cleanString(body.currency, 10).toLowerCase(),
+        appVersion: cleanString(body.appVersion, 40),
+      };
+      if (report.provisionId !== installation.provisionId ||
+          report.moduleId !== installation.moduleId ||
+          report.currency !== cleanString(installation.currency, 10).toLowerCase() ||
+          report.slotCount !== normalizeSlotNumbers(installation).length) {
+        fail(409, "installation-config-mismatch", "The payment app configuration is out of date.");
+      }
+      await store.confirmInstallation(installation, report, now());
+      return {
+        status: 200,
+        body: {confirmed: true, stationId: installation.stationId},
+      };
+    },
+
     async getConfig(req) {
       const installation = await authorize(req);
       const [offer, availability] = await Promise.all([
@@ -791,8 +885,7 @@ function createKioskTerminalService({
         id: randomUUID(),
         installationId: installation.id,
         stationId: installation.stationId,
-        stripeAccountCountry: installation.stripeAccountCountry ||
-          installation.stationId.slice(0, 2).toUpperCase(),
+        stripeAccountCountry: installation.stripeAccountCountry,
         stripeMode: installation.stripeMode,
         provisionId: installation.provisionId,
         moduleId: availability.selected.moduleId,
@@ -1147,7 +1240,9 @@ function createKioskTerminalHandler(service) {
     const path = requestPath(req);
     try {
       let result;
-      if (method === "GET" && path === "/v1/config") {
+      if (method === "POST" && path === "/v1/installation/confirm") {
+        result = await service.confirmInstallation(req);
+      } else if (method === "GET" && path === "/v1/config") {
         result = await service.getConfig(req);
       } else if (method === "POST" && path === "/v1/terminal/connection-token") {
         result = await service.createConnectionToken(req);

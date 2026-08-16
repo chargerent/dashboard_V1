@@ -1,0 +1,7 @@
+{
+  "packageName": "com.chargerent.kiosk.test.debug",
+  "versionName": "0.2.3-stripe-test",
+  "versionCode": 5,
+  "apkUrl": "https://chargerentstations.com/portal/mdm/chargerent-payment-v0.2.3-stripe-test-portrait.apk",
+  "apkSha256": "2f98380c03291860f505bcf00fd87cfd6e75a7e2d0ef227e0a69c1383dab7be3"
+}

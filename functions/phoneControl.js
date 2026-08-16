@@ -58,6 +58,7 @@ const ALLOWED_OPERATIONS = new Set([
   "SET_KEYGUARD_DISABLED",
   "SET_KIOSK_ALLOWLIST",
   "SET_TERMINAL_LOCKDOWN",
+  "LAUNCH_PAYMENT_APP",
   "SET_APP_HIDDEN",
   "SET_APP_SUSPENDED",
   "SET_RUNTIME_PERMISSION",
@@ -294,6 +295,20 @@ function normalizeTerminalLockdownArguments(value, device = {}) {
   };
 }
 
+function normalizePaymentLaunchArguments(device = {}) {
+  const terminal = device.terminal && typeof device.terminal === "object" ?
+    device.terminal : {};
+  if (terminal.enabled !== true) {
+    throw new HttpsError(
+        "failed-precondition",
+        "Enable the Stripe terminal assignment before launching the payment app.",
+    );
+  }
+  return {
+    packageName: String(terminal.packageName || TERMINAL_PACKAGE_NAME),
+  };
+}
+
 function parseCommandEncryptionPublicKey(publicKeyBase64) {
   try {
     const publicKey = crypto.createPublicKey({
@@ -363,21 +378,20 @@ function normalizeTerminalCountry(value) {
 }
 
 function terminalAccountCountry(stationId, kiosk) {
-  const stationCountry = String(stationId || "").trim().toUpperCase().slice(0, 2);
-  if (!TERMINAL_ACCOUNT_COUNTRIES.has(stationCountry)) {
-    throw new HttpsError(
-        "failed-precondition",
-        `${stationId} does not identify a supported US, Canadian, or French Stripe account.`,
-    );
-  }
   const addressCountry = normalizeTerminalCountry(kiosk?.info?.country || kiosk?.country);
-  if (addressCountry && addressCountry !== stationCountry) {
+  if (!addressCountry) {
     throw new HttpsError(
         "failed-precondition",
-        `${stationId} has a ${addressCountry} address but requires the ${stationCountry} Stripe account.`,
+        `${stationId} needs a country in its physical address before terminal assignment.`,
     );
   }
-  return stationCountry;
+  if (!TERMINAL_ACCOUNT_COUNTRIES.has(addressCountry)) {
+    throw new HttpsError(
+        "failed-precondition",
+        `${stationId} has an unsupported ${addressCountry} terminal address country.`,
+    );
+  }
+  return addressCountry;
 }
 
 function terminalAddressForKiosk(stationId, kiosk) {
@@ -422,6 +436,43 @@ function cachedTerminalLocation(kiosk, cacheKey, addressHash) {
     {locationId, ...cached} : null;
 }
 
+async function assertStripeAccountCountry(config, stripe) {
+  if (!stripe?.accounts?.retrieve) {
+    throw new HttpsError(
+        "failed-precondition",
+        `The ${config.stripeAccountCountry} Stripe ${config.stripeMode} account cannot be verified.`,
+    );
+  }
+  let account;
+  try {
+    account = await stripe.accounts.retrieve();
+  } catch {
+    throw new HttpsError(
+        "failed-precondition",
+        `The ${config.stripeAccountCountry} Stripe ${config.stripeMode} account cannot be verified.`,
+    );
+  }
+  const actualCountry = normalizeTerminalCountry(account?.country);
+  if (actualCountry !== config.stripeAccountCountry) {
+    throw new HttpsError(
+        "failed-precondition",
+        `${config.stationId} has a ${config.stripeAccountCountry} address, but the configured ` +
+        `Stripe ${config.stripeMode} account is ${actualCountry || "missing its country"}.`,
+    );
+  }
+}
+
+function assertStripeLocationCountry(config, location) {
+  const actualCountry = normalizeTerminalCountry(location?.address?.country);
+  if (actualCountry !== config.stripeAccountCountry) {
+    throw new HttpsError(
+        "failed-precondition",
+        `${config.stationId} has a ${config.stripeAccountCountry} address, but its cached ` +
+        `Stripe Terminal Location is ${actualCountry || "missing its country"}.`,
+    );
+  }
+}
+
 async function ensureStripeTerminalLocation(config, kiosk, stripe) {
   if (!stripe?.terminal?.locations?.create) {
     throw new HttpsError(
@@ -429,6 +480,7 @@ async function ensureStripeTerminalLocation(config, kiosk, stripe) {
         `The ${config.stripeAccountCountry} Stripe ${config.stripeMode} account is not configured.`,
     );
   }
+  await assertStripeAccountCountry(config, stripe);
   const cached = cachedTerminalLocation(
       kiosk,
       config.stripeLocationCacheKey,
@@ -438,7 +490,10 @@ async function ensureStripeTerminalLocation(config, kiosk, stripe) {
     if (!stripe.terminal.locations.retrieve) return cached;
     try {
       const location = await stripe.terminal.locations.retrieve(cached.locationId);
-      if (location && location.id && location.deleted !== true) return cached;
+      if (location && location.id && location.deleted !== true) {
+        assertStripeLocationCountry(config, location);
+        return cached;
+      }
     } catch (error) {
       if (Number(error?.statusCode || error?.status) !== 404) throw error;
     }
@@ -496,16 +551,18 @@ function terminalConfigForKiosk(stationId, kioskSnapshot, options = {}) {
       `${stationId} has no V2 slots available for terminal assignment.`,
     );
   }
-  const offer = resolveKioskOffer({
-    stationId,
-    provisionId: kioskSnapshot.id,
-    moduleId,
-  }, kiosk);
   const stripeMode = String(options.stripeMode || TERMINAL_STRIPE_MODE).trim().toLowerCase();
   if (!new Set(["test", "live"]).has(stripeMode)) {
     throw new HttpsError("failed-precondition", "A valid Stripe terminal mode is required.");
   }
   const stripeAccountCountry = terminalAccountCountry(stationId, kiosk);
+  const offer = resolveKioskOffer({
+    stationId,
+    provisionId: kioskSnapshot.id,
+    moduleId,
+    stripeMode,
+    stripeAccountCountry,
+  }, kiosk);
   const stripeLocationAddress = terminalAddressForKiosk(stationId, kiosk);
   const stripeLocationAddressHash = terminalAddressHash(stripeLocationAddress);
   const stripeLocationCacheKey = terminalLocationCacheKey(stripeMode, stripeAccountCountry);
@@ -855,6 +912,32 @@ function completedCommandScreenUpdate(operation, result, currentScreen = {}) {
     };
   }
   return null;
+}
+
+function terminalStateAfterAppRestrictions(
+    currentTerminal,
+    {status, requestedEnabled, lockdownActive, errorMessage, updatedAt},
+) {
+  const appAlreadyConfirmed = status === "completed" && requestedEnabled &&
+    currentTerminal?.state === "ready" && Boolean(currentTerminal?.confirmedAt);
+  return {
+    ...currentTerminal,
+    enabled: requestedEnabled,
+    state: status === "completed" ?
+      (requestedEnabled ?
+        (appAlreadyConfirmed ? "ready" : "awaiting_app_confirmation") : "disabled") :
+      "error",
+    lockdownEnabled: status === "completed" && requestedEnabled,
+    lockdownState: status === "completed" ?
+      (requestedEnabled ? (lockdownActive ? "locked" : "locking") : "unlocked") : "error",
+    message: status === "completed" ?
+      (requestedEnabled ?
+        (appAlreadyConfirmed ? currentTerminal.message :
+          "Waiting for the payment app to confirm its kiosk configuration.") :
+        "Payment terminal removed from the phone.") :
+      (errorMessage || "The phone could not apply terminal configuration."),
+    updatedAt,
+  };
 }
 
 async function findKiosk(db, stationId) {
@@ -1324,6 +1407,7 @@ async function assignDevice(data, authState, dependencies) {
     if (installationRef) {
       transaction.create(installationRef, {
         active: true,
+        confirmationState: "pending",
         deviceId,
         stationId,
         provisionId: terminalConfig.provisionId,
@@ -1374,13 +1458,13 @@ async function sendCommand(data, authState, dependencies) {
   const requestId = normalizeRequestId(data?.requestId);
   const operation = normalizeOperation(data?.operation);
   const confirmed = data?.confirmed === true;
-  if (["CONNECT_WIFI", "SET_TERMINAL_LOCKDOWN"].includes(operation) &&
+  if (["CONNECT_WIFI", "SET_TERMINAL_LOCKDOWN", "LAUNCH_PAYMENT_APP"].includes(operation) &&
       !isPhoneControlAdmin(authState)) {
     throw new HttpsError(
         "permission-denied",
         operation === "CONNECT_WIFI" ?
           "Only Chargerent administrators can join a phone to Wi-Fi." :
-          "Only Chargerent administrators can change payment-app lockdown.",
+          "Only Chargerent administrators can control the payment app.",
     );
   }
   if (HIGH_IMPACT_OPERATIONS.has(operation) && !confirmed) {
@@ -1409,6 +1493,8 @@ async function sendCommand(data, authState, dependencies) {
         data?.arguments,
         authorizedDeviceSnapshot.data(),
     );
+  } else if (operation === "LAUNCH_PAYMENT_APP") {
+    commandArguments = normalizePaymentLaunchArguments(authorizedDeviceSnapshot.data());
   } else {
     commandArguments = normalizeArguments(data?.arguments, maxArgumentBytes);
   }
@@ -1749,19 +1835,14 @@ async function recordCommandResult(data, req, dependencies) {
       const currentTerminal = deviceSnapshot.data()?.terminal;
       if (currentTerminal?.commandId === commandId) {
         const requestedEnabled = commandData.arguments?.restrictions?.terminal_enabled === true;
-        deviceUpdate.terminal = {
-          ...currentTerminal,
-          enabled: requestedEnabled,
-          state: status === "completed" ? (requestedEnabled ? "ready" : "disabled") : "error",
-          lockdownEnabled: status === "completed" && requestedEnabled,
-          lockdownState: status === "completed" ?
-            (requestedEnabled ? "locked" : "unlocked") : "error",
-          message: status === "completed" ?
-            (requestedEnabled ? "Payment terminal configured on the phone." :
-              "Payment terminal removed from the phone.") :
-            (errorMessage || "The phone could not apply terminal configuration."),
+        const lockdownActive = result?.lockdown?.active === true;
+        deviceUpdate.terminal = terminalStateAfterAppRestrictions(currentTerminal, {
+          status,
+          requestedEnabled,
+          lockdownActive,
+          errorMessage,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        };
+        });
         const assignmentRef = db.collection(ASSIGNMENTS_COLLECTION)
             .doc(String(commandData.stationId || "").trim().toUpperCase());
         transaction.set(assignmentRef, {
@@ -1893,6 +1974,7 @@ module.exports = {
   normalizePaymentAppArguments,
   normalizeConnectWifiArguments,
   normalizeHotspotArguments,
+  normalizePaymentLaunchArguments,
   normalizeTerminalLockdownArguments,
   normalizeWebRtcStartArguments,
   normalizeDeviceId,
@@ -1912,4 +1994,5 @@ module.exports = {
   terminalAddressForKiosk,
   terminalCommandArguments,
   terminalConfigForKiosk,
+  terminalStateAfterAppRestrictions,
 };

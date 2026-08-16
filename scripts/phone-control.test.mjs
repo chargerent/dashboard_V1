@@ -16,6 +16,7 @@ import {
   phoneHotspotLabel,
   normalizePhoneDevice,
   normalizeAgentRelease,
+  normalizePaymentAppRelease,
   phoneMatchesSearch,
   phoneTimestampToMillis,
 } from '../src/utils/phoneControl.js';
@@ -39,6 +40,23 @@ test('validates the signed Agent release metadata used for updates', () => {
     ...release,
     packageName: 'com.chargerent.remoteagent',
     apkUrl: 'https://example.com/remote-agent-v1.2.0.apk',
+  }), /approved Chargerent download location/);
+});
+
+test('validates the signed payment app release metadata used for terminal updates', () => {
+  const release = normalizePaymentAppRelease({
+    packageName: 'com.chargerent.kiosk.test.debug',
+    versionName: '0.2.3-stripe-test',
+    versionCode: 5,
+    apkUrl: 'https://chargerentstations.com/portal/mdm/chargerent-payment-v0.2.3-stripe-test-portrait.apk',
+    apkSha256: 'B'.repeat(64),
+  });
+  assert.equal(release.packageName, 'com.chargerent.kiosk.test.debug');
+  assert.equal(release.versionCode, 5);
+  assert.equal(release.apkSha256, 'b'.repeat(64));
+  assert.throws(() => normalizePaymentAppRelease({
+    ...release,
+    apkUrl: 'https://example.com/chargerent-payment-v0.2.3-stripe-test.apk',
   }), /approved Chargerent download location/);
 });
 

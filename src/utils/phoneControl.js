@@ -19,6 +19,7 @@ export const HIGH_IMPACT_PHONE_OPERATIONS = new Set([
   'REQUEST_BUGREPORT',
   'INSTALL_SYSTEM_UPDATE',
   'INSTALL_APP_UPDATE',
+  'INSTALL_PAYMENT_APP',
   'WIPE_DEVICE',
 ]);
 
@@ -56,6 +57,37 @@ export function normalizeAgentRelease(metadata = {}) {
     throw new Error('The Agent release information is incomplete.');
   }
   return {
+    versionName,
+    versionCode,
+    apkUrl: apkUrl.toString(),
+    apkSha256,
+  };
+}
+
+export function normalizePaymentAppRelease(metadata = {}) {
+  let apkUrl;
+  try {
+    apkUrl = new URL(String(metadata.apkUrl || '').trim());
+  } catch {
+    throw new Error('The payment app release URL is invalid.');
+  }
+  if (apkUrl.origin !== AGENT_RELEASE_ORIGIN || apkUrl.search || apkUrl.hash ||
+      !/^\/portal\/mdm\/chargerent-payment-v\d+\.\d+\.\d+(?:-[a-z0-9-]+)?\.apk$/.test(apkUrl.pathname)) {
+    throw new Error('The payment app release is not from the approved Chargerent download location.');
+  }
+
+  const packageName = String(metadata.packageName || '').trim();
+  const versionName = String(metadata.versionName || '').trim();
+  const versionCode = Number(metadata.versionCode);
+  const apkSha256 = String(metadata.apkSha256 || '').trim().toLowerCase();
+  if (!/^com\.chargerent\.kiosk(?:\.[A-Za-z0-9_]+)*$/.test(packageName) ||
+      !/^\d+\.\d+\.\d+(?:-[a-z0-9-]+)?$/.test(versionName) ||
+      !Number.isSafeInteger(versionCode) || versionCode < 1 ||
+      !/^[0-9a-f]{64}$/.test(apkSha256)) {
+    throw new Error('The payment app release information is incomplete.');
+  }
+  return {
+    packageName,
     versionName,
     versionCode,
     apkUrl: apkUrl.toString(),

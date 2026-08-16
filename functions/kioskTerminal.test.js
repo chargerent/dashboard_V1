@@ -5,6 +5,7 @@ const test = require("node:test");
 const {
   createKioskTerminalHandler,
   createKioskTerminalService,
+  resolveKioskOffer,
   settleStripeReturn,
   tokenHash,
 } = require("./kioskTerminal");
@@ -17,10 +18,10 @@ const INSTALLATION = {
   provisionId: "id-9987807816",
   moduleId: "100049231111490591",
   stripeMode: "test",
-  stripeAccountCountry: "CA",
+  stripeAccountCountry: "US",
   stripeLocationId: "tml_test_location",
   amountCents: 777,
-  currency: "cad",
+  currency: "usd",
   slotNumbers: [1, 2, 3],
 };
 
@@ -75,10 +76,14 @@ function createFakeStore() {
       returnedRental = value;
     },
     kioskVerified: 0,
+    confirmations: [],
     released: [],
     extended: [],
     async getInstallation(id) {
       return id === INSTALLATION.id ? {...INSTALLATION} : null;
+    },
+    async confirmInstallation(installation, report) {
+      this.confirmations.push({installation, report});
     },
     async verifyKiosk() {
       this.kioskVerified += 1;
@@ -287,7 +292,47 @@ test("connection token is minted from the kiosk country Stripe account", async (
   assert.equal(result.status, 200);
   assert.equal(result.body.secret, "pst_test_connection_secret");
   assert.equal(stripe.calls.connectionTokens, 1);
-  assert.deepEqual(stripeSelections, [{accountCountry: "CA", mode: "test"}]);
+  assert.deepEqual(stripeSelections, [{accountCountry: "US", mode: "test"}]);
+});
+
+test("payment app confirms the exact managed kiosk configuration", async () => {
+  const {service, store} = createFixture();
+  const result = await service.confirmInstallation(request({
+    path: "/v1/installation/confirm",
+    body: {
+      stationId: "CA8019",
+      provisionId: "id-9987807816",
+      moduleId: "100049231111490591",
+      slotCount: 3,
+      currency: "usd",
+      appVersion: "0.2.3-stripe-test",
+    },
+  }));
+
+  assert.equal(result.status, 200);
+  assert.equal(result.body.confirmed, true);
+  assert.equal(store.confirmations.length, 1);
+  assert.equal(store.confirmations[0].report.stationId, "CA8019");
+  assert.equal(store.confirmations[0].report.currency, "usd");
+});
+
+test("payment app cannot confirm a stale currency bundle", async () => {
+  const {service, store} = createFixture();
+  await assert.rejects(
+      service.confirmInstallation(request({
+        path: "/v1/installation/confirm",
+        body: {
+          stationId: "CA8019",
+          provisionId: "id-9987807816",
+          moduleId: "100049231111490591",
+          slotCount: 3,
+          currency: "eur",
+          appVersion: "0.2.3-stripe-test",
+        },
+      })),
+      (error) => error.code === "installation-config-mismatch" && error.status === 409,
+  );
+  assert.equal(store.confirmations.length, 0);
 });
 
 test("config derives pricing and availability from the kiosk and Besiter", async () => {
@@ -307,6 +352,92 @@ test("config derives pricing and availability from the kiosk and Besiter", async
   assert.equal(besiter.calls.availability.length, 1);
 });
 
+test("French shared-account test terminals use USD consistently", () => {
+  const offer = resolveKioskOffer({
+    stationId: "FR8011",
+    stripeMode: "test",
+    stripeAccountCountry: "FR",
+  }, {
+    hardware: {gatewayoptions: "FULLPRICE"},
+    pricing: {
+      text: "PURCHASE - SIMPLE DAILY",
+      currency: "FR",
+      symbol: "€",
+      kioskmode: "PURCHASE",
+      initialperiod: 24,
+      authamount: 2,
+      dailyprice: 4,
+      buyprice: 30,
+      overdue: 30,
+    },
+  });
+
+  assert.equal(offer.currency, "usd");
+  assert.equal(offer.kioskCurrency, "US");
+  assert.equal(offer.configuredCurrency, "eur");
+  assert.equal(offer.configuredKioskCurrency, "FR");
+  assert.equal(offer.testCurrencyOverride, true);
+  assert.equal(offer.symbol, "$");
+  assert.equal(offer.paymentAmount, "$30.00");
+  assert.deepEqual(offer.pricingLines, [
+    "$4.00 per 24-hour period",
+    "$30.00 if not returned after 30 days",
+  ]);
+});
+
+test("US-address test terminals keep USD when kiosk pricing is still French", () => {
+  const offer = resolveKioskOffer({
+    stationId: "FR8011",
+    stripeMode: "test",
+    stripeAccountCountry: "US",
+  }, {
+    hardware: {gatewayoptions: "FULLPRICE"},
+    pricing: {
+      text: "PURCHASE - SIMPLE DAILY",
+      currency: "FR",
+      symbol: "€",
+      kioskmode: "PURCHASE",
+      initialperiod: 24,
+      authamount: 2,
+      dailyprice: 4,
+      buyprice: 30,
+      overdue: 30,
+    },
+  });
+
+  assert.equal(offer.currency, "usd");
+  assert.equal(offer.kioskCurrency, "US");
+  assert.equal(offer.configuredCurrency, "eur");
+  assert.equal(offer.testCurrencyOverride, true);
+  assert.equal(offer.symbol, "$");
+});
+
+test("French live terminals retain the configured EUR currency", () => {
+  const offer = resolveKioskOffer({
+    stationId: "FR8011",
+    stripeMode: "live",
+    stripeAccountCountry: "FR",
+  }, {
+    hardware: {gatewayoptions: "FULLPRICE"},
+    pricing: {
+      text: "PURCHASE - SIMPLE DAILY",
+      currency: "FR",
+      symbol: "€",
+      kioskmode: "PURCHASE",
+      initialperiod: 24,
+      authamount: 2,
+      dailyprice: 4,
+      buyprice: 30,
+      overdue: 30,
+    },
+  });
+
+  assert.equal(offer.currency, "eur");
+  assert.equal(offer.kioskCurrency, "FR");
+  assert.equal(offer.testCurrencyOverride, false);
+  assert.equal(offer.symbol, "€");
+});
+
 test("rental creates a kiosk-priced manual-capture card-present payment", async () => {
   const {service, store, stripe, besiter} = createFixture();
   const created = await service.createInteraction(request({
@@ -322,7 +453,7 @@ test("rental creates a kiosk-priced manual-capture card-present payment", async 
   assert.equal(created.body.reservedSlot, 2);
   assert.equal(created.body.amountCents, 100);
   assert.equal(store.kioskVerified, 1);
-  assert.equal(store.interactions.get("test-id-2").stripeAccountCountry, "CA");
+  assert.equal(store.interactions.get("test-id-2").stripeAccountCountry, "US");
 
   const payment = await service.createPaymentIntent(
       request({path: "/v1/interactions/test-id-1/payment-intent"}),
@@ -352,7 +483,7 @@ test("rental creates a kiosk-priced manual-capture card-present payment", async 
   assert.equal(besiter.calls.vends[0].chargerid, 41807101);
   assert.equal(besiter.calls.vends[0].slotid, 2);
   assert.equal(besiter.calls.vends[0].paymentIntentId, "pi_test_8019");
-  assert.equal(besiter.calls.vends[0].stripeAccountCountry, "CA");
+  assert.equal(besiter.calls.vends[0].stripeAccountCountry, "US");
 
   const status = await service.getInteraction(
       request({method: "GET", path: "/v1/interactions/test-id-1"}),
@@ -473,7 +604,7 @@ test("a free on-time Stripe return refunds the captured kiosk deposit", async ()
     id: "interaction-return",
     paymentIntentId: "pi_test_return",
     stationId: "CA8019",
-    stripeAccountCountry: "CA",
+    stripeAccountCountry: "US",
     stripeMode: "test",
   });
 
@@ -493,9 +624,9 @@ test("a free on-time Stripe return refunds the captured kiosk deposit", async ()
   assert.equal(stripe.calls.refunds[0].params.amount, 100);
   assert.equal(stripe.calls.refunds[0].options.idempotencyKey, "kiosk-return-refund-pi_test_return");
   assert.equal(store.rentals.get("pi_test_return").stripeReturnSettlement.status, "completed");
-  assert.deepEqual(stripeSelections, [{accountCountry: "CA", mode: "test"}]);
+  assert.deepEqual(stripeSelections, [{accountCountry: "US", mode: "test"}]);
   assert.equal(
       store.rentals.get("pi_test_return").stripeReturnSettlement.stripeAccountCountry,
-      "CA",
+      "US",
   );
 });

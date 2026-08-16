@@ -41,6 +41,7 @@ import {
   isPhoneWebRtcActive,
   isPhoneRemoteInputAvailable,
   normalizeAgentRelease,
+  normalizePaymentAppRelease,
   normalizePhoneDevice,
   phoneLocationMapUrls,
   phoneHotspotLabel,
@@ -124,6 +125,7 @@ const PHONE_COMMAND_LABELS = {
   SET_KEYGUARD_DISABLED: 'Lock screen',
   SET_KIOSK_ALLOWLIST: 'Kiosk apps',
   SET_TERMINAL_LOCKDOWN: 'Payment app lockdown',
+  LAUNCH_PAYMENT_APP: 'Launch payment app',
   SET_APP_HIDDEN: 'App visibility',
   SET_APP_SUSPENDED: 'App suspension',
   SET_RUNTIME_PERMISSION: 'App permission',
@@ -142,6 +144,7 @@ const PHONE_COMMAND_LABELS = {
   STOP_WEBRTC_SCREEN: 'Stop live screen',
   INSTALL_SYSTEM_UPDATE: 'Install system update',
   INSTALL_APP_UPDATE: 'Install app update',
+  INSTALL_PAYMENT_APP: 'Update payment app',
   WIPE_DEVICE: 'Erase phone',
 };
 
@@ -172,8 +175,10 @@ function commandActionLabel(operation, args = {}) {
   if (operation === 'SET_HOTSPOT_ENABLED') return `Turn hotspot ${args.enabled === true ? 'on' : 'off'}`;
   if (operation === 'SET_ALWAYS_ON_HOTSPOT') return `${args.enabled === true ? 'Enable' : 'Disable'} always-on hotspot`;
   if (operation === 'SET_TERMINAL_LOCKDOWN') return `${args.enabled === true ? 'Lock' : 'Unlock'} payment app`;
+  if (operation === 'LAUNCH_PAYMENT_APP') return 'Launch payment app';
   if (operation === 'POWER_OFF') return 'Shut down phone';
   if (operation === 'INSTALL_APP_UPDATE' && args.versionName) return `Install Agent ${args.versionName}`;
+  if (operation === 'INSTALL_PAYMENT_APP' && args.versionName) return `Install payment app ${args.versionName}`;
   return commandLabel(operation);
 }
 
@@ -244,6 +249,15 @@ function phoneCommandConfirmationDetails(confirmation, device) {
       title: `Install Agent ${versionName}`,
       action: operation,
       confirmationText: `Install Agent ${versionName} on the phone assigned to ${stationLabel}? Remote management will restart briefly while Android replaces the app.`,
+    };
+  }
+
+  if (operation === 'INSTALL_PAYMENT_APP') {
+    const versionName = confirmation?.args?.versionName || 'update';
+    return {
+      title: `Update Payment App ${versionName}`,
+      action: operation,
+      confirmationText: `Install payment app ${versionName} on the terminal assigned to ${stationLabel}? The customer screen will restart briefly and return to lockdown.`,
     };
   }
 
@@ -479,6 +493,15 @@ async function fetchCurrentAgentRelease() {
   return normalizeAgentRelease(await response.json());
 }
 
+async function fetchCurrentPaymentAppRelease() {
+  const basePath = import.meta.env.BASE_URL || '/portal/';
+  const response = await fetch(`${basePath}mdm/chargerent-payment-provisioning.json`, {
+    cache: 'no-store',
+  });
+  if (!response.ok) throw new Error('Current payment app release information is unavailable.');
+  return normalizePaymentAppRelease(await response.json());
+}
+
 function Metric({ icon: Icon, label, value, detail = '', detailTone = 'slate', active = null }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
@@ -556,6 +579,117 @@ function ActionButton({ children, icon: Icon, onClick, disabled = false, tone = 
       <Icon className="h-4 w-4" />
       {children}
     </button>
+  );
+}
+
+function TerminalControlPanel({
+  device,
+  terminalStyle,
+  locked,
+  canControl,
+  agentReady,
+  paymentUpdateChecking,
+  onToggleLockdown,
+  onLaunch,
+  onReprovision,
+  onUpdatePaymentApp,
+}) {
+  const inventory = device?.inventory || {};
+  const terminal = device?.terminal || {};
+  const packageVersion = inventory.terminalPackageVersionName
+    ? `v${inventory.terminalPackageVersionName}`
+    : 'Version not reported';
+  const stripeCountry = terminal.stripeAccountCountry || 'Not configured';
+  const stripeMode = terminal.stripeMode ? terminal.stripeMode.toUpperCase() : 'UNKNOWN';
+  const controlsDisabled = !canControl || !agentReady;
+
+  return (
+    <section className="overflow-hidden rounded-xl border border-blue-200 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 text-white shadow-lg">
+      <div className="border-b border-white/10 px-5 py-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <CreditCardIcon className="h-6 w-6 text-blue-300" />
+              <h3 className="text-xl font-black">Payment terminal</h3>
+            </div>
+            <p className="mt-2 max-w-xl text-sm leading-6 text-slate-300">
+              Dedicated terminal controls replace live screen and Android navigation for this phone.
+            </p>
+          </div>
+          <span className={`rounded-full px-3 py-1.5 text-xs font-black ${terminalStyle.badge}`}>
+            {terminalStyle.label}
+          </span>
+        </div>
+      </div>
+
+      <div className="grid gap-3 border-b border-white/10 px-5 py-4 sm:grid-cols-2">
+        <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Payment app</p>
+          <p className="mt-1 text-sm font-black text-white">
+            {inventory.terminalPackageInstalled ? 'Installed' : 'Not installed'}
+          </p>
+          <p className="mt-0.5 text-xs text-slate-400">{packageVersion}</p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Lockdown</p>
+          <p className={`mt-1 text-sm font-black ${locked ? 'text-emerald-300' : 'text-amber-300'}`}>
+            {locked ? 'Locked for customers' : 'Maintenance access open'}
+          </p>
+          <p className="mt-0.5 text-xs text-slate-400">
+            {inventory.terminalLockdownPermitted ? 'Device Owner permission active' : 'Device Owner permission missing'}
+          </p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Stripe account</p>
+          <p className="mt-1 text-sm font-black text-white">{stripeCountry} · {stripeMode}</p>
+          <p className="mt-0.5 text-xs text-slate-400">Derived from the kiosk terminal assignment</p>
+        </div>
+        <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Configuration</p>
+          <p className="mt-1 text-sm font-black text-white">{terminal.message || 'Waiting for terminal status'}</p>
+          <p className="mt-0.5 text-xs text-slate-400">{device?.stationId || 'Unassigned phone'}</p>
+        </div>
+      </div>
+
+      <div className="grid gap-3 p-5 sm:grid-cols-2">
+        <ActionButton
+          icon={locked ? LockOpenIcon : LockClosedIcon}
+          onClick={onToggleLockdown}
+          disabled={controlsDisabled}
+          tone={locked ? 'amber' : 'green'}
+          className="min-h-14 !text-sm"
+        >
+          {locked ? 'Unlock to Home' : 'Lock app'}
+        </ActionButton>
+        <ActionButton
+          icon={PlayIcon}
+          onClick={onLaunch}
+          disabled={controlsDisabled || !inventory.terminalPackageInstalled}
+          tone="blue"
+          className="min-h-14 !text-sm"
+        >
+          Launch app
+        </ActionButton>
+        <ActionButton
+          icon={ArrowPathIcon}
+          onClick={onReprovision}
+          disabled={controlsDisabled || !inventory.commandEncryptionReady}
+          tone="slate"
+          className="min-h-14 !text-sm"
+        >
+          Reprovision
+        </ActionButton>
+        <ActionButton
+          icon={BoltIcon}
+          onClick={onUpdatePaymentApp}
+          disabled={controlsDisabled || paymentUpdateChecking}
+          tone="blue"
+          className="min-h-14 !text-sm"
+        >
+          {paymentUpdateChecking ? 'Checking update…' : 'Update payment app'}
+        </ActionButton>
+      </div>
+    </section>
   );
 }
 
@@ -1351,6 +1485,7 @@ export default function PhoneControlPage({
   const [addPhoneOpen, setAddPhoneOpen] = useState(false);
   const [liveRequestedDeviceId, setLiveRequestedDeviceId] = useState('');
   const [agentUpdateChecking, setAgentUpdateChecking] = useState(false);
+  const [paymentUpdateChecking, setPaymentUpdateChecking] = useState(false);
   const [agentRelease, setAgentRelease] = useState(null);
   const [agentReleaseLoading, setAgentReleaseLoading] = useState(true);
   const [wifiJoinNetwork, setWifiJoinNetwork] = useState(null);
@@ -1661,6 +1796,37 @@ export default function PhoneControlPage({
     }
   }, [agentUpdateChecking, selectedDevice]);
 
+  const requestPaymentAppUpdate = useCallback(async () => {
+    if (!selectedDevice?.id || paymentUpdateChecking) return;
+    setPaymentUpdateChecking(true);
+    setCommandStatus({ state: 'sending', message: 'Checking the current payment app release…' });
+    try {
+      const release = await fetchCurrentPaymentAppRelease();
+      const assignedPackage = String(selectedDevice.terminal?.packageName || '').trim();
+      if (assignedPackage && assignedPackage !== release.packageName) {
+        throw new Error(`The published payment app does not match ${assignedPackage}.`);
+      }
+      setCommandStatus(null);
+      setConfirmation({
+        operation: 'INSTALL_PAYMENT_APP',
+        args: {
+          httpsUrl: release.apkUrl,
+          sha256: release.apkSha256,
+          packageName: release.packageName,
+          versionCode: release.versionCode,
+          versionName: release.versionName,
+        },
+      });
+    } catch (error) {
+      setCommandStatus({
+        state: 'error',
+        message: humanizePhoneMessage(error?.message || 'Could not check for payment app updates.'),
+      });
+    } finally {
+      setPaymentUpdateChecking(false);
+    }
+  }, [paymentUpdateChecking, selectedDevice]);
+
   const startRealtimeScreen = useCallback(async (arguments_) => {
     if (!selectedDevice?.id) return;
     setLiveRequestedDeviceId(selectedDevice.id);
@@ -1718,6 +1884,29 @@ export default function PhoneControlPage({
       await loadDevices(false);
     } catch (error) {
       setCommandStatus({ state: 'error', message: error?.message || 'Phone assignment failed.' });
+    }
+  };
+
+  const reprovisionSelectedTerminal = async () => {
+    const stationId = selectedDevice?.stationId;
+    if (!selectedDevice?.id || !stationId || selectedDevice.terminal?.enabled !== true) return;
+    setCommandStatus({ state: 'sending', message: `Reprovisioning ${stationId} terminal…` });
+    try {
+      const result = await callFunctionWithAuth('phoneControl_assignDevice', {
+        deviceId: selectedDevice.id,
+        stationId,
+        terminalEnabled: true,
+      });
+      setCommandStatus({
+        state: 'success',
+        message: result?.message || `Terminal reprovisioning queued for ${stationId}.`,
+      });
+      await loadDevices(false);
+    } catch (error) {
+      setCommandStatus({
+        state: 'error',
+        message: humanizePhoneMessage(error?.message || 'Terminal reprovisioning failed.'),
+      });
     }
   };
 
@@ -1911,31 +2100,6 @@ export default function PhoneControlPage({
                             </span>
                           </span>
                         </label>
-                        {selectedDevice.terminal.enabled && (
-                          <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2">
-                            <div className="min-w-0">
-                              <p className="text-xs font-black text-slate-800">Payment app lockdown</p>
-                              <p className="mt-0.5 text-[10px] leading-4 text-slate-500">
-                                {selectedTerminalLocked
-                                  ? 'Customers cannot leave the Chargerent payment app.'
-                                  : 'Maintenance access is open until you lock the payment app again.'}
-                              </p>
-                              <p className="mt-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                                {selectedDevice.terminal.stripeAccountCountry || selectedDevice.stationId.slice(0, 2)} Stripe
-                                {selectedDevice.terminal.stripeMode ? ` · ${selectedDevice.terminal.stripeMode}` : ''}
-                                {selectedDevice.terminal.stripeLocationId ? ` · ${selectedDevice.terminal.stripeLocationId}` : ''}
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => requestCommand('SET_TERMINAL_LOCKDOWN', { enabled: !selectedTerminalLocked })}
-                              disabled={!canControlSelected || !selectedTerminalAgentReady}
-                              className={`shrink-0 rounded-lg px-3 py-2 text-[11px] font-black text-white disabled:cursor-not-allowed disabled:opacity-40 ${selectedTerminalLocked ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'}`}
-                            >
-                              {selectedTerminalLocked ? 'Unlock app' : 'Lock app'}
-                            </button>
-                          </div>
-                        )}
                       </div>}
                     </div>
 
@@ -1969,22 +2133,37 @@ export default function PhoneControlPage({
                   </section>
 
                   <div className="grid gap-4 lg:grid-cols-[minmax(280px,0.75fr)_minmax(0,1.25fr)]">
-                    <RemoteScreen
-                      device={selectedDevice}
-                      canControl={canControlSelected}
-                      canInput={canControlSelected && selectedRemoteInputAvailable}
-                      canSendCommand={canControlSelected}
-                      onCommand={requestCommand}
-                      onPrepareRealtime={prepareRealtimeScreen}
-                      onRealtimeError={reportRealtimeError}
-                      onStartRealtime={startRealtimeScreen}
-                      onStopRealtime={stopRealtimeScreen}
-                      onStartPreview={startLivePreview}
-                      onStopPreview={stopLivePreview}
-                      liveRequested={liveRequestedDeviceId === selectedDevice.id}
-                      remoteInputAvailable={selectedRemoteInputAvailable}
-                      now={now}
-                    />
+                    {selectedDevice.terminal.enabled ? (
+                      <TerminalControlPanel
+                        device={selectedDevice}
+                        terminalStyle={selectedTerminalStyle}
+                        locked={selectedTerminalLocked}
+                        canControl={canControlSelected}
+                        agentReady={selectedTerminalAgentReady}
+                        paymentUpdateChecking={paymentUpdateChecking}
+                        onToggleLockdown={() => requestCommand('SET_TERMINAL_LOCKDOWN', { enabled: !selectedTerminalLocked })}
+                        onLaunch={() => requestCommand('LAUNCH_PAYMENT_APP')}
+                        onReprovision={reprovisionSelectedTerminal}
+                        onUpdatePaymentApp={requestPaymentAppUpdate}
+                      />
+                    ) : (
+                      <RemoteScreen
+                        device={selectedDevice}
+                        canControl={canControlSelected}
+                        canInput={canControlSelected && selectedRemoteInputAvailable}
+                        canSendCommand={canControlSelected}
+                        onCommand={requestCommand}
+                        onPrepareRealtime={prepareRealtimeScreen}
+                        onRealtimeError={reportRealtimeError}
+                        onStartRealtime={startRealtimeScreen}
+                        onStopRealtime={stopRealtimeScreen}
+                        onStartPreview={startLivePreview}
+                        onStopPreview={stopLivePreview}
+                        liveRequested={liveRequestedDeviceId === selectedDevice.id}
+                        remoteInputAvailable={selectedRemoteInputAvailable}
+                        now={now}
+                      />
+                    )}
 
                     <div className="space-y-4">
                       <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
