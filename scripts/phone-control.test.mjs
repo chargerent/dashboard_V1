@@ -6,6 +6,7 @@ import {
   formatPhoneRelativeTime,
   getKioskForPhone,
   getPhoneKioskCountryCode,
+  getPhoneStationCountryCode,
   getPhoneConnectionState,
   isPhoneWebRtcActive,
   isPhoneAgentUpdateAvailable,
@@ -111,6 +112,8 @@ test('normalizes kiosk assignment and Android inventory', () => {
       cellularSignalDbm: -92,
       commandEncryptionPublicKey: 'public-key',
       terminalPackageInstalled: true,
+      terminalPackageVersionName: '0.2.3-stripe-test',
+      terminalPackageVersionCode: 5,
       terminalLockdownDesired: true,
       terminalLockdownPermitted: true,
       terminalLockdownActive: true,
@@ -154,6 +157,8 @@ test('normalizes kiosk assignment and Android inventory', () => {
   assert.equal(device.inventory.cellularTechnology, '5G');
   assert.equal(device.inventory.commandEncryptionReady, true);
   assert.equal(device.inventory.terminalPackageInstalled, true);
+  assert.equal(device.inventory.terminalPackageVersionName, '0.2.3-stripe-test');
+  assert.equal(device.inventory.terminalPackageVersionCode, 5);
   assert.equal(device.inventory.terminalLockdownActive, true);
   assert.equal(device.inventory.availableWifiNetworks[0].security, 'wpa2_wpa3');
   assert.equal(device.inventory.hotspotActive, true);
@@ -289,6 +294,13 @@ test('resolves enrollment kiosk countries from explicit data and station prefixe
   assert.equal(getPhoneKioskCountryCode({ stationid: 'OTHER', info: { country: 'France' } }), 'FR');
   assert.equal(getPhoneKioskCountryCode({ stationId: 'US0118', country: 'USA' }), 'US');
   assert.equal(getPhoneKioskCountryCode({ stationid: 'XX0001' }), '');
+});
+
+test('derives phone list and assignment countries only from station ids', () => {
+  assert.equal(getPhoneStationCountryCode('ca8019'), 'CA');
+  assert.equal(getPhoneStationCountryCode(' FR8011 '), 'FR');
+  assert.equal(getPhoneStationCountryCode('US0118'), 'US');
+  assert.equal(getPhoneStationCountryCode('OTHER'), '');
 });
 
 test('encodes the versioned binary WebRTC control protocol', () => {

@@ -13,6 +13,10 @@ export const PHONE_KIOSK_COUNTRIES = [
   { code: 'US', label: 'US' },
 ];
 
+export function getPhoneStationCountryCode(stationId) {
+  return String(stationId || '').trim().toUpperCase().match(/^(CA|FR|US)/)?.[1] || '';
+}
+
 export const HIGH_IMPACT_PHONE_OPERATIONS = new Set([
   'REBOOT',
   'POWER_OFF',
@@ -285,6 +289,8 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
       availableWifiScannedAt: phoneTimestampToMillis(inventory.availableWifiScannedAt),
       commandEncryptionReady: Boolean(String(inventory.commandEncryptionPublicKey || '').trim()),
       terminalPackageInstalled: inventory.terminalPackageInstalled === true,
+      terminalPackageVersionName: String(inventory.terminalPackageVersionName || '').trim(),
+      terminalPackageVersionCode: optionalNumber(inventory.terminalPackageVersionCode),
       terminalLockdownDesired: inventory.terminalLockdownDesired === true,
       terminalLockdownPermitted: inventory.terminalLockdownPermitted === true,
       terminalLockdownActive: inventory.terminalLockdownActive === true,
@@ -416,7 +422,6 @@ export function getPhoneKioskCountryCode(kiosk) {
   };
   if (countryAliases[explicitCountry]) return countryAliases[explicitCountry];
 
-  const stationId = String(kiosk?.stationid || kiosk?.stationId || '').trim().toUpperCase();
-  const stationPrefix = stationId.match(/^(CA|FR|US)/)?.[1] || '';
+  const stationPrefix = getPhoneStationCountryCode(kiosk?.stationid || kiosk?.stationId);
   return countryAliases[stationPrefix] || '';
 }

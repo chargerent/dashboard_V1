@@ -36,6 +36,7 @@ import {
   formatPhoneRelativeTime,
   getKioskForPhone,
   getPhoneKioskCountryCode,
+  getPhoneStationCountryCode,
   getPhoneConnectionState,
   isPhoneAgentUpdateAvailable,
   isPhoneWebRtcActive,
@@ -60,14 +61,23 @@ import {
   waitForIceGatheringComplete,
 } from '../utils/phoneWebRtc.js';
 
-const FILTERS = [
-  { value: 'all', label: 'All phones' },
-  { value: 'online', label: 'Online' },
-  { value: 'offline', label: 'Offline' },
-  { value: 'unassigned', label: 'Unassigned' },
+const PHONE_CARD_FILTERS = [
+  { value: 'all', label: 'All' },
+  { value: 'CA', label: 'CA' },
+  { value: 'FR', label: 'FR' },
+  { value: 'US', label: 'US' },
+  { value: 'attention', label: 'Needs attention' },
+  { value: 'terminal', label: 'Terminal' },
+  { value: 'no-terminal', label: 'No terminal' },
 ];
 
 const TERMINAL_AGENT_MIN_VERSION_CODE = 29;
+
+function phoneNeedsAttention(device, now = Date.now()) {
+  return getPhoneConnectionState(device, now) !== 'online' ||
+    device?.inventory?.isDeviceOwner !== true ||
+    !isPhoneRemoteInputAvailable(device, now);
+}
 
 const STATE_STYLES = {
   online: { dot: 'bg-emerald-500', badge: 'bg-emerald-100 text-emerald-700', label: 'Online' },
@@ -598,7 +608,7 @@ function TerminalControlPanel({
   const terminal = device?.terminal || {};
   const packageVersion = inventory.terminalPackageVersionName
     ? `v${inventory.terminalPackageVersionName}`
-    : 'Version not reported';
+    : '';
   const stripeCountry = terminal.stripeAccountCountry || 'Not configured';
   const stripeMode = terminal.stripeMode ? terminal.stripeMode.toUpperCase() : 'UNKNOWN';
   const controlsDisabled = !canControl || !agentReady;
@@ -628,26 +638,17 @@ function TerminalControlPanel({
           <p className="mt-1 text-sm font-black text-white">
             {inventory.terminalPackageInstalled ? 'Installed' : 'Not installed'}
           </p>
-          <p className="mt-0.5 text-xs text-slate-400">{packageVersion}</p>
+          {packageVersion && <p className="mt-0.5 text-xs text-slate-400">{packageVersion}</p>}
         </div>
         <div className="rounded-xl border border-white/10 bg-white/5 p-3">
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Lockdown</p>
           <p className={`mt-1 text-sm font-black ${locked ? 'text-emerald-300' : 'text-amber-300'}`}>
-            {locked ? 'Locked for customers' : 'Maintenance access open'}
-          </p>
-          <p className="mt-0.5 text-xs text-slate-400">
-            {inventory.terminalLockdownPermitted ? 'Device Owner permission active' : 'Device Owner permission missing'}
+            {locked ? 'Locked' : 'Not locked'}
           </p>
         </div>
-        <div className="rounded-xl border border-white/10 bg-white/5 p-3">
+        <div className="rounded-xl border border-white/10 bg-white/5 p-3 sm:col-span-2">
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Stripe account</p>
           <p className="mt-1 text-sm font-black text-white">{stripeCountry} · {stripeMode}</p>
-          <p className="mt-0.5 text-xs text-slate-400">Derived from the kiosk terminal assignment</p>
-        </div>
-        <div className="rounded-xl border border-white/10 bg-white/5 p-3">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Configuration</p>
-          <p className="mt-1 text-sm font-black text-white">{terminal.message || 'Waiting for terminal status'}</p>
-          <p className="mt-0.5 text-xs text-slate-400">{device?.stationId || 'Unassigned phone'}</p>
         </div>
       </div>
 
@@ -1473,11 +1474,12 @@ export default function PhoneControlPage({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('all');
+  const [phoneCardFilter, setPhoneCardFilter] = useState('all');
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
   const [commandStatus, setCommandStatus] = useState(null);
   const [confirmation, setConfirmation] = useState(null);
   const [assignmentStationId, setAssignmentStationId] = useState('');
+  const [assignmentCountry, setAssignmentCountry] = useState('CA');
   const [assignmentTerminalEnabled, setAssignmentTerminalEnabled] = useState(false);
   const [enrollmentCountry, setEnrollmentCountry] = useState('CA');
   const [enrollmentStationId, setEnrollmentStationId] = useState('');
@@ -1502,6 +1504,12 @@ export default function PhoneControlPage({
   const changeEnrollmentStation = useCallback((stationId) => {
     setEnrollmentStationId(stationId);
     setEnrollmentCode('');
+  }, []);
+  const changeAssignmentCountry = useCallback((countryCode) => {
+    setAssignmentCountry(countryCode);
+    setAssignmentStationId((current) => (
+      getPhoneStationCountryCode(current) === countryCode ? current : ''
+    ));
   }, []);
 
   const isAdmin = currentUser?.isAdmin === true || currentUser?.role === 'admin' || currentUser?.username === 'chargerent';
@@ -1664,6 +1672,7 @@ export default function PhoneControlPage({
     .map((kiosk) => ({
       stationId: stationIdOf(kiosk),
       countryCode: getPhoneKioskCountryCode(kiosk),
+      stationCountryCode: getPhoneStationCountryCode(stationIdOf(kiosk)),
       label: kiosk?.info?.location || kiosk?.info?.place || kiosk?.info?.client || '',
     }))
     .filter((kiosk) => kiosk.stationId)
@@ -1673,13 +1682,18 @@ export default function PhoneControlPage({
     kioskOptions.filter((kiosk) => kiosk.countryCode === enrollmentCountry)
   ), [enrollmentCountry, kioskOptions]);
 
+  const assignmentKioskOptions = useMemo(() => (
+    kioskOptions.filter((kiosk) => kiosk.stationCountryCode === assignmentCountry)
+  ), [assignmentCountry, kioskOptions]);
+
   const filteredDevices = useMemo(() => devices.filter((device) => {
-    const connection = getPhoneConnectionState(device, now);
-    if (filter === 'online' && connection !== 'online') return false;
-    if (filter === 'offline' && connection === 'online') return false;
-    if (filter === 'unassigned' && device.stationId) return false;
+    if (['CA', 'FR', 'US'].includes(phoneCardFilter) &&
+        getPhoneStationCountryCode(device.stationId) !== phoneCardFilter) return false;
+    if (phoneCardFilter === 'attention' && !phoneNeedsAttention(device, now)) return false;
+    if (phoneCardFilter === 'terminal' && device.terminal.enabled !== true) return false;
+    if (phoneCardFilter === 'no-terminal' && device.terminal.enabled === true) return false;
     return phoneMatchesSearch(device, kioskByStationId.get(device.stationId), search);
-  }), [devices, filter, kioskByStationId, now, search]);
+  }), [devices, kioskByStationId, now, phoneCardFilter, search]);
 
   const selectedDevice = devices.find((device) => device.id === selectedDeviceId) || null;
   const selectedKiosk = selectedDevice ? getKioskForPhone(selectedDevice, accessibleKiosks) : null;
@@ -1722,6 +1736,7 @@ export default function PhoneControlPage({
 
   useEffect(() => {
     setAssignmentStationId(selectedDevice?.stationId || '');
+    setAssignmentCountry(getPhoneStationCountryCode(selectedDevice?.stationId) || 'CA');
     setAssignmentTerminalEnabled(selectedDevice?.terminal?.enabled === true);
   }, [selectedDevice?.id, selectedDevice?.stationId, selectedDevice?.terminal?.enabled]);
 
@@ -1925,10 +1940,7 @@ export default function PhoneControlPage({
 
   const onlineCount = devices.filter((device) => getPhoneConnectionState(device, now) === 'online').length;
   const unassignedCount = devices.filter((device) => !device.stationId).length;
-  const attentionCount = devices.filter((device) => (
-    getPhoneConnectionState(device, now) !== 'online' || !device.inventory.isDeviceOwner ||
-    !isPhoneRemoteInputAvailable(device, now)
-  )).length;
+  const attentionCount = devices.filter((device) => phoneNeedsAttention(device, now)).length;
 
   if (!hasPhoneControlAccess) {
     return <div className="min-h-screen bg-gray-100 p-6"><div className="mx-auto max-w-3xl rounded-lg border border-red-200 bg-red-50 p-6 text-red-700">Mobile Device Management is not enabled for this account.</div></div>;
@@ -1991,18 +2003,9 @@ export default function PhoneControlPage({
         </section>
 
         <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-            <div>
-              <label htmlFor="phone-search" className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Find kiosk or phone</label>
-              <input id="phone-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Station ID, location, client, model, or device ID" className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10" />
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {FILTERS.map((item) => (
-                <button key={item.value} type="button" onClick={() => setFilter(item.value)} className={`rounded-lg px-3 py-2 text-xs font-bold transition ${filter === item.value ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
-                  {item.label}
-                </button>
-              ))}
-            </div>
+          <div>
+            <label htmlFor="phone-search" className="mb-1 block text-xs font-bold uppercase tracking-wide text-slate-500">Find kiosk or phone</label>
+            <input id="phone-search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Station ID, location, client, model, or device ID" className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10" />
           </div>
         </section>
 
@@ -2014,6 +2017,19 @@ export default function PhoneControlPage({
               <div className="flex items-center justify-between px-1">
                 <h2 className="text-xs font-black uppercase tracking-wider text-slate-500">Kiosk phones</h2>
                 <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-bold text-slate-600">{filteredDevices.length}</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5 rounded-xl border border-slate-200 bg-white p-2 shadow-sm" role="group" aria-label="Filter kiosk phones">
+                {PHONE_CARD_FILTERS.map((item) => (
+                  <button
+                    key={item.value}
+                    type="button"
+                    onClick={() => setPhoneCardFilter(item.value)}
+                    aria-pressed={phoneCardFilter === item.value}
+                    className={`rounded-md px-2.5 py-1.5 text-[11px] font-bold transition ${phoneCardFilter === item.value ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
               </div>
 
               {filteredDevices.length === 0 ? (
@@ -2076,10 +2092,23 @@ export default function PhoneControlPage({
                         <p className="mt-1 font-mono text-[11px] text-slate-400">{selectedDevice.id}</p>
                       </div>
                       {isAdmin && <div className="min-w-[300px] rounded-xl border border-slate-200 bg-slate-50 p-3">
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap gap-2">
+                          <div className="flex shrink-0 rounded-lg bg-slate-200 p-1" role="group" aria-label="Assignment kiosk country">
+                            {PHONE_KIOSK_COUNTRIES.map((country) => (
+                              <button
+                                key={country.code}
+                                type="button"
+                                onClick={() => changeAssignmentCountry(country.code)}
+                                aria-pressed={assignmentCountry === country.code}
+                                className={`rounded-md px-2 py-1 text-[10px] font-black transition ${assignmentCountry === country.code ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                              >
+                                {country.code}
+                              </button>
+                            ))}
+                          </div>
                           <select value={assignmentStationId} onChange={(event) => setAssignmentStationId(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
-                            <option value="">Assign to kiosk</option>
-                            {kioskOptions.map((kiosk) => <option key={kiosk.stationId} value={kiosk.stationId} disabled={assignedStationIds.has(kiosk.stationId) && kiosk.stationId !== selectedDevice.stationId}>{kiosk.stationId}</option>)}
+                            <option value="">Assign to {assignmentCountry} kiosk</option>
+                            {assignmentKioskOptions.map((kiosk) => <option key={kiosk.stationId} value={kiosk.stationId} disabled={assignedStationIds.has(kiosk.stationId) && kiosk.stationId !== selectedDevice.stationId}>{kiosk.stationId}</option>)}
                           </select>
                           <button type="button" onClick={assignSelectedPhone} disabled={!assignmentStationId || assignmentUnchanged} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40">Save</button>
                         </div>

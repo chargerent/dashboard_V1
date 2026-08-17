@@ -347,13 +347,14 @@ const DEFAULT_MEDIA_OPTIONS = {
   loop: true,
 };
 const MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set(["CT8", "CK24", "CK48"]);
-const NEW_KIOSK_TYPES = new Set(["CT3", "CT4", "CT8", "CT12", "CK24", "CK48"]);
+const NEW_KIOSK_TYPES = new Set(["CT3", "CT4", "CT8", "CT12", "CK24", "CK40", "CK48"]);
 const BOUND_KIOSK_TYPE_CONFIG = Object.freeze({
   CT3: {modules: 1, slots: 3},
   CT4: {modules: 1, slots: 4},
   CT8: {modules: 2, slots: 8, screen: "16IN"},
   CT12: {modules: 3, slots: 12},
   CK24: {modules: 6, slots: 24, screen: "24IN"},
+  CK40: {modules: 10, slots: 40},
   CK48: {modules: 12, slots: 48},
 });
 const V2_DEFAULT_WIFI = Object.freeze({

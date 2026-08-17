@@ -10,7 +10,7 @@ const ONLINE_WINDOW_MS = 10 * 60 * 1000;
 const CRITICAL_OFFLINE_WINDOW_MS = 30 * 60 * 1000;
 const ACTIVE_KIOSK_WINDOW_MS = 10 * 24 * 60 * 60 * 1000;
 const V2_STATION_PATTERN = /^((CA|FR|US)8\d{3}|(CAB|FRB|USB)\d{4})$/;
-const V2_TYPES = new Set(["CK24", "CK48", "CT3", "CT4", "CT8", "CT12"]);
+const V2_TYPES = new Set(["CK24", "CK40", "CK48", "CT3", "CT4", "CT8", "CT12"]);
 const DIRECT_SURFACE_EVENT_STATIONS = new Set(["US0118"]);
 
 const UI_STATE_POLICIES = [
