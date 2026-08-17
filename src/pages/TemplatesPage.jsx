@@ -97,13 +97,14 @@ function createRepeatingModule(id, count, options = {}) {
 }
 
 function createTemplateKiosk(type) {
-  const isNewSchema = ['CT3', 'CT4', 'CT8', 'CT12', 'CK24', 'CK48'].includes(type);
+  const isNewSchema = ['CT3', 'CT4', 'CT8', 'CT12', 'CK24', 'CK40', 'CK48'].includes(type);
   const hardwareDefaultsByType = {
     CT3: { modules: 1 },
     CT4: { modules: 1 },
     CT8: { modules: 2, screen: '16IN' },
     CT12: { modules: 3 },
     CK24: { modules: 6, screen: '24IN' },
+    CK40: { modules: 10 },
     CK48: { modules: 12 },
   };
   const base = {
@@ -219,6 +220,22 @@ function createTemplateKiosk(type) {
           },
         ],
       };
+    case 'CK40':
+      return {
+        ...base,
+        modules: [
+          {
+            id: 'ck40-m1',
+            lastUpdated: new Date().toISOString(),
+            output: true,
+            slots: Array.from({ length: 40 }, (_, index) => createSlot(index + 1, {
+              hasCharger: (index + 1) % 3 !== 0,
+              batteryLevel: (index + 1) % 4 === 0 ? 72 : 100,
+              chargingCurrent: (index + 1) % 9 === 0 ? 10 : 0,
+            })),
+          },
+        ],
+      };
     case 'CK50':
       return {
         ...base,
@@ -244,6 +261,7 @@ const templateOptions = [
   { id: 'CK20', label: 'CK20' },
   { id: 'CK30', label: 'CK30' },
   { id: 'CK24', label: 'CK24' },
+  { id: 'CK40', label: 'CK40' },
   { id: 'CK48', label: 'CK48' },
   { id: 'CK50', label: 'CK50' },
 ];

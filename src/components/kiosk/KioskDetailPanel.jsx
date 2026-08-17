@@ -145,7 +145,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     const hasAnyCommands = Object.values(clientInfo.commands).some(v => v === true) || clientInfo.features.rentals;
     const canUpdateModules = clientInfo.commands.updates && isV2Kiosk;
     const showModuleFirmwareMetadata = isV2Kiosk;
-    const showInlineModuleIds = ['CT3', 'CT4', 'CT8', 'CT12', 'CK24', 'CK48'].includes(kiosk.hardware?.type);
+    const showInlineModuleIds = ['CT3', 'CT4', 'CT8', 'CT12', 'CK24', 'CK40', 'CK48'].includes(kiosk.hardware?.type);
     const chargeReadyThreshold = getKioskPowerThreshold(kiosk);
     const mockNowMs = mockNow instanceof Date ? mockNow.getTime() : Number(mockNow);
     const chargeTimeoutNow = Number.isFinite(mockNowMs) ? mockNowMs : mountedAt;
@@ -971,8 +971,10 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     };
 
     const renderCompactGridSlot = (entry, key) => {
+        const isCK4xCompactSlot = ['CK40', 'CK48'].includes(kiosk.hardware?.type);
+
         if (!entry?.slot || !entry?.module) {
-            return <div key={key} className={`${kiosk.hardware?.type === 'CK48' ? 'min-h-[68px]' : 'min-h-[40px]'} rounded-md border border-gray-300 bg-gray-100`} />;
+            return <div key={key} className={`${isCK4xCompactSlot ? 'min-h-[68px]' : 'min-h-[40px]'} rounded-md border border-gray-300 bg-gray-100`} />;
         }
 
         const { slot, module, displayPosition } = entry;
@@ -981,14 +983,13 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         const isChargeTimedOut = isSlotInChargeTimeout(module, slot, chargeTimeoutNow);
         const canEject = clientInfo.commands.eject;
         const canLock = clientInfo.commands.lock;
-        const isCK48CompactSlot = kiosk.hardware?.type === 'CK48';
         const ejectDisabledReason = !canEject ? 'permission' : !isOnline ? 'offline' : '';
         const lockDisabledReason = !isOnline ? 'offline' : '';
 
         return (
             <div
                 key={key}
-                className={`relative ${kiosk.hardware?.type === 'CK48' ? 'min-h-[68px]' : 'min-h-[52px]'} rounded-md border p-0.5 text-left transition-colors duration-200 ${style.className} ${style.glow ? 'slot-charging-glow' : ''}`}
+                className={`relative ${isCK4xCompactSlot ? 'min-h-[68px]' : 'min-h-[52px]'} rounded-md border p-0.5 text-left transition-colors duration-200 ${style.className} ${style.glow ? 'slot-charging-glow' : ''}`}
                 data-kiosk-slot-debug="true"
                 data-kiosk-stationid={kiosk.stationid}
                 data-kiosk-moduleid={module.id}
@@ -1018,7 +1019,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                             }
                         }}
                         disabled={!canEject || !isOnline}
-                        className={`grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-1.5 text-left disabled:cursor-not-allowed ${isCK48CompactSlot ? 'min-h-[36px]' : ''}`}
+                        className={`grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-1.5 text-left disabled:cursor-not-allowed ${isCK4xCompactSlot ? 'min-h-[36px]' : ''}`}
                         title={hasCharger ? `SN ${slot.sn}` : `Slot ${displayPosition || slot.position}`}
                     >
                         <div className="flex min-w-[22px] shrink-0 flex-col items-start justify-start pt-0.5">
@@ -1043,7 +1044,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                             data-kiosk-moduleid={module.id}
                             data-kiosk-slotid={slot.position}
                             onClick={(event) => handleNavigateToCharger(event, slot.sn)}
-                            className={`mt-0.5 block w-full min-w-0 truncate text-left font-mono leading-tight text-sky-700 underline decoration-sky-300 underline-offset-2 hover:text-sky-900 ${isCK48CompactSlot ? 'text-[9px]' : 'pr-5 text-[8px]'}`}
+                            className={`mt-0.5 block w-full min-w-0 truncate text-left font-mono leading-tight text-sky-700 underline decoration-sky-300 underline-offset-2 hover:text-sky-900 ${isCK4xCompactSlot ? 'text-[9px]' : 'pr-5 text-[8px]'}`}
                             title={`${t('chargers_page_title')}: ${slot.sn}`}
                             aria-label={`${t('chargers_page_title')}: ${slot.sn}`}
                         >
@@ -1051,7 +1052,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                         </button>
                     )}
                     {!hasCharger && (
-                        <span className={`mt-0.5 block w-full font-mono text-[9px] leading-tight text-gray-500 ${isCK48CompactSlot ? '' : 'pr-5'}`}>
+                        <span className={`mt-0.5 block w-full font-mono text-[9px] leading-tight text-gray-500 ${isCK4xCompactSlot ? '' : 'pr-5'}`}>
                             {'\u00A0'}
                         </span>
                     )}
@@ -1079,7 +1080,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                             onLockSlot(kiosk.stationid, module.id, slot.position, slot.isLocked);
                         }}
                         disabled={!isOnline}
-                        className={`absolute right-1 ${isCK48CompactSlot ? 'top-5' : 'bottom-1'} flex h-[18px] w-[18px] items-center justify-center rounded-md bg-white/75 shadow-sm hover:bg-white disabled:cursor-not-allowed`}
+                        className={`absolute right-1 ${isCK4xCompactSlot ? 'top-5' : 'bottom-1'} flex h-[18px] w-[18px] items-center justify-center rounded-md bg-white/75 shadow-sm hover:bg-white disabled:cursor-not-allowed`}
                         title={getLockButtonTitle(slot)}
                     >
                         {slot.isLocked ? (
@@ -1249,6 +1250,51 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         );
     };
 
+    const renderCK4xScreen = () => (
+        <div className="mx-auto w-full max-w-sm overflow-hidden rounded-lg bg-black shadow-lg">
+            <div className="w-full" style={{ aspectRatio: '9 / 16' }}>
+                {renderAssignedMediaScreen()}
+            </div>
+        </div>
+    );
+
+    const renderCK40 = () => {
+        // CK40 keeps CK48's 2-column body and in-group slot order. Positions
+        // 1-24 run down the left; the upper two groups on the right are physically
+        // absent, then positions 25-40 continue down the remaining right groups.
+        const { slotsByPosition } = buildCompactSlotMap(visibleModules);
+        const groupRows = [
+            [0, null],
+            [1, null],
+            [2, 6],
+            [3, 7],
+            [4, 8],
+            [5, 9],
+        ];
+
+        return (
+            <div className="p-1.5 flex flex-col items-center gap-2.5">
+                <div className="w-full space-y-2.5">
+                    {renderCompactTowerHeader()}
+                    {renderCK4xScreen()}
+
+                    <div className="grid w-full grid-cols-2 gap-x-3 gap-y-2">
+                        {groupRows.flatMap(([leftGroupIndex, rightGroupIndex], rowIndex) => [
+                            renderCompactGroupCard(slotsByPosition, leftGroupIndex),
+                            rightGroupIndex === null ? (
+                                <div
+                                    key={`ck40-missing-right-${rowIndex}`}
+                                    aria-hidden="true"
+                                    data-kiosk-ck40-missing-group="true"
+                                />
+                            ) : renderCompactGroupCard(slotsByPosition, rightGroupIndex),
+                        ])}
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     const renderCK48 = () => {
         // CK48 stores all 48 slots flat in modules[0] with absolute positions 1–48.
         // Visual layout: 12 logical modules arranged in 2 columns (right: 0–5, left: 6–11).
@@ -1263,11 +1309,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                 <div className="w-full space-y-2.5">
                     {renderCompactTowerHeader()}
 
-                    <div className="mx-auto w-full max-w-sm overflow-hidden rounded-lg bg-black shadow-lg">
-                        <div className="w-full" style={{ aspectRatio: '9 / 16' }}>
-                            {renderAssignedMediaScreen()}
-                        </div>
-                    </div>
+                    {renderCK4xScreen()}
 
                     <div className="grid w-full grid-cols-2 gap-3">
                         <div className="flex min-w-0 flex-col gap-2">
@@ -1366,6 +1408,8 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                 return renderCK30();
             case 'CK24':
                 return renderCK24();
+            case 'CK40':
+                return renderCK40();
             case 'CK48':
                 return renderCK48();
             case 'CK50':
