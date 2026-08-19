@@ -23,6 +23,8 @@ const {
   normalizeAppUpdateArguments,
   normalizeConnectWifiArguments,
   normalizeHotspotArguments,
+  normalizeSystemUpdateArguments,
+  normalizeUpdatePolicyArguments,
   normalizePaymentLaunchArguments,
   normalizeTerminalLockdownArguments,
   normalizeWebRtcStartArguments,
@@ -53,6 +55,29 @@ test("allowlists fixed remote screen and tethering controls", () => {
   assert.equal(ALLOWED_OPERATIONS.has("LAUNCH_PAYMENT_APP"), true);
   assert.equal(ALLOWED_OPERATIONS.has("POWER_OFF"), true);
   assert.equal(HIGH_IMPACT_OPERATIONS.has("POWER_OFF"), true);
+  assert.equal(HIGH_IMPACT_OPERATIONS.has("INSTALL_SYSTEM_UPDATE"), true);
+  assert.equal(HIGH_IMPACT_OPERATIONS.has("SET_UPDATE_POLICY"), true);
+});
+
+test("validates controlled Android update windows and policies", () => {
+  assert.deepEqual(normalizeSystemUpdateArguments({}), {timeoutHours: 24});
+  assert.deepEqual(normalizeSystemUpdateArguments({timeoutHours: 12}), {timeoutHours: 12});
+  assert.throws(() => normalizeSystemUpdateArguments({timeoutHours: 0}), /1 to 72 hours/);
+  assert.throws(() => normalizeSystemUpdateArguments({contentUri: "content://untrusted"}),
+      /managed Android update window/i);
+
+  assert.deepEqual(normalizeUpdatePolicyArguments({mode: "postponed"}), {mode: "POSTPONED"});
+  assert.deepEqual(normalizeUpdatePolicyArguments({
+    mode: "windowed",
+    startMinutes: 120,
+    endMinutes: 240,
+  }), {mode: "WINDOWED", startMinutes: 120, endMinutes: 240});
+  assert.throws(() => normalizeUpdatePolicyArguments({mode: "later"}), /valid Android update policy/);
+  assert.throws(() => normalizeUpdatePolicyArguments({
+    mode: "windowed",
+    startMinutes: -1,
+    endMinutes: 240,
+  }), /minutes from midnight/);
 });
 
 test("derives payment-app lockdown from the assigned terminal", () => {

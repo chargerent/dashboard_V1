@@ -97,6 +97,12 @@ test('normalizes kiosk assignment and Android inventory', () => {
     inventory: {
       manufacturer: 'Google',
       model: 'Pixel 6a',
+      androidVersion: '16',
+      securityPatch: '2026-08-05',
+      systemUpdatePolicy: 'postponed',
+      systemUpdateWindowActive: false,
+      systemUpdatePending: true,
+      systemUpdateReceivedAt: 900,
       agentVersionCode: 15,
       batteryPercent: 84,
       isDeviceOwner: true,
@@ -148,6 +154,11 @@ test('normalizes kiosk assignment and Android inventory', () => {
   assert.equal(device.terminal.lockdownState, 'locked');
   assert.equal(device.lastSeenAtMs, 1_000_500);
   assert.equal(device.inventory.model, 'Pixel 6a');
+  assert.equal(device.inventory.androidVersion, '16');
+  assert.equal(device.inventory.systemUpdatePolicy, 'postponed');
+  assert.equal(device.inventory.systemUpdateWindowActive, false);
+  assert.equal(device.inventory.systemUpdatePending, true);
+  assert.equal(device.inventory.systemUpdateReceivedAt, 900);
   assert.equal(device.inventory.agentVersionCode, 15);
   assert.equal(device.inventory.isDeviceOwner, true);
   assert.equal(device.inventory.wifiSsid, 'OurHome');

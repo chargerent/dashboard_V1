@@ -85,6 +85,7 @@ const HIGH_IMPACT_OPERATIONS = new Set([
   "REBOOT",
   "POWER_OFF",
   "REQUEST_BUGREPORT",
+  "SET_UPDATE_POLICY",
   "INSTALL_SYSTEM_UPDATE",
   "INSTALL_APP_UPDATE",
   "INSTALL_PAYMENT_APP",
@@ -275,6 +276,35 @@ function normalizeHotspotArguments(value) {
     invalidArgument("Always-on hotspot requires an enabled value.");
   }
   return {enabled: input.enabled};
+}
+
+function normalizeSystemUpdateArguments(value) {
+  const input = normalizeArguments(value);
+  if (Object.keys(input).some((key) => key !== "timeoutHours")) {
+    invalidArgument("Only a managed Android update window can be requested from the dashboard.");
+  }
+  const timeoutHours = Number(input.timeoutHours ?? 24);
+  if (!Number.isInteger(timeoutHours) || timeoutHours < 1 || timeoutHours > 72) {
+    invalidArgument("The Android update window must be 1 to 72 hours.");
+  }
+  return {timeoutHours};
+}
+
+function normalizeUpdatePolicyArguments(value) {
+  const input = normalizeArguments(value);
+  const mode = String(input.mode || "").trim().toUpperCase();
+  if (!["AUTOMATIC", "POSTPONED", "WINDOWED", "NONE"].includes(mode)) {
+    invalidArgument("Choose a valid Android update policy.");
+  }
+  if (mode !== "WINDOWED") return {mode};
+
+  const startMinutes = Number(input.startMinutes);
+  const endMinutes = Number(input.endMinutes);
+  if (!Number.isInteger(startMinutes) || startMinutes < 0 || startMinutes >= 1440 ||
+      !Number.isInteger(endMinutes) || endMinutes < 0 || endMinutes >= 1440) {
+    invalidArgument("Android update window times must be minutes from midnight.");
+  }
+  return {mode, startMinutes, endMinutes};
 }
 
 function normalizeTerminalLockdownArguments(value, device = {}) {
@@ -1458,13 +1488,21 @@ async function sendCommand(data, authState, dependencies) {
   const requestId = normalizeRequestId(data?.requestId);
   const operation = normalizeOperation(data?.operation);
   const confirmed = data?.confirmed === true;
-  if (["CONNECT_WIFI", "SET_TERMINAL_LOCKDOWN", "LAUNCH_PAYMENT_APP"].includes(operation) &&
+  if ([
+    "CONNECT_WIFI",
+    "SET_TERMINAL_LOCKDOWN",
+    "LAUNCH_PAYMENT_APP",
+    "INSTALL_SYSTEM_UPDATE",
+    "SET_UPDATE_POLICY",
+  ].includes(operation) &&
       !isPhoneControlAdmin(authState)) {
     throw new HttpsError(
         "permission-denied",
         operation === "CONNECT_WIFI" ?
           "Only Chargerent administrators can join a phone to Wi-Fi." :
-          "Only Chargerent administrators can control the payment app.",
+          ["INSTALL_SYSTEM_UPDATE", "SET_UPDATE_POLICY"].includes(operation) ?
+            "Only Chargerent administrators can control Android updates." :
+            "Only Chargerent administrators can control the payment app.",
     );
   }
   if (HIGH_IMPACT_OPERATIONS.has(operation) && !confirmed) {
@@ -1477,6 +1515,10 @@ async function sendCommand(data, authState, dependencies) {
   let commandArguments;
   if (operation === "INSTALL_APP_UPDATE") {
     commandArguments = normalizeAppUpdateArguments(data?.arguments);
+  } else if (operation === "INSTALL_SYSTEM_UPDATE") {
+    commandArguments = normalizeSystemUpdateArguments(data?.arguments);
+  } else if (operation === "SET_UPDATE_POLICY") {
+    commandArguments = normalizeUpdatePolicyArguments(data?.arguments);
   } else if (operation === "INSTALL_PAYMENT_APP") {
     commandArguments = normalizePaymentAppArguments(data?.arguments);
   } else if (["SET_HOTSPOT_ENABLED", "SET_ALWAYS_ON_HOTSPOT"].includes(operation)) {
@@ -1974,6 +2016,8 @@ module.exports = {
   normalizePaymentAppArguments,
   normalizeConnectWifiArguments,
   normalizeHotspotArguments,
+  normalizeSystemUpdateArguments,
+  normalizeUpdatePolicyArguments,
   normalizePaymentLaunchArguments,
   normalizeTerminalLockdownArguments,
   normalizeWebRtcStartArguments,

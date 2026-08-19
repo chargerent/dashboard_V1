@@ -72,6 +72,7 @@ const PHONE_CARD_FILTERS = [
 ];
 
 const TERMINAL_AGENT_MIN_VERSION_CODE = 29;
+const ANDROID_UPDATE_AGENT_MIN_VERSION_CODE = 47;
 
 function phoneNeedsAttention(device, now = Date.now()) {
   return getPhoneConnectionState(device, now) !== 'online' ||
@@ -152,7 +153,7 @@ const PHONE_COMMAND_LABELS = {
   START_WEBRTC_SCREEN: 'Start live screen',
   SET_WEBRTC_PROFILE: 'Live screen quality',
   STOP_WEBRTC_SCREEN: 'Stop live screen',
-  INSTALL_SYSTEM_UPDATE: 'Install system update',
+  INSTALL_SYSTEM_UPDATE: 'Update Android',
   INSTALL_APP_UPDATE: 'Install app update',
   INSTALL_PAYMENT_APP: 'Update payment app',
   WIPE_DEVICE: 'Erase phone',
@@ -187,6 +188,7 @@ function commandActionLabel(operation, args = {}) {
   if (operation === 'SET_TERMINAL_LOCKDOWN') return `${args.enabled === true ? 'Lock' : 'Unlock'} payment app`;
   if (operation === 'LAUNCH_PAYMENT_APP') return 'Launch payment app';
   if (operation === 'POWER_OFF') return 'Shut down phone';
+  if (operation === 'INSTALL_SYSTEM_UPDATE') return 'Start Android update';
   if (operation === 'INSTALL_APP_UPDATE' && args.versionName) return `Install Agent ${args.versionName}`;
   if (operation === 'INSTALL_PAYMENT_APP' && args.versionName) return `Install payment app ${args.versionName}`;
   return commandLabel(operation);
@@ -259,6 +261,15 @@ function phoneCommandConfirmationDetails(confirmation, device) {
       title: `Install Agent ${versionName}`,
       action: operation,
       confirmationText: `Install Agent ${versionName} on the phone assigned to ${stationLabel}? Remote management will restart briefly while Android replaces the app.`,
+    };
+  }
+
+  if (operation === 'INSTALL_SYSTEM_UPDATE') {
+    const timeoutHours = Number(confirmation?.args?.timeoutHours || 24);
+    return {
+      title: 'Update Android',
+      action: operation,
+      confirmationText: `Allow Android to download, install, and reboot the phone assigned to ${stationLabel} during the next ${timeoutHours} hours? Agent will postpone updates again after the Android build changes or the window expires.`,
     };
   }
 
@@ -565,6 +576,73 @@ function AgentMetric({
           {releaseLoading || updateChecking ? 'Checking…' : 'Update'}
         </button>
       </div>
+    </div>
+  );
+}
+
+function AndroidMetric({
+  inventory,
+  cohortDetail,
+  updateRecommended,
+  canControl,
+  canManage,
+  onUpdate,
+}) {
+  const updateWindowActive = inventory.systemUpdateWindowActive === true;
+  const agentReady = Number(inventory.agentVersionCode || 0) >=
+    ANDROID_UPDATE_AGENT_MIN_VERSION_CODE;
+  const expiresAt = Number(inventory.systemUpdateWindowExpiresAt || 0);
+  const buttonEnabled = canManage && canControl && inventory.isDeviceOwner === true &&
+    agentReady && !updateWindowActive;
+  const buttonTitle = updateWindowActive
+    ? 'Android updates are temporarily allowed on this phone'
+    : !canManage
+      ? 'Only Chargerent administrators can control Android updates'
+      : !canControl
+        ? 'The phone must be online to update Android'
+        : inventory.isDeviceOwner !== true
+          ? 'Device Owner enrollment is required'
+          : !agentReady
+            ? 'Update Agent before controlling Android updates'
+            : 'Allow Android to install the latest available system update';
+  const policyDetail = updateWindowActive
+    ? `Updates allowed${expiresAt ? ` until ${new Date(expiresAt).toLocaleString()}` : ''}`
+    : inventory.systemUpdatePending
+      ? 'Android reports an update is available'
+      : inventory.systemUpdatePolicy === 'postponed'
+        ? 'Automatic updates paused'
+        : 'Update status unknown';
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2 text-xs font-semibold text-slate-500">
+          <DevicePhoneMobileIcon className="h-4 w-4 shrink-0 text-slate-500" />
+          OS
+        </div>
+        <button
+          type="button"
+          onClick={onUpdate}
+          disabled={!buttonEnabled}
+          title={buttonTitle}
+          className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 text-[10px] font-bold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
+        >
+          <ArrowPathIcon className="h-3.5 w-3.5" />
+          {updateWindowActive ? 'Updating' : 'Update'}
+        </button>
+      </div>
+      <p
+        title={`${inventory.model || 'Android phone'}${inventory.androidVersion ? ` · Android ${inventory.androidVersion}` : ''}`}
+        className={`mt-1 truncate text-sm font-bold ${updateRecommended ? 'text-red-600' : 'text-slate-800'}`}
+      >
+        {inventory.androidVersion ? `Android ${inventory.androidVersion}` : 'Version unknown'}
+      </p>
+      <p className={`mt-0.5 truncate text-[11px] font-semibold ${updateRecommended ? 'text-red-600' : 'text-slate-500'}`}>
+        {cohortDetail}
+      </p>
+      <p className={`mt-0.5 truncate text-[10px] font-semibold ${updateWindowActive ? 'text-blue-600' : inventory.systemUpdatePending ? 'text-amber-700' : 'text-slate-400'}`}>
+        {policyDetail}
+      </p>
     </div>
   );
 }
@@ -1722,10 +1800,26 @@ export default function PhoneControlPage({
       .filter(Boolean);
     const versions = [...new Set(reportedVersions)]
       .sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+    const latestVersion = versions.at(-1) || '';
+    const latestSecurityPatch = members
+      .filter((device) => String(device.inventory.androidVersion || '').trim() === latestVersion)
+      .map((device) => String(device.inventory.securityPatch || '').trim())
+      .filter(Boolean)
+      .sort()
+      .at(-1) || '';
+    const selectedVersion = String(selectedDevice.inventory.androidVersion || '').trim();
+    const selectedSecurityPatch = String(selectedDevice.inventory.securityPatch || '').trim();
+    const behindVersion = Boolean(selectedVersion && latestVersion) &&
+      selectedVersion.localeCompare(latestVersion, undefined, { numeric: true }) < 0;
+    const behindSecurityPatch = selectedVersion === latestVersion && Boolean(selectedSecurityPatch) &&
+      Boolean(latestSecurityPatch) && selectedSecurityPatch < latestSecurityPatch;
     return {
       count: members.length,
       versions,
+      latestVersion,
+      latestSecurityPatch,
       aligned: reportedVersions.length === members.length && versions.length === 1,
+      selectedBehind: behindVersion || behindSecurityPatch,
     };
   }, [devices, selectedDevice]);
   const selectedModelVersionDetail = selectedModelCohort?.count === 1
@@ -1733,6 +1827,8 @@ export default function PhoneControlPage({
     : selectedModelCohort?.aligned
       ? `Android ${selectedModelCohort.versions[0] || 'version unknown'} aligned across ${selectedModelCohort.count} phones`
       : `Version mismatch: ${selectedModelCohort?.versions.join(', ') || 'one or more unknown'}`;
+  const selectedAndroidUpdateRecommended = selectedDevice?.inventory?.systemUpdatePending === true ||
+    selectedModelCohort?.selectedBehind === true;
 
   useEffect(() => {
     setAssignmentStationId(selectedDevice?.stationId || '');
@@ -2142,12 +2238,13 @@ export default function PhoneControlPage({
                         active={selectedDevice.inventory.network !== 'offline'}
                       />
                       <Metric icon={WifiIcon} label="Hotspot" value={phoneHotspotLabel(selectedDevice.inventory)} active={selectedDevice.inventory.hotspotActive} />
-                      <Metric
-                        icon={DevicePhoneMobileIcon}
-                        label="Phone"
-                        value={`${selectedDevice.inventory.model}${selectedDevice.inventory.androidVersion ? ` · Android ${selectedDevice.inventory.androidVersion}` : ''}`}
-                        detail={selectedModelVersionDetail}
-                        detailTone={selectedModelCohort?.aligned === false ? 'red' : 'slate'}
+                      <AndroidMetric
+                        inventory={selectedDevice.inventory}
+                        cohortDetail={selectedModelVersionDetail}
+                        updateRecommended={selectedAndroidUpdateRecommended}
+                        canControl={canControlSelected}
+                        canManage={isAdmin}
+                        onUpdate={() => requestCommand('INSTALL_SYSTEM_UPDATE', { timeoutHours: 24 })}
                       />
                       <AgentMetric
                         inventory={selectedDevice.inventory}

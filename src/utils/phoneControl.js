@@ -21,6 +21,7 @@ export const HIGH_IMPACT_PHONE_OPERATIONS = new Set([
   'REBOOT',
   'POWER_OFF',
   'REQUEST_BUGREPORT',
+  'SET_UPDATE_POLICY',
   'INSTALL_SYSTEM_UPDATE',
   'INSTALL_APP_UPDATE',
   'INSTALL_PAYMENT_APP',
@@ -251,6 +252,12 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
       model: String(inventory.model || rawDevice.model || 'Android phone').trim(),
       androidVersion: String(inventory.androidVersion || '').trim(),
       securityPatch: String(inventory.securityPatch || '').trim(),
+      systemUpdatePolicy: String(inventory.systemUpdatePolicy || 'unknown').trim().toLowerCase(),
+      systemUpdateWindowActive: inventory.systemUpdateWindowActive === true,
+      systemUpdateWindowStartedAt: phoneTimestampToMillis(inventory.systemUpdateWindowStartedAt),
+      systemUpdateWindowExpiresAt: phoneTimestampToMillis(inventory.systemUpdateWindowExpiresAt),
+      systemUpdatePending: inventory.systemUpdatePending === true,
+      systemUpdateReceivedAt: phoneTimestampToMillis(inventory.systemUpdateReceivedAt),
       agentVersion: String(inventory.agentVersion || rawDevice.agentVersion || '').trim(),
       agentVersionCode: Number.isSafeInteger(Number(inventory.agentVersionCode))
         ? Number(inventory.agentVersionCode)
