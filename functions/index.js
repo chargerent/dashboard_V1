@@ -348,6 +348,7 @@ const DEFAULT_MEDIA_OPTIONS = {
 };
 const V2_MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set(["CT8", "CK24", "CK48"]);
 const V1_MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set(["CK50"]);
+const V1_MEDIA_ASSIGNMENTS_COLLECTION = "kioskMediaAssignments";
 const NEW_KIOSK_TYPES = new Set(["CT3", "CT4", "CT8", "CT12", "CK24", "CK40", "CK48"]);
 const BOUND_KIOSK_TYPE_CONFIG = Object.freeze({
   CT3: {modules: 1, slots: 3},
@@ -2231,6 +2232,40 @@ function serializeMediaAssetSnapshot(docSnap) {
   };
 }
 
+function serializeV1MediaAssignmentSnapshot(docSnap) {
+  const assignment = docSnap.data() || {};
+
+  return {
+    stationid: normalizeStationId(assignment.stationid || docSnap.id),
+    provisionid: String(assignment.provisionid || ""),
+    hardwareType: String(assignment.hardwareType || "CK50"),
+    clientId: String(assignment.clientId || ""),
+    repId: String(assignment.repId || ""),
+    active: assignment.active === true,
+    loop: assignment.loop !== false,
+    assetIds: Array.isArray(assignment.assetIds) ? assignment.assetIds : [],
+    playlist: Array.isArray(assignment.playlist) ? assignment.playlist : [],
+    updatedAt: serializeFirestoreTimestamp(assignment.updatedAt),
+    assignedAt: serializeFirestoreTimestamp(assignment.assignedAt),
+    clearedAt: serializeFirestoreTimestamp(assignment.clearedAt),
+  };
+}
+
+function canAccessV1MediaAssignment(authState, assignment) {
+  if (authState?.isAdmin) {
+    return true;
+  }
+
+  const authClientId = getAuthClientId(authState);
+  if (!authClientId) {
+    return false;
+  }
+
+  return [assignment?.clientId, assignment?.repId]
+      .map((value) => String(value || "").trim().toUpperCase())
+      .includes(authClientId);
+}
+
 function serializeFirmwareReleaseSnapshot(docSnap) {
   const release = docSnap.data() || {};
 
@@ -3162,7 +3197,39 @@ async function mediaListAssetsImpl(authState, data = {}) {
       .filter((asset) => canAccessMediaAsset(authState, asset))
       .filter((asset) => includeArchived || asset.active !== false);
 
-  return {assets};
+  const assignmentSnapshot = await db.collection(V1_MEDIA_ASSIGNMENTS_COLLECTION).get();
+  const v1Assignments = assignmentSnapshot.docs
+      .map((docSnap) => serializeV1MediaAssignmentSnapshot(docSnap))
+      .filter((assignment) => canAccessV1MediaAssignment(authState, assignment));
+
+  return {assets, v1Assignments};
+}
+
+async function mediaV1AssignmentImpl(stationidInput) {
+  const stationid = normalizeStationId(stationidInput);
+  if (!stationid || !/^[A-Z0-9_-]{3,32}$/.test(stationid)) {
+    return {code: 400, type: 0, data: [], msg: "Invalid station ID", time: Date.now()};
+  }
+
+  const assignmentSnap = await db.collection(V1_MEDIA_ASSIGNMENTS_COLLECTION).doc(stationid).get();
+  const assignment = assignmentSnap.exists ? assignmentSnap.data() || {} : {};
+  const playlist = assignment.active === true && Array.isArray(assignment.playlist) ?
+    assignment.playlist.filter((item) =>
+      ["image", "video"].includes(String(item?.kind || "").trim().toLowerCase()) &&
+      String(item?.downloadUrl || "").trim()
+    ) : [];
+
+  return {
+    code: 200,
+    type: 0,
+    data: playlist.map((item) => ({
+      title: String(item.name || item.assetId || "media"),
+      url2: String(item.downloadUrl || ""),
+      playTime: Math.max(1, Math.min(3600, Number(item.playTime || 20))),
+    })),
+    msg: playlist.length > 0 ? "OK" : "No media assigned",
+    time: Date.now(),
+  };
 }
 
 async function mediaCreateUploadUrlImpl(data, authState, req = null) {
@@ -3811,6 +3878,9 @@ async function mediaDeleteAssetImpl(data, authState) {
   const assignedKioskSnapshot = await db.collection("kiosks")
       .where("media.assetIds", "array-contains", assetId)
       .get();
+  const assignedV1Snapshot = await db.collection(V1_MEDIA_ASSIGNMENTS_COLLECTION)
+      .where("assetIds", "array-contains", assetId)
+      .get();
 
   const updatedStationIds = [];
   let batch = db.batch();
@@ -3861,6 +3931,51 @@ async function mediaDeleteAssetImpl(data, authState) {
     batch.set(docSnap.ref, {media: nextMedia}, {merge: true});
     writesInBatch += 1;
     updatedStationIds.push(normalizeStationId(kiosk.stationid || docSnap.id));
+
+    if (writesInBatch >= 400) {
+      await batch.commit();
+      batch = db.batch();
+      writesInBatch = 0;
+    }
+  }
+
+  for (const docSnap of assignedV1Snapshot.docs) {
+    const assignment = serializeV1MediaAssignmentSnapshot(docSnap);
+    if (!canAccessV1MediaAssignment(authState, assignment)) {
+      throw new functions.https.HttpsError(
+          "permission-denied",
+          `Not allowed to update kiosk ${assignment.stationid || docSnap.id}`,
+      );
+    }
+
+    const nextAssetIds = assignment.assetIds
+        .map((value) => String(value || "").trim())
+        .filter((value) => value && value !== assetId);
+    const nextPlaylist = assignment.playlist
+        .filter((item) => String(item?.assetId || "").trim() !== assetId)
+        .map((item, index) => ({
+          ...(clonePlain(item) || {}),
+          order: index + 1,
+        }));
+    const nextMedia = nextAssetIds.length > 0 ? {
+      active: assignment.active && nextPlaylist.length > 0,
+      assetIds: nextAssetIds,
+      playlist: nextPlaylist,
+      updatedAt: timestamp,
+      updatedByUid: authState.uid,
+      updatedByUsername: normalizeUsername(authState.profile?.username),
+    } : {
+      ...DEFAULT_MEDIA_OPTIONS,
+      active: false,
+      updatedAt: timestamp,
+      updatedByUid: authState.uid,
+      updatedByUsername: normalizeUsername(authState.profile?.username),
+      clearedAt: timestamp,
+    };
+
+    batch.set(docSnap.ref, nextMedia, {merge: true});
+    writesInBatch += 1;
+    updatedStationIds.push(assignment.stationid || docSnap.id);
 
     if (writesInBatch >= 400) {
       await batch.commit();
@@ -4025,6 +4140,7 @@ async function mediaAssignPlaylistImpl(data, authState) {
   const timestamp = new Date().toISOString();
 
   for (const entry of validUpdates) {
+    const isV1 = isV1MediaKiosk(entry.kiosk);
     const nextMedia = active ? {
       active: true,
       loop,
@@ -4044,15 +4160,27 @@ async function mediaAssignPlaylistImpl(data, authState) {
       clearedAt: timestamp,
     };
 
-    const updateData = {media: nextMedia};
-    if (active && setUiMode) {
-      updateData.ui = {
-        ...(clonePlain(entry.kiosk.ui) || {}),
-        mode: isV1MediaKiosk(entry.kiosk) ? "media" : resolveMediaModeValue(entry.kiosk?.ui?.mode),
-      };
-    }
+    if (isV1) {
+      const kioskInfo = entry.kiosk.info || {};
+      batch.set(db.collection(V1_MEDIA_ASSIGNMENTS_COLLECTION).doc(entry.stationid), {
+        ...nextMedia,
+        stationid: entry.stationid,
+        provisionid: String(entry.kiosk.provisionid || entry.docSnap.id || ""),
+        hardwareType: getKioskHardwareType(entry.kiosk),
+        clientId: String(kioskInfo.client || kioskInfo.clientId || "").trim().toUpperCase(),
+        repId: String(kioskInfo.rep || "").trim().toUpperCase(),
+      });
+    } else {
+      const updateData = {media: nextMedia};
+      if (active && setUiMode) {
+        updateData.ui = {
+          ...(clonePlain(entry.kiosk.ui) || {}),
+          mode: resolveMediaModeValue(entry.kiosk?.ui?.mode),
+        };
+      }
 
-    batch.set(entry.docSnap.ref, updateData, {merge: true});
+      batch.set(entry.docSnap.ref, updateData, {merge: true});
+    }
     writesInBatch += 1;
     updatedStationIds.push(entry.stationid);
 
@@ -10072,6 +10200,26 @@ exports.media_listAssets = functions.https.onCall(async (data, context) => {
 exports.media_httpListAssets = handleHttpFunction(async (data, req) => {
   const authState = await assertCanManageMedia(req, data);
   return mediaListAssetsImpl(authState, data);
+});
+
+exports.media_v1Assignment = functions.https.onRequest(async (req, res) => {
+  setCorsHeaders(req, res);
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return;
+  }
+  if (req.method !== "GET") {
+    res.status(405).json({code: 405, type: 0, data: [], msg: "Method not allowed", time: Date.now()});
+    return;
+  }
+
+  try {
+    const result = await mediaV1AssignmentImpl(req.query?.stationid);
+    res.status(result.code === 400 ? 400 : 200).json(result);
+  } catch (error) {
+    console.error("media_v1Assignment failed", error);
+    res.status(500).json({code: 500, type: 0, data: [], msg: "Unable to load media", time: Date.now()});
+  }
 });
 
 exports.media_createUploadUrl = functions.https.onCall(async (data, context) => {

@@ -479,6 +479,7 @@ export default function MediaPage({
   t,
 }) {
   const [assets, setAssets] = useState([]);
+  const [v1Assignments, setV1Assignments] = useState([]);
   const [loadingAssets, setLoadingAssets] = useState(true);
   const [status, setStatus] = useState(null);
   const [assetPendingDelete, setAssetPendingDelete] = useState(null);
@@ -508,6 +509,10 @@ export default function MediaPage({
       .filter(isMediaConfigurableKiosk)
       .sort((left, right) => String(left.stationid || '').localeCompare(String(right.stationid || '')))
   ), [allStationsData, currentUser]);
+
+  const v1AssignmentsByStationId = useMemo(() => new Map(
+    v1Assignments.map((assignment) => [String(assignment?.stationid || '').trim().toUpperCase(), assignment]),
+  ), [v1Assignments]);
 
   const uploadClientOptions = useMemo(() => buildClientTagOptions(eligibleKiosks), [eligibleKiosks]);
 
@@ -591,6 +596,7 @@ export default function MediaPage({
         timeoutMessage: 'Loading media assets took too long. Please refresh and try again.',
       });
       setAssets(Array.isArray(payload?.assets) ? payload.assets : []);
+      setV1Assignments(Array.isArray(payload?.v1Assignments) ? payload.v1Assignments : []);
     } catch (error) {
       setStatus({
         state: 'error',
@@ -1160,6 +1166,7 @@ export default function MediaPage({
         setUiMode: true,
         active: true,
       });
+      await loadAssets();
       setStatus({
         state: 'success',
         message: `Updated ${payload?.updatedCount || 0} station${payload?.updatedCount === 1 ? '' : 's'}.`,
@@ -1190,6 +1197,7 @@ export default function MediaPage({
         active: false,
         setUiMode: false,
       });
+      await loadAssets();
       setStatus({
         state: 'success',
         message: `Cleared media on ${payload?.updatedCount || 0} station${payload?.updatedCount === 1 ? '' : 's'}.`,
@@ -1277,7 +1285,7 @@ export default function MediaPage({
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Upload Media</h2>
                 <p className="mt-1 text-sm text-gray-600">
-                  Upload images, videos, or PDFs to Firebase Storage for CT8, CK24, and CK48 station playlists.
+                  Upload images, videos, or PDFs to Firebase Storage. V1 CK50 assignments support images and videos.
                 </p>
                 <p className="mt-1 text-xs text-gray-500">
                   Upload scope: {uploadVisibility === 'global' ? 'Global library' : 'Your client library'}
@@ -1593,13 +1601,16 @@ export default function MediaPage({
               <div className="mt-4 max-h-[32rem] space-y-3 overflow-y-auto pr-1">
                 {eligibleKiosks.map((kiosk) => {
                   const isSelected = selectedStationIds.includes(kiosk.stationid);
-                  const currentPlaylist = Array.isArray(kiosk?.media?.playlist) ? kiosk.media.playlist : [];
+                  const currentMedia = isV1MediaKiosk(kiosk) ?
+                    (v1AssignmentsByStationId.get(String(kiosk.stationid || '').trim().toUpperCase()) || {}) :
+                    (kiosk?.media || {});
+                  const currentPlaylist = Array.isArray(currentMedia.playlist) ? currentMedia.playlist : [];
                   const currentPlaylistCount = currentPlaylist.length;
                   const currentPlaylistNames = currentPlaylist
                     .map((asset) => String(asset?.name || asset?.assetId || '').trim())
                     .filter(Boolean)
                     .join(', ');
-                  const currentPlaylistLabel = kiosk?.media?.active && currentPlaylistCount > 0 ?
+                  const currentPlaylistLabel = currentMedia.active && currentPlaylistCount > 0 ?
                     `${currentPlaylistCount} asset${currentPlaylistCount === 1 ? '' : 's'} assigned${currentPlaylistNames ? ` · ${currentPlaylistNames}` : ''}` :
                     'No media assigned';
 
