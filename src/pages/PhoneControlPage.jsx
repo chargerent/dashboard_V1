@@ -45,11 +45,13 @@ import {
   normalizePaymentAppRelease,
   normalizePhoneDevice,
   phoneLocationMapUrls,
+  phoneHotspotControlLabel,
   phoneHotspotLabel,
   phoneMatchesSearch,
   phoneNetworkLabel,
   phoneSignalLevelFromDbm,
   phoneTimestampToMillis,
+  summarizePhoneLines,
 } from '../utils/phoneControl.js';
 import {
   PHONE_WEBRTC_PROFILES,
@@ -63,6 +65,7 @@ import {
 
 const PHONE_CARD_FILTERS = [
   { value: 'all', label: 'All' },
+  { value: 'unassigned', label: 'Unassigned' },
   { value: 'CA', label: 'CA' },
   { value: 'FR', label: 'FR' },
   { value: 'US', label: 'US' },
@@ -289,7 +292,7 @@ function phoneCommandConfirmationDetails(confirmation, device) {
   };
 }
 
-function SummaryCard({ label, value, detail, tone = 'slate' }) {
+function SummaryCard({ label, value, detail, tone = 'slate', onClick = null }) {
   const tones = {
     slate: 'border-slate-200 bg-white text-slate-900',
     green: 'border-emerald-200 bg-emerald-50 text-emerald-900',
@@ -297,13 +300,26 @@ function SummaryCard({ label, value, detail, tone = 'slate' }) {
     amber: 'border-amber-200 bg-amber-50 text-amber-900',
   };
 
-  return (
-    <div className={`rounded-xl border p-4 shadow-sm ${tones[tone]}`}>
+  const content = (
+    <>
       <p className="text-xs font-bold uppercase tracking-wide opacity-60">{label}</p>
       <p className="mt-1 text-2xl font-black">{value}</p>
       <p className="mt-1 text-xs opacity-70">{detail}</p>
-    </div>
+    </>
   );
+  const className = `rounded-xl border p-4 text-left shadow-sm ${tones[tone]}`;
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={`${className} transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-4 focus:ring-blue-500/15`}
+      >
+        {content}
+      </button>
+    );
+  }
+  return <div className={className}>{content}</div>;
 }
 
 function AddPhoneCard({ onClick }) {
@@ -316,6 +332,53 @@ function AddPhoneCard({ onClick }) {
       <p className="text-xs font-bold uppercase tracking-wide text-blue-600">Add a phone</p>
       <PlusIcon className="mt-1 h-8 w-8 stroke-2 text-blue-600 transition group-hover:scale-105" />
       <p className="mt-1 text-xs text-blue-700/75">Provision or enroll a kiosk phone</p>
+    </button>
+  );
+}
+
+function PhoneListCard({ device, kiosk, now, selected, onSelect }) {
+  const connection = getPhoneConnectionState(device, now);
+  const style = STATE_STYLES[connection];
+  const unassigned = !device.stationId;
+  const deviceSuffix = String(device.id || '').slice(-6);
+  const subtitle = unassigned
+    ? [device.inventory.model || device.displayName || 'Android phone', deviceSuffix ? `Device …${deviceSuffix}` : '']
+      .filter(Boolean).join(' · ')
+    : kiosk?.info?.location || kiosk?.info?.place || device.displayName || device.id;
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`w-full rounded-xl border p-4 text-left shadow-sm transition ${selected ? 'border-blue-400 bg-blue-50 ring-2 ring-blue-100' : unassigned ? 'border-amber-200 bg-amber-50/40 hover:border-amber-300 hover:shadow-md' : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-md'}`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className={`h-2.5 w-2.5 rounded-full ${style.dot}`} />
+            <p className="truncate text-base font-black text-slate-900">{device.stationId || 'Unassigned phone'}</p>
+          </div>
+          <p className="mt-1 truncate text-xs text-slate-500">{subtitle}</p>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${style.badge}`}>{style.label}</span>
+          {unassigned ? (
+            <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-800">Unassigned</span>
+          ) : device.terminal.enabled && (
+            <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${TERMINAL_STYLES[device.terminal.state]?.badge || TERMINAL_STYLES.pending.badge}`}>
+              {TERMINAL_STYLES[device.terminal.state]?.label || TERMINAL_STYLES.pending.label}
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-3 border-t border-slate-200/80 pt-3 text-xs text-slate-500">
+        <span className="min-w-0 truncate font-semibold">
+          {unassigned
+            ? `${device.market || 'Unspecified'} inventory${device.phoneLine.number ? ` · ${device.phoneLine.number}` : ''}`
+            : device.inventory.model}
+        </span>
+        <span className="shrink-0">{formatPhoneRelativeTime(device.lastSeenAtMs, now)}</span>
+      </div>
     </button>
   );
 }
@@ -371,8 +434,8 @@ function FieldProvisioningCard() {
         <li><span className="font-bold text-slate-800">1.</span> Factory-reset the phone and stop at the first Welcome screen.</li>
         <li><span className="font-bold text-slate-800">2.</span> Tap the same empty area six times, then connect to Wi-Fi.</li>
         <li><span className="font-bold text-slate-800">3.</span> Scan this QR and wait for Android to install Agent.</li>
-        <li><span className="font-bold text-slate-800">4.</span> Enter the one-time kiosk code created below.</li>
-        <li><span className="font-bold text-slate-800">5.</span> Open Agent and approve always-on hotspot access.</li>
+        <li><span className="font-bold text-slate-800">4.</span> Enter the one-time phone enrollment code created beside this QR.</li>
+        <li><span className="font-bold text-slate-800">5.</span> Open Agent, enable Remote UI control, and follow any hotspot-control prompt shown.</li>
       </ol>
 
       <div className="mt-4 grid grid-cols-2 gap-2">
@@ -387,6 +450,8 @@ function FieldProvisioningCard() {
 function PhoneEnrollmentModal({
   isOpen,
   onClose,
+  enrollmentMode,
+  onEnrollmentModeChange,
   enrollmentCountry,
   onEnrollmentCountryChange,
   enrollmentStationId,
@@ -437,7 +502,7 @@ function PhoneEnrollmentModal({
           <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4 sm:px-6">
             <div>
               <h2 id="phone-enrollment-modal-title" className="text-xl font-black text-slate-900">Add a phone</h2>
-              <p className="mt-1 text-xs leading-5 text-slate-500">Provision a factory-reset Android phone, then create its one-time kiosk enrollment code.</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">Provision a factory-reset Android phone, then enroll it securely into managed inventory.</p>
             </div>
             <button
               type="button"
@@ -454,9 +519,34 @@ function PhoneEnrollmentModal({
             <FieldProvisioningCard />
 
             <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <h3 className="text-sm font-black text-slate-900">Enroll a kiosk phone</h3>
-              <p className="mt-1 text-xs leading-5 text-slate-500">Create a one-time code tied to a kiosk, then enter it in Agent.</p>
-              <div className="mt-3 grid grid-cols-3 rounded-lg bg-slate-100 p-1" role="group" aria-label="Enrollment kiosk country">
+              <h3 className="text-sm font-black text-slate-900">Enroll a managed phone</h3>
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                {enrollmentMode === 'unassigned'
+                  ? 'Prepare the phone now and assign it to a kiosk when deployment is ready.'
+                  : 'Create a one-time code that assigns the phone to a kiosk during enrollment.'}
+              </p>
+              <div className="mt-3 grid grid-cols-2 rounded-lg bg-slate-100 p-1" role="group" aria-label="Phone enrollment mode">
+                <button
+                  type="button"
+                  onClick={() => onEnrollmentModeChange('unassigned')}
+                  aria-pressed={enrollmentMode === 'unassigned'}
+                  className={`rounded-md px-3 py-2 text-xs font-bold transition ${enrollmentMode === 'unassigned' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                >
+                  Prepare now
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onEnrollmentModeChange('assigned')}
+                  aria-pressed={enrollmentMode === 'assigned'}
+                  className={`rounded-md px-3 py-2 text-xs font-bold transition ${enrollmentMode === 'assigned' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                >
+                  Assign now
+                </button>
+              </div>
+              <p className="mt-3 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                {enrollmentMode === 'unassigned' ? 'Inventory market' : 'Kiosk country'}
+              </p>
+              <div className="mt-1 grid grid-cols-3 rounded-lg bg-slate-100 p-1" role="group" aria-label="Enrollment phone country">
                 {PHONE_KIOSK_COUNTRIES.map((country) => (
                   <button
                     key={country.code}
@@ -470,25 +560,31 @@ function PhoneEnrollmentModal({
                 ))}
               </div>
               <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-                <select
-                  value={enrollmentStationId}
-                  onChange={(event) => onEnrollmentStationIdChange(event.target.value)}
-                  className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                >
-                  <option value="">Select {PHONE_KIOSK_COUNTRIES.find((country) => country.code === enrollmentCountry)?.label} kiosk</option>
-                  {enrollmentKioskOptions.map((kiosk) => (
-                    <option key={kiosk.stationId} value={kiosk.stationId} disabled={assignedStationIds.has(kiosk.stationId)}>
-                      {kiosk.stationId}{kiosk.label ? ` — ${kiosk.label}` : ''}
-                    </option>
-                  ))}
-                </select>
+                {enrollmentMode === 'assigned' ? (
+                  <select
+                    value={enrollmentStationId}
+                    onChange={(event) => onEnrollmentStationIdChange(event.target.value)}
+                    className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  >
+                    <option value="">Select {PHONE_KIOSK_COUNTRIES.find((country) => country.code === enrollmentCountry)?.label} kiosk</option>
+                    {enrollmentKioskOptions.map((kiosk) => (
+                      <option key={kiosk.stationId} value={kiosk.stationId} disabled={assignedStationIds.has(kiosk.stationId)}>
+                        {kiosk.stationId}{kiosk.label ? ` — ${kiosk.label}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="min-w-0 flex-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold leading-5 text-amber-900">
+                    The phone will appear in Unassigned inventory and remain visible only to Chargerent administrators.
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={onCreateEnrollment}
-                  disabled={!enrollmentStationId}
+                  disabled={enrollmentMode === 'assigned' && !enrollmentStationId}
                   className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  Create
+                  Create code
                 </button>
               </div>
               {enrollmentCode && (
@@ -498,6 +594,226 @@ function PhoneEnrollmentModal({
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      </div>
+    </ModalPortal>
+  );
+}
+
+function PhoneLinesModal({
+  isOpen,
+  onClose,
+  devices,
+  now,
+  isAdmin,
+  onSaveNumber,
+  onSelectDevice,
+}) {
+  const dialogRef = useRef(null);
+  const [search, setSearch] = useState('');
+  const [editingDeviceId, setEditingDeviceId] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [savingDeviceId, setSavingDeviceId] = useState('');
+  const [saveError, setSaveError] = useState('');
+  const summary = useMemo(() => summarizePhoneLines(devices, now), [devices, now]);
+  const duplicateKeys = useMemo(() => new Set(
+    summary.lines.filter((line) => line.devices.length > 1).map((line) => line.key),
+  ), [summary.lines]);
+  const filteredDevices = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return [...devices]
+      .filter((device) => !needle || [
+        device.stationId,
+        device.phoneLine?.number,
+        device.inventory?.cellularCarrier,
+        device.inventory?.model,
+        device.displayName,
+        device.id,
+      ].some((value) => String(value || '').toLowerCase().includes(needle)))
+      .sort((left, right) => (
+        (left.stationId || 'ZZZZ').localeCompare(right.stationId || 'ZZZZ') ||
+        left.id.localeCompare(right.id)
+      ));
+  }, [devices, search]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const previouslyFocused = document.activeElement;
+    dialogRef.current?.querySelector('[data-phone-lines-close]')?.focus({preventScroll: true});
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus({preventScroll: true});
+    };
+  }, [isOpen, onClose]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setSearch('');
+      setEditingDeviceId('');
+      setPhoneNumber('');
+      setSavingDeviceId('');
+      setSaveError('');
+    }
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  const beginEditing = (device) => {
+    setEditingDeviceId(device.id);
+    setPhoneNumber(device.phoneLine?.manualNumber || '');
+    setSaveError('');
+  };
+  const saveNumber = async (deviceId, value) => {
+    setSavingDeviceId(deviceId);
+    setSaveError('');
+    try {
+      await onSaveNumber(deviceId, value);
+      setEditingDeviceId('');
+      setPhoneNumber('');
+    } catch (error) {
+      setSaveError(humanizePhoneMessage(error?.message || 'Could not save the phone number.'));
+    } finally {
+      setSavingDeviceId('');
+    }
+  };
+
+  return (
+    <ModalPortal>
+      <div
+        className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+        role="presentation"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget) onClose();
+        }}
+      >
+        <div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="phone-lines-modal-title"
+          className="flex max-h-[calc(100vh-2rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-slate-100 shadow-2xl"
+        >
+          <div className="flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4 sm:px-6">
+            <div>
+              <h2 id="phone-lines-modal-title" className="text-xl font-black text-slate-900">Phone lines</h2>
+              <p className="mt-1 text-xs leading-5 text-slate-500">Numbers reported by Agent, with a manual fallback when Android cannot read the line.</p>
+            </div>
+            <button
+              type="button"
+              data-phone-lines-close
+              onClick={onClose}
+              className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus:outline-none focus:ring-4 focus:ring-blue-500/15"
+              aria-label="Close phone lines"
+            >
+              <XMarkIcon className="h-5 w-5" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 border-b border-slate-200 bg-slate-50 px-4 py-3 sm:grid-cols-5 sm:px-6">
+            {[
+              ['Lines', summary.lineCount, 'text-slate-900'],
+              ['Live', summary.liveCount, 'text-emerald-700'],
+              ['Offline', summary.offlineCount, 'text-red-700'],
+              ['Unavailable', summary.unavailableCount, 'text-amber-700'],
+              ['Duplicates', summary.duplicateCount, summary.duplicateCount ? 'text-red-700' : 'text-slate-500'],
+            ].map(([label, value, tone]) => (
+              <div key={label} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</p>
+                <p className={`mt-0.5 text-xl font-black ${tone}`}>{value}</p>
+              </div>
+            ))}
+          </div>
+
+          <div className="border-b border-slate-200 bg-white px-4 py-3 sm:px-6">
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search number, kiosk, carrier, model, or device ID"
+              aria-label="Search phone lines"
+              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+            />
+            {saveError && <p className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{saveError}</p>}
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6">
+            {filteredDevices.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-sm text-slate-500">No matching phones.</div>
+            ) : (
+              <div className="space-y-2">
+                {filteredDevices.map((device) => {
+                  const connection = getPhoneConnectionState(device, now);
+                  const style = STATE_STYLES[connection];
+                  const line = device.phoneLine || {};
+                  const editing = editingDeviceId === device.id;
+                  const saving = savingDeviceId === device.id;
+                  const duplicate = line.key && duplicateKeys.has(line.key);
+                  return (
+                    <div key={device.id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0 sm:w-[28%]">
+                          <button
+                            type="button"
+                            onClick={() => onSelectDevice(device.id)}
+                            className="truncate text-left text-sm font-black text-blue-700 hover:text-blue-900 hover:underline"
+                          >
+                            {device.stationId || 'Unassigned phone'}
+                          </button>
+                          <p className="mt-0.5 truncate text-[11px] text-slate-500">{device.inventory.model || device.displayName || device.id}</p>
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          {editing ? (
+                            <div className="flex flex-col gap-2 sm:flex-row">
+                              <input
+                                value={phoneNumber}
+                                onChange={(event) => setPhoneNumber(event.target.value)}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter' && phoneNumber.trim() && !saving) {
+                                    saveNumber(device.id, phoneNumber);
+                                  }
+                                }}
+                                autoFocus
+                                inputMode="tel"
+                                placeholder="+1 310 555 0123"
+                                aria-label={`Phone number for ${device.stationId || device.id}`}
+                                className="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                              />
+                              <button type="button" onClick={() => saveNumber(device.id, phoneNumber)} disabled={!phoneNumber.trim() || saving} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40">{saving ? 'Saving…' : 'Save'}</button>
+                              <button type="button" onClick={() => { setEditingDeviceId(''); setPhoneNumber(''); setSaveError(''); }} disabled={saving} className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50">Cancel</button>
+                            </div>
+                          ) : (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className={`font-mono text-sm font-black ${line.number ? 'text-slate-900' : 'text-slate-400'}`}>{line.number || 'Number unavailable'}</p>
+                              {line.source && <span className={`rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-wide ${line.source === 'agent' ? 'bg-blue-100 text-blue-700' : 'bg-violet-100 text-violet-700'}`}>{line.source === 'agent' ? 'Agent' : 'Manual'}</span>}
+                              {duplicate && <span className="rounded-full bg-red-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-red-700">Duplicate</span>}
+                            </div>
+                          )}
+                          <p className="mt-1 truncate text-[11px] text-slate-500">{device.inventory.cellularCarrier || 'Carrier unavailable'}</p>
+                        </div>
+
+                        <div className="flex shrink-0 items-center justify-between gap-3 sm:justify-end">
+                          <div className="text-right">
+                            <span className={`inline-flex rounded-full px-2 py-1 text-[10px] font-bold ${style.badge}`}>{style.label}</span>
+                            <p className="mt-1 text-[10px] text-slate-400">{formatPhoneRelativeTime(device.lastSeenAtMs, now)}</p>
+                          </div>
+                          {isAdmin && !line.agentNumber && !editing && (
+                            <div className="flex gap-1.5">
+                              <button type="button" onClick={() => beginEditing(device)} className="rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-2 text-[10px] font-bold text-blue-700 hover:bg-blue-100">{line.manualNumber ? 'Edit' : 'Add number'}</button>
+                              {line.manualNumber && <button type="button" onClick={() => saveNumber(device.id, '')} disabled={saving} className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-2 text-[10px] font-bold text-red-700 hover:bg-red-100 disabled:opacity-40">Remove</button>}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1023,6 +1339,17 @@ function PhoneNetworkCard({
   const networkToolsReady = inventory.commandEncryptionReady;
   const wifiSignalText = inventory.wifiRssiDbm == null ? 'Signal unavailable' : `${inventory.wifiRssiDbm} dBm`;
   const cellularSignalText = inventory.cellularSignalDbm == null ? 'Signal unavailable' : `${inventory.cellularSignalDbm} dBm`;
+  const hotspotControlMode = String(inventory.hotspotControlMode || 'unavailable').trim().toLowerCase();
+  const hotspotCompatibility = hotspotControlMode === 'settings_automation';
+  const hotspotControlTitle = !inventory.hotspotSupported
+    ? 'This phone has no safe hotspot control path'
+    : !inventory.hotspotControlGranted
+      ? hotspotCompatibility
+        ? 'Enable Remote UI control in Agent first'
+        : 'Open Agent on the phone and approve Modify system settings first'
+      : hotspotCompatibility
+        ? 'Agent will use this phone’s trusted Android Settings screen'
+        : 'Agent will use Android’s direct tethering control';
   const status = inventory.wifiCaptivePortal
     ? { label: 'Sign-in required', tone: 'bg-amber-100 text-amber-800' }
     : inventory.networkStatus === 'online'
@@ -1071,11 +1398,7 @@ function PhoneNetworkCard({
           icon={WifiIcon}
           onToggle={onToggleHotspot}
           disabled={!canControl || !inventory.hotspotSupported || !inventory.hotspotControlGranted}
-          title={!inventory.hotspotSupported
-            ? 'Hotspot control requires Android 16 or newer'
-            : !inventory.hotspotControlGranted
-              ? 'Open Agent on the phone and approve hotspot control first'
-              : ''}
+          title={hotspotControlTitle}
           label="Hotspot"
           compact
         />
@@ -1083,10 +1406,15 @@ function PhoneNetworkCard({
           enabled={inventory.hotspotAlwaysOn}
           onToggle={onToggleAlwaysOnHotspot}
           disabled={!canControl || !inventory.hotspotSupported || !inventory.hotspotControlGranted}
+          title={hotspotControlTitle}
           label="Always on"
           icon={ArrowPathIcon}
           compact
         />
+        <p className={`col-span-2 pb-2 text-center text-[10px] font-bold ${hotspotCompatibility ? 'text-amber-700' : 'text-slate-500'}`}>
+          {phoneHotspotControlLabel(inventory)}
+          {hotspotCompatibility ? ' · Shows the last Agent-confirmed state and opens Android Settings when a change is needed' : ''}
+        </p>
         {inventory.hotspotLastError && inventory.hotspotAlwaysOn && !inventory.hotspotActive && (
           <p className="col-span-2 mt-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-800">
             {humanizePhoneMessage(inventory.hotspotLastError)}
@@ -1545,13 +1873,15 @@ export default function PhoneControlPage({
   onLogout,
   currentUser,
   allStationsData = [],
+  initialSearch = '',
   t = (key) => key,
 }) {
   const [devices, setDevices] = useState([]);
   const [commands, setCommands] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
-  const [search, setSearch] = useState('');
+  const normalizedInitialSearch = String(initialSearch || '').trim();
+  const [search, setSearch] = useState(normalizedInitialSearch);
   const [phoneCardFilter, setPhoneCardFilter] = useState('all');
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
   const [commandStatus, setCommandStatus] = useState(null);
@@ -1559,10 +1889,12 @@ export default function PhoneControlPage({
   const [assignmentStationId, setAssignmentStationId] = useState('');
   const [assignmentCountry, setAssignmentCountry] = useState('CA');
   const [assignmentTerminalEnabled, setAssignmentTerminalEnabled] = useState(false);
+  const [enrollmentMode, setEnrollmentMode] = useState('unassigned');
   const [enrollmentCountry, setEnrollmentCountry] = useState('CA');
   const [enrollmentStationId, setEnrollmentStationId] = useState('');
   const [enrollmentCode, setEnrollmentCode] = useState('');
   const [addPhoneOpen, setAddPhoneOpen] = useState(false);
+  const [phoneLinesOpen, setPhoneLinesOpen] = useState(false);
   const [liveRequestedDeviceId, setLiveRequestedDeviceId] = useState('');
   const [agentUpdateChecking, setAgentUpdateChecking] = useState(false);
   const [paymentUpdateChecking, setPaymentUpdateChecking] = useState(false);
@@ -1573,7 +1905,14 @@ export default function PhoneControlPage({
 
   const openAddPhone = useCallback(() => setAddPhoneOpen(true), []);
   const closeAddPhone = useCallback(() => setAddPhoneOpen(false), []);
+  const openPhoneLines = useCallback(() => setPhoneLinesOpen(true), []);
+  const closePhoneLines = useCallback(() => setPhoneLinesOpen(false), []);
   const closeWifiJoin = useCallback(() => setWifiJoinNetwork(null), []);
+  const changeEnrollmentMode = useCallback((mode) => {
+    setEnrollmentMode(mode === 'assigned' ? 'assigned' : 'unassigned');
+    setEnrollmentStationId('');
+    setEnrollmentCode('');
+  }, []);
   const changeEnrollmentCountry = useCallback((countryCode) => {
     setEnrollmentCountry(countryCode);
     setEnrollmentStationId('');
@@ -1613,16 +1952,20 @@ export default function PhoneControlPage({
         ));
       setDevices(nextDevices);
       setLoadError('');
-      setSelectedDeviceId((current) => (
-        nextDevices.some((device) => device.id === current) ? current : nextDevices[0]?.id || ''
-      ));
+      setSelectedDeviceId((current) => {
+        if (nextDevices.some((device) => device.id === current)) return current;
+        const initiallyFilteredDevice = normalizedInitialSearch
+          ? nextDevices.find((device) => device.stationId === normalizedInitialSearch)
+          : null;
+        return initiallyFilteredDevice?.id || nextDevices[0]?.id || '';
+      });
     } catch (error) {
       console.error('Unable to load managed phones', error);
       setLoadError('Unable to load managed phones. The Mobile Device Management service may not be deployed yet.');
     } finally {
       setLoading(false);
     }
-  }, [hasPhoneControlAccess]);
+  }, [hasPhoneControlAccess, normalizedInitialSearch]);
 
   useEffect(() => {
     loadDevices(true);
@@ -1765,13 +2108,22 @@ export default function PhoneControlPage({
   ), [assignmentCountry, kioskOptions]);
 
   const filteredDevices = useMemo(() => devices.filter((device) => {
+    if (phoneCardFilter === 'unassigned' && device.stationId) return false;
     if (['CA', 'FR', 'US'].includes(phoneCardFilter) &&
-        getPhoneStationCountryCode(device.stationId) !== phoneCardFilter) return false;
+        (device.market || getPhoneStationCountryCode(device.stationId)) !== phoneCardFilter) return false;
     if (phoneCardFilter === 'attention' && !phoneNeedsAttention(device, now)) return false;
     if (phoneCardFilter === 'terminal' && device.terminal.enabled !== true) return false;
     if (phoneCardFilter === 'no-terminal' && device.terminal.enabled === true) return false;
     return phoneMatchesSearch(device, kioskByStationId.get(device.stationId), search);
   }), [devices, kioskByStationId, now, phoneCardFilter, search]);
+  const filteredUnassignedDevices = useMemo(
+    () => filteredDevices.filter((device) => !device.stationId),
+    [filteredDevices],
+  );
+  const filteredAssignedDevices = useMemo(
+    () => filteredDevices.filter((device) => device.stationId),
+    [filteredDevices],
+  );
 
   const selectedDevice = devices.find((device) => device.id === selectedDeviceId) || null;
   const selectedKiosk = selectedDevice ? getKioskForPhone(selectedDevice, accessibleKiosks) : null;
@@ -1832,9 +2184,11 @@ export default function PhoneControlPage({
 
   useEffect(() => {
     setAssignmentStationId(selectedDevice?.stationId || '');
-    setAssignmentCountry(getPhoneStationCountryCode(selectedDevice?.stationId) || 'CA');
+    setAssignmentCountry(
+      getPhoneStationCountryCode(selectedDevice?.stationId) || selectedDevice?.market || 'CA',
+    );
     setAssignmentTerminalEnabled(selectedDevice?.terminal?.enabled === true);
-  }, [selectedDevice?.id, selectedDevice?.stationId, selectedDevice?.terminal?.enabled]);
+  }, [selectedDevice?.id, selectedDevice?.market, selectedDevice?.stationId, selectedDevice?.terminal?.enabled]);
 
   const sendCommand = useCallback(async (operation, args = {}, confirmed = false) => {
     if (!selectedDevice?.id) return;
@@ -2022,21 +2376,45 @@ export default function PhoneControlPage({
   };
 
   const createEnrollment = async () => {
-    if (!enrollmentStationId) return;
-    setCommandStatus({ state: 'sending', message: `Creating enrollment for ${enrollmentStationId}…` });
+    if (enrollmentMode === 'assigned' && !enrollmentStationId) return;
+    const targetLabel = enrollmentMode === 'assigned'
+      ? enrollmentStationId
+      : `${enrollmentCountry} inventory`;
+    setCommandStatus({ state: 'sending', message: `Creating enrollment for ${targetLabel}…` });
     setEnrollmentCode('');
     try {
-      const result = await callFunctionWithAuth('phoneControl_createEnrollment', { stationId: enrollmentStationId });
+      const result = await callFunctionWithAuth('phoneControl_createEnrollment', {
+        market: enrollmentCountry,
+        stationId: enrollmentMode === 'assigned' ? enrollmentStationId : '',
+      });
       setEnrollmentCode(String(result?.enrollmentCode || ''));
-      setCommandStatus({ state: 'success', message: result?.message || `Enrollment ready for ${enrollmentStationId}.` });
+      setCommandStatus({ state: 'success', message: result?.message || `Enrollment ready for ${targetLabel}.` });
     } catch (error) {
       setCommandStatus({ state: 'error', message: error?.message || 'Could not create enrollment.' });
     }
   };
 
+  const saveManualPhoneNumber = useCallback(async (deviceId, phoneNumber) => {
+    setCommandStatus({state: 'sending', message: phoneNumber.trim() ? 'Saving phone number…' : 'Removing manual phone number…'});
+    try {
+      const result = await callFunctionWithAuth('phoneControl_setManualPhoneNumber', {
+        deviceId,
+        phoneNumber,
+      });
+      await loadDevices(false);
+      setCommandStatus({state: 'success', message: result?.message || 'Phone number saved.'});
+      return result;
+    } catch (error) {
+      const message = humanizePhoneMessage(error?.message || 'Could not save the phone number.');
+      setCommandStatus({state: 'error', message});
+      throw new Error(message);
+    }
+  }, [loadDevices]);
+
   const onlineCount = devices.filter((device) => getPhoneConnectionState(device, now) === 'online').length;
   const unassignedCount = devices.filter((device) => !device.stationId).length;
   const attentionCount = devices.filter((device) => phoneNeedsAttention(device, now)).length;
+  const phoneLineSummary = useMemo(() => summarizePhoneLines(devices, now), [devices, now]);
 
   if (!hasPhoneControlAccess) {
     return <div className="min-h-screen bg-gray-100 p-6"><div className="mx-auto max-w-3xl rounded-lg border border-red-200 bg-red-50 p-6 text-red-700">Mobile Device Management is not enabled for this account.</div></div>;
@@ -2049,6 +2427,18 @@ export default function PhoneControlPage({
         network={wifiJoinNetwork}
         onClose={closeWifiJoin}
         onJoin={joinWifiNetwork}
+      />
+      <PhoneLinesModal
+        isOpen={phoneLinesOpen}
+        onClose={closePhoneLines}
+        devices={devices}
+        now={now}
+        isAdmin={isAdmin}
+        onSaveNumber={saveManualPhoneNumber}
+        onSelectDevice={(deviceId) => {
+          setSelectedDeviceId(deviceId);
+          closePhoneLines();
+        }}
       />
       <ConfirmationModal
         isOpen={Boolean(confirmation)}
@@ -2064,6 +2454,8 @@ export default function PhoneControlPage({
         <PhoneEnrollmentModal
           isOpen={addPhoneOpen}
           onClose={closeAddPhone}
+          enrollmentMode={enrollmentMode}
+          onEnrollmentModeChange={changeEnrollmentMode}
           enrollmentCountry={enrollmentCountry}
           onEnrollmentCountryChange={changeEnrollmentCountry}
           enrollmentStationId={enrollmentStationId}
@@ -2090,11 +2482,26 @@ export default function PhoneControlPage({
       </header>
 
       <main className="mx-auto max-w-screen-2xl space-y-5 px-4 py-6 sm:px-6 lg:px-8">
-        <section className={`grid grid-cols-2 gap-3 ${isAdmin ? 'lg:grid-cols-5' : 'lg:grid-cols-4'}`}>
-          <SummaryCard label="Managed phones" value={devices.length} detail="One phone per assigned kiosk" />
+        <section className={`grid grid-cols-2 gap-3 ${isAdmin ? 'lg:grid-cols-3 xl:grid-cols-6' : 'lg:grid-cols-4'}`}>
+          <SummaryCard label="Managed phones" value={devices.length} detail="Assigned and staged inventory" />
           <SummaryCard label="Online" value={onlineCount} detail="Heartbeat within 90 seconds" tone="green" />
+          <SummaryCard
+            label="Phone lines"
+            value={phoneLineSummary.lineCount}
+            detail={`${phoneLineSummary.liveCount} live · ${phoneLineSummary.offlineCount} offline · ${phoneLineSummary.unavailableCount} unavailable`}
+            tone={phoneLineSummary.unavailableCount || phoneLineSummary.duplicateCount ? 'amber' : 'green'}
+            onClick={openPhoneLines}
+          />
           <SummaryCard label="Needs attention" value={attentionCount} detail="Offline or missing control access" tone={attentionCount ? 'red' : 'green'} />
-          <SummaryCard label="Unassigned" value={unassignedCount} detail="Not linked to a kiosk" tone={unassignedCount ? 'amber' : 'slate'} />
+          {isAdmin && (
+            <SummaryCard
+              label="Unassigned"
+              value={unassignedCount}
+              detail="Staged and ready to assign"
+              tone={unassignedCount ? 'amber' : 'slate'}
+              onClick={() => setPhoneCardFilter('unassigned')}
+            />
+          )}
           {isAdmin && <AddPhoneCard onClick={openAddPhone} />}
         </section>
 
@@ -2111,7 +2518,7 @@ export default function PhoneControlPage({
           <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(300px,0.8fr)_minmax(0,1.6fr)]">
             <section className="min-w-0 space-y-3">
               <div className="flex items-center justify-between px-1">
-                <h2 className="text-xs font-black uppercase tracking-wider text-slate-500">Kiosk phones</h2>
+                <h2 className="text-xs font-black uppercase tracking-wider text-slate-500">Managed phones</h2>
                 <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-bold text-slate-600">{filteredDevices.length}</span>
               </div>
               <div className="flex flex-wrap gap-1.5 rounded-xl border border-slate-200 bg-white p-2 shadow-sm" role="group" aria-label="Filter kiosk phones">
@@ -2132,46 +2539,57 @@ export default function PhoneControlPage({
                 <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center">
                   <DevicePhoneMobileIcon className="mx-auto h-12 w-12 text-slate-300" />
                   <p className="mt-3 text-sm font-bold text-slate-700">No matching phones</p>
-                  <p className="mt-1 text-xs text-slate-500">{isAdmin ? 'Select Add a phone above to connect the first kiosk phone.' : 'No managed phones are assigned to your partner kiosks.'}</p>
+                  <p className="mt-1 text-xs text-slate-500">{isAdmin ? 'Select Add a phone above to enroll managed inventory.' : 'No managed phones are assigned to your partner kiosks.'}</p>
                 </div>
-              ) : filteredDevices.map((device) => {
-                const kiosk = kioskByStationId.get(device.stationId);
-                const connection = getPhoneConnectionState(device, now);
-                const style = STATE_STYLES[connection];
-                const selected = device.id === selectedDeviceId;
-                return (
-                  <button key={device.id} type="button" onClick={() => setSelectedDeviceId(device.id)} className={`w-full rounded-xl border p-4 text-left shadow-sm transition ${selected ? 'border-blue-400 bg-blue-50 ring-2 ring-blue-100' : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-md'}`}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className={`h-2.5 w-2.5 rounded-full ${style.dot}`} />
-                          <p className="truncate text-base font-black text-slate-900">{device.stationId || 'Unassigned phone'}</p>
+              ) : (
+                <div className="space-y-4">
+                  {isAdmin && filteredUnassignedDevices.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between px-1">
+                        <h3 className="text-[10px] font-black uppercase tracking-wider text-amber-700">Unassigned inventory</h3>
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-800">{filteredUnassignedDevices.length}</span>
+                      </div>
+                      {filteredUnassignedDevices.map((device) => (
+                        <PhoneListCard
+                          key={device.id}
+                          device={device}
+                          kiosk={null}
+                          now={now}
+                          selected={device.id === selectedDeviceId}
+                          onSelect={() => setSelectedDeviceId(device.id)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                  {filteredAssignedDevices.length > 0 && (
+                    <div className="space-y-2">
+                      {isAdmin && filteredUnassignedDevices.length > 0 && (
+                        <div className="flex items-center justify-between px-1">
+                          <h3 className="text-[10px] font-black uppercase tracking-wider text-slate-500">Assigned kiosk phones</h3>
+                          <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-black text-slate-600">{filteredAssignedDevices.length}</span>
                         </div>
-                        <p className="mt-1 truncate text-xs text-slate-500">{kiosk?.info?.location || kiosk?.info?.place || device.displayName || device.id}</p>
-                      </div>
-                      <div className="flex shrink-0 flex-col items-end gap-1">
-                        <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${style.badge}`}>{style.label}</span>
-                        {device.terminal.enabled && (
-                          <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${TERMINAL_STYLES[device.terminal.state]?.badge || TERMINAL_STYLES.pending.badge}`}>
-                            {TERMINAL_STYLES[device.terminal.state]?.label || TERMINAL_STYLES.pending.label}
-                          </span>
-                        )}
-                      </div>
+                      )}
+                      {filteredAssignedDevices.map((device) => (
+                        <PhoneListCard
+                          key={device.id}
+                          device={device}
+                          kiosk={kioskByStationId.get(device.stationId)}
+                          now={now}
+                          selected={device.id === selectedDeviceId}
+                          onSelect={() => setSelectedDeviceId(device.id)}
+                        />
+                      ))}
                     </div>
-                    <div className="mt-3 flex items-center justify-between gap-3 border-t border-slate-200/80 pt-3 text-xs text-slate-500">
-                      <span className="truncate font-semibold">{device.inventory.model}</span>
-                      <span className="shrink-0">{formatPhoneRelativeTime(device.lastSeenAtMs, now)}</span>
-                    </div>
-                  </button>
-                );
-              })}
+                  )}
+                </div>
+              )}
 
             </section>
 
             <section className="min-w-0">
               {!selectedDevice ? (
                 <div className="flex min-h-[520px] items-center justify-center rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center">
-                  <div><DevicePhoneMobileIcon className="mx-auto h-14 w-14 text-slate-300" /><p className="mt-3 text-sm font-bold text-slate-700">Select a kiosk phone</p></div>
+                  <div><DevicePhoneMobileIcon className="mx-auto h-14 w-14 text-slate-300" /><p className="mt-3 text-sm font-bold text-slate-700">Select a managed phone</p></div>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -2184,8 +2602,17 @@ export default function PhoneControlPage({
                           <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${selectedDevice.inventory.isDeviceOwner ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}`}>{selectedDevice.inventory.isDeviceOwner ? 'Device Owner' : 'Owner missing'}</span>
                           <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${selectedTerminalStyle.badge}`}>{selectedTerminalStyle.label}</span>
                         </div>
-                        <p className="mt-1 text-sm text-slate-500">{selectedKiosk?.info?.location || selectedKiosk?.info?.place || 'No kiosk location'}{selectedKiosk?.info?.client ? ` · ${selectedKiosk.info.client}` : ''}</p>
+                        <p className="mt-1 text-sm text-slate-500">
+                          {selectedDevice.stationId
+                            ? `${selectedKiosk?.info?.location || selectedKiosk?.info?.place || 'Kiosk location unavailable'}${selectedKiosk?.info?.client ? ` · ${selectedKiosk.info.client}` : ''}`
+                            : `${selectedDevice.market || 'Unspecified'} inventory · Awaiting kiosk assignment`}
+                        </p>
                         <p className="mt-1 font-mono text-[11px] text-slate-400">{selectedDevice.id}</p>
+                        {!selectedDevice.stationId && (
+                          <div className="mt-3 max-w-xl rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
+                            This phone is enrolled and can be prepared remotely. Assign it to a kiosk to enable partner access and kiosk-specific terminal controls.
+                          </div>
+                        )}
                       </div>
                       {isAdmin && <div className="min-w-[300px] rounded-xl border border-slate-200 bg-slate-50 p-3">
                         <div className="flex flex-wrap gap-2">
@@ -2234,7 +2661,7 @@ export default function PhoneControlPage({
                         icon={SignalIcon}
                         label="Network"
                         value={phoneNetworkLabel(selectedDevice.inventory)}
-                        detail={selectedDevice.inventory.phoneNumber || 'Number unavailable'}
+                        detail={selectedDevice.phoneLine.number ? `${selectedDevice.phoneLine.number}${selectedDevice.phoneLine.source === 'manual' ? ' · Manual' : ''}` : 'Number unavailable'}
                         active={selectedDevice.inventory.network !== 'offline'}
                       />
                       <Metric icon={WifiIcon} label="Hotspot" value={phoneHotspotLabel(selectedDevice.inventory)} active={selectedDevice.inventory.hotspotActive} />

@@ -27,6 +27,7 @@ import { db } from '../firebase-config';
 
 const EMPTY_RENTALS = Object.freeze([]);
 const EMPTY_INCIDENTS = Object.freeze([]);
+const EMPTY_STATION_IDS = new Set();
 const MOBILE_KIOSK_PREVIEW_LIMIT = 4;
 const DESKTOP_KIOSK_PREVIEW_LIMIT = 8;
 const INITIAL_STATUS_SETTLE_MS = 1500;
@@ -109,7 +110,7 @@ const buildStationStatusIssues = (kiosk, referenceTime) => {
     return issues;
 };
 
-export default function DashboardPage({ _token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToAiBooths, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToActivity, onNavigateToPhoneControl, onNavigateToReporting, onNavigateToTesting, rentalData, rentalDashboardStatsByStationId, useRentalDashboardSummaries = false, allStationsData, _setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, _setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, _ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, _setNgrokInfo, manageIgnoredKiosk, kiosksReady, sshConnectivityByStation = {}, ngrokConnectivityByStation = {}, initialSearch = '', sessionWarningOpen = false, sessionCountdown = 60, onStayLoggedIn, operationalActivityEnabled = false }) {
+export default function DashboardPage({ _token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToAiBooths, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToActivity, onNavigateToPhoneControl, assignedPhoneStationIds = EMPTY_STATION_IDS, onNavigateToReporting, onNavigateToTesting, rentalData, rentalDashboardStatsByStationId, useRentalDashboardSummaries = false, allStationsData, _setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, _setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, _ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, _setNgrokInfo, manageIgnoredKiosk, kiosksReady, sshConnectivityByStation = {}, ngrokConnectivityByStation = {}, initialSearch = '', sessionWarningOpen = false, sessionCountdown = 60, onStayLoggedIn, operationalActivityEnabled = false }) {
     const [loading, setLoading] = useState(!kiosksReady);
     const [urgentIncidents, setUrgentIncidents] = useState([]);
     const [error] = useState(null);
@@ -943,7 +944,7 @@ return (
 
                                                 return (
                                                 <div key={kiosk.stationid}>
-                                                    <KioskPanel kiosk={kiosk} isExpanded={isExpanded || isEditing} onToggle={handleToggleDetails} onToggleEdit={handleToggleEditMode} mockNow={latestTimestamp} rentalData={stationRentalData} rentalDashboardStats={stationRentalDashboardTotals} clientInfo={clientInfo} t={t} onCommand={handleGeneralCommand} onShowRentalDetails={handleShowRentalDetails} urgentIncidents={urgentIncidentsByStation.get(kiosk.stationid) || EMPTY_INCIDENTS} onNavigateToActivity={onNavigateToActivity} serverFlowVersion={serverFlowVersion} />
+                                                    <KioskPanel kiosk={kiosk} isExpanded={isExpanded || isEditing} onToggle={handleToggleDetails} onToggleEdit={handleToggleEditMode} mockNow={latestTimestamp} rentalData={stationRentalData} rentalDashboardStats={stationRentalDashboardTotals} clientInfo={clientInfo} t={t} onCommand={handleGeneralCommand} onShowRentalDetails={handleShowRentalDetails} urgentIncidents={urgentIncidentsByStation.get(kiosk.stationid) || EMPTY_INCIDENTS} onNavigateToActivity={onNavigateToActivity} serverFlowVersion={serverFlowVersion} hasAssignedPhone={assignedPhoneStationIds.has(kiosk.stationid)} onNavigateToPhoneControl={onNavigateToPhoneControl} />
                                                     {isEditing && kioskToEdit ? (
                                                         <KioskEditPanel kiosk={kioskToEdit} onSave={handleKioskSave} clientInfo={clientInfo} isVisible={editingKioskId === kiosk.stationid} t={t} onCommand={handleGeneralCommand} />
                                                     ) : (

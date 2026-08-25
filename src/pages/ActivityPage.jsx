@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import {
     collection,
     documentId,
@@ -14,7 +15,8 @@ import { ExclamationTriangleIcon } from '@heroicons/react/24/outline';
 import { db } from '../firebase-config';
 import { isKioskActive, isKioskOnline } from '../utils/helpers';
 
-const PAGE_SIZE = 30;
+const HISTORY_BATCH_SIZE = 250;
+const FIRESTORE_IN_QUERY_SIZE = 30;
 const SEEN_STORAGE_KEY = 'chargerent:kiosk-activity-seen:v1';
 const TELEMETRY_OVERDUE_TYPE = 'kiosk_telemetry_overdue';
 const MQTT_DISCONNECTED_TYPE = 'mqtt_disconnected';
@@ -73,6 +75,26 @@ const TRANSACTION_TIMELINE_EVENT_TYPES = new Set([
     'interaction_timed_out',
 ]);
 
+const chunkValues = (values, size = FIRESTORE_IN_QUERY_SIZE) => {
+    const chunks = [];
+    for (let index = 0; index < values.length; index += size) {
+        chunks.push(values.slice(index, index + size));
+    }
+    return chunks;
+};
+
+const isGenuineErrorEvent = (event) => (
+    event?.type !== 'payment_declined' && ['critical', 'error'].includes(event?.severity)
+);
+
+const isRentalActivityEvent = (event) => {
+    if (event?.type === 'payment_declined') return false;
+    return TRANSACTION_TIMELINE_EVENT_TYPES.has(event?.type) ||
+        ['rental', 'rent'].includes(String(event?.interactionKind || '').toLowerCase()) ||
+        event?.source === 'rental' ||
+        Boolean(event?.transactionId);
+};
+
 const eventTime = (event) => (
     event?.occurredAt?.toDate?.() ||
     event?.openedAt?.toDate?.() ||
@@ -109,6 +131,29 @@ const activityTimeLabel = (value) => {
 };
 
 const eventTimeLabel = (event) => activityTimeLabel(eventTime(event));
+
+const navigatorTimeLabel = (occurredAt) => {
+    const normalized = new Date(occurredAt);
+    if (Number.isNaN(normalized.getTime())) return 'Time unavailable';
+    return normalized.toLocaleString(undefined, {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+    });
+};
+
+const relativeTimeLabel = (timestamp, nowMs = Date.now()) => {
+    const elapsedMs = Math.max(0, nowMs - timestamp);
+    const elapsedMinutes = Math.floor(elapsedMs / 60_000);
+    if (elapsedMinutes < 1) return 'just now';
+    if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
+    const elapsedHours = Math.floor(elapsedMinutes / 60);
+    if (elapsedHours < 24) return `${elapsedHours}h ${elapsedMinutes % 60}m ago`;
+    const elapsedDays = Math.floor(elapsedHours / 24);
+    return `${elapsedDays}d ${elapsedHours % 24}h ago`;
+};
 
 const formatDuration = (durationMs) => {
     const totalMinutes = Math.max(0, Math.floor(Number(durationMs || 0) / 60000));
@@ -165,6 +210,14 @@ const interactionSequence = (event) => {
 
 const normalizeActivityEvent = (event, fallbackSurface) => {
     const type = String(event.type || '');
+    if (type === 'payment_declined') {
+        return {
+            ...event,
+            category: 'interaction',
+            severity: 'info',
+            summary: event.summary || 'Payment declined',
+        };
+    }
     const isResolvedHeartbeat = type === `${TELEMETRY_OVERDUE_TYPE}_resolved`;
     if (type === TELEMETRY_OVERDUE_TYPE || isResolvedHeartbeat) {
         return {
@@ -394,14 +447,10 @@ function InteractionCard({ events, cardEvent, cardKind, rentalRecord, onNavigate
     const firstEvent = events[0];
     const lastEvent = events.at(-1);
     const displayEvent = cardEvent || firstEvent;
-    const severity = events.some((event) => ['critical', 'error'].includes(event.severity))
+    const severity = events.some(isGenuineErrorEvent)
         ? 'error'
         : events.some((event) => event.severity === 'warning') ? 'warning' : 'info';
-    const isRentalInteraction = events.some((event) => (
-        ['rental', 'rent'].includes(String(event.interactionKind || '').toLowerCase()) ||
-        event.source === 'rental' ||
-        Boolean(event.transactionId)
-    ));
+    const isRentalInteraction = events.some(isRentalActivityEvent);
     const purchasedEvent = events.find((event) => event.type === 'charger_purchased');
     const isPurchasedRental = Boolean(purchasedEvent);
     const style = severity === 'info' && isPurchasedRental
@@ -416,7 +465,8 @@ function InteractionCard({ events, cardEvent, cardKind, rentalRecord, onNavigate
         'charger_returned',
         'charger_purchased',
     ].includes(event.type));
-    const failed = events.some((event) => ['interaction_failed', 'interaction_timed_out', 'charger_dispense_failed', 'payment_declined'].includes(event.type));
+    const failed = events.some((event) => ['interaction_failed', 'interaction_timed_out', 'charger_dispense_failed'].includes(event.type));
+    const declined = events.some((event) => event.type === 'payment_declined');
     const rentalStartedAt = events.find((event) => event.type === 'charger_rented');
     const rentalReturnedAt = [...events].reverse().find((event) => event.type === 'charger_returned');
     const rentalDurationMs = rentalStartedAt && rentalReturnedAt
@@ -444,7 +494,7 @@ function InteractionCard({ events, cardEvent, cardKind, rentalRecord, onNavigate
                         <p className="mt-1 text-sm font-semibold leading-5">{interactionTitle(events, cardKind)}</p>
                     </div>
                     <span className="shrink-0 rounded-full bg-white/70 px-2 py-1 font-mono text-[10px] font-bold uppercase">
-                        {failed ? 'Error' : completed ? 'Complete' : 'In progress'}
+                        {failed ? 'Error' : declined ? 'Declined' : completed ? 'Complete' : 'In progress'}
                     </span>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] opacity-75">
@@ -473,6 +523,87 @@ function InteractionCard({ events, cardEvent, cardKind, rentalRecord, onNavigate
             </ol>
             {lastEvent.durationMs > 0 && <p className="px-3 pb-3 text-[11px] opacity-70 sm:px-4 sm:pb-4">Duration {formatDuration(lastEvent.durationMs)}</p>}
         </details>
+    );
+}
+
+function ActivityTimeNavigator({ items, onJump, rangeStartMs, rangeEndMs }) {
+    const [hoverMarker, setHoverMarker] = useState(null);
+    const rangeDurationMs = Math.max(1, rangeEndMs - rangeStartMs);
+    const ticks = useMemo(() => items.map((item) => ({
+        key: item.key,
+        label: navigatorTimeLabel(item.occurredAt),
+        occurredAt: item.occurredAt,
+        position: Math.min(100, Math.max(0, ((rangeEndMs - item.occurredAt) / rangeDurationMs) * 100)),
+        tone: (item.type === 'interaction' ? item.events : [item.event]).some(isGenuineErrorEvent)
+            ? 'error'
+            : (item.type === 'interaction' ? item.events : [item.event]).some(isRentalActivityEvent)
+                ? 'rental'
+                : 'default',
+    })), [items, rangeDurationMs, rangeEndMs]);
+    if (ticks.length < 2) return null;
+
+    const markerFromPointer = (event) => {
+        const bounds = event.currentTarget.getBoundingClientRect();
+        const position = Math.min(100, Math.max(0, ((event.clientY - bounds.top) / bounds.height) * 100));
+        const timestamp = rangeEndMs - (rangeDurationMs * position / 100);
+        return {
+            position,
+            timestamp,
+            label: `${navigatorTimeLabel(timestamp)} · ${relativeTimeLabel(timestamp, rangeEndMs)}`,
+        };
+    };
+
+    const jumpToPointerTime = (event) => {
+        const marker = markerFromPointer(event);
+        const nearestIndex = ticks.reduce((nearest, tick, index) => (
+            Math.abs(tick.occurredAt - marker.timestamp) < Math.abs(ticks[nearest].occurredAt - marker.timestamp)
+                ? index
+                : nearest
+        ), 0);
+        onJump(nearestIndex);
+    };
+
+    return (
+        <aside className="sticky top-24 h-[calc(100vh-7rem)] w-11 shrink-0 overflow-visible sm:w-14" aria-label="Activity time navigator">
+            <div
+                className="absolute inset-x-0 inset-y-4 overflow-visible"
+                onPointerMove={(event) => setHoverMarker(markerFromPointer(event))}
+                onPointerLeave={() => setHoverMarker(null)}
+            >
+                <div className="absolute inset-y-0 right-2.5 w-px rounded-full bg-slate-300 sm:right-3.5" />
+                <button
+                    type="button"
+                    className="absolute inset-y-0 right-0 z-0 w-8 cursor-ns-resize bg-transparent focus:outline-none focus:ring-2 focus:ring-[#B784A7]/40 sm:w-10"
+                    onClick={jumpToPointerTime}
+                    aria-label="Jump to the nearest activity at this time"
+                />
+                {ticks.map((tick, index) => {
+                    if (tick.tone === 'default') return null;
+                    const isError = tick.tone === 'error';
+                    return (
+                        <button
+                            key={tick.key}
+                            type="button"
+                            onClick={() => onJump(index)}
+                            className="group absolute right-0 z-10 flex h-5 w-8 -translate-y-1/2 items-center justify-end focus:outline-none sm:w-10"
+                            style={{ top: `${tick.position}%` }}
+                            aria-label={`Jump to ${tick.label}${tick.tone === 'error' ? ', error' : tick.tone === 'rental' ? ', rental activity' : ''}`}
+                            title={`${tick.label} · ${relativeTimeLabel(tick.occurredAt, rangeEndMs)}`}
+                        >
+                            <span className={`rounded-full transition-all group-hover:w-8 sm:group-hover:w-9 ${isError ? 'h-1 w-7 bg-red-500 sm:w-8' : 'h-0.5 w-5 bg-emerald-500 sm:w-6'}`} />
+                        </button>
+                    );
+                })}
+                {hoverMarker && (
+                    <div
+                        className="pointer-events-none absolute right-8 hidden -translate-y-1/2 whitespace-nowrap rounded-md bg-[#B784A7] px-2 py-1 text-[10px] font-semibold text-white shadow-sm sm:block"
+                        style={{ top: `${hoverMarker.position}%` }}
+                    >
+                        {hoverMarker.label}
+                    </div>
+                )}
+            </div>
+        </aside>
     );
 }
 
@@ -522,12 +653,10 @@ export default function ActivityPage({
     const [events, setEvents] = useState([]);
     const [relatedTimelineEvents, setRelatedTimelineEvents] = useState([]);
     const [rentalRecords, setRentalRecords] = useState({});
-    const [cursor, setCursor] = useState(null);
-    const [hasMore, setHasMore] = useState(false);
     const [loading, setLoading] = useState(true);
-    const [loadingMore, setLoadingMore] = useState(false);
     const [error, setError] = useState('');
     const [referenceTime, setReferenceTime] = useState(() => new Date().toISOString());
+    const loadRequestRef = useRef(0);
     const [seenActivity, setSeenActivity] = useState(() => {
         try {
             return JSON.parse(localStorage.getItem(SEEN_STORAGE_KEY) || '{}');
@@ -603,50 +732,61 @@ export default function ActivityPage({
         });
     }, [allowedStationIds]);
 
-    const loadEvents = useCallback(async ({ append = false, after = null } = {}) => {
+    const loadEvents = useCallback(async () => {
+        const requestId = loadRequestRef.current + 1;
+        loadRequestRef.current = requestId;
         if (!selectedStation) {
             setEvents([]);
             setRelatedTimelineEvents([]);
             setRentalRecords({});
-            setCursor(null);
-            setHasMore(false);
             setLoading(false);
-            setLoadingMore(false);
             return;
         }
-        append ? setLoadingMore(true) : setLoading(true);
+        setLoading(true);
         setError('');
         try {
-            const constraints = [where('stationId', '==', selectedStation)];
-            constraints.push(where('occurredAt', '>=', new Date(historyStartMs)));
-            constraints.push(orderBy('occurredAt', 'desc'));
-            if (after) constraints.push(startAfter(after));
-            constraints.push(limit(PAGE_SIZE));
-            const snapshot = await getDocs(query(collection(db, 'kioskEvents'), ...constraints));
-            const nextEvents = snapshot.docs
+            const eventDocuments = [];
+            let nextCursor = null;
+            let batchSize = 0;
+            do {
+                const constraints = [
+                    where('stationId', '==', selectedStation),
+                    where('occurredAt', '>=', new Date(historyStartMs)),
+                    orderBy('occurredAt', 'desc'),
+                ];
+                if (nextCursor) constraints.push(startAfter(nextCursor));
+                constraints.push(limit(HISTORY_BATCH_SIZE));
+                const snapshot = await getDocs(query(collection(db, 'kioskEvents'), ...constraints));
+                if (loadRequestRef.current !== requestId) return;
+                eventDocuments.push(...snapshot.docs);
+                batchSize = snapshot.size;
+                nextCursor = snapshot.docs.at(-1) || null;
+            } while (batchSize === HISTORY_BATCH_SIZE && nextCursor);
+
+            const nextEvents = eventDocuments
                 .map((document) => ({ id: document.id, ...document.data() }))
                 .filter((event) => allowedStationIds.has(event.stationId))
                 .map((event) => normalizeActivityEvent(event, selectedStationSurface));
             const returnTransactionIds = [...new Set(nextEvents
                 .filter((event) => event.type === 'charger_returned')
                 .map((event) => event.transactionId)
-                .filter(Boolean))]
-                .slice(0, 30);
+                .filter(Boolean))];
             const purchasedTransactionIds = [...new Set(nextEvents
                 .filter((event) => event.type === 'charger_purchased')
                 .map((event) => event.transactionId)
-                .filter(Boolean))]
-                .slice(0, 30);
+                .filter(Boolean))];
             let nextRelatedEvents = [];
             let nextRentalRecords = {};
             if (returnTransactionIds.length > 0) {
                 try {
-                    const relatedSnapshot = await getDocs(query(
+                    const relatedSnapshots = await Promise.all(chunkValues(returnTransactionIds).map((transactionIds) => getDocs(query(
                         collection(db, 'kioskEvents'),
-                        where('transactionId', 'in', returnTransactionIds),
-                    ));
-                    nextRelatedEvents = relatedSnapshot.docs
+                        where('transactionId', 'in', transactionIds),
+                    ))));
+                    if (loadRequestRef.current !== requestId) return;
+                    nextRelatedEvents = relatedSnapshots.flatMap((snapshot) => snapshot.docs)
                         .map((document) => ({ id: document.id, ...document.data() }))
+                        .filter((event) => event.stationId === selectedStation)
                         .map((event) => normalizeActivityEvent(event, selectedStationSurface));
                 } catch (timelineError) {
                     console.warn('Unable to enrich returned rental timelines', timelineError);
@@ -655,14 +795,15 @@ export default function ActivityPage({
             const rentalRecordIds = [...new Set([
                 ...returnTransactionIds,
                 ...purchasedTransactionIds,
-            ])].slice(0, 30);
+            ])];
             if (rentalRecordIds.length > 0) {
                 try {
-                    const rentalSnapshot = await getDocs(query(
+                    const rentalSnapshots = await Promise.all(chunkValues(rentalRecordIds).map((recordIds) => getDocs(query(
                         collection(db, 'rentals'),
-                        where(documentId(), 'in', rentalRecordIds),
-                    ));
-                    nextRentalRecords = Object.fromEntries(rentalSnapshot.docs.map((document) => [
+                        where(documentId(), 'in', recordIds),
+                    ))));
+                    if (loadRequestRef.current !== requestId) return;
+                    nextRentalRecords = Object.fromEntries(rentalSnapshots.flatMap((snapshot) => snapshot.docs).map((document) => [
                         document.id,
                         { id: document.id, ...document.data() },
                     ]));
@@ -670,21 +811,16 @@ export default function ActivityPage({
                     console.warn('Unable to load rental timing details', rentalError);
                 }
             }
-            setEvents((previous) => append ? [...previous, ...nextEvents] : nextEvents);
-            setRelatedTimelineEvents((previous) => append
-                ? uniqueTimelineEvents([...previous, ...nextRelatedEvents])
-                : nextRelatedEvents);
-            setRentalRecords((previous) => append
-                ? { ...previous, ...nextRentalRecords }
-                : nextRentalRecords);
-            setCursor(snapshot.docs.at(-1) || null);
-            setHasMore(snapshot.size === PAGE_SIZE);
+            if (loadRequestRef.current !== requestId) return;
+            setEvents(nextEvents);
+            setRelatedTimelineEvents(nextRelatedEvents);
+            setRentalRecords(nextRentalRecords);
         } catch (loadError) {
+            if (loadRequestRef.current !== requestId) return;
             console.error('Unable to load kiosk activity history', loadError);
             setError('Activity history is temporarily unavailable.');
         } finally {
-            setLoading(false);
-            setLoadingMore(false);
+            if (loadRequestRef.current === requestId) setLoading(false);
         }
     }, [allowedStationIds, historyStartMs, selectedStation, selectedStationSurface]);
 
@@ -692,7 +828,6 @@ export default function ActivityPage({
         setEvents([]);
         setRelatedTimelineEvents([]);
         setRentalRecords({});
-        setCursor(null);
         loadEvents();
     }, [loadEvents]);
 
@@ -755,6 +890,36 @@ export default function ActivityPage({
         relatedTimelineEvents,
         rentalRecords,
     ), [relatedTimelineEvents, rentalRecords, visibleEvents]);
+    const activityListRef = useRef(null);
+    const [activityListOffset, setActivityListOffset] = useState(0);
+    const getActivityKey = useCallback((index) => {
+        const item = visibleActivityItems[index];
+        return item?.type === 'interaction' ? `interaction:${item.key}` : item?.key || index;
+    }, [visibleActivityItems]);
+    const activityVirtualizer = useWindowVirtualizer({
+        count: visibleActivityItems.length,
+        estimateSize: () => 112,
+        getItemKey: getActivityKey,
+        overscan: 6,
+        scrollMargin: activityListOffset,
+    });
+
+    useLayoutEffect(() => {
+        const activityList = activityListRef.current;
+        if (!activityList) return undefined;
+        const updateOffset = () => {
+            const nextOffset = activityList.getBoundingClientRect().top + window.scrollY;
+            setActivityListOffset((previous) => previous === nextOffset ? previous : nextOffset);
+        };
+        updateOffset();
+        window.addEventListener('resize', updateOffset, { passive: true });
+        return () => window.removeEventListener('resize', updateOffset);
+    }, [visibleActivityItems.length]);
+
+    const virtualActivityItems = activityVirtualizer.getVirtualItems();
+    const jumpToActivity = useCallback((index) => {
+        activityVirtualizer.scrollToIndex(index, { align: 'center', behavior: 'smooth' });
+    }, [activityVirtualizer]);
     const seenScope = selectedStation || 'all-kiosks';
     const newestActivityByFilter = useMemo(() => Object.fromEntries(FILTERS.map(([filterValue]) => {
         const newest = [...visibleIncidents, ...surfaceEvents]
@@ -872,24 +1037,46 @@ export default function ActivityPage({
                                 </button>
                             ))}
                         </div>
+                        <div className="flex justify-end gap-3 text-[10px] font-semibold text-slate-500" aria-label="Activity navigator legend">
+                            <span className="inline-flex items-center gap-1"><span className="h-0.5 w-4 rounded-full bg-emerald-500" />Rental activity</span>
+                            <span className="inline-flex items-center gap-1"><span className="h-0.5 w-4 rounded-full bg-red-500" />Error</span>
+                        </div>
                     </div>
                     {loading ? (
-                        <p className="rounded-lg bg-white p-6 text-center text-sm text-slate-500">Loading activity…</p>
+                        <p className="rounded-lg bg-white p-6 text-center text-sm text-slate-500">Loading the complete activity range…</p>
                     ) : visibleActivityItems.length > 0 ? (
-                        <div className="space-y-3">
-                            {visibleActivityItems.map((item) => item.type === 'interaction'
-                                ? <InteractionCard key={`interaction:${item.key}`} events={item.events} cardEvent={item.cardEvent} cardKind={item.cardKind} rentalRecord={item.rentalRecord} onNavigateToDashboard={onNavigateToDashboard} />
-                                : <ActivityRow key={item.key} event={item.event} onNavigateToDashboard={onNavigateToDashboard} />)}
+                        <div className="flex items-start gap-1 sm:gap-3">
+                            <div
+                                ref={activityListRef}
+                                className="relative min-w-0 flex-1"
+                                style={{ height: `${activityVirtualizer.getTotalSize()}px` }}
+                            >
+                                {virtualActivityItems.map((virtualItem) => {
+                                    const item = visibleActivityItems[virtualItem.index];
+                                    return (
+                                    <div
+                                        data-index={virtualItem.index}
+                                        ref={activityVirtualizer.measureElement}
+                                        key={virtualItem.key}
+                                        className="absolute left-0 top-0 w-full pb-3"
+                                        style={{ transform: `translateY(${virtualItem.start - activityListOffset}px)` }}
+                                    >
+                                        {item.type === 'interaction'
+                                            ? <InteractionCard key={`interaction:${item.key}`} events={item.events} cardEvent={item.cardEvent} cardKind={item.cardKind} rentalRecord={item.rentalRecord} onNavigateToDashboard={onNavigateToDashboard} />
+                                            : <ActivityRow key={item.key} event={item.event} onNavigateToDashboard={onNavigateToDashboard} />}
+                                    </div>
+                                    );
+                                })}
+                            </div>
+                            <ActivityTimeNavigator
+                                items={visibleActivityItems}
+                                onJump={jumpToActivity}
+                                rangeStartMs={historyStartMs}
+                                rangeEndMs={timeValue(referenceTime)}
+                            />
                         </div>
                     ) : (
                         <p className="rounded-lg bg-white p-6 text-center text-sm text-slate-500">No matching activity recorded.</p>
-                    )}
-                    {hasMore && !loading && (
-                        <div className="mt-4 flex justify-center">
-                            <button type="button" disabled={loadingMore} onClick={() => loadEvents({ append: true, after: cursor })} className="min-h-11 rounded-md border border-slate-300 bg-white px-5 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">
-                                {loadingMore ? 'Loading…' : 'Load more'}
-                            </button>
-                        </div>
                     )}
                 </section>}
             </main>

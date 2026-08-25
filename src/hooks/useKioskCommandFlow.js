@@ -201,6 +201,21 @@ export default function useKioskCommandFlow({
             });
           });
           break;
+        case 'eject locked manual':
+        case 'eject locked auto':
+          (Array.isArray(commandDetails.targets) ? commandDetails.targets : []).forEach((target) => {
+            trackSlotForEject(target.moduleid, target.slotid, target.chargerid);
+          });
+          break;
+        case 'eject 0e':
+          targetKiosk.modules.forEach((module) => {
+            module.slots.forEach((slot) => {
+              if (String(slot?.sstat || '').trim().toUpperCase() === '0E') {
+                trackSlotForEject(module.id, slot.position, slot.sn);
+              }
+            });
+          });
+          break;
         default:
           break;
       }
@@ -232,6 +247,8 @@ export default function useKioskCommandFlow({
       ...((commandDetails.action === 'lock slot' || commandDetails.action === 'unlock slot' || commandDetails.action === 'eject specific' || commandDetails.action === 'rent' || commandDetails.action === 'vend') && { slotid: commandDetails.slotid, info: lockReason }),
       ...((commandDetails.action === 'eject specific' || commandDetails.action === 'vend') && commandDetails.chargerid ? { chargerid: commandDetails.chargerid } : {}),
       ...((commandDetails.action === 'eject count' || commandDetails.action === 'reboot module') && { slotid: commandDetails.slotid }),
+      ...(commandDetails.action === 'eject 0e' && { targets: commandDetails.targets }),
+      ...((commandDetails.action === 'eject locked manual' || commandDetails.action === 'eject locked auto') && { targets: commandDetails.targets }),
       ...(commandDetails.action === 'set volume' && { volume: commandDetails.volume, muted: commandDetails.muted === true }),
       ...extraConfirmationDetails,
     };
@@ -317,6 +334,12 @@ export default function useKioskCommandFlow({
     } else if (action === 'eject module') {
       confirmationText = `${t('eject_module_confirmation')}?`;
       commandDetailsPayload.slotid = moduleid;
+    } else if (action === 'eject 0e') {
+      confirmationText = t('eject_0e_confirmation');
+    } else if (action === 'eject locked manual') {
+      confirmationText = t('eject_locked_manual_confirmation');
+    } else if (action === 'eject locked auto') {
+      confirmationText = t('eject_locked_auto_confirmation');
     } else if (action === 'reboot module') {
       confirmationText = `${t('reboot_module_confirmation')} ${moduleid}?`;
       commandDetailsPayload.slotid = moduleid;

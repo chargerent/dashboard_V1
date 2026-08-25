@@ -29,6 +29,7 @@ const commandsList = [
   "edit",
   "lock",
   "eject",
+  "eject_0e",
   "eject_multiple",
   "updates",
   "connectivity",

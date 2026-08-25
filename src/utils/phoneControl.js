@@ -150,6 +150,11 @@ export function isPhoneRemoteInputAvailable(device = {}, now = Date.now()) {
   return webRtc.inputAvailable === true && isPhoneWebRtcActive(webRtc, now);
 }
 
+export function phoneLineNumberKey(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+  return digits.length >= 7 && digits.length <= 15 ? digits : '';
+}
+
 export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
   const inventory = rawDevice.inventory && typeof rawDevice.inventory === 'object'
     ? rawDevice.inventory
@@ -157,6 +162,8 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
   const stationId = String(
     rawDevice.stationId || rawDevice.stationid || rawDevice.assignment?.stationId || '',
   ).trim().toUpperCase();
+  const market = String(rawDevice.market || getPhoneStationCountryCode(stationId) || '')
+    .trim().toUpperCase();
   const lastSeenAtMs = phoneTimestampToMillis(
     rawDevice.lastSeenAt || rawDevice.heartbeatAt || inventory.collectedAt,
   );
@@ -205,16 +212,31 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
   const wifiMetric = (inventoryValue, connectedValue) => (
     optionalNumber(inventoryValue) ?? optionalNumber(connectedValue)
   );
+  const currentAgentPhoneNumber = String(inventory.phoneNumber || '').trim();
+  const retainedAgentPhoneNumber = String(rawDevice.reportedPhoneNumber || '').trim();
+  const agentPhoneNumber = currentAgentPhoneNumber || retainedAgentPhoneNumber;
+  const manualPhoneNumber = String(rawDevice.manualPhoneNumber || '').trim();
+  const effectivePhoneNumber = agentPhoneNumber || manualPhoneNumber;
 
   return {
     id: String(rawDevice.deviceId || documentId || '').trim(),
     stationId,
     assignmentState: stationId ? 'assigned' : 'unassigned',
+    market,
     displayName: String(rawDevice.displayName || rawDevice.name || '').trim(),
     enrollmentState: String(rawDevice.enrollmentState || rawDevice.status || 'pending').toLowerCase(),
     lastSeenAtMs,
     lastSeenAt: rawDevice.lastSeenAt || rawDevice.heartbeatAt || null,
     lastCommand: rawDevice.lastCommand || null,
+    phoneLine: {
+      number: effectivePhoneNumber,
+      key: phoneLineNumberKey(effectivePhoneNumber),
+      source: agentPhoneNumber ? 'agent' : manualPhoneNumber ? 'manual' : '',
+      agentNumber: agentPhoneNumber,
+      manualNumber: manualPhoneNumber,
+      reportedAtMs: phoneTimestampToMillis(rawDevice.reportedPhoneNumberAt),
+      manualUpdatedAtMs: phoneTimestampToMillis(rawDevice.manualPhoneNumberUpdatedAt),
+    },
     screen: rawDevice.screen && typeof rawDevice.screen === 'object' ? rawDevice.screen : {},
     terminal: {
       enabled: rawTerminal.enabled === true,
@@ -302,6 +324,10 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
       terminalLockdownPermitted: inventory.terminalLockdownPermitted === true,
       terminalLockdownActive: inventory.terminalLockdownActive === true,
       hotspotSupported: inventory.hotspotSupported === true,
+      hotspotControlMode: String(
+        inventory.hotspotControlMode ||
+        (inventory.hotspotSupported === true ? 'android_api' : 'unavailable'),
+      ).trim().toLowerCase(),
       hotspotControlGranted: inventory.hotspotControlGranted === true,
       hotspotAlwaysOn: inventory.hotspotAlwaysOn === true,
       hotspotActive: inventory.hotspotActive === true,
@@ -324,16 +350,50 @@ export function getPhoneConnectionState(device, now = Date.now()) {
   return now - device.lastSeenAtMs <= PHONE_ONLINE_WINDOW_MS ? 'online' : 'offline';
 }
 
+export function summarizePhoneLines(devices = [], now = Date.now()) {
+  const linesByNumber = new Map();
+  let unavailableCount = 0;
+
+  devices.forEach((device) => {
+    const key = phoneLineNumberKey(device?.phoneLine?.number);
+    if (!key) {
+      unavailableCount += 1;
+      return;
+    }
+    const existing = linesByNumber.get(key) || {
+      key,
+      number: device.phoneLine.number,
+      devices: [],
+      live: false,
+    };
+    existing.devices.push(device);
+    existing.live = existing.live || getPhoneConnectionState(device, now) === 'online';
+    linesByNumber.set(key, existing);
+  });
+
+  const lines = [...linesByNumber.values()];
+  return {
+    lines,
+    lineCount: lines.length,
+    liveCount: lines.filter((line) => line.live).length,
+    offlineCount: lines.filter((line) => !line.live).length,
+    unavailableCount,
+    duplicateCount: lines.filter((line) => line.devices.length > 1).length,
+  };
+}
+
 export function phoneMatchesSearch(device, kiosk, searchTerm) {
   const needle = String(searchTerm || '').trim().toLowerCase();
   if (!needle) return true;
 
   return [
     device?.stationId,
+    device?.market,
     device?.displayName,
     device?.id,
     device?.inventory?.manufacturer,
     device?.inventory?.model,
+    device?.phoneLine?.number,
     device?.inventory?.wifiSsid,
     kiosk?.info?.location,
     kiosk?.info?.place,
@@ -350,14 +410,32 @@ export function phoneNetworkLabel(inventory = {}) {
 }
 
 export function phoneHotspotLabel(inventory = {}) {
-  if (inventory.hotspotSupported !== true) return 'Unsupported';
-  if (inventory.hotspotAlwaysOn !== true) return 'Disabled';
-  if (inventory.hotspotControlGranted !== true) return 'Permission needed';
-  if (inventory.hotspotActive === true) return 'On · Always-on';
+  const mode = String(inventory.hotspotControlMode || '').trim().toLowerCase();
+  const compatibility = mode === 'settings_automation';
+  if (inventory.hotspotSupported !== true || mode === 'unavailable') return 'Control unavailable';
+  if (inventory.hotspotControlGranted !== true) {
+    return compatibility ? 'Remote UI needed' : 'Permission needed';
+  }
+  if (inventory.hotspotActive === true) {
+    if (compatibility) return inventory.hotspotAlwaysOn === true
+      ? 'Last confirmed on'
+      : 'On · Settings control';
+    return inventory.hotspotAlwaysOn === true ? 'On · Always-on' : 'On';
+  }
+  if (inventory.hotspotAlwaysOn !== true) {
+    return compatibility ? 'Off · Settings control' : 'Disabled';
+  }
   const state = String(inventory.hotspotState || '').trim().toLowerCase();
-  if (state === 'starting') return 'Starting';
-  if (state === 'retrying') return 'Retrying';
-  return 'Waiting to start';
+  if (state === 'starting') return compatibility ? 'Starting through Settings' : 'Starting';
+  if (state === 'retrying') return compatibility ? 'Compatibility recovery' : 'Retrying';
+  return compatibility ? 'Waiting for Settings' : 'Waiting to start';
+}
+
+export function phoneHotspotControlLabel(inventory = {}) {
+  const mode = String(inventory.hotspotControlMode || '').trim().toLowerCase();
+  if (mode === 'android_api') return 'Direct Android control';
+  if (mode === 'settings_automation') return 'Compatibility control';
+  return 'Manual hotspot control';
 }
 
 export function phoneLocationMapUrls(location = {}) {

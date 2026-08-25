@@ -39,18 +39,21 @@ const {
   slugifyPublicAsset,
 } = require("./aiBoothPublicAssets");
 const {
+  assignDeviceFromAgent: assignPhoneDeviceFromAgent,
   assignDevice: assignPhoneDevice,
   createEnrollment: createPhoneEnrollment,
   enrollDevice: enrollPhoneDevice,
   getIceServers: getPhoneIceServers,
   getScreen: getPhoneScreen,
   listCommands: listPhoneCommands,
+  listAvailableKiosksForAgent: listPhoneAvailableKiosks,
   listDevices: listPhoneDevices,
   pollDeviceCommand: pollPhoneDeviceCommand,
   recordCommandResult: recordPhoneCommandResult,
   recordHeartbeat: recordPhoneHeartbeat,
   recordScreenUpdate: recordPhoneScreenUpdate,
   sendCommand: sendPhoneCommand,
+  setManualPhoneNumber: setPhoneManualPhoneNumber,
 } = require("./phoneControl");
 
 admin.initializeApp();
@@ -9875,6 +9878,16 @@ exports.phoneControl_httpListDevices = handleHttpFunction(async (data, req) => {
   return listPhoneDevices(data, authState, {db});
 });
 
+exports.phoneControl_setManualPhoneNumber = functions.https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  return setPhoneManualPhoneNumber(data, authState, {db, admin});
+});
+
+exports.phoneControl_httpSetManualPhoneNumber = handleHttpFunction(async (data, req) => {
+  const authState = await assertAdmin(req, data);
+  return setPhoneManualPhoneNumber(data, authState, {db, admin});
+});
+
 exports.phoneControl_listCommands = functions.https.onCall(async (data, context) => {
   const authState = await getAuthorizedProfileFromContext(context);
   return listPhoneCommands(data, authState, {db});
@@ -9943,6 +9956,14 @@ exports.phoneControl_deviceEnroll = handleHttpFunction(async (data) => (
 
 exports.phoneControl_deviceHeartbeat = handleHttpFunction(async (data, req) => (
   recordPhoneHeartbeat(data, req, {db, admin})
+));
+
+exports.phoneControl_deviceAssign = handleHttpFunction(async (data, req) => (
+  assignPhoneDeviceFromAgent(data, req, {db, admin})
+));
+
+exports.phoneControl_deviceAvailableKiosks = handleHttpFunction(async (data, req) => (
+  listPhoneAvailableKiosks(data, req, {db})
 ));
 
 exports.phoneControl_devicePoll = handleHttpFunction(async (data, req) => (

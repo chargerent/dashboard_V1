@@ -56,7 +56,7 @@ test('dashboard activity navigation uses a distinct purple activity control', as
     assert.match(rules, /collection != 'kioskIncidents'/);
 });
 
-test('activity page paginates history and supports station deep links', async () => {
+test('activity page loads and virtualizes the complete selected history range', async () => {
     const [app, activityPage] = await Promise.all([
         readSource('../src/App.jsx'),
         readSource('../src/pages/ActivityPage.jsx'),
@@ -64,7 +64,7 @@ test('activity page paginates history and supports station deep links', async ()
 
     assert.match(app, /searchParams\.set\('page', 'activity'\)/);
     assert.match(app, /searchParams\.set\('station', stationId\)/);
-    assert.match(activityPage, /const PAGE_SIZE = 30/);
+    assert.match(activityPage, /const HISTORY_BATCH_SIZE = 250/);
     assert.match(activityPage, /if \(!selectedStation\)/);
     assert.match(activityPage, /\{selectedStation && <section>/);
     assert.match(activityPage, /aria-label=\{`View activity for/);
@@ -112,8 +112,23 @@ test('activity page paginates history and supports station deep links', async ()
     assert.match(activityPage, /if \(TRANSACTION_TIMELINE_EVENT_TYPES\.has\(event\.type\)\) return true/);
     assert.match(activityPage, /matchesInteractionSurface\(event, selectedStationSurface\)/);
     assert.match(activityPage, /const newest = \[\.\.\.visibleIncidents, \.\.\.surfaceEvents\]/);
-    assert.match(activityPage, /startAfter\(after\)/);
-    assert.match(activityPage, /Load more/);
+    assert.match(activityPage, /startAfter\(nextCursor\)/);
+    assert.match(activityPage, /while \(batchSize === HISTORY_BATCH_SIZE && nextCursor\)/);
+    assert.doesNotMatch(activityPage, /Load more/);
+    assert.match(activityPage, /useWindowVirtualizer/);
+    assert.match(activityPage, /activityVirtualizer\.scrollToIndex/);
+    assert.match(activityPage, /function ActivityTimeNavigator/);
+    assert.match(activityPage, /aria-label="Activity time navigator"/);
+    assert.match(activityPage, /bg-emerald-500/);
+    assert.match(activityPage, /bg-red-500/);
+    assert.match(activityPage, /if \(tick\.tone === 'default'\) return null/);
+    assert.match(activityPage, /const relativeTimeLabel/);
+    assert.match(activityPage, /onPointerMove=/);
+    assert.match(activityPage, /Jump to the nearest activity at this time/);
+    assert.match(activityPage, /navigatorTimeLabel\(item\.occurredAt\)/);
+    assert.match(activityPage, /event\?\.type !== 'payment_declined'/);
+    assert.match(activityPage, /if \(event\?\.type === 'payment_declined'\) return false/);
+    assert.match(activityPage, /declined \? 'Declined'/);
     assert.match(activityPage, /aria-label="Home"/);
     assert.match(activityPage, /SEEN_STORAGE_KEY/);
     assert.match(activityPage, /Unseen activity/);
@@ -132,9 +147,9 @@ test('activity page paginates history and supports station deep links', async ()
     assert.match(activityPage, /Rental \{activityTimeLabel\(rentalTime\)\}/);
     assert.match(activityPage, /Overdue \{activityTimeLabel\(overdueTime\)\}/);
     assert.match(activityPage, /events\.length === 1 \? 'step' : 'steps'/);
-    assert.match(activityPage, /where\(documentId\(\), 'in', rentalRecordIds\)/);
-    assert.match(activityPage, /where\('transactionId', 'in', returnTransactionIds\)/);
-    assert.doesNotMatch(activityPage, /\.filter\(\(event\) => event\.stationId === selectedStation\)/);
+    assert.match(activityPage, /where\(documentId\(\), 'in', recordIds\)/);
+    assert.match(activityPage, /where\('transactionId', 'in', transactionIds\)/);
+    assert.match(activityPage, /where\('stationId', '==', selectedStation\)/);
     assert.match(activityPage, /const isTransactionEvent = event\.category === 'interaction'/);
     assert.match(activityPage, /transactionKey && TRANSACTION_TIMELINE_EVENT_TYPES\.has\(event\.type\)/);
     assert.match(activityPage, /const cardKind = event\.type === 'charger_returned' \? 'return' : 'rental'/);

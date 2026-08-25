@@ -5,7 +5,27 @@ import { SpeakerXMarkIcon } from '@heroicons/react/24/outline';
 import { getKioskPowerThreshold } from '../../utils/helpers';
 import { logKioskInteraction } from '../../utils/kioskInteractionDebug';
 
-const ControlButton = ({ icon, label, subLabel, onClick, className = '', status, statusColor = 'green', disabled = false, debugAction = '', debugContext = {} }) => (
+const EjectIcon = ({ className = 'h-5 w-5' }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4L4.5 15h15L12 4zM5 20h14" />
+    </svg>
+);
+
+const isAutomaticallyLockedSlot = (slot) => {
+    const reason = String(slot?.lockReason || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[._-]+/g, ' ')
+        .replace(/\s+/g, ' ');
+
+    return reason.startsWith('auto locked') ||
+        reason.startsWith('never dispensed:') ||
+        reason.startsWith('broken charger suspected:') ||
+        reason.includes('consecutive returns between 1 and 5 minutes') ||
+        reason.includes('verified motor error; charger remained present');
+};
+
+const ControlButton = ({ icon, label, subLabel, onClick, className = '', status, statusColor = 'green', disabled = false, debugAction = '', debugContext = {}, horizontal = false }) => (
     <button 
         type="button"
         data-kiosk-action={debugAction || label}
@@ -22,7 +42,7 @@ const ControlButton = ({ icon, label, subLabel, onClick, className = '', status,
             onClick();
         }}
         disabled={disabled}
-        className={`relative flex min-h-11 flex-col items-center justify-center gap-1 p-2 rounded-lg transition-colors duration-200 ${className} disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed`}
+        className={`relative flex min-h-11 items-center justify-center gap-1.5 p-2 rounded-lg transition-colors duration-200 ${horizontal ? 'flex-row' : 'flex-col'} ${className} disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed`}
     >
         {status !== undefined && (
             <span className={`absolute top-1 right-1 w-2 h-2 rounded-full ${
@@ -145,6 +165,12 @@ function KioskControlPanel({ kiosk, t, onCommand, serverUiVersion, serverFlowVer
         let fullChargers = 0;
         let emptyChargers = 0;
         let lockedChargers = 0;
+        let manuallyLockedChargers = 0;
+        let automaticallyLockedChargers = 0;
+        let status0EChargers = 0;
+        const manuallyLockedTargets = [];
+        const automaticallyLockedTargets = [];
+        const status0ETargets = [];
 
         kiosk.modules.forEach(module => {
             module.slots.forEach(slot => {
@@ -156,9 +182,42 @@ function KioskControlPanel({ kiosk, t, onCommand, serverUiVersion, serverFlowVer
                     }
                     if (slot.isLocked) lockedChargers++;
                 }
+                if (slot.isLocked) {
+                    const target = {
+                        moduleid: module.id,
+                        slotid: slot.position,
+                        chargerid: slot.sn || undefined,
+                    };
+                    if (isAutomaticallyLockedSlot(slot)) {
+                        automaticallyLockedChargers++;
+                        automaticallyLockedTargets.push(target);
+                    } else {
+                        manuallyLockedChargers++;
+                        manuallyLockedTargets.push(target);
+                    }
+                }
+                if (String(slot.sstat || '').trim().toUpperCase() === '0E') {
+                    status0EChargers++;
+                    status0ETargets.push({
+                        moduleid: module.id,
+                        slotid: slot.position,
+                        chargerid: slot.sn || undefined,
+                    });
+                }
             });
         });
-        return { total: totalChargers, full: fullChargers, empty: emptyChargers, locked: lockedChargers };
+        return {
+            total: totalChargers,
+            full: fullChargers,
+            empty: emptyChargers,
+            locked: lockedChargers,
+            manuallyLocked: manuallyLockedChargers,
+            automaticallyLocked: automaticallyLockedChargers,
+            manuallyLockedTargets,
+            automaticallyLockedTargets,
+            status0E: status0EChargers,
+            status0ETargets,
+        };
     }, [kiosk]);
 
     return (
@@ -203,20 +262,27 @@ function KioskControlPanel({ kiosk, t, onCommand, serverUiVersion, serverFlowVer
                         <ControlButton debugAction="rent" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'rent')} disabled={disabled} label={t('rent')} className="col-span-2 bg-sky-100 hover:bg-sky-200 text-sky-800" />
                 )}
 
-                {clientInfo.commands.eject && (
-                    <>
-                        <ControlButton debugAction="eject all" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject all')} disabled={disabled} label={`${t('eject_all')} (${ejectCounts.total})`} className="bg-green-100 hover:bg-green-200 text-green-800" />
-                        <ControlButton debugAction="eject full" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject full')} disabled={disabled} label={`${t('eject_full')} (${ejectCounts.full})`} className="bg-green-100 hover:bg-green-200 text-green-800" />
-                        <ControlButton debugAction="eject empty" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject empty')} disabled={disabled} label={`${t('eject_empty')} (${ejectCounts.empty})`} className="bg-green-100 hover:bg-green-200 text-green-800" />
-                        <ControlButton debugAction="eject locked" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject locked')} disabled={disabled} label={`${t('eject_locked')} (${ejectCounts.locked})`} className="bg-green-100 hover:bg-green-200 text-green-800" />
-                    </>
-                )}
-
-                {clientInfo.commands.eject_multiple && (
-                    <>
-                        <ControlButton debugAction="eject count 5" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject count', null, null, null, { slotid: 5 })} disabled={disabled} label={t('eject_5')} className="bg-green-100 hover:bg-green-200 text-green-800" />
-                        <ControlButton debugAction="eject count 10" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject count', null, null, null, { slotid: 10 })} disabled={disabled} label={t('eject_10')} className="bg-green-100 hover:bg-green-200 text-green-800" />
-                    </>
+                {(clientInfo.commands.eject || clientInfo.commands.eject_multiple || (clientInfo.commands.eject_0e && !isV2)) && (
+                    <div className="col-span-2 grid grid-cols-3 gap-2" data-kiosk-eject-controls="true">
+                        {clientInfo.commands.eject && (
+                            <>
+                                <ControlButton horizontal icon={<EjectIcon />} debugAction="eject all" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject all')} disabled={disabled} label={`${t('all')} (${ejectCounts.total})`} className="bg-green-100 hover:bg-green-200 text-green-800" />
+                                <ControlButton horizontal icon={<EjectIcon />} debugAction="eject full" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject full')} disabled={disabled} label={`${t('full')} (${ejectCounts.full})`} className="bg-green-100 hover:bg-green-200 text-green-800" />
+                                <ControlButton horizontal icon={<EjectIcon />} debugAction="eject empty" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject empty')} disabled={disabled} label={`${t('empty')} (${ejectCounts.empty})`} className="bg-green-100 hover:bg-green-200 text-green-800" />
+                                <ControlButton horizontal icon={<EjectIcon />} debugAction="eject locked manual" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject locked manual', null, null, null, { targets: ejectCounts.manuallyLockedTargets })} disabled={disabled || ejectCounts.manuallyLocked === 0} label={`${t('locked_manual')} (${ejectCounts.manuallyLocked})`} className="bg-green-100 hover:bg-green-200 text-green-800" />
+                                <ControlButton horizontal icon={<EjectIcon />} debugAction="eject locked auto" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject locked auto', null, null, null, { targets: ejectCounts.automaticallyLockedTargets })} disabled={disabled || ejectCounts.automaticallyLocked === 0} label={`${t('locked_auto')} (${ejectCounts.automaticallyLocked})`} className="bg-purple-100 hover:bg-purple-200 text-purple-800" />
+                            </>
+                        )}
+                        {clientInfo.commands.eject_0e && !isV2 && (
+                            <ControlButton horizontal icon={<EjectIcon />} debugAction="eject 0e" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject 0e', null, null, null, { targets: ejectCounts.status0ETargets })} disabled={disabled || ejectCounts.status0E === 0} label={`0E (${ejectCounts.status0E})`} className="bg-amber-100 hover:bg-amber-200 text-amber-800" />
+                        )}
+                        {clientInfo.commands.eject_multiple && (
+                            <>
+                                <ControlButton horizontal icon={<EjectIcon />} debugAction="eject count 5" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject count', null, null, null, { slotid: 5 })} disabled={disabled} label="5" className="bg-green-100 hover:bg-green-200 text-green-800" />
+                                <ControlButton horizontal icon={<EjectIcon />} debugAction="eject count 10" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject count', null, null, null, { slotid: 10 })} disabled={disabled} label="10" className="bg-green-100 hover:bg-green-200 text-green-800" />
+                            </>
+                        )}
+                    </div>
                 )}
 
                 {canControlAudio && (

@@ -14,6 +14,7 @@ import {
 import { formatModuleFirmwareVersion } from '../../utils/firmwareVersion';
 import { installKioskInteractionDebugCapture, logKioskInteraction } from '../../utils/kioskInteractionDebug';
 import { resolveKioskUiProfileStatus } from '../../utils/kioskUiProfileStatus';
+import { callFunctionWithAuth } from '../../utils/callableRequest';
 
 // --- Sub-component for the charger status code ---
 const StatusIndicator = ({ status }) => {
@@ -139,9 +140,14 @@ const resolvePlaylistAssetKind = (asset) => {
 function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSlots, ejectingSlots, failedEjectSlots, lockingSlots, t, onCommand, onNavigateToChargers, serverUiVersion, serverFlowVersion, clientInfo, mockNow }) {
     const [mountedAt] = useState(() => Date.now());
     const [selectedModuleId, setSelectedModuleId] = useState(() => String(kiosk.modules?.[0]?.id || ''));
+    const [v1MediaAssignment, setV1MediaAssignment] = useState(null);
+    const [v1MediaLoadState, setV1MediaLoadState] = useState('idle');
+    const [activeMediaIndex, setActiveMediaIndex] = useState(0);
     const isOnline = isKioskOnline(kiosk, mockNow);
     const isV2Kiosk = isNewSchemaKiosk(kiosk);
     const stationId = kiosk.stationid;
+    const hardwareType = String(kiosk.hardware?.type || '').trim().toUpperCase();
+    const isCK50Kiosk = hardwareType === 'CK50';
     const hasAnyCommands = Object.values(clientInfo.commands).some(v => v === true) || clientInfo.features.rentals;
     const canUpdateModules = clientInfo.commands.updates && isV2Kiosk;
     const showModuleFirmwareMetadata = isV2Kiosk;
@@ -156,22 +162,90 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         : kiosk.activity?.terminal?.currentState || kiosk.terminalState || kiosk.uistate;
     const uiProfileStatus = useMemo(() => resolveKioskUiProfileStatus(kiosk), [kiosk]);
     useEffect(() => installKioskInteractionDebugCapture(), []);
-    const primaryMediaAsset = useMemo(() => {
-        if (kiosk?.media?.active !== true) {
-            return null;
+    useEffect(() => {
+        if (!isVisible || !isCK50Kiosk || !stationId) {
+            setV1MediaAssignment(null);
+            setV1MediaLoadState('idle');
+            return undefined;
         }
 
-        const playlist = Array.isArray(kiosk?.media?.playlist) ? kiosk.media.playlist : [];
-        const firstAsset = playlist.find((asset) => String(asset?.downloadUrl || '').trim());
-        if (!firstAsset) {
-            return null;
-        }
+        const abortController = new AbortController();
+        let disposed = false;
+        const normalizedStationId = String(stationId).trim().toUpperCase();
 
-        return {
-            ...firstAsset,
-            previewKind: resolvePlaylistAssetKind(firstAsset),
+        setV1MediaLoadState('loading');
+        callFunctionWithAuth('media_listAssets', {}, {
+            timeoutMs: 15000,
+            timeoutMessage: 'Loading the CK50 screen preview took too long.',
+            abortController,
+            abortMessage: 'CK50 screen preview request canceled.',
+            forceRefreshToken: false,
+        }).then((payload) => {
+            if (disposed) return;
+
+            const assignments = Array.isArray(payload?.v1Assignments) ? payload.v1Assignments : [];
+            const assignment = assignments.find((entry) => (
+                String(entry?.stationid || '').trim().toUpperCase() === normalizedStationId
+            ));
+
+            setV1MediaAssignment(assignment || {
+                stationid: normalizedStationId,
+                active: false,
+                playlist: [],
+                assetIds: [],
+            });
+            setV1MediaLoadState('loaded');
+        }).catch(() => {
+            if (disposed || abortController.signal.aborted) return;
+            setV1MediaAssignment(null);
+            setV1MediaLoadState('error');
+        });
+
+        return () => {
+            disposed = true;
+            abortController.abort();
         };
-    }, [kiosk?.media]);
+    }, [isCK50Kiosk, isVisible, stationId]);
+    const effectiveMedia = isCK50Kiosk
+        ? (v1MediaAssignment || kiosk?.media || null)
+        : kiosk?.media;
+    const mediaPlaylist = useMemo(() => {
+        if (effectiveMedia?.active !== true) {
+            return [];
+        }
+
+        return (Array.isArray(effectiveMedia?.playlist) ? effectiveMedia.playlist : [])
+            .filter((asset) => String(asset?.downloadUrl || '').trim())
+            .map((asset) => ({
+                ...asset,
+                previewKind: resolvePlaylistAssetKind(asset),
+            }));
+    }, [effectiveMedia]);
+    const mediaPlaylistKey = useMemo(() => (
+        mediaPlaylist
+            .map((asset) => String(asset?.assetId || asset?.downloadUrl || ''))
+            .join('|')
+    ), [mediaPlaylist]);
+    const advanceMediaPreview = useCallback(() => {
+        setActiveMediaIndex((currentIndex) => (
+            mediaPlaylist.length > 0 ? (currentIndex + 1) % mediaPlaylist.length : 0
+        ));
+    }, [mediaPlaylist.length]);
+    useEffect(() => {
+        setActiveMediaIndex(0);
+    }, [mediaPlaylistKey, stationId]);
+    const primaryMediaAsset = mediaPlaylist.length > 0
+        ? mediaPlaylist[activeMediaIndex % mediaPlaylist.length]
+        : null;
+    useEffect(() => {
+        if (!primaryMediaAsset || mediaPlaylist.length < 2 || primaryMediaAsset.previewKind === 'video') {
+            return undefined;
+        }
+
+        const playTimeSeconds = Math.max(1, Math.min(3600, Number(primaryMediaAsset.playTime || 20)));
+        const timeoutId = globalThis.setTimeout(advanceMediaPreview, playTimeSeconds * 1000);
+        return () => globalThis.clearTimeout(timeoutId);
+    }, [advanceMediaPreview, mediaPlaylist.length, primaryMediaAsset]);
     const formatFotaVersion = useCallback((module) => {
         const rawVersion = String(
             module?.fotaVersion ||
@@ -627,7 +701,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                 data-kiosk-slotid={slot.position}
             >
                 {/* Eject Button */}
-                <div className="flex-grow flex items-center justify-start p-0.5 rounded-l-md overflow-hidden">
+                <div className={`relative flex-grow p-0.5 rounded-l-md overflow-hidden ${isCK50Kiosk ? 'min-w-0' : 'flex items-center justify-start'}`}>
                     <button
                         type="button"
                         data-kiosk-action="slot eject"
@@ -648,20 +722,40 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                             onSlotClick(stationId, module.id, slot.position);
                         }}
                         disabled={!canEject || !isOnline}
-                        className="flex min-w-0 flex-grow items-center justify-start disabled:cursor-not-allowed"
+                        className={isCK50Kiosk
+                            ? 'grid h-9 w-full min-w-0 grid-cols-[24px_minmax(0,1fr)] grid-rows-2 items-center gap-x-0.5 disabled:cursor-not-allowed'
+                            : 'flex min-w-0 flex-grow items-center justify-start disabled:cursor-not-allowed'}
                     >
-                        <div className="flex flex-col items-center w-8 mr-2">
-                            <span className="text-xs font-mono text-gray-500">{String(slot.position).padStart(2, '0')}</span>
-                            <StatusIndicator status={slot.sstat} />
-                        </div>
-                        <div className="flex flex-col items-start min-w-0">
-                            <span className="flex items-center gap-1 text-xs font-mono font-bold">
-                                <span>{hasCharger ? `${slot.batteryLevel}%` : t('empty')}</span>
-                                <ChargeStatusIndicator slot={slot} />
-                                {isChargeTimedOut && <ChargeTimeoutIndicator />}
-                            </span>
-                            <span className="text-[10px] text-gray-400 font-mono leading-tight truncate">{'\u00A0'}</span>
-                        </div>
+                        {isCK50Kiosk ? (
+                            <>
+                                <span className="col-start-1 row-start-1 self-center text-center font-mono text-xs text-gray-500">
+                                    {String(slot.position).padStart(2, '0')}
+                                </span>
+                                <span className="col-start-1 row-start-2 flex items-center justify-center self-center">
+                                    <StatusIndicator status={slot.sstat} />
+                                </span>
+                                <span className="col-start-2 row-start-1 flex min-w-0 items-center gap-0.5 self-center font-mono text-[8px] font-bold">
+                                    <span>{hasCharger ? `${slot.batteryLevel}%` : t('empty')}</span>
+                                    <ChargeStatusIndicator slot={slot} />
+                                    {isChargeTimedOut && <ChargeTimeoutIndicator />}
+                                </span>
+                            </>
+                        ) : (
+                            <>
+                                <div className="mr-2 flex w-8 flex-col items-center">
+                                    <span className="text-xs font-mono text-gray-500">{String(slot.position).padStart(2, '0')}</span>
+                                    <StatusIndicator status={slot.sstat} />
+                                </div>
+                                <div className="flex min-w-0 flex-col items-start">
+                                    <span className="flex items-center gap-1 font-mono text-xs font-bold">
+                                        <span>{hasCharger ? `${slot.batteryLevel}%` : t('empty')}</span>
+                                        <ChargeStatusIndicator slot={slot} />
+                                        {isChargeTimedOut && <ChargeTimeoutIndicator />}
+                                    </span>
+                                    <span className="text-[10px] text-gray-400 font-mono leading-tight truncate">{'\u00A0'}</span>
+                                </div>
+                            </>
+                        )}
                     </button>
                     {hasCharger && (
                         <button
@@ -671,7 +765,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                             data-kiosk-moduleid={module.id}
                             data-kiosk-slotid={slot.position}
                             onClick={(event) => handleNavigateToCharger(event, slot.sn)}
-                            className="ml-2 shrink-0 text-[10px] font-mono leading-tight text-sky-700 underline decoration-sky-300 underline-offset-2 hover:text-sky-900"
+                            className={`${isCK50Kiosk ? 'absolute bottom-[5px] left-[26px] text-[8px]' : 'ml-2 text-[10px]'} shrink-0 font-mono leading-tight text-sky-700 underline decoration-sky-300 underline-offset-2 hover:text-sky-900`}
                             title={`${t('chargers_page_title')}: ${slot.sn}`}
                         >
                             {slot.sn}
@@ -701,7 +795,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                 onLockSlot(stationId, module.id, slot.position, slot.isLocked);
                             }}
                             disabled={!isOnline}
-                            className="flex items-center justify-center w-8 h-8 rounded-r-md hover:bg-gray-200/50 disabled:cursor-not-allowed"
+                            className={`flex h-8 items-center justify-center rounded-r-md hover:bg-gray-200/50 disabled:cursor-not-allowed ${isCK50Kiosk ? 'w-6' : 'w-8'}`}
                             title={getLockButtonTitle(slot)}
                         >
                             {slot.isLocked ? (
@@ -1150,6 +1244,24 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
             return null;
         }
 
+        if (isCK50Kiosk && v1MediaLoadState === 'loading' && !primaryMediaAsset) {
+            return (
+                <div className="flex h-full w-full flex-col items-center justify-center bg-neutral-950 px-4 text-center text-white">
+                    <div className="h-7 w-7 animate-spin rounded-full border-2 border-white/25 border-t-white" aria-hidden="true" />
+                    <p className="mt-3 text-xs font-medium text-white/75">Loading screen media…</p>
+                </div>
+            );
+        }
+
+        if (isCK50Kiosk && v1MediaLoadState === 'error' && !primaryMediaAsset) {
+            return (
+                <div className="flex h-full w-full flex-col items-center justify-center bg-neutral-950 px-4 text-center text-white">
+                    <p className="text-sm font-medium">Preview unavailable</p>
+                    <p className="mt-1 text-xs text-white/60">Unable to load the CK50 media assignment.</p>
+                </div>
+            );
+        }
+
         if (!primaryMediaAsset) {
             return (
                 <div className="flex h-full w-full flex-col items-center justify-center bg-neutral-950 px-4 text-center text-white">
@@ -1178,6 +1290,11 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                 <video
                     src={primaryMediaAsset.downloadUrl}
                     className="h-full w-full object-contain"
+                    autoPlay
+                    muted
+                    playsInline
+                    loop={mediaPlaylist.length === 1}
+                    onEnded={mediaPlaylist.length > 1 ? advanceMediaPreview : undefined}
                     controls
                     preload="metadata"
                 />
@@ -1362,35 +1479,43 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
 
     const renderCK50 = () => {
         return (
-            <div className="p-2 flex flex-col items-center gap-4 max-h-[60vh] overflow-y-auto pb-4">
-                <div className="bg-gray-900 rounded-lg shadow-lg text-white flex flex-col justify-center border-4 border-gray-700 relative p-4 w-full" style={{ aspectRatio: '9/16' }}>
-                    <div className="text-left w-full space-y-2">
-                        <div>
-                            <p className="text-[10px] text-gray-400 uppercase tracking-wider">UI Mode</p>
-                            <p className="text-xs text-white font-semibold truncate">{kiosk.ui?.mode || '---'}</p>
-                        </div>
-                        <div>
-                            <p className="text-[10px] text-gray-400 uppercase tracking-wider">{displayedStateLabel}</p>
-                            <p className="text-xs text-white font-semibold truncate">{displayedState || '---'}</p>
-                        </div>
-                        <div>
-                            <p className="text-[10px] text-gray-400 uppercase tracking-wider">SN</p>
-                            <p className="text-xs text-white font-semibold truncate">{kiosk.hardware?.sn || '---'}</p>
+            <div className="flex max-h-[60vh] flex-col items-center gap-3 overflow-y-auto p-2 pb-4">
+                <div className="w-full space-y-2.5">
+                    <div
+                        className="mx-auto w-full max-w-[280px] overflow-hidden rounded-xl bg-black shadow-lg ring-4 ring-gray-700"
+                        data-kiosk-ck50-screen-preview="true"
+                    >
+                        <div className="w-full" style={{ aspectRatio: '9 / 16' }}>
+                            {renderAssignedMediaScreen()}
                         </div>
                     </div>
-                </div>
-                <div className="w-full grid grid-cols-2 gap-2">
-                    {visibleModules.slice(0, 2).reverse().map((module) => renderModule(module, { reverseOrder: true }))}
-                </div>
-                <div className="w-full grid grid-cols-3 gap-2">
-                    {visibleModules.slice(2, 5).map((module) => renderModule(module, { reverseOrder: true }))}
+
+                    <div className="flex items-start justify-between gap-2 rounded-lg bg-gray-900 px-3 py-2 text-white">
+                        <div className="min-w-0">
+                            <p className="text-[9px] font-semibold uppercase tracking-[0.15em] text-white/50">Screen media</p>
+                            <p className="truncate text-xs font-semibold" title={primaryMediaAsset?.name || ''}>
+                                {primaryMediaAsset?.name || (v1MediaLoadState === 'loading' ? 'Loading…' : 'No media assigned')}
+                            </p>
+                        </div>
+                        {mediaPlaylist.length > 1 && (
+                            <span className="shrink-0 rounded-full bg-white/10 px-2 py-1 text-[10px] font-semibold text-white/70">
+                                {(activeMediaIndex % mediaPlaylist.length) + 1}/{mediaPlaylist.length}
+                            </span>
+                        )}
+                    </div>
+
+                    <div className="grid w-full grid-cols-2 gap-2" data-kiosk-ck50-modules="all">
+                        {visibleModules.slice(0, 2).reverse().map((module) => renderModule(module, { reverseOrder: true }))}
+                    </div>
+                    <div className="grid w-full grid-cols-3 gap-2" data-kiosk-ck50-modules="all">
+                        {visibleModules.slice(2, 5).map((module) => renderModule(module, { reverseOrder: true }))}
+                    </div>
                 </div>
             </div>
         );
     };
 
     const renderContent = () => {
-        const hardwareType = kiosk.hardware?.type;
         switch (hardwareType) {
             case 'CT3':
                 return renderCT3();

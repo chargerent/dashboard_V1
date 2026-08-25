@@ -14,6 +14,7 @@ const TERMINAL_TEST_PACKAGE_NAME = "com.chargerent.kiosk.test.debug";
 const TERMINAL_AGENT_MIN_VERSION_CODE = 29;
 const TERMINAL_STRIPE_MODE = "test";
 const TERMINAL_ACCOUNT_COUNTRIES = new Set(["US", "CA", "FR"]);
+const PHONE_MARKETS = new Set(["US", "CA", "FR"]);
 
 const COMMAND_TTL_MS = 2 * 60 * 1000;
 const ENROLLMENT_TTL_MS = 15 * 60 * 1000;
@@ -92,6 +93,16 @@ const HIGH_IMPACT_OPERATIONS = new Set([
   "WIPE_DEVICE",
 ]);
 
+const UNASSIGNED_PHONE_OPERATIONS = new Set([
+  ...ALLOWED_OPERATIONS,
+]);
+[
+  "SET_KIOSK_ALLOWLIST",
+  "SET_TERMINAL_LOCKDOWN",
+  "LAUNCH_PAYMENT_APP",
+  "INSTALL_PAYMENT_APP",
+].forEach((operation) => UNASSIGNED_PHONE_OPERATIONS.delete(operation));
+
 function isPhoneControlAdmin(authState) {
   const username = String(authState?.profile?.username || "").trim().toLowerCase();
   const role = String(authState?.profile?.role || "").trim().toLowerCase();
@@ -137,12 +148,79 @@ function normalizeDeviceId(value) {
   return deviceId;
 }
 
+function normalizePhoneNumber(value, {allowEmpty = false} = {}) {
+  const raw = String(value || "").trim();
+  if (!raw && allowEmpty) return "";
+  const compact = raw.replace(/[\s().-]/g, "");
+  if (!/^\+?\d{7,15}$/.test(compact)) {
+    invalidArgument("Enter a phone number with 7 to 15 digits, including the country code when available.");
+  }
+  return compact;
+}
+
+function normalizeReportedPhoneNumber(value) {
+  try {
+    return normalizePhoneNumber(value, {allowEmpty: true});
+  } catch {
+    return "";
+  }
+}
+
+function resolveManagedPhoneNumber(inventoryPhoneNumber, device = {}) {
+  const reportedPhoneNumber = normalizeReportedPhoneNumber(inventoryPhoneNumber);
+  const retainedPhoneNumber = normalizeReportedPhoneNumber(device.reportedPhoneNumber);
+  const manualPhoneNumber = normalizeReportedPhoneNumber(device.manualPhoneNumber);
+  const phoneNumber = reportedPhoneNumber || retainedPhoneNumber || manualPhoneNumber;
+  return {
+    phoneNumber,
+    source: reportedPhoneNumber || retainedPhoneNumber ?
+      "agent" : manualPhoneNumber ? "manual" : "",
+  };
+}
+
 function normalizeStationId(value) {
   const stationId = String(value || "").trim().toUpperCase();
   if (!/^[A-Z]{2,4}\d{3,5}$/.test(stationId)) {
     invalidArgument("A valid kiosk station ID is required.");
   }
   return stationId;
+}
+
+function normalizePhoneMarket(value, {allowEmpty = false} = {}) {
+  const market = String(value || "").trim().toUpperCase();
+  if (!market && allowEmpty) return "";
+  if (!PHONE_MARKETS.has(market)) {
+    invalidArgument("Choose Canada, France, or US for this phone.");
+  }
+  return market;
+}
+
+function availableKioskIdsForMarket(kioskSnapshots, assignmentSnapshots, market, deviceId) {
+  const normalizedMarket = normalizePhoneMarket(market);
+  const assignedStationIds = new Set((assignmentSnapshots || []).flatMap((snapshot) => {
+    const assignment = snapshot.data() || {};
+    const assignedDeviceId = String(assignment.deviceId || "").trim();
+    if (!assignedDeviceId || assignedDeviceId === deviceId) return [];
+    const stationId = String(assignment.stationId || snapshot.id || "").trim().toUpperCase();
+    return stationId ? [stationId] : [];
+  }));
+
+  return [...new Set((kioskSnapshots || []).flatMap((snapshot) => {
+    const kiosk = snapshot.data() || {};
+    const stationId = String(kiosk.stationid || kiosk.stationId || snapshot.id || "")
+        .trim()
+        .toUpperCase();
+    if (!stationId.startsWith(normalizedMarket) || assignedStationIds.has(stationId)) return [];
+    try {
+      return normalizeStationId(stationId) === stationId ? [stationId] : [];
+    } catch {
+      return [];
+    }
+  }))].sort((left, right) => left.localeCompare(right)).slice(0, 1000);
+}
+
+function canControlUnassignedPhone(operation, authState) {
+  return isPhoneControlAdmin(authState) && UNASSIGNED_PHONE_OPERATIONS.has(operation);
 }
 
 function normalizeRequestId(value) {
@@ -991,12 +1069,19 @@ function timestampToMillis(value) {
 function safeDeviceData(snapshot) {
   const data = snapshot.data() || {};
   const terminal = data.terminal && typeof data.terminal === "object" ? data.terminal : {};
+  const stationId = String(data.stationId || "").trim().toUpperCase();
   return {
     id: snapshot.id,
     deviceId: String(data.deviceId || snapshot.id),
-    stationId: String(data.stationId || "").trim().toUpperCase(),
+    stationId,
+    assignmentState: stationId ? "assigned" : "unassigned",
+    market: String(data.market || stationId.slice(0, 2) || "").trim().toUpperCase(),
     displayName: String(data.displayName || "").trim(),
     enrollmentState: String(data.enrollmentState || "pending"),
+    reportedPhoneNumber: String(data.reportedPhoneNumber || "").trim(),
+    reportedPhoneNumberAt: timestampToMillis(data.reportedPhoneNumberAt),
+    manualPhoneNumber: String(data.manualPhoneNumber || "").trim(),
+    manualPhoneNumberUpdatedAt: timestampToMillis(data.manualPhoneNumberUpdatedAt),
     inventory: data.inventory && typeof data.inventory === "object" ? data.inventory : {},
     location: data.location && typeof data.location === "object" ? data.location : {},
     screen: data.screen && typeof data.screen === "object" ? data.screen : {},
@@ -1100,6 +1185,48 @@ async function listDevices(_data, authState, dependencies) {
   return {ok: true, devices};
 }
 
+async function setManualPhoneNumber(data, authState, dependencies) {
+  if (!isPhoneControlAdmin(authState)) {
+    throw new HttpsError(
+        "permission-denied",
+        "Only Chargerent administrators can edit a phone number.",
+    );
+  }
+  const {db, admin} = dependencies;
+  const deviceId = normalizeDeviceId(data?.deviceId);
+  const phoneNumber = normalizePhoneNumber(data?.phoneNumber, {allowEmpty: true});
+  const deviceRef = db.collection(DEVICES_COLLECTION).doc(deviceId);
+  const deviceSnapshot = await deviceRef.get();
+  if (!deviceSnapshot.exists) {
+    throw new HttpsError("not-found", "Managed phone was not found.");
+  }
+  const existingDevice = deviceSnapshot.data() || {};
+  const agentPhoneNumber = normalizeReportedPhoneNumber(
+      existingDevice.inventory?.phoneNumber || existingDevice.reportedPhoneNumber,
+  );
+  if (phoneNumber && agentPhoneNumber) {
+    throw new HttpsError(
+        "failed-precondition",
+        "This phone is already reporting its number through Agent.",
+    );
+  }
+
+  await deviceRef.set({
+    manualPhoneNumber: phoneNumber,
+    manualPhoneNumberUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    manualPhoneNumberUpdatedBy: String(authState.uid || authState.profile?.username || "admin")
+        .trim().slice(0, 160),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  }, {merge: true});
+
+  return {
+    ok: true,
+    deviceId,
+    phoneNumber,
+    message: phoneNumber ? "Phone number saved." : "Manual phone number removed.",
+  };
+}
+
 async function listCommands(data, authState, dependencies) {
   const {db} = dependencies;
   const deviceId = normalizeDeviceId(data?.deviceId);
@@ -1177,16 +1304,20 @@ async function getIceServers(data, authState, dependencies) {
 
 async function createEnrollment(data, authState, dependencies) {
   const {db, admin, privateKeyPem} = dependencies;
-  const stationId = normalizeStationId(data?.stationId);
-  await findKiosk(db, stationId);
+  const requestedStationId = String(data?.stationId || "").trim();
+  const stationId = requestedStationId ? normalizeStationId(requestedStationId) : "";
+  const market = normalizePhoneMarket(data?.market || stationId.slice(0, 2));
+  if (stationId) {
+    await findKiosk(db, stationId);
 
-  const assignmentRef = db.collection(ASSIGNMENTS_COLLECTION).doc(stationId);
-  const assignment = await assignmentRef.get();
-  if (assignment.exists && assignment.data()?.deviceId) {
-    throw new HttpsError(
-        "already-exists",
-        `${stationId} already has a managed phone. Unassign it before enrolling another.`,
-    );
+    const assignmentRef = db.collection(ASSIGNMENTS_COLLECTION).doc(stationId);
+    const assignment = await assignmentRef.get();
+    if (assignment.exists && assignment.data()?.deviceId) {
+      throw new HttpsError(
+          "already-exists",
+          `${stationId} already has a managed phone. Unassign it before enrolling another.`,
+      );
+    }
   }
 
   const code = createEnrollmentCode();
@@ -1194,7 +1325,9 @@ async function createEnrollment(data, authState, dependencies) {
   const now = Date.now();
   const expiresAt = now + ENROLLMENT_TTL_MS;
   await db.collection(ENROLLMENTS_COLLECTION).doc(enrollmentHash(normalizedCode)).set({
-    stationId,
+    purpose: stationId ? "kiosk_assignment" : "staging",
+    stationId: stationId || null,
+    market,
     codeLength: normalizedCode.length,
     state: "pending",
     expiresAt,
@@ -1205,10 +1338,14 @@ async function createEnrollment(data, authState, dependencies) {
   return {
     ok: true,
     stationId,
+    assignmentState: stationId ? "assigned" : "unassigned",
+    market,
     enrollmentCode: code,
     expiresAt,
     controllerPublicKey: controllerPublicKeyBase64(privateKeyPem),
-    message: `Enrollment code created for ${stationId}. It expires in 15 minutes.`,
+    message: stationId ?
+      `Enrollment code created for ${stationId}. It expires in 15 minutes.` :
+      `Enrollment code created for ${market} phone inventory. It expires in 15 minutes.`,
   };
 }
 
@@ -1405,6 +1542,8 @@ async function assignDevice(data, authState, dependencies) {
     });
     transaction.set(deviceRef, {
       stationId,
+      assignmentState: "assigned",
+      market: normalizePhoneMarket(stationId.slice(0, 2)),
       terminal: terminalState,
       activeCommandId: command?.id || transactionDevice.activeCommandId || null,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -1481,6 +1620,110 @@ async function assignDevice(data, authState, dependencies) {
   };
 }
 
+async function assignEnrolledDeviceToKiosk(data, authState, dependencies) {
+  const {db, admin} = dependencies;
+  const deviceId = normalizeDeviceId(authState?.deviceId);
+  const stationId = normalizeStationId(data?.stationId);
+  const targetMarket = normalizePhoneMarket(stationId.slice(0, 2));
+  const deviceRef = authState?.deviceRef || db.collection(DEVICES_COLLECTION).doc(deviceId);
+  const targetRef = db.collection(ASSIGNMENTS_COLLECTION).doc(stationId);
+  const kioskSnapshot = await findKiosk(db, stationId);
+  const kioskRef = kioskSnapshot.ref;
+
+  await db.runTransaction(async (transaction) => {
+    const [deviceSnapshot, targetSnapshot, transactionKioskSnapshot] = await Promise.all([
+      transaction.get(deviceRef),
+      transaction.get(targetRef),
+      transaction.get(kioskRef),
+    ]);
+    if (!deviceSnapshot.exists || deviceSnapshot.data()?.enrollmentState !== "enrolled") {
+      throw new HttpsError("unauthenticated", "Phone is not enrolled.");
+    }
+    if (!transactionKioskSnapshot.exists) {
+      throw new HttpsError("not-found", `Kiosk ${stationId} was not found.`);
+    }
+
+    const device = deviceSnapshot.data() || {};
+    const currentStationId = String(device.stationId || "").trim().toUpperCase();
+    if (currentStationId && currentStationId !== stationId) {
+      throw new HttpsError(
+          "failed-precondition",
+          `This phone is already assigned to ${currentStationId}. Use Mobile Device Management to move it.`,
+      );
+    }
+
+    const existingDeviceId = String(targetSnapshot.data()?.deviceId || "").trim();
+    if (existingDeviceId && existingDeviceId !== deviceId) {
+      throw new HttpsError("already-exists", `${stationId} already has another managed phone.`);
+    }
+
+    const terminal = device.terminal && typeof device.terminal === "object" ?
+      device.terminal : {};
+    if (terminal.enabled === true) {
+      throw new HttpsError(
+          "failed-precondition",
+          "Use Mobile Device Management to change a payment-terminal phone assignment.",
+      );
+    }
+
+    transaction.set(targetRef, {
+      stationId,
+      deviceId,
+      terminalEnabled: false,
+      source: "agent-self-assignment",
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedBy: `phone-agent:${deviceId}`,
+    }, {merge: true});
+    transaction.set(deviceRef, {
+      stationId,
+      assignmentState: "assigned",
+      market: targetMarket,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedBy: `phone-agent:${deviceId}`,
+    }, {merge: true});
+  });
+
+  return {
+    ok: true,
+    deviceId,
+    stationId,
+    assignmentState: "assigned",
+    market: targetMarket,
+    message: `Phone assigned to ${stationId}.`,
+  };
+}
+
+async function assignDeviceFromAgent(data, req, dependencies) {
+  const authState = await authenticateDeviceRequest(req, dependencies);
+  return assignEnrolledDeviceToKiosk(data, authState, dependencies);
+}
+
+async function listAvailableKiosksForAgent(data, req, dependencies) {
+  const {db} = dependencies;
+  const authState = await authenticateDeviceRequest(req, dependencies);
+  const market = normalizePhoneMarket(data?.market);
+  const currentStationId = String(authState.device?.stationId || "").trim().toUpperCase();
+  if (currentStationId) {
+    throw new HttpsError(
+        "failed-precondition",
+        `This phone is already assigned to ${currentStationId}.`,
+    );
+  }
+
+  const [kioskSnapshot, assignmentSnapshot, deviceSnapshot] = await Promise.all([
+    db.collection("kiosks").select("stationid", "stationId").get(),
+    db.collection(ASSIGNMENTS_COLLECTION).select("stationId", "deviceId").get(),
+    db.collection(DEVICES_COLLECTION).select("stationId", "deviceId").get(),
+  ]);
+  const kiosks = availableKioskIdsForMarket(
+      kioskSnapshot.docs,
+      [...assignmentSnapshot.docs, ...deviceSnapshot.docs],
+      market,
+      authState.deviceId,
+  );
+  return {ok: true, market, kiosks};
+}
+
 async function sendCommand(data, authState, dependencies) {
   const {db, admin, privateKeyPem} = dependencies;
   assertPhoneControlAccess(authState);
@@ -1553,6 +1796,12 @@ async function sendCommand(data, authState, dependencies) {
   const authorizedStationId = String(
       authorizedDeviceSnapshot.data()?.stationId || "",
   ).trim().toUpperCase();
+  if (!authorizedStationId && !canControlUnassignedPhone(operation, authState)) {
+    throw new HttpsError(
+        "failed-precondition",
+        "Assign this phone to a kiosk before using kiosk-specific controls.",
+    );
+  }
   const commandRef = db.collection(COMMANDS_COLLECTION).doc(requestId);
   const now = Date.now();
   const command = {
@@ -1577,11 +1826,14 @@ async function sendCommand(data, authState, dependencies) {
       throw new HttpsError("failed-precondition", "This phone is not enrolled.");
     }
     const stationId = String(deviceSnapshot.data()?.stationId || "").trim().toUpperCase();
-    if (!stationId) {
-      throw new HttpsError("failed-precondition", "Assign this phone to a kiosk first.");
-    }
     if (stationId !== authorizedStationId) {
       throw new HttpsError("permission-denied", "The phone kiosk assignment changed.");
+    }
+    if (!stationId && !canControlUnassignedPhone(operation, authState)) {
+      throw new HttpsError(
+          "failed-precondition",
+          "Assign this phone to a kiosk before using kiosk-specific controls.",
+      );
     }
     if (commandSnapshot.exists) {
       throw new HttpsError("already-exists", "This command request was already submitted.");
@@ -1600,7 +1852,7 @@ async function sendCommand(data, authState, dependencies) {
 
     transaction.create(commandRef, {
       ...command,
-      stationId,
+      stationId: stationId || null,
       status: "queued",
       confirmed,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -1632,13 +1884,18 @@ async function enrollDevice(data, dependencies) {
   const enrollmentRef = db.collection(ENROLLMENTS_COLLECTION).doc(enrollmentHash(normalizedCode));
 
   let enrolledStationId = "";
+  let enrolledMarket = "";
   await db.runTransaction(async (transaction) => {
     const enrollmentSnapshot = await transaction.get(enrollmentRef);
     if (!enrollmentSnapshot.exists) {
       throw new HttpsError("not-found", "Enrollment code was not found.");
     }
     const enrollment = enrollmentSnapshot.data() || {};
-    enrolledStationId = normalizeStationId(enrollment.stationId);
+    const enrollmentStationId = String(enrollment.stationId || "").trim();
+    enrolledStationId = enrollmentStationId ? normalizeStationId(enrollmentStationId) : "";
+    enrolledMarket = normalizePhoneMarket(
+        enrollment.market || enrolledStationId.slice(0, 2),
+    );
     const isResume = canResumeEnrollment(enrollment, deviceId);
     if (!isResume &&
         (enrollment.state !== "pending" || Number(enrollment.expiresAt || 0) < Date.now())) {
@@ -1646,18 +1903,20 @@ async function enrollDevice(data, dependencies) {
     }
 
     const deviceRef = db.collection(DEVICES_COLLECTION).doc(deviceId);
-    const assignmentRef = db.collection(ASSIGNMENTS_COLLECTION).doc(enrolledStationId);
+    const assignmentRef = enrolledStationId ?
+      db.collection(ASSIGNMENTS_COLLECTION).doc(enrolledStationId) : null;
     const [deviceSnapshot, assignmentSnapshot] = await Promise.all([
       transaction.get(deviceRef),
-      transaction.get(assignmentRef),
+      assignmentRef ? transaction.get(assignmentRef) : Promise.resolve(null),
     ]);
-    const assignedDeviceId = String(assignmentSnapshot.data()?.deviceId || "");
-    if (assignedDeviceId && assignedDeviceId !== deviceId) {
+    const assignedDeviceId = String(assignmentSnapshot?.data()?.deviceId || "");
+    if (assignmentRef && assignedDeviceId && assignedDeviceId !== deviceId) {
       throw new HttpsError("already-exists", `${enrolledStationId} already has another managed phone.`);
     }
     if (isResume) {
       if (!deviceSnapshot.exists ||
-          normalizeStationId(deviceSnapshot.data()?.stationId) !== enrolledStationId) {
+          String(deviceSnapshot.data()?.stationId || "").trim().toUpperCase() !==
+            enrolledStationId) {
         throw new HttpsError("failed-precondition", "The original phone enrollment is incomplete.");
       }
       return;
@@ -1672,7 +1931,9 @@ async function enrollDevice(data, dependencies) {
 
     transaction.set(deviceRef, {
       deviceId,
-      stationId: enrolledStationId,
+      stationId: enrolledStationId || null,
+      assignmentState: enrolledStationId ? "assigned" : "unassigned",
+      market: enrolledMarket,
       publicKey: publicKeyBase64,
       inventory,
       enrollmentState: "enrolled",
@@ -1680,12 +1941,14 @@ async function enrollDevice(data, dependencies) {
       lastSeenAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, {merge: true});
-    transaction.set(assignmentRef, {
-      stationId: enrolledStationId,
-      deviceId,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      source: "device-enrollment",
-    });
+    if (assignmentRef) {
+      transaction.set(assignmentRef, {
+        stationId: enrolledStationId,
+        deviceId,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        source: "device-enrollment",
+      });
+    }
     transaction.set(enrollmentRef, {
       state: "used",
       usedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -1697,6 +1960,8 @@ async function enrollDevice(data, dependencies) {
     ok: true,
     deviceId,
     stationId: enrolledStationId,
+    assignmentState: enrolledStationId ? "assigned" : "unassigned",
+    market: enrolledMarket,
     controllerPublicKey: controllerPublicKeyBase64(privateKeyPem),
   };
 }
@@ -1744,12 +2009,32 @@ async function recordHeartbeat(data, req, dependencies) {
   const {admin} = dependencies;
   const authState = await authenticateDeviceRequest(req, dependencies);
   const inventory = cleanDevicePayload(data?.inventory || {});
-  await authState.deviceRef.set({
+  const reportedPhoneNumber = normalizeReportedPhoneNumber(inventory.phoneNumber);
+  const heartbeatUpdate = {
     inventory,
     lastSeenAt: admin.firestore.FieldValue.serverTimestamp(),
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  }, {merge: true});
-  return {ok: true, serverTime: Date.now()};
+  };
+  if (reportedPhoneNumber) {
+    heartbeatUpdate.reportedPhoneNumber = reportedPhoneNumber;
+    heartbeatUpdate.reportedPhoneNumberAt = admin.firestore.FieldValue.serverTimestamp();
+  }
+  await authState.deviceRef.set(heartbeatUpdate, {merge: true});
+  const stationId = String(authState.device?.stationId || "").trim().toUpperCase();
+  const managedPhoneNumber = resolveManagedPhoneNumber(
+      reportedPhoneNumber,
+      authState.device,
+  );
+  return {
+    ok: true,
+    serverTime: Date.now(),
+    stationId,
+    assignmentState: stationId ? "assigned" : "unassigned",
+    market: String(authState.device?.market || stationId.slice(0, 2) || "")
+        .trim().toUpperCase(),
+    phoneNumber: managedPhoneNumber.phoneNumber,
+    phoneNumberSource: managedPhoneNumber.source,
+  };
 }
 
 async function pollDeviceCommand(_data, req, dependencies) {
@@ -1991,9 +2276,13 @@ async function recordScreenUpdate(data, req, dependencies) {
 module.exports = {
   ALLOWED_OPERATIONS,
   HIGH_IMPACT_OPERATIONS,
+  availableKioskIdsForMarket,
   assertPhoneControlAccess,
+  assignDeviceFromAgent,
+  assignEnrolledDeviceToKiosk,
   assignDevice,
   canAccessKiosk,
+  canControlUnassignedPhone,
   canResumeEnrollment,
   completedCommandScreenUpdate,
   canonicalCommandPayload,
@@ -2022,16 +2311,21 @@ module.exports = {
   normalizeTerminalLockdownArguments,
   normalizeWebRtcStartArguments,
   normalizeDeviceId,
+  normalizePhoneNumber,
+  normalizePhoneMarket,
   normalizeEnrollmentCode,
   normalizeScreenUpdate,
   normalizeStationId,
   listCommands,
+  listAvailableKiosksForAgent,
   listDevices,
   pollDeviceCommand,
   recordCommandResult,
   recordHeartbeat,
   recordScreenUpdate,
+  resolveManagedPhoneNumber,
   sendCommand,
+  setManualPhoneNumber,
   signCommand,
   provisionTerminalConfigForKiosk,
   terminalAccountCountry,

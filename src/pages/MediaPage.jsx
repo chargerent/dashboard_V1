@@ -4,7 +4,7 @@ import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
 import ConfirmationModal from '../components/UI/ConfirmationModal.jsx';
 import LoadingSpinner from '../components/UI/LoadingSpinner.jsx';
 import { callFunctionWithAuth } from '../utils/callableRequest.js';
-import { filterStationsForClient, isNewSchemaKiosk } from '../utils/helpers.js';
+import { filterStationsForClient, isKioskOnline, isNewSchemaKiosk } from '../utils/helpers.js';
 
 const ALL_LOCATIONS_TAG = 'All Locations';
 const UNTAGGED_FILTER_VALUE = '__UNTAGGED__';
@@ -476,6 +476,7 @@ export default function MediaPage({
   onNavigateToAdmin,
   currentUser,
   allStationsData,
+  referenceTime,
   t,
 }) {
   const [assets, setAssets] = useState([]);
@@ -1601,6 +1602,7 @@ export default function MediaPage({
               <div className="mt-4 max-h-[32rem] space-y-3 overflow-y-auto pr-1">
                 {eligibleKiosks.map((kiosk) => {
                   const isSelected = selectedStationIds.includes(kiosk.stationid);
+                  const kioskIsOnline = isKioskOnline(kiosk, referenceTime);
                   const currentMedia = isV1MediaKiosk(kiosk) ?
                     (v1AssignmentsByStationId.get(String(kiosk.stationid || '').trim().toUpperCase()) || {}) :
                     (kiosk?.media || {});
@@ -1636,9 +1638,19 @@ export default function MediaPage({
                                 {kiosk.info?.location || 'Unknown location'} · {kiosk.info?.place || 'Unknown place'}
                               </p>
                             </div>
-                            <span className="rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-gray-600">
-                              {getKioskMediaBadge(kiosk) || MEDIA_CONFIGURABLE_BADGE_FALLBACK}
-                            </span>
+                            <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                              {kioskIsOnline && (
+                                <span
+                                  className="rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200"
+                                  data-media-kiosk-online="true"
+                                >
+                                  Online
+                                </span>
+                              )}
+                              <span className="rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-gray-600">
+                                {getKioskMediaBadge(kiosk) || MEDIA_CONFIGURABLE_BADGE_FALLBACK}
+                              </span>
+                            </div>
                           </div>
                           <p className="mt-2 truncate text-xs text-gray-600" title={currentPlaylistLabel}>
                             {currentPlaylistLabel}

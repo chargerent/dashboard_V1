@@ -292,6 +292,10 @@ function DashboardHarness() {
         onNavigateToBinding={() => {}}
         onNavigateToRentals={() => {}}
         onNavigateToChargers={() => {}}
+        onNavigateToPhoneControl={(stationId) => {
+          window.__phoneControlNavigationTarget = stationId;
+        }}
+        assignedPhoneStationIds={new Set([TARGET_STATION_ID])}
         onNavigateToReporting={() => {}}
         onNavigateToTesting={() => {}}
         rentalData={useRentalDashboardSummaries ? [] : rentals}

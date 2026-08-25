@@ -37,6 +37,20 @@ test('new-schema kiosk cards omit legacy flow badges and show module firmware he
   await expect(page.locator('[data-module-firmware="unknown"]').first()).toHaveAttribute('data-heart-style', 'solid');
 });
 
+test('assigned-phone icon opens Phone Control filtered to its kiosk', async ({ page }) => {
+  const phoneButton = page.getByRole('button', { name: `Open phone assigned to ${TARGET_STATION_ID}`, exact: true });
+  const placeRow = page.locator(`[data-kiosk-place-row="${TARGET_STATION_ID}"]`);
+  await expect(placeRow).toContainText('TEST STATION 1');
+  await expect(placeRow.getByRole('button', { name: `Open phone assigned to ${TARGET_STATION_ID}`, exact: true })).toHaveCount(1);
+  await expect(phoneButton).toBeVisible();
+  await phoneButton.tap();
+  await expect.poll(() => page.evaluate(() => window.__phoneControlNavigationTarget)).toBe(TARGET_STATION_ID);
+
+  const search = page.getByRole('textbox', { name: /search by location/i });
+  await search.fill('US9002');
+  await expect(page.getByRole('button', { name: 'Open phone assigned to US9002', exact: true })).toHaveCount(0);
+});
+
 test('desktop-only reporting and analytics controls are absent on mobile', async ({ page }) => {
   await expect(page.getByTitle('Reporting')).toHaveCount(0);
   await expect(page.getByTitle('Station Analytics')).toHaveCount(0);

@@ -2,6 +2,7 @@
 
 import { memo, useMemo, useCallback } from 'react';
 import { BoltIcon, HeartIcon } from '@heroicons/react/24/solid';
+import { DevicePhoneMobileIcon } from '@heroicons/react/24/outline';
 import { isKioskOnline, getKioskPowerThreshold, isModuleOnline, isNewSchemaKiosk, isSlotActivelyCharging } from '../../utils/helpers';
 import RentalStats from '../Dashboard/RentalStats';
 import GatewayIcon from './GatewayIcon';
@@ -27,7 +28,7 @@ const getNumericVersion = (version) => {
     return Number.isFinite(parsedVersion) ? parsedVersion : null;
 };
 
-function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rentalData, rentalDashboardStats, clientInfo, t, onCommand, onShowRentalDetails, urgentIncidents, onNavigateToActivity, serverFlowVersion }) {
+function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rentalData, rentalDashboardStats, clientInfo, t, onCommand, onShowRentalDetails, urgentIncidents, onNavigateToActivity, serverFlowVersion, hasAssignedPhone = false, onNavigateToPhoneControl }) {
     const isOnline = isKioskOnline(kiosk, mockNow);
     const isV2Kiosk = isNewSchemaKiosk(kiosk);
     const canEditKiosk = isOnline || isV2Kiosk;
@@ -53,6 +54,21 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
             : kioskFlowNumber !== null && currentServerFlowNumber !== null && kioskFlowNumber > currentServerFlowNumber
                 ? 'ahead'
                 : 'unknown';
+    const phoneLink = hasAssignedPhone && typeof onNavigateToPhoneControl === 'function' ? (
+        <button
+            type="button"
+            onClick={(event) => {
+                event.stopPropagation();
+                onNavigateToPhoneControl(kiosk.stationid);
+            }}
+            className="rounded-full p-0.5 text-violet-500 transition-colors hover:bg-violet-100 hover:text-violet-700"
+            title={`Open phone assigned to ${kiosk.stationid}`}
+            aria-label={`Open phone assigned to ${kiosk.stationid}`}
+            data-kiosk-phone-link={kiosk.stationid}
+        >
+            <DevicePhoneMobileIcon className="h-4 w-4" />
+        </button>
+    ) : null;
     
     const stats = useMemo(() => {
         let total = 0;
@@ -125,6 +141,7 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                         ) : (
                             <h3 className="font-bold text-lg text-gray-800">{kiosk.info.place}</h3>
                         )}
+                        {!clientInfo.features.stationid && phoneLink}
                         {isPending && (
                             <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-800">
                                 {t('pending')}
@@ -134,17 +151,6 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                             <button onClick={(e) => { e.stopPropagation(); onToggleEdit(kiosk.stationid); }} disabled={!canEditKiosk} className="p-1 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-200 transition-colors disabled:text-gray-300 disabled:hover:bg-transparent disabled:cursor-not-allowed">
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L14.732 3.732z" /></svg>
                             </button>
-                        )}
-                        {!isV2Kiosk && (
-                            <span
-                                className={`shrink-0 text-[10px] font-medium leading-none ${flowVersionIsBehind ? 'text-orange-400' : 'text-gray-400'}`}
-                                data-kiosk-flow-version={kioskFlowVersion}
-                                data-flow-version-match={flowVersionMatches ? 'true' : 'false'}
-                                data-flow-version-status={flowVersionStatus}
-                                title={`Kiosk flow ${kioskFlowVersion}; current server flow ${currentServerFlowVersion}`}
-                            >
-                                F:{kioskFlowVersion}
-                            </span>
                         )}
                     </div>
                     <div className="flex items-center gap-3">
@@ -221,7 +227,15 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                         )}
                     </div>
                 </div>
-                    {clientInfo.features.stationid && <p className="text-sm text-gray-500 -mt-2 mb-2">{kiosk.info.place}</p>}
+                {clientInfo.features.stationid && (
+                    <div
+                        className="-mt-2 mb-2 flex items-center gap-1"
+                        data-kiosk-place-row={kiosk.stationid}
+                    >
+                        <p className="text-sm text-gray-500">{kiosk.info.place}</p>
+                        {phoneLink}
+                    </div>
+                )}
                 <div className={`grid ${clientInfo.commands.lock ? 'grid-cols-3' : 'grid-cols-3'} gap-2 text-center my-4`}>
                     <div>
                         <p className="text-2xl font-bold text-gray-700">{stats.total}</p>
@@ -247,8 +261,8 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                     ) : (
                         <div></div>
                     )}
-                    <div className="flex items-end justify-end select-none -mb-4">
-                        <span className="text-2xl font-black text-gray-300 tracking-widest">{kiosk.hardware?.type}</span>
+                    <div className="-mb-4 flex select-none items-end justify-end">
+                        <span className="text-2xl font-black tracking-widest text-gray-300">{kiosk.hardware?.type}</span>
                     </div>
                 </div>
                 {kiosk.disabled && <div className="mt-2 p-2 bg-red-100 text-red-700 text-center rounded-md text-sm font-semibold">{t('kiosk_disabled')}</div>}
@@ -260,7 +274,21 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                     onNavigateToActivity={onNavigateToActivity}
                 />
                 {clientInfo.features.rentals && (
-                    <div className={`mt-4 ${isOnline ? 'border-t' : ''} pt-4`}>
+                    <div
+                        className={`relative mt-4 ${isOnline ? 'border-t' : ''} pt-4`}
+                        data-kiosk-rental-section={kiosk.stationid}
+                    >
+                        {!isV2Kiosk && (
+                            <span
+                                className={`absolute right-0 top-4 text-2xl font-black leading-none tracking-widest ${flowVersionIsBehind ? 'text-orange-400' : 'text-gray-300'}`}
+                                data-kiosk-flow-version={kioskFlowVersion}
+                                data-flow-version-match={flowVersionMatches ? 'true' : 'false'}
+                                data-flow-version-status={flowVersionStatus}
+                                title={`Kiosk flow ${kioskFlowVersion}; current server flow ${currentServerFlowVersion}`}
+                            >
+                                F:{kioskFlowVersion}
+                            </span>
+                        )}
                         <RentalStats 
                             rentalData={rentalData} 
                             dashboardStats={rentalDashboardStats}

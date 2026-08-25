@@ -608,6 +608,7 @@ function buildClientInfoFromProfile(profile, uid) {
     edit: false,
     lock: false,
     eject: false,
+    eject_0e: false,
     eject_multiple: false,
     binding: false,
     updates: false,
@@ -655,6 +656,7 @@ function buildClientInfoFromProfile(profile, uid) {
       edit: true,
       lock: true,
       eject: true,
+      eject_0e: true,
       eject_multiple: true,
       updates: true,
       connectivity: true,
@@ -805,10 +807,12 @@ function App() {
   const [clientInfo, setClientInfo] = useState(null);
   const [serverFlowVersion, setServerFlowVersion] = useState('');
   const [serverUiVersion, setServerUiVersion] = useState('');
+  const [assignedPhoneStationIds, setAssignedPhoneStationIds] = useState(() => new Set());
   const [language, setLanguage] = useState('en');
   const [page, setPage] = useState(() => readActivityNavigation().page); // 'dashboard', 'activity', 'admin', 'media', 'binding', 'templates', 'kiosk-editor', 'rentals', 'chargers', 'provision', 'reporting', 'analytics', 'testing'
   const [activityInitialStation, setActivityInitialStation] = useState(() => readActivityNavigation().stationId);
   const [dashboardSearchTerm, setDashboardSearchTerm] = useState('');
+  const [phoneControlInitialSearch, setPhoneControlInitialSearch] = useState('');
   const [chargerSearchTerm, setChargerSearchTerm] = useState('');
   const [rentalsInitialPeriod, setRentalsInitialPeriod] = useState('7days');
   const [rentalsInitialStationIds, setRentalsInitialStationIds] = useState([]);
@@ -1014,6 +1018,7 @@ function App() {
     setClientInfo(null);
     setServerFlowVersion('');
     setServerUiVersion('');
+    setAssignedPhoneStationIds(new Set());
     setLanguage('en');
     setPage('dashboard');
     setInitialStatusCheck(false);
@@ -1056,6 +1061,11 @@ function App() {
     setActivityInitialStation(normalized);
     setPage('activity');
     window.history.pushState({ dashboardActivityNavigation: true }, '', activityUrl(normalized));
+  }, []);
+
+  const onNavigateToPhoneControl = useCallback((stationId = '') => {
+    setPhoneControlInitialSearch(normalizeNavigationSearch(stationId));
+    setPage('phone-control');
   }, []);
 
   const onActivityStationChange = useCallback((stationId = '') => {
@@ -1110,6 +1120,7 @@ function App() {
         setClientInfo(null);
         setServerFlowVersion('');
         setServerUiVersion('');
+        setAssignedPhoneStationIds(new Set());
         setLanguage('en');
         setInitialStatusCheck(false);
         setAllStationsData([]);
@@ -1206,6 +1217,24 @@ function App() {
       unsubscribeUiVersion();
     };
   }, [hasAuthToken, serverVersionListenerUid]);
+
+  const canUsePhoneControl = clientInfo?.isAdmin === true || clientInfo?.features?.phone_control === true;
+
+  useEffect(() => {
+    if (!hasAuthToken || !auth.currentUser || !serverVersionListenerUid || !canUsePhoneControl) {
+      setAssignedPhoneStationIds(new Set());
+      return undefined;
+    }
+
+    return onSnapshot(collection(db, 'phoneKioskAssignments'), (snapshot) => {
+      setAssignedPhoneStationIds(new Set(snapshot.docs
+        .map((assignment) => String(assignment.data()?.stationId || assignment.id || '').trim())
+        .filter(Boolean)));
+    }, (error) => {
+      console.warn('Unable to subscribe to managed-phone assignments:', error);
+      setAssignedPhoneStationIds(new Set());
+    });
+  }, [canUsePhoneControl, hasAuthToken, serverVersionListenerUid]);
 
   // Effect to handle token expiration when tab/PWA becomes visible again
   useEffect(() => {
@@ -2263,6 +2292,9 @@ function App() {
           };
           break;
         case 'eject count':
+        case 'eject 0e':
+        case 'eject locked manual':
+        case 'eject locked auto':
         case 'eject module':
         case 'reboot module':
         case 'start charge module':
@@ -2840,7 +2872,8 @@ function App() {
         setPage('chargers');
       }}
       onNavigateToActivity={onNavigateToActivity}
-      onNavigateToPhoneControl={() => setPage('phone-control')}
+      onNavigateToPhoneControl={onNavigateToPhoneControl}
+      assignedPhoneStationIds={assignedPhoneStationIds}
       operationalActivityEnabled={clientInfo?.isAdmin === true}
       initialSearch={dashboardSearchTerm}
       onNavigateToReporting={() => {
@@ -2943,6 +2976,7 @@ function App() {
             onNavigateToDashboard={() => setPage('dashboard')}
             currentUser={clientInfo}
             allStationsData={dedupedStationsData}
+            initialSearch={phoneControlInitialSearch}
             t={t}
           />
         );
@@ -3028,6 +3062,7 @@ function App() {
             onNavigateToAdmin={() => setPage('admin')}
             currentUser={clientInfo}
             allStationsData={dedupedStationsData}
+            referenceTime={latestTimestamp}
             t={t}
           />
         );

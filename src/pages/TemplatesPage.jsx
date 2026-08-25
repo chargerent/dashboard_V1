@@ -17,6 +17,7 @@ const previewClientInfo = {
     edit: false,
     lock: false,
     eject: false,
+    eject_0e: false,
     eject_multiple: false,
     updates: false,
     connectivity: false,

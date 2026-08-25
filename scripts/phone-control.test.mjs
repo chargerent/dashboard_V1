@@ -12,14 +12,17 @@ import {
   isPhoneAgentUpdateAvailable,
   isPhoneRemoteInputAvailable,
   phoneLocationMapUrls,
+  phoneLineNumberKey,
   phoneNetworkLabel,
   phoneSignalLevelFromDbm,
+  phoneHotspotControlLabel,
   phoneHotspotLabel,
   normalizePhoneDevice,
   normalizeAgentRelease,
   normalizePaymentAppRelease,
   phoneMatchesSearch,
   phoneTimestampToMillis,
+  summarizePhoneLines,
 } from '../src/utils/phoneControl.js';
 import {
   encodeGlobalActionPacket,
@@ -133,6 +136,7 @@ test('normalizes kiosk assignment and Android inventory', () => {
         joinSupported: true,
       }],
       hotspotSupported: true,
+      hotspotControlMode: 'settings_automation',
       hotspotControlGranted: true,
       hotspotAlwaysOn: true,
       hotspotActive: true,
@@ -163,6 +167,8 @@ test('normalizes kiosk assignment and Android inventory', () => {
   assert.equal(device.inventory.isDeviceOwner, true);
   assert.equal(device.inventory.wifiSsid, 'OurHome');
   assert.equal(device.inventory.phoneNumber, '+33612345678');
+  assert.equal(device.phoneLine.number, '+33612345678');
+  assert.equal(device.phoneLine.source, 'agent');
   assert.equal(device.inventory.networkStatus, 'online');
   assert.equal(device.inventory.wifiSignalLevel, 4);
   assert.equal(device.inventory.cellularTechnology, '5G');
@@ -173,8 +179,90 @@ test('normalizes kiosk assignment and Android inventory', () => {
   assert.equal(device.inventory.terminalLockdownActive, true);
   assert.equal(device.inventory.availableWifiNetworks[0].security, 'wpa2_wpa3');
   assert.equal(device.inventory.hotspotActive, true);
+  assert.equal(device.inventory.hotspotControlMode, 'settings_automation');
+  assert.equal(phoneHotspotLabel(device.inventory), 'Last confirmed on');
+  assert.equal(phoneHotspotControlLabel(device.inventory), 'Compatibility control');
   assert.equal(device.location.latitude, 45.5019);
   assert.equal(device.location.capturedAtMs, 1234);
+});
+
+test('distinguishes direct, compatibility, and unavailable hotspot control', () => {
+  assert.equal(phoneHotspotLabel({
+    hotspotSupported: true,
+    hotspotControlMode: 'android_api',
+    hotspotControlGranted: true,
+    hotspotAlwaysOn: true,
+    hotspotActive: true,
+  }), 'On · Always-on');
+  assert.equal(phoneHotspotLabel({
+    hotspotSupported: true,
+    hotspotControlMode: 'settings_automation',
+    hotspotControlGranted: false,
+    hotspotAlwaysOn: true,
+  }), 'Remote UI needed');
+  assert.equal(phoneHotspotLabel({
+    hotspotSupported: false,
+    hotspotControlMode: 'unavailable',
+  }), 'Control unavailable');
+});
+
+test('uses a manual phone number only when the Agent has not reported one', () => {
+  const manualDevice = normalizePhoneDevice({
+    manualPhoneNumber: '+1 (310) 555-0123',
+    manualPhoneNumberUpdatedAt: 1_000,
+    inventory: {phoneNumber: ''},
+  }, 'manual-phone');
+  assert.equal(manualDevice.phoneLine.number, '+1 (310) 555-0123');
+  assert.equal(manualDevice.phoneLine.source, 'manual');
+  assert.equal(manualDevice.phoneLine.key, '13105550123');
+
+  const reportedDevice = normalizePhoneDevice({
+    reportedPhoneNumber: '+33123456789',
+    manualPhoneNumber: '+13105550123',
+    inventory: {phoneNumber: ''},
+  }, 'reported-phone');
+  assert.equal(reportedDevice.phoneLine.number, '+33123456789');
+  assert.equal(reportedDevice.phoneLine.source, 'agent');
+  assert.equal(phoneLineNumberKey('(310) 555-0123'), '3105550123');
+});
+
+test('keeps staged phones unassigned while retaining their inventory market', () => {
+  const device = normalizePhoneDevice({
+    stationId: null,
+    assignmentState: 'unassigned',
+    market: 'us',
+    enrollmentState: 'enrolled',
+    inventory: {model: 'Pixel 6a'},
+  }, 'staged-phone-1234');
+  assert.equal(device.stationId, '');
+  assert.equal(device.assignmentState, 'unassigned');
+  assert.equal(device.market, 'US');
+  assert.equal(phoneMatchesSearch(device, null, 'US'), true);
+});
+
+test('summarizes unique live, offline, duplicate, and unavailable phone lines', () => {
+  const now = 100_000;
+  const devices = [
+    normalizePhoneDevice({
+      lastSeenAt: now - 10_000,
+      inventory: {phoneNumber: '+13105550123'},
+    }, 'phone-1'),
+    normalizePhoneDevice({
+      lastSeenAt: now - 200_000,
+      reportedPhoneNumber: '+13105550123',
+    }, 'phone-2'),
+    normalizePhoneDevice({
+      lastSeenAt: now - 200_000,
+      manualPhoneNumber: '+33612345678',
+    }, 'phone-3'),
+    normalizePhoneDevice({lastSeenAt: now - 5_000}, 'phone-4'),
+  ];
+  const summary = summarizePhoneLines(devices, now);
+  assert.equal(summary.lineCount, 2);
+  assert.equal(summary.liveCount, 1);
+  assert.equal(summary.offlineCount, 1);
+  assert.equal(summary.unavailableCount, 1);
+  assert.equal(summary.duplicateCount, 1);
 });
 
 test('uses the connected scan entry when Android redacts the Wi-Fi summary', () => {

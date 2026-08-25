@@ -53,6 +53,7 @@ const HTTP_FUNCTION_NAME_MAP = {
   phoneControl_createEnrollment: 'phoneControl_httpCreateEnrollment',
   phoneControl_assignDevice: 'phoneControl_httpAssignDevice',
   phoneControl_listDevices: 'phoneControl_httpListDevices',
+  phoneControl_setManualPhoneNumber: 'phoneControl_httpSetManualPhoneNumber',
   phoneControl_listCommands: 'phoneControl_httpListCommands',
   phoneControl_getScreen: 'phoneControl_httpGetScreen',
   phoneControl_getIceServers: 'phoneControl_httpGetIceServers',

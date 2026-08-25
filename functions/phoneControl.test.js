@@ -6,17 +6,22 @@ const test = require("node:test");
 const {
   ALLOWED_OPERATIONS,
   HIGH_IMPACT_OPERATIONS,
+  assignEnrolledDeviceToKiosk,
+  availableKioskIdsForMarket,
   authenticateDeviceRequest,
   canAccessKiosk,
+  canControlUnassignedPhone,
   canResumeEnrollment,
   completedCommandScreenUpdate,
   canonicalCommandPayload,
   canonicalJson,
   controllerPublicKeyBase64,
+  createEnrollment,
   createEnrollmentCode,
   createTurnIceConfiguration,
   deviceIdFromPublicKey,
   encryptCommandSecret,
+  enrollDevice,
   enrollmentHash,
   hasPhoneControlAccess,
   normalizeArguments,
@@ -30,14 +35,351 @@ const {
   normalizeWebRtcStartArguments,
   normalizeDeviceId,
   normalizeEnrollmentCode,
+  normalizePhoneNumber,
+  normalizePhoneMarket,
   normalizeScreenUpdate,
   normalizeStationId,
   provisionTerminalConfigForKiosk,
+  resolveManagedPhoneNumber,
   signCommand,
+  setManualPhoneNumber,
   terminalCommandArguments,
   terminalConfigForKiosk,
   terminalStateAfterAppRestrictions,
 } = require("./phoneControl");
+
+function createPhoneAssignmentTestDatabase(initialDocuments = {}) {
+  const documents = new Map(Object.entries(initialDocuments));
+  const snapshot = (ref) => ({
+    exists: documents.has(ref.path),
+    id: ref.id,
+    ref,
+    data: () => documents.get(ref.path),
+  });
+  const db = {
+    collection(name) {
+      return {
+        doc(id) {
+          const ref = {
+            id,
+            path: `${name}/${id}`,
+          };
+          ref.get = async () => snapshot(ref);
+          return ref;
+        },
+        where() {
+          return {
+            limit() {
+              return {get: async () => ({empty: true, docs: []})};
+            },
+          };
+        },
+      };
+    },
+    async runTransaction(callback) {
+      return callback({
+        get: async (ref) => snapshot(ref),
+        set: (ref, data, options = {}) => {
+          const current = options.merge ? documents.get(ref.path) || {} : {};
+          documents.set(ref.path, {...current, ...data});
+        },
+      });
+    },
+  };
+  return {db, documents};
+}
+
+test("normalizes manual phone numbers without guessing a country code", () => {
+  assert.equal(normalizePhoneNumber("+1 (310) 555-0123"), "+13105550123");
+  assert.equal(normalizePhoneNumber("06 12 34 56 78"), "0612345678");
+  assert.equal(normalizePhoneNumber("", {allowEmpty: true}), "");
+  assert.throws(() => normalizePhoneNumber("555"), /7 to 15 digits/);
+  assert.throws(() => normalizePhoneNumber("+1-800-FLOWERS"), /7 to 15 digits/);
+});
+
+test("returns the Agent-reported number before a retained or manual phone record", () => {
+  assert.deepEqual(resolveManagedPhoneNumber("+13105550123", {
+    reportedPhoneNumber: "+13105550456",
+    manualPhoneNumber: "+13105550789",
+  }), {phoneNumber: "+13105550123", source: "agent"});
+  assert.deepEqual(resolveManagedPhoneNumber("", {
+    reportedPhoneNumber: "+33123456789",
+    manualPhoneNumber: "+33612345678",
+  }), {phoneNumber: "+33123456789", source: "agent"});
+  assert.deepEqual(resolveManagedPhoneNumber("", {
+    manualPhoneNumber: "+33612345678",
+  }), {phoneNumber: "+33612345678", source: "manual"});
+  assert.deepEqual(resolveManagedPhoneNumber("", {}), {phoneNumber: "", source: ""});
+});
+
+test("normalizes the supported staging markets", () => {
+  assert.equal(normalizePhoneMarket(" us "), "US");
+  assert.equal(normalizePhoneMarket("CA"), "CA");
+  assert.equal(normalizePhoneMarket("FR"), "FR");
+  assert.equal(normalizePhoneMarket("", {allowEmpty: true}), "");
+  assert.throws(() => normalizePhoneMarket("GB"), /Canada, France, or US/);
+});
+
+test("lists only available kiosk IDs for the selected country", () => {
+  const document = (id, data) => ({id, data: () => data});
+  const kiosks = [
+    document("US0118", {stationid: "US0118"}),
+    document("id-us77", {stationId: "US0077"}),
+    document("FR0070", {stationid: "FR0070"}),
+    document("aid-unassigned", {}),
+  ];
+  const assignments = [
+    document("US0077", {stationId: "US0077", deviceId: "another-phone"}),
+    document("US0118", {stationId: "US0118", deviceId: "this-phone"}),
+  ];
+  assert.deepEqual(
+      availableKioskIdsForMarket(kiosks, assignments, "US", "this-phone"),
+      ["US0118"],
+  );
+  assert.deepEqual(
+      availableKioskIdsForMarket(kiosks, assignments, "FR", "this-phone"),
+      ["FR0070"],
+  );
+});
+
+test("allows administrators to control staged phones without enabling kiosk features", () => {
+  const admin = {isAdmin: true, profile: {}};
+  const partner = {profile: {role: "partner", features: {phone_control: true}}};
+  assert.equal(canControlUnassignedPhone("GET_INVENTORY", admin), true);
+  assert.equal(canControlUnassignedPhone("INSTALL_APP_UPDATE", admin), true);
+  assert.equal(canControlUnassignedPhone("SET_TERMINAL_LOCKDOWN", admin), false);
+  assert.equal(canControlUnassignedPhone("LAUNCH_PAYMENT_APP", admin), false);
+  assert.equal(canControlUnassignedPhone("GET_INVENTORY", partner), false);
+});
+
+test("creates and consumes a one-time enrollment without a kiosk assignment", async () => {
+  const {privateKey, publicKey} = crypto.generateKeyPairSync("ec", {namedCurve: "prime256v1"});
+  const privateKeyPem = privateKey.export({type: "pkcs8", format: "pem"});
+  const publicKeyBase64 = publicKey.export({type: "spki", format: "der"}).toString("base64");
+  const documents = new Map();
+  const timestamp = {serverTimestamp: true};
+  const snapshot = (ref) => ({
+    exists: documents.has(ref.path),
+    id: ref.id,
+    data: () => documents.get(ref.path),
+  });
+  const db = {
+    collection(name) {
+      return {
+        doc(id) {
+          return {id, path: `${name}/${id}`};
+        },
+      };
+    },
+    async runTransaction(callback) {
+      return callback({
+        get: async (ref) => snapshot(ref),
+        set: (ref, data, options = {}) => {
+          const current = options.merge ? documents.get(ref.path) || {} : {};
+          documents.set(ref.path, {...current, ...data});
+        },
+      });
+    },
+  };
+  const enrollmentWrites = [];
+  const enrollmentCollection = db.collection("phoneDeviceEnrollments");
+  db.collection = (name) => {
+    const collection = name === "phoneDeviceEnrollments" ? enrollmentCollection : {
+      doc(id) {
+        return {id, path: `${name}/${id}`};
+      },
+    };
+    return {
+      ...collection,
+      doc(id) {
+        const ref = collection.doc(id);
+        if (name === "phoneDeviceEnrollments") {
+          ref.set = async (data) => {
+            documents.set(ref.path, data);
+            enrollmentWrites.push(data);
+          };
+        }
+        return ref;
+      },
+    };
+  };
+  const dependencies = {
+    db,
+    admin: {firestore: {FieldValue: {serverTimestamp: () => timestamp}}},
+    privateKeyPem,
+  };
+
+  const created = await createEnrollment(
+      {market: "US"},
+      {uid: "admin-1", isAdmin: true, profile: {}},
+      dependencies,
+  );
+  assert.equal(created.stationId, "");
+  assert.equal(created.assignmentState, "unassigned");
+  assert.equal(created.market, "US");
+  assert.equal(enrollmentWrites[0].purpose, "staging");
+  assert.equal(enrollmentWrites[0].stationId, null);
+
+  const enrolled = await enrollDevice({
+    enrollmentCode: created.enrollmentCode,
+    publicKey: publicKeyBase64,
+    inventory: {model: "Pixel 6a"},
+  }, dependencies);
+  assert.equal(enrolled.stationId, "");
+  assert.equal(enrolled.assignmentState, "unassigned");
+  const device = documents.get(`phoneDevices/${enrolled.deviceId}`);
+  assert.equal(device.stationId, null);
+  assert.equal(device.assignmentState, "unassigned");
+  assert.equal(device.market, "US");
+  assert.equal(
+      [...documents.keys()].some((path) => path.startsWith("phoneKioskAssignments/")),
+      false,
+  );
+});
+
+test("allows an enrolled unassigned phone to claim an available kiosk in its market", async () => {
+  const {db, documents} = createPhoneAssignmentTestDatabase({
+    "phoneDevices/phone-device-1234": {
+      deviceId: "phone-device-1234",
+      enrollmentState: "enrolled",
+      stationId: null,
+      assignmentState: "unassigned",
+      market: "US",
+    },
+    "kiosks/US0118": {stationid: "US0118"},
+  });
+  const deviceRef = db.collection("phoneDevices").doc("phone-device-1234");
+  const timestamp = {serverTimestamp: true};
+
+  const result = await assignEnrolledDeviceToKiosk(
+      {stationId: "us0118"},
+      {deviceId: "phone-device-1234", deviceRef},
+      {
+        db,
+        admin: {firestore: {FieldValue: {serverTimestamp: () => timestamp}}},
+      },
+  );
+
+  assert.equal(result.stationId, "US0118");
+  assert.equal(documents.get("phoneDevices/phone-device-1234").stationId, "US0118");
+  assert.deepEqual(documents.get("phoneKioskAssignments/US0118"), {
+    stationId: "US0118",
+    deviceId: "phone-device-1234",
+    terminalEnabled: false,
+    source: "agent-self-assignment",
+    updatedAt: timestamp,
+    updatedBy: "phone-agent:phone-device-1234",
+  });
+});
+
+test("allows country selection but prevents Agent-side reassignment and kiosk conflicts", async () => {
+  const timestamp = {serverTimestamp: true};
+  const dependencies = (db) => ({
+    db,
+    admin: {firestore: {FieldValue: {serverTimestamp: () => timestamp}}},
+  });
+
+  const crossMarket = createPhoneAssignmentTestDatabase({
+    "phoneDevices/phone-device-1234": {
+      enrollmentState: "enrolled",
+      stationId: null,
+      market: "CA",
+    },
+    "kiosks/US0118": {stationid: "US0118"},
+  });
+  const crossMarketResult = await assignEnrolledDeviceToKiosk(
+      {stationId: "US0118"},
+      {
+        deviceId: "phone-device-1234",
+        deviceRef: crossMarket.db.collection("phoneDevices").doc("phone-device-1234"),
+      },
+      dependencies(crossMarket.db),
+  );
+  assert.equal(crossMarketResult.market, "US");
+  assert.equal(crossMarket.documents.get("phoneDevices/phone-device-1234").market, "US");
+
+  const reassignment = createPhoneAssignmentTestDatabase({
+    "phoneDevices/phone-device-1234": {
+      enrollmentState: "enrolled",
+      stationId: "US0077",
+      market: "US",
+    },
+    "kiosks/US0118": {stationid: "US0118"},
+  });
+  await assert.rejects(() => assignEnrolledDeviceToKiosk(
+      {stationId: "US0118"},
+      {
+        deviceId: "phone-device-1234",
+        deviceRef: reassignment.db.collection("phoneDevices").doc("phone-device-1234"),
+      },
+      dependencies(reassignment.db),
+  ), /already assigned to US0077/);
+
+  const conflict = createPhoneAssignmentTestDatabase({
+    "phoneDevices/phone-device-1234": {
+      enrollmentState: "enrolled",
+      stationId: null,
+      market: "US",
+    },
+    "kiosks/US0118": {stationid: "US0118"},
+    "phoneKioskAssignments/US0118": {deviceId: "another-phone"},
+  });
+  await assert.rejects(() => assignEnrolledDeviceToKiosk(
+      {stationId: "US0118"},
+      {
+        deviceId: "phone-device-1234",
+        deviceRef: conflict.db.collection("phoneDevices").doc("phone-device-1234"),
+      },
+      dependencies(conflict.db),
+  ), /already has another managed phone/);
+});
+
+test("allows only administrators to save a manual phone number", async () => {
+  const writes = [];
+  const timestamp = {serverTimestamp: true};
+  const deviceRef = {
+    get: async () => ({exists: true, data: () => ({})}),
+    set: async (data, options) => writes.push({data, options}),
+  };
+  const dependencies = {
+    db: {
+      collection: (name) => {
+        assert.equal(name, "phoneDevices");
+        return {doc: (id) => {
+          assert.equal(id, "phone-device-1234");
+          return deviceRef;
+        }};
+      },
+    },
+    admin: {firestore: {FieldValue: {serverTimestamp: () => timestamp}}},
+  };
+
+  const result = await setManualPhoneNumber({
+    deviceId: "phone-device-1234",
+    phoneNumber: "+1 (310) 555-0123",
+  }, {uid: "admin-1", isAdmin: true, profile: {}}, dependencies);
+  assert.equal(result.phoneNumber, "+13105550123");
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].data.manualPhoneNumber, "+13105550123");
+  assert.equal(writes[0].data.manualPhoneNumberUpdatedBy, "admin-1");
+  assert.deepEqual(writes[0].options, {merge: true});
+
+  await assert.rejects(() => setManualPhoneNumber({
+    deviceId: "phone-device-1234",
+    phoneNumber: "+13105550123",
+  }, {uid: "partner-1", profile: {role: "partner", features: {phone_control: true}}}, dependencies),
+  /Only Chargerent administrators/);
+
+  deviceRef.get = async () => ({
+    exists: true,
+    data: () => ({inventory: {phoneNumber: "+13105550999"}}),
+  });
+  await assert.rejects(() => setManualPhoneNumber({
+    deviceId: "phone-device-1234",
+    phoneNumber: "+13105550123",
+  }, {uid: "admin-1", isAdmin: true, profile: {}}, dependencies),
+  /already reporting its number/);
+});
 
 test("allowlists fixed remote screen and tethering controls", () => {
   assert.equal(ALLOWED_OPERATIONS.has("UI_SWIPE"), true);
