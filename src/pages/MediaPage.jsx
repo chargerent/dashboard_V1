@@ -12,9 +12,10 @@ const UNTAGGED_FILTER_LABEL = 'Untagged';
 const MEDIA_LIST_TIMEOUT_MS = 45000;
 const MEDIA_UPLOAD_URL_TIMEOUT_MS = 45000;
 const MEDIA_FINALIZE_TIMEOUT_MS = 120000;
-const MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set(['CT8', 'CK24', 'CK48']);
-const MEDIA_CONFIGURABLE_KIOSK_LABEL = 'CT8, CK24, or CK48';
-const MEDIA_CONFIGURABLE_BADGE_FALLBACK = 'CT8/CK24/CK48';
+const V2_MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set(['CT8', 'CK24', 'CK48']);
+const V1_MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set(['CK50']);
+const MEDIA_CONFIGURABLE_KIOSK_LABEL = 'CT8, CK24, CK48, or V1 CK50';
+const MEDIA_CONFIGURABLE_BADGE_FALLBACK = 'CT8/CK24/CK48/CK50';
 
 function isPdfFile(fileOrAsset) {
   return String(fileOrAsset?.type || fileOrAsset?.contentType || '').trim().toLowerCase() === 'application/pdf';
@@ -84,6 +85,22 @@ function getKioskLocationTag(kiosk) {
 
 function getKioskHardwareType(kiosk) {
   return String(kiosk?.hardware?.type || '').trim().toUpperCase();
+}
+
+function isV1MediaKiosk(kiosk) {
+  return !isNewSchemaKiosk(kiosk) && V1_MEDIA_CONFIGURABLE_KIOSK_TYPES.has(getKioskHardwareType(kiosk));
+}
+
+function isMediaConfigurableKiosk(kiosk) {
+  const hardwareType = getKioskHardwareType(kiosk);
+  return isV1MediaKiosk(kiosk) || (
+    isNewSchemaKiosk(kiosk) && V2_MEDIA_CONFIGURABLE_KIOSK_TYPES.has(hardwareType)
+  );
+}
+
+function getKioskMediaBadge(kiosk) {
+  const hardwareType = getKioskHardwareType(kiosk);
+  return isV1MediaKiosk(kiosk) ? `V1 ${hardwareType}` : hardwareType;
 }
 
 function normalizeTagKey(value) {
@@ -488,10 +505,7 @@ export default function MediaPage({
 
   const eligibleKiosks = useMemo(() => (
     filterStationsForClient(allStationsData, currentUser)
-      .filter((kiosk) => (
-        isNewSchemaKiosk(kiosk) &&
-        MEDIA_CONFIGURABLE_KIOSK_TYPES.has(getKioskHardwareType(kiosk))
-      ))
+      .filter(isMediaConfigurableKiosk)
       .sort((left, right) => String(left.stationid || '').localeCompare(String(right.stationid || '')))
   ), [allStationsData, currentUser]);
 
@@ -1119,6 +1133,20 @@ export default function MediaPage({
       return;
     }
 
+    const selectedV1Kiosks = eligibleKiosks.filter((kiosk) => (
+      selectedStationIds.includes(kiosk.stationid) && isV1MediaKiosk(kiosk)
+    ));
+    const unsupportedV1Assets = selectedAssets.filter((asset) => (
+      !['image', 'video'].includes(String(asset?.kind || '').trim().toLowerCase())
+    ));
+    if (selectedV1Kiosks.length > 0 && unsupportedV1Assets.length > 0) {
+      setStatus({
+        state: 'error',
+        message: 'V1 CK50 screens support image and video assets only. Remove PDF or unsupported assets before assigning.',
+      });
+      return;
+    }
+
     setStatus({
       state: 'sending',
       message: `Assigning ${selectedAssetIds.length} asset${selectedAssetIds.length === 1 ? '' : 's'} to ${selectedStationIds.length} station${selectedStationIds.length === 1 ? '' : 's'}...`,
@@ -1531,7 +1559,7 @@ export default function MediaPage({
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Target Stations</h2>
                 <p className="mt-1 text-sm text-gray-600">
-                  Select stations to assign assets to. Offline CT8, CK24, and CK48 kiosks will load their assigned media when they come back online.
+                  Select stations to assign assets to. Offline CT8, CK24, CK48, and V1 CK50 kiosks will load their assigned media when they come back online.
                 </p>
               </div>
               <div className="text-right text-xs text-gray-500">
@@ -1559,7 +1587,7 @@ export default function MediaPage({
 
             {eligibleKiosks.length === 0 ? (
               <div className="mt-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-6 text-sm text-gray-500">
-                No CT8, CK24, or CK48 stations were found for this account.
+                No CT8, CK24, CK48, or V1 CK50 stations were found for this account.
               </div>
             ) : (
               <div className="mt-4 max-h-[32rem] space-y-3 overflow-y-auto pr-1">
@@ -1598,7 +1626,7 @@ export default function MediaPage({
                               </p>
                             </div>
                             <span className="rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-gray-600">
-                              {getKioskHardwareType(kiosk) || MEDIA_CONFIGURABLE_BADGE_FALLBACK}
+                              {getKioskMediaBadge(kiosk) || MEDIA_CONFIGURABLE_BADGE_FALLBACK}
                             </span>
                           </div>
                           <p className="mt-2 truncate text-xs text-gray-600" title={currentPlaylistLabel}>

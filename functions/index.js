@@ -346,7 +346,8 @@ const DEFAULT_MEDIA_OPTIONS = {
   playlist: [],
   loop: true,
 };
-const MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set(["CT8", "CK24", "CK48"]);
+const V2_MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set(["CT8", "CK24", "CK48"]);
+const V1_MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set(["CK50"]);
 const NEW_KIOSK_TYPES = new Set(["CT3", "CT4", "CT8", "CT12", "CK24", "CK40", "CK48"]);
 const BOUND_KIOSK_TYPE_CONFIG = Object.freeze({
   CT3: {modules: 1, slots: 3},
@@ -379,9 +380,17 @@ function getKioskHardwareType(kiosk) {
   return String(kiosk?.hardware?.type || "").trim().toUpperCase();
 }
 
+function isV1MediaKiosk(kiosk) {
+  return !isNewSchemaKioskDocument(kiosk) &&
+    V1_MEDIA_CONFIGURABLE_KIOSK_TYPES.has(getKioskHardwareType(kiosk));
+}
+
 function isMediaConfigurableKiosk(kiosk) {
-  return isNewSchemaKioskDocument(kiosk) &&
-    MEDIA_CONFIGURABLE_KIOSK_TYPES.has(getKioskHardwareType(kiosk));
+  const hardwareType = getKioskHardwareType(kiosk);
+  return isV1MediaKiosk(kiosk) || (
+    isNewSchemaKioskDocument(kiosk) &&
+    V2_MEDIA_CONFIGURABLE_KIOSK_TYPES.has(hardwareType)
+  );
 }
 
 function mergeLocalizedMarketingValue(value, defaults) {
@@ -3991,7 +4000,12 @@ async function mediaAssignPlaylistImpl(data, authState) {
     }
 
     if (!isMediaConfigurableKiosk(kiosk)) {
-      failures.push({stationid, reason: "Only V2 CT8, CK24, or CK48 kiosks are supported"});
+      failures.push({stationid, reason: "Only V2 CT8, CK24, CK48, or V1 CK50 kiosks are supported"});
+      return;
+    }
+
+    if (isV1MediaKiosk(kiosk) && playlist.some((asset) => !["image", "video"].includes(asset.kind))) {
+      failures.push({stationid, reason: "V1 CK50 kiosks support image and video media only"});
       return;
     }
 
@@ -4034,7 +4048,7 @@ async function mediaAssignPlaylistImpl(data, authState) {
     if (active && setUiMode) {
       updateData.ui = {
         ...(clonePlain(entry.kiosk.ui) || {}),
-        mode: resolveMediaModeValue(entry.kiosk?.ui?.mode),
+        mode: isV1MediaKiosk(entry.kiosk) ? "media" : resolveMediaModeValue(entry.kiosk?.ui?.mode),
       };
     }
 
