@@ -1124,6 +1124,13 @@ function App() {
     setActivityInitialStation('');
   }, []);
 
+  const onNavigateFromPhoneToDashboard = useCallback((stationId = '') => {
+    const normalized = String(stationId || '').trim().toUpperCase();
+    setDashboardSearchTerm(normalized);
+    window.history.replaceState({}, '', dashboardUrl());
+    setPage('dashboard');
+  }, []);
+
   useEffect(() => {
     const handlePopState = () => {
       const navigation = readActivityNavigation();
@@ -3046,7 +3053,7 @@ function App() {
         return (
           <PhoneControlPage
             onLogout={handleLogout}
-            onNavigateToDashboard={() => setPage('dashboard')}
+            onNavigateToDashboard={onNavigateFromPhoneToDashboard}
             currentUser={clientInfo}
             allStationsData={dedupedStationsData}
             initialSearch={phoneControlInitialSearch}

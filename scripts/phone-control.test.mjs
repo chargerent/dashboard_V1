@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 
 import {
   createPhoneCommandRequestId,
@@ -29,6 +30,27 @@ import {
   encodePointerPacket,
   normalizePhoneWebRtcIceServers,
 } from '../src/utils/phoneWebRtc.js';
+
+const appSource = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8');
+const phoneControlSource = readFileSync(
+  new URL('../src/pages/PhoneControlPage.jsx', import.meta.url),
+  'utf8',
+);
+
+test('routes assigned phone Station IDs to an exact dashboard filter', () => {
+  assert.match(appSource, /const onNavigateFromPhoneToDashboard = useCallback/);
+  assert.match(appSource, /setDashboardSearchTerm\(normalized\)/);
+  assert.match(appSource, /onNavigateToDashboard=\{onNavigateFromPhoneToDashboard\}/);
+  assert.match(phoneControlSource, /function StationDashboardLink/);
+  assert.match(phoneControlSource, /Show \$\{normalizedStationId\} on the main dashboard/);
+});
+
+test('keeps the live phone frame and assignment panel inside a mobile viewport', () => {
+  assert.match(phoneControlSource, /max-w-\[160px\]/);
+  assert.match(phoneControlSource, /sm:max-w-\[240px\]/);
+  assert.match(phoneControlSource, /min-w-0 overflow-hidden rounded-xl/);
+  assert.match(phoneControlSource, /w-full rounded-xl border border-slate-200 bg-slate-50 p-3 sm:w-auto sm:min-w-\[300px\]/);
+});
 
 test('validates the signed Agent release metadata used for updates', () => {
   const release = normalizeAgentRelease({

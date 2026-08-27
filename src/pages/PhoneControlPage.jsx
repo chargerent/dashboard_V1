@@ -336,7 +336,27 @@ function AddPhoneCard({ onClick }) {
   );
 }
 
-function PhoneListCard({ device, kiosk, now, selected, onSelect }) {
+function StationDashboardLink({ stationId, onNavigateToDashboard, className = '' }) {
+  const normalizedStationId = String(stationId || '').trim().toUpperCase();
+  if (!normalizedStationId) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        event.stopPropagation();
+        onNavigateToDashboard(normalizedStationId);
+      }}
+      className={`rounded-sm text-left text-blue-700 transition hover:text-blue-900 hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${className}`}
+      aria-label={`Show ${normalizedStationId} on the main dashboard`}
+      title={`Show ${normalizedStationId} on the main dashboard`}
+    >
+      {normalizedStationId}
+    </button>
+  );
+}
+
+function PhoneListCard({ device, kiosk, now, selected, onSelect, onNavigateToDashboard }) {
   const connection = getPhoneConnectionState(device, now);
   const style = STATE_STYLES[connection];
   const unassigned = !device.stationId;
@@ -347,16 +367,29 @@ function PhoneListCard({ device, kiosk, now, selected, onSelect }) {
     : kiosk?.info?.location || kiosk?.info?.place || device.displayName || device.id;
 
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      className={`w-full rounded-xl border p-4 text-left shadow-sm transition ${selected ? 'border-blue-400 bg-blue-50 ring-2 ring-blue-100' : unassigned ? 'border-amber-200 bg-amber-50/40 hover:border-amber-300 hover:shadow-md' : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-md'}`}
+    <article
+      className={`group relative w-full rounded-xl border p-4 text-left shadow-sm transition ${selected ? 'border-blue-400 bg-blue-50 ring-2 ring-blue-100' : unassigned ? 'border-amber-200 bg-amber-50/40 hover:border-amber-300 hover:shadow-md' : 'border-slate-200 bg-white hover:border-slate-300 hover:shadow-md'}`}
     >
-      <div className="flex items-start justify-between gap-3">
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-label={`Manage ${device.stationId || device.displayName || 'unassigned phone'}`}
+        aria-pressed={selected}
+        className="absolute inset-0 z-0 rounded-xl focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-500/20"
+      />
+      <div className="pointer-events-none relative z-10 flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className={`h-2.5 w-2.5 rounded-full ${style.dot}`} />
-            <p className="truncate text-base font-black text-slate-900">{device.stationId || 'Unassigned phone'}</p>
+            {unassigned ? (
+              <p className="truncate text-base font-black text-slate-900">Unassigned phone</p>
+            ) : (
+              <StationDashboardLink
+                stationId={device.stationId}
+                onNavigateToDashboard={onNavigateToDashboard}
+                className="pointer-events-auto truncate text-base font-black"
+              />
+            )}
           </div>
           <p className="mt-1 truncate text-xs text-slate-500">{subtitle}</p>
         </div>
@@ -371,7 +404,7 @@ function PhoneListCard({ device, kiosk, now, selected, onSelect }) {
           )}
         </div>
       </div>
-      <div className="mt-3 flex items-center justify-between gap-3 border-t border-slate-200/80 pt-3 text-xs text-slate-500">
+      <div className="pointer-events-none relative z-10 mt-3 flex items-center justify-between gap-3 border-t border-slate-200/80 pt-3 text-xs text-slate-500">
         <span className="min-w-0 truncate font-semibold">
           {unassigned
             ? `${device.market || 'Unspecified'} inventory${device.phoneLine.number ? ` · ${device.phoneLine.number}` : ''}`
@@ -379,7 +412,7 @@ function PhoneListCard({ device, kiosk, now, selected, onSelect }) {
         </span>
         <span className="shrink-0">{formatPhoneRelativeTime(device.lastSeenAtMs, now)}</span>
       </div>
-    </button>
+    </article>
   );
 }
 
@@ -609,6 +642,7 @@ function PhoneLinesModal({
   isAdmin,
   onSaveNumber,
   onSelectDevice,
+  onNavigateToDashboard,
 }) {
   const dialogRef = useRef(null);
   const [search, setSearch] = useState('');
@@ -756,13 +790,21 @@ function PhoneLinesModal({
                     <div key={device.id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div className="min-w-0 sm:w-[28%]">
-                          <button
-                            type="button"
-                            onClick={() => onSelectDevice(device.id)}
-                            className="truncate text-left text-sm font-black text-blue-700 hover:text-blue-900 hover:underline"
-                          >
-                            {device.stationId || 'Unassigned phone'}
-                          </button>
+                          {device.stationId ? (
+                            <StationDashboardLink
+                              stationId={device.stationId}
+                              onNavigateToDashboard={onNavigateToDashboard}
+                              className="truncate text-sm font-black"
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => onSelectDevice(device.id)}
+                              className="truncate text-left text-sm font-black text-blue-700 hover:text-blue-900 hover:underline"
+                            >
+                              Unassigned phone
+                            </button>
+                          )}
                           <p className="mt-0.5 truncate text-[11px] text-slate-500">{device.inventory.model || device.displayName || device.id}</p>
                         </div>
 
@@ -1783,7 +1825,7 @@ function RemoteScreen({
   const realtimeConnected = webRtcActive &&
     (rtcState === 'connected' || serverRtcState === 'connected');
   return (
-    <section className="rounded-xl border border-slate-200 bg-slate-950 p-3 shadow-inner">
+    <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-slate-950 p-2 shadow-inner sm:p-3">
       <div className="mx-auto mb-3 flex w-full max-w-[240px] gap-2">
         <button
           type="button"
@@ -1803,7 +1845,7 @@ function RemoteScreen({
         </p>
       )}
 
-      <div className="mx-auto flex aspect-[9/19.5] max-h-[520px] max-w-[240px] items-center justify-center overflow-hidden rounded-[1.5rem] border-4 border-slate-700 bg-black">
+      <div className="mx-auto flex aspect-[9/19.5] w-full max-w-[160px] items-center justify-center overflow-hidden rounded-[1.25rem] border-4 border-slate-700 bg-black sm:max-h-[520px] sm:max-w-[240px] sm:rounded-[1.5rem]">
         {realtimeFailureMessage ? (
           <div className="px-5 text-center">
             <ExclamationTriangleIcon className="mx-auto h-12 w-12 text-red-400" />
@@ -1818,16 +1860,16 @@ function RemoteScreen({
             onPointerUp={handlePointerUp}
             onPointerCancel={cancelPointer}
             disabled={!canInput}
-            className="h-full w-full touch-none cursor-crosshair select-none disabled:cursor-default"
+            className="h-full min-h-0 w-full min-w-0 touch-none cursor-crosshair select-none disabled:cursor-default"
           >
             <video
               ref={videoRef}
               autoPlay
               muted
               playsInline
-              className={`${hasRemoteVideo ? 'block' : 'hidden'} h-full w-full object-contain`}
+              className={`${hasRemoteVideo ? 'block' : 'hidden'} h-full min-h-0 w-full min-w-0 max-w-full object-contain`}
             />
-            {!hasRemoteVideo && <img ref={imageRef} src={imageUrl} alt={`Screen preview for ${device.stationId || device.id}`} className="h-full w-full object-contain" />}
+            {!hasRemoteVideo && <img ref={imageRef} src={imageUrl} alt={`Screen preview for ${device.stationId || device.id}`} className="h-full min-h-0 w-full min-w-0 max-w-full object-contain" />}
           </button>
         ) : (
           <div className="px-5 text-center">
@@ -1838,8 +1880,8 @@ function RemoteScreen({
         )}
       </div>
 
-      <div className="mx-auto mt-3 flex max-w-[360px] items-center gap-2">
-        <select value={profileKey} onChange={changeProfile} className="min-h-9 flex-1 rounded-lg border border-slate-700 bg-slate-900 px-2 text-[11px] font-bold text-slate-200">
+      <div className="mx-auto mt-3 flex w-full max-w-[360px] items-center gap-2">
+        <select value={profileKey} onChange={changeProfile} className="min-h-9 min-w-0 flex-1 rounded-lg border border-slate-700 bg-slate-900 px-2 text-[11px] font-bold text-slate-200">
           {Object.entries(PHONE_WEBRTC_PROFILES).map(([key, profile]) => (
             <option key={key} value={key}>{profile.label}</option>
           ))}
@@ -1849,7 +1891,7 @@ function RemoteScreen({
         </button>
       </div>
 
-      <div className="mx-auto mt-3 grid max-w-[360px] grid-cols-3 gap-2">
+      <div className="mx-auto mt-3 grid w-full max-w-[360px] grid-cols-3 gap-2">
         <ActionButton icon={ArrowUturnLeftIcon} onClick={() => globalAction('BACK')} disabled={!canInput}>Back</ActionButton>
         <ActionButton icon={HomeIcon} onClick={() => globalAction('HOME')} disabled={!canInput}>Home</ActionButton>
         <ActionButton icon={Squares2X2Icon} onClick={() => globalAction('RECENTS')} disabled={!canInput}>Recent</ActionButton>
@@ -1857,7 +1899,7 @@ function RemoteScreen({
         <ActionButton icon={ArrowDownIcon} onClick={swipeDown} disabled={!canInput} className="!gap-1 !px-2 !text-[11px] whitespace-nowrap">Swipe down</ActionButton>
         <ActionButton icon={WifiIcon} onClick={() => onCommand('OPEN_TETHER_SETTINGS')} disabled={!canSendCommand} tone="blue" className="!gap-1 !px-2 !text-[11px] whitespace-nowrap">Tethering</ActionButton>
       </div>
-      <div className="mx-auto mt-2 grid max-w-[360px] grid-cols-2 gap-2">
+      <div className="mx-auto mt-2 grid w-full max-w-[360px] grid-cols-2 gap-2">
         <ActionButton icon={LockOpenIcon} onClick={() => onCommand('WAKE_AND_UNLOCK')} disabled={!canSendCommand} tone="blue">Unlock</ActionButton>
         <ActionButton icon={LockClosedIcon} onClick={() => onCommand('LOCK_NOW')} disabled={!canSendCommand || webRtcActive} title={webRtcActive ? 'Stop the live stream before locking the phone' : ''} tone="amber">Lock</ActionButton>
       </div>
@@ -2439,6 +2481,10 @@ export default function PhoneControlPage({
           setSelectedDeviceId(deviceId);
           closePhoneLines();
         }}
+        onNavigateToDashboard={(stationId) => {
+          closePhoneLines();
+          onNavigateToDashboard(stationId);
+        }}
       />
       <ConfirmationModal
         isOpen={Boolean(confirmation)}
@@ -2471,7 +2517,7 @@ export default function PhoneControlPage({
         <div className="mx-auto flex max-w-screen-2xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
           <h1 className="truncate text-xl font-black text-slate-900">Mobile Device Management</h1>
           <div className="flex items-center gap-3">
-            <button type="button" onClick={onNavigateToDashboard} className="rounded-md bg-gray-200 p-2 text-gray-700 hover:bg-gray-300" title="Back to dashboard" aria-label="Back to dashboard">
+            <button type="button" onClick={() => onNavigateToDashboard()} className="rounded-md bg-gray-200 p-2 text-gray-700 hover:bg-gray-300" title="Back to dashboard" aria-label="Back to dashboard">
               <HomeIcon className="h-6 w-6" />
             </button>
             <button type="button" onClick={onLogout} className="rounded-md bg-red-500 p-2 text-white hover:bg-red-600" title={t('logout')} aria-label={t('logout')}>
@@ -2557,6 +2603,7 @@ export default function PhoneControlPage({
                           now={now}
                           selected={device.id === selectedDeviceId}
                           onSelect={() => setSelectedDeviceId(device.id)}
+                          onNavigateToDashboard={onNavigateToDashboard}
                         />
                       ))}
                     </div>
@@ -2577,6 +2624,7 @@ export default function PhoneControlPage({
                           now={now}
                           selected={device.id === selectedDeviceId}
                           onSelect={() => setSelectedDeviceId(device.id)}
+                          onNavigateToDashboard={onNavigateToDashboard}
                         />
                       ))}
                     </div>
@@ -2597,7 +2645,15 @@ export default function PhoneControlPage({
                     <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
-                          <h2 className="text-2xl font-black text-slate-900">{selectedDevice.stationId || 'Unassigned phone'}</h2>
+                          {selectedDevice.stationId ? (
+                            <StationDashboardLink
+                              stationId={selectedDevice.stationId}
+                              onNavigateToDashboard={onNavigateToDashboard}
+                              className="text-2xl font-black"
+                            />
+                          ) : (
+                            <h2 className="text-2xl font-black text-slate-900">Unassigned phone</h2>
+                          )}
                           <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${STATE_STYLES[selectedConnection].badge}`}>{STATE_STYLES[selectedConnection].label}</span>
                           <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${selectedDevice.inventory.isDeviceOwner ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}`}>{selectedDevice.inventory.isDeviceOwner ? 'Device Owner' : 'Owner missing'}</span>
                           <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${selectedTerminalStyle.badge}`}>{selectedTerminalStyle.label}</span>
@@ -2614,7 +2670,7 @@ export default function PhoneControlPage({
                           </div>
                         )}
                       </div>
-                      {isAdmin && <div className="min-w-[300px] rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      {isAdmin && <div className="w-full rounded-xl border border-slate-200 bg-slate-50 p-3 sm:w-auto sm:min-w-[300px]">
                         <div className="flex flex-wrap gap-2">
                           <div className="flex shrink-0 rounded-lg bg-slate-200 p-1" role="group" aria-label="Assignment kiosk country">
                             {PHONE_KIOSK_COUNTRIES.map((country) => (
