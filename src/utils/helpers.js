@@ -387,6 +387,8 @@ export const normalizeKioskData = (kiosks) => {
                 heartbeatOutput: module.heartbeatOutput,
                 heartbeat: module.heartbeat,
                 chargeControl: module.chargeControl || null,
+                operationalEnabled: module.operationalEnabled !== false,
+                operationalState: module.operationalState || null,
                 chargeMetrics: module.chargeMetrics || null,
                 FW: moduleFw,
                 softwareVersion: Number.isFinite(moduleSoftwareVersion) ? moduleSoftwareVersion : 0,
@@ -416,15 +418,16 @@ export const normalizeKioskData = (kiosks) => {
         const defaultWifi = isV2Kiosk(normalizedKiosk) ? V2_DEFAULT_WIFI : DEFAULT_WIFI;
         const fullThreshold = getKioskPowerThreshold({ hardware });
         const derivedCount = normalizedModules.reduce((sum, module) => (
-            sum + module.slots.filter(slot => (
+            sum + (module.operationalEnabled === false ? 0 : module.slots.filter(slot => (
                 slot.sn &&
                 slot.sn !== 0 &&
                 !slot.isLocked &&
                 typeof slot.batteryLevel === 'number' &&
                 slot.batteryLevel >= fullThreshold
-            )).length
+            )).length)
         ), 0);
         const kioskCount = Number(kiosk.count);
+        const hasOperationallyDisabledModule = normalizedModules.some(module => module.operationalEnabled === false);
 
         const normalizedAddress = getKioskInfoAddress(kiosk.info);
 
@@ -468,6 +471,10 @@ export const normalizeKioskData = (kiosks) => {
             uiProfileId: kiosk.uiProfileId || kiosk.ui?.profileId || '',
             reportedUiProfile: kiosk.reportedUiProfile || null,
             uiProfileReportedAt: kiosk.uiProfileReportedAt || null,
+            reportedMedia: kiosk.reportedMedia && typeof kiosk.reportedMedia === 'object'
+                ? { ...kiosk.reportedMedia }
+                : null,
+            mediaReportedAt: kiosk.mediaReportedAt || null,
             aiBoothRuntime: kiosk.aiBoothRuntime || null,
             registration: kiosk.registration || null,
             moduleDisplayOrder: Array.isArray(kiosk.hardware?.moduleOrder) ? kiosk.hardware.moduleOrder : [],
@@ -479,7 +486,9 @@ export const normalizeKioskData = (kiosks) => {
             lastUpdated,
             lastSeen: kiosk.lastSeen || null,
             active: kiosk.active !== false,
-            count: Number.isFinite(kioskCount) ? kioskCount : derivedCount,
+            count: hasOperationallyDisabledModule
+                ? derivedCount
+                : Number.isFinite(kioskCount) ? kioskCount : derivedCount,
             ngrok: !!kiosk.ngrok,
             ssh: !!kiosk.ssh,
             fversion: kiosk.fversion,

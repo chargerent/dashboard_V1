@@ -11,26 +11,9 @@ import ChartDataLabels from 'chartjs-plugin-datalabels';
 import { db } from '../firebase-config';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { isNewSchemaKiosk } from '../utils/helpers';
+import { isRentalIncludedInReport } from '../utils/reportingRentalEligibility';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, PointElement, LineElement, Title, Tooltip, Legend, ArcElement, ChartDataLabels);
-
-const EXCLUDED_REPORT_RENTAL_STATUSES = new Set([
-    'purchased',
-    'purchase-pending',
-    'purchased-pending',
-]);
-
-const isExcludedReportRentalStatus = (status) => EXCLUDED_REPORT_RENTAL_STATUSES.has(String(status || '').toLowerCase());
-
-const EXCLUDED_REPORT_RETURN_TYPES = new Set([
-    'vend-reset',
-]);
-
-const isExcludedReportReturnType = (returnType) => EXCLUDED_REPORT_RETURN_TYPES.has(String(returnType || '').toLowerCase());
-
-const getReportRentalStatus = (rental) => String(rental?.reportingStatus || rental?.status || '').toLowerCase();
-
-const getReportReturnType = (rental) => String(rental?.reportingReturnType || rental?.returnType || '').toLowerCase();
 
 const getReportRentalPeriod = (rental) => Number(rental?.reportingRentalPeriod ?? rental?.rentalPeriod);
 
@@ -361,9 +344,7 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
         }
 
         return activeRentalData.filter(rental => {
-            if (rental.excludeFromReporting) return false;
-            if (isExcludedReportRentalStatus(getReportRentalStatus(rental))) return false;
-            if (isExcludedReportReturnType(getReportReturnType(rental))) return false;
+            if (!isRentalIncludedInReport(rental)) return false;
 
             const rentalDate = new Date(rental.rentalTime);
 

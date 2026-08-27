@@ -347,6 +347,10 @@ export default function useKioskCommandFlow({
       confirmationText = `${t('start_charge_module_confirmation')} ${moduleid}?`;
     } else if (action === 'stop charge module') {
       confirmationText = `${t('stop_charge_module_confirmation')} ${moduleid}?`;
+    } else if (action === 'disable module') {
+      confirmationText = `Turn ${moduleid} OFF? Chargers in this module will not be rented.`;
+    } else if (action === 'enable module') {
+      confirmationText = `Turn ${moduleid} ON?`;
     } else if (action === 'update flow' && uiVersion) {
       confirmationText = t('update_flow_confirmation').replace('{version}', uiVersion);
     } else if (action === 'update ui' && uiVersion) {

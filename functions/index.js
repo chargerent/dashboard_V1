@@ -352,6 +352,14 @@ const DEFAULT_MEDIA_OPTIONS = {
 const V2_MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set(["CT8", "CK24", "CK48"]);
 const V1_MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set(["CK50"]);
 const V1_MEDIA_ASSIGNMENTS_COLLECTION = "kioskMediaAssignments";
+const V1_MEDIA_DEFAULT_CONFIG_COLLECTION = "mediaConfig";
+const V1_MEDIA_DEFAULT_CONFIG_DOCUMENT = "v1Ck50Default";
+const V1_MEDIA_DEFAULT_CACHE_MS = 5 * 60 * 1000;
+const V1_MEDIA_DEFAULT_ALLOWED_HOSTS = new Set([
+  "firebasestorage.googleapis.com",
+  "storage.googleapis.com",
+]);
+let v1MediaDefaultCache = {expiresAt: 0, value: null};
 const NEW_KIOSK_TYPES = new Set(["CT3", "CT4", "CT8", "CT12", "CK24", "CK40", "CK48"]);
 const BOUND_KIOSK_TYPE_CONFIG = Object.freeze({
   CT3: {modules: 1, slots: 3},
@@ -3208,10 +3216,63 @@ async function mediaListAssetsImpl(authState, data = {}) {
   return {assets, v1Assignments};
 }
 
+function normalizeV1MediaDefaultConfig(value) {
+  const config = value && typeof value === "object" ? value : {};
+  const url = String(config.url || "").trim();
+  const sha256 = String(config.sha256 || "").trim().toLowerCase();
+  const contentType = String(config.contentType || "").trim().toLowerCase();
+  const version = String(config.version || "").trim();
+  const size = Number(config.size || 0);
+
+  let parsedUrl;
+  try {
+    parsedUrl = new URL(url);
+  } catch {
+    return null;
+  }
+
+  if (
+    parsedUrl.protocol !== "https:" ||
+    !V1_MEDIA_DEFAULT_ALLOWED_HOSTS.has(parsedUrl.hostname) ||
+    !/^[a-f0-9]{64}$/.test(sha256) ||
+    contentType !== "image/jpeg" ||
+    !version ||
+    !Number.isFinite(size) ||
+    size <= 0 ||
+    size > 10 * 1024 * 1024
+  ) {
+    return null;
+  }
+
+  return {url, sha256, contentType, version, size: Math.trunc(size)};
+}
+
+async function getV1MediaDefaultConfig() {
+  const now = Date.now();
+  if (v1MediaDefaultCache.expiresAt > now) {
+    return v1MediaDefaultCache.value;
+  }
+
+  const snapshot = await db.collection(V1_MEDIA_DEFAULT_CONFIG_COLLECTION)
+      .doc(V1_MEDIA_DEFAULT_CONFIG_DOCUMENT)
+      .get();
+  const value = snapshot.exists ? normalizeV1MediaDefaultConfig(snapshot.data()) : null;
+  v1MediaDefaultCache = {
+    value,
+    expiresAt: now + V1_MEDIA_DEFAULT_CACHE_MS,
+  };
+  return value;
+}
+
 async function mediaV1AssignmentImpl(stationidInput) {
   const stationid = normalizeStationId(stationidInput);
   if (!stationid || !/^[A-Z0-9_-]{3,32}$/.test(stationid)) {
     return {code: 400, type: 0, data: [], msg: "Invalid station ID", time: Date.now()};
+  }
+
+  const defaultMedia = await getV1MediaDefaultConfig();
+  if (!defaultMedia) {
+    return {code: 503, type: 0, data: [], msg: "Default media unavailable", time: Date.now()};
   }
 
   const assignmentSnap = await db.collection(V1_MEDIA_ASSIGNMENTS_COLLECTION).doc(stationid).get();
@@ -3230,6 +3291,7 @@ async function mediaV1AssignmentImpl(stationidInput) {
       url2: String(item.downloadUrl || ""),
       playTime: Math.max(1, Math.min(3600, Number(item.playTime || 20))),
     })),
+    defaultMedia,
     msg: playlist.length > 0 ? "OK" : "No media assigned",
     time: Date.now(),
   };
@@ -10236,7 +10298,7 @@ exports.media_v1Assignment = functions.https.onRequest(async (req, res) => {
 
   try {
     const result = await mediaV1AssignmentImpl(req.query?.stationid);
-    res.status(result.code === 400 ? 400 : 200).json(result);
+    res.status([200, 400, 503].includes(result.code) ? result.code : 200).json(result);
   } catch (error) {
     console.error("media_v1Assignment failed", error);
     res.status(500).json({code: 500, type: 0, data: [], msg: "Unable to load media", time: Date.now()});

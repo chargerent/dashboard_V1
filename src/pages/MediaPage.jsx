@@ -5,6 +5,7 @@ import ConfirmationModal from '../components/UI/ConfirmationModal.jsx';
 import LoadingSpinner from '../components/UI/LoadingSpinner.jsx';
 import { callFunctionWithAuth } from '../utils/callableRequest.js';
 import { filterStationsForClient, isKioskOnline, isNewSchemaKiosk } from '../utils/helpers.js';
+import { resolveKioskMediaPlaybackStatus } from '../utils/kioskMediaPlaybackStatus.js';
 
 const ALL_LOCATIONS_TAG = 'All Locations';
 const UNTAGGED_FILTER_VALUE = '__UNTAGGED__';
@@ -16,6 +17,17 @@ const V2_MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set(['CT8', 'CK24', 'CK48']);
 const V1_MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set(['CK50']);
 const MEDIA_CONFIGURABLE_KIOSK_LABEL = 'CT8, CK24, CK48, or V1 CK50';
 const MEDIA_CONFIGURABLE_BADGE_FALLBACK = 'CT8/CK24/CK48/CK50';
+
+const MEDIA_PLAYBACK_PILL_CLASSES = {
+  playing: 'bg-emerald-100 text-emerald-700 ring-emerald-200',
+  downloaded: 'bg-blue-100 text-blue-700 ring-blue-200',
+  pending: 'bg-amber-100 text-amber-800 ring-amber-200',
+  'out-of-sync': 'bg-orange-100 text-orange-800 ring-orange-200',
+  error: 'bg-red-100 text-red-700 ring-red-200',
+  offline: 'bg-gray-200 text-gray-700 ring-gray-300',
+  stale: 'bg-gray-200 text-gray-700 ring-gray-300',
+  cleared: 'bg-gray-100 text-gray-600 ring-gray-200',
+};
 
 function isPdfFile(fileOrAsset) {
   return String(fileOrAsset?.type || fileOrAsset?.contentType || '').trim().toLowerCase() === 'application/pdf';
@@ -1615,6 +1627,16 @@ export default function MediaPage({
                   const currentPlaylistLabel = currentMedia.active && currentPlaylistCount > 0 ?
                     `${currentPlaylistCount} asset${currentPlaylistCount === 1 ? '' : 's'} assigned${currentPlaylistNames ? ` · ${currentPlaylistNames}` : ''}` :
                     'No media assigned';
+                  const mediaPlaybackStatus = isV1MediaKiosk(kiosk) ? resolveKioskMediaPlaybackStatus({
+                    kiosk,
+                    assignment: currentMedia,
+                    referenceTime,
+                    isOnline: kioskIsOnline,
+                  }) : null;
+                  const mediaPlaybackTitle = [
+                    mediaPlaybackStatus?.reportedAt ? `Reported ${mediaPlaybackStatus.reportedAt}` : '',
+                    mediaPlaybackStatus?.error || '',
+                  ].filter(Boolean).join(' · ');
 
                   return (
                     <label
@@ -1645,6 +1667,17 @@ export default function MediaPage({
                                   data-media-kiosk-online="true"
                                 >
                                   Online
+                                </span>
+                              )}
+                              {mediaPlaybackStatus && mediaPlaybackStatus.state !== 'unassigned' && (
+                                <span
+                                  className={`rounded-full px-2 py-1 text-[11px] font-semibold ring-1 ring-inset ${
+                                    MEDIA_PLAYBACK_PILL_CLASSES[mediaPlaybackStatus.state] || MEDIA_PLAYBACK_PILL_CLASSES.stale
+                                  }`}
+                                  data-media-playback-status={mediaPlaybackStatus.state}
+                                  title={mediaPlaybackTitle || mediaPlaybackStatus.label}
+                                >
+                                  {mediaPlaybackStatus.label}
                                 </span>
                               )}
                               <span className="rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-gray-600">

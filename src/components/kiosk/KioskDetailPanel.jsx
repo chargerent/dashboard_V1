@@ -14,7 +14,16 @@ import {
 import { formatModuleFirmwareVersion } from '../../utils/firmwareVersion';
 import { installKioskInteractionDebugCapture, logKioskInteraction } from '../../utils/kioskInteractionDebug';
 import { resolveKioskUiProfileStatus } from '../../utils/kioskUiProfileStatus';
+import { resolveKioskMediaPlaybackStatus } from '../../utils/kioskMediaPlaybackStatus';
 import { callFunctionWithAuth } from '../../utils/callableRequest';
+
+const UI_PROFILE_STATUS_CLASSES = {
+    confirmed: 'border-emerald-400/30 bg-emerald-400/15 text-emerald-200',
+    pending: 'border-amber-400/30 bg-amber-400/15 text-amber-100',
+    'out-of-sync': 'border-orange-400/30 bg-orange-400/15 text-orange-100',
+    error: 'border-red-400/30 bg-red-400/15 text-red-100',
+    legacy: 'border-gray-400/30 bg-gray-400/10 text-gray-300',
+};
 
 // --- Sub-component for the charger status code ---
 const StatusIndicator = ({ status }) => {
@@ -237,15 +246,24 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     const primaryMediaAsset = mediaPlaylist.length > 0
         ? mediaPlaylist[activeMediaIndex % mediaPlaylist.length]
         : null;
+    const mediaPlaybackStatus = useMemo(() => (
+        isCK50Kiosk ? resolveKioskMediaPlaybackStatus({
+            kiosk,
+            assignment: effectiveMedia || {},
+            referenceTime: mockNow,
+            isOnline,
+        }) : null
+    ), [effectiveMedia, isCK50Kiosk, isOnline, kiosk, mockNow]);
+    const shouldDisplayMediaArtwork = !isCK50Kiosk || mediaPlaybackStatus?.state === 'playing';
     useEffect(() => {
-        if (!primaryMediaAsset || mediaPlaylist.length < 2 || primaryMediaAsset.previewKind === 'video') {
+        if (!shouldDisplayMediaArtwork || !primaryMediaAsset || mediaPlaylist.length < 2 || primaryMediaAsset.previewKind === 'video') {
             return undefined;
         }
 
         const playTimeSeconds = Math.max(1, Math.min(3600, Number(primaryMediaAsset.playTime || 20)));
         const timeoutId = globalThis.setTimeout(advanceMediaPreview, playTimeSeconds * 1000);
         return () => globalThis.clearTimeout(timeoutId);
-    }, [advanceMediaPreview, mediaPlaylist.length, primaryMediaAsset]);
+    }, [advanceMediaPreview, mediaPlaylist.length, primaryMediaAsset, shouldDisplayMediaArtwork]);
     const formatFotaVersion = useCallback((module) => {
         const rawVersion = String(
             module?.fotaVersion ||
@@ -394,18 +412,6 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                 label: `Eject all chargers from module ${moduleId}`,
                 className: 'hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700',
                 icon: <path strokeLinecap="round" strokeLinejoin="round" d="M7 11l5-5m0 0l5 5m-5-5v12M5 21h14" />,
-            },
-            {
-                action: 'lock module',
-                enabled: clientInfo.commands.lock,
-                label: `Lock all slots in module ${moduleId}`,
-                className: 'hover:border-red-300 hover:bg-red-50 hover:text-red-700',
-                icon: (
-                    <>
-                        <rect x="5" y="10" width="14" height="10" rx="2" />
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M8 10V7a4 4 0 018 0v3" />
-                    </>
-                ),
             },
         ].filter((item) => item.enabled);
 
@@ -819,9 +825,46 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         );
     };
 
+    const renderModuleOperationalSwitch = (module) => {
+        if (isV2Kiosk || !clientInfo.commands.disable) return null;
+
+        const enabled = module?.operationalEnabled !== false;
+        const action = enabled ? 'disable module' : 'enable module';
+
+        return (
+            <button
+                type="button"
+                role="switch"
+                aria-checked={enabled}
+                aria-label={`${enabled ? 'Disable' : 'Enable'} rentals for ${module.id}`}
+                data-kiosk-action={action}
+                data-kiosk-stationid={stationId}
+                data-kiosk-moduleid={module.id}
+                disabled={!isOnline}
+                onClick={(event) => {
+                    event.stopPropagation();
+                    onCommand(stationId, action, module.id);
+                }}
+                className={`relative inline-flex h-6 w-[52px] items-center rounded-full text-[8px] font-black uppercase transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${enabled ? 'bg-blue-600 text-white' : 'bg-gray-300 text-gray-600'}`}
+            >
+                <span className={`absolute z-10 ${enabled ? 'left-2' : 'right-1.5'}`}>
+                    {enabled ? 'ON' : 'OFF'}
+                </span>
+                <span className={`absolute left-[3px] top-[3px] h-[18px] w-[18px] rounded-full bg-white shadow transition-transform ${enabled ? 'translate-x-7' : ''}`} />
+            </button>
+        );
+    };
+
     const renderModule = (module, { reverseOrder = false, className = '' } = {}) => (
-        <div key={module.id} className={`${module.output === false ? 'bg-red-100' : 'bg-white'} p-2 rounded-lg shadow-inner ${getModuleTypeOutlineClass(module)} ${className}`}>
-            <div className="flex flex-col gap-1">
+        <div
+            key={module.id}
+            data-kiosk-module-operational={module.operationalEnabled === false ? 'disabled' : 'enabled'}
+            className={`${module.operationalEnabled === false ? 'border-2 border-gray-400 bg-gray-100' : module.output === false ? 'bg-red-100' : 'bg-white'} p-2 rounded-lg shadow-inner ${getModuleTypeOutlineClass(module)} ${className}`}
+        >
+            <div className="mb-1.5 flex justify-end">
+                {renderModuleOperationalSwitch(module)}
+            </div>
+            <div className={`flex flex-col gap-1 ${module.operationalEnabled === false ? 'opacity-45 grayscale' : ''}`}>
                 {module.slots.slice().sort((a, b) => reverseOrder ? b.position - a.position : a.position - b.position).map(slot => {
                     const style = getSlotStyle(slot, module);
                     return renderSlotButton(slot, module, style, slot.position);
@@ -848,14 +891,6 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
             },
         };
         const style = modelStyles[model] || modelStyles.CT10;
-        const statusClasses = {
-            confirmed: 'border-emerald-400/30 bg-emerald-400/15 text-emerald-200',
-            pending: 'border-amber-400/30 bg-amber-400/15 text-amber-100',
-            'out-of-sync': 'border-orange-400/30 bg-orange-400/15 text-orange-100',
-            error: 'border-red-400/30 bg-red-400/15 text-red-100',
-            legacy: 'border-gray-400/30 bg-gray-400/10 text-gray-300',
-        };
-
         return (
             <div
                 className={`h-auto rounded-lg border text-white shadow-lg ${style.shell}`}
@@ -865,7 +900,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                 <div className="rounded-md border border-white/10 bg-white/[0.06] px-3 py-2.5">
                     <div className="flex items-center justify-between gap-2">
                         <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-white/45">Profile</p>
-                        <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${statusClasses[uiProfileStatus.state]}`}>
+                        <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${UI_PROFILE_STATUS_CLASSES[uiProfileStatus.state]}`}>
                             {uiProfileStatus.statusLabel}
                         </span>
                     </div>
@@ -1239,27 +1274,106 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         </div>
     );
 
+    const renderMediaPlaybackState = (status = {}) => {
+        const state = String(status?.state || 'pending');
+        const stateContent = {
+            pending: {
+                label: 'Awaiting kiosk',
+                description: 'The kiosk has not confirmed this media assignment yet.',
+                accent: 'bg-amber-400',
+                badge: 'bg-amber-400/15 text-amber-200 ring-amber-300/25',
+            },
+            downloaded: {
+                label: 'Downloaded',
+                description: 'The files are loaded. Waiting for playback verification.',
+                accent: 'bg-sky-400',
+                badge: 'bg-sky-400/15 text-sky-200 ring-sky-300/25',
+            },
+            'out-of-sync': {
+                label: 'Out of sync',
+                description: 'The assigned dashboard playlist is not active on this screen.',
+                accent: 'bg-orange-400',
+                badge: 'bg-orange-400/15 text-orange-200 ring-orange-300/25',
+            },
+            error: {
+                label: 'Load error',
+                description: 'The kiosk could not load or start the assigned media.',
+                accent: 'bg-red-400',
+                badge: 'bg-red-400/15 text-red-200 ring-red-300/25',
+            },
+            offline: {
+                label: 'Offline',
+                description: 'Playback cannot be confirmed while the kiosk is offline.',
+                accent: 'bg-gray-400',
+                badge: 'bg-white/10 text-white/70 ring-white/15',
+            },
+            stale: {
+                label: 'Playback stale',
+                description: 'The last playback confirmation is too old to trust.',
+                accent: 'bg-gray-400',
+                badge: 'bg-white/10 text-white/70 ring-white/15',
+            },
+            cleared: {
+                label: 'Cleared',
+                description: 'Dashboard media has been removed from this screen.',
+                accent: 'bg-gray-400',
+                badge: 'bg-white/10 text-white/70 ring-white/15',
+            },
+            unassigned: {
+                label: 'No media assigned',
+                description: 'Assign media to this station from the Media page.',
+                accent: 'bg-gray-500',
+                badge: 'bg-white/10 text-white/70 ring-white/15',
+            },
+        };
+        const content = stateContent[state] || stateContent.pending;
+
+        return (
+            <div
+                className="flex h-full w-full flex-col items-center justify-center bg-neutral-950 px-5 text-center text-white"
+                data-kiosk-media-state={state}
+            >
+                <span className={`h-2.5 w-2.5 rounded-full ${content.accent}`} aria-hidden="true" />
+                <div className={`mt-4 rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] ring-1 ring-inset ${content.badge}`}>
+                    Media state
+                </div>
+                <p className="mt-3 text-base font-semibold text-white">{content.label}</p>
+                <p className="mt-1 max-w-[210px] text-xs leading-relaxed text-white/60">{content.description}</p>
+            </div>
+        );
+    };
+
     const renderAssignedMediaScreen = () => {
         if (!isVisible) {
             return null;
         }
 
-        if (isCK50Kiosk && v1MediaLoadState === 'loading' && !primaryMediaAsset) {
+        if (isCK50Kiosk && v1MediaLoadState === 'loading') {
             return (
-                <div className="flex h-full w-full flex-col items-center justify-center bg-neutral-950 px-4 text-center text-white">
+                <div
+                    className="flex h-full w-full flex-col items-center justify-center bg-neutral-950 px-4 text-center text-white"
+                    data-kiosk-media-state="loading"
+                >
                     <div className="h-7 w-7 animate-spin rounded-full border-2 border-white/25 border-t-white" aria-hidden="true" />
                     <p className="mt-3 text-xs font-medium text-white/75">Loading screen media…</p>
                 </div>
             );
         }
 
-        if (isCK50Kiosk && v1MediaLoadState === 'error' && !primaryMediaAsset) {
+        if (isCK50Kiosk && v1MediaLoadState === 'error') {
             return (
-                <div className="flex h-full w-full flex-col items-center justify-center bg-neutral-950 px-4 text-center text-white">
+                <div
+                    className="flex h-full w-full flex-col items-center justify-center bg-neutral-950 px-4 text-center text-white"
+                    data-kiosk-media-state="assignment-error"
+                >
                     <p className="text-sm font-medium">Preview unavailable</p>
                     <p className="mt-1 text-xs text-white/60">Unable to load the CK50 media assignment.</p>
                 </div>
             );
+        }
+
+        if (isCK50Kiosk && !shouldDisplayMediaArtwork) {
+            return renderMediaPlaybackState(mediaPlaybackStatus);
         }
 
         if (!primaryMediaAsset) {
@@ -1281,6 +1395,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                     alt={primaryMediaAsset.name || `${stationId} assigned media`}
                     className="h-full w-full object-contain"
                     loading="lazy"
+                    data-kiosk-media-playing="true"
                 />
             );
         }
@@ -1297,6 +1412,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                     onEnded={mediaPlaylist.length > 1 ? advanceMediaPreview : undefined}
                     controls
                     preload="metadata"
+                    data-kiosk-media-playing="true"
                 />
             );
         }
@@ -1478,6 +1594,18 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     )};
 
     const renderCK50 = () => {
+        const screenMediaLabel = v1MediaLoadState === 'loading'
+            ? 'Loading…'
+            : v1MediaLoadState === 'error'
+                ? 'Preview unavailable'
+                : shouldDisplayMediaArtwork
+                    ? (primaryMediaAsset?.name || 'Playing')
+                    : (mediaPlaybackStatus?.label || 'Awaiting kiosk');
+        const screenMediaTitle = shouldDisplayMediaArtwork
+            ? (primaryMediaAsset?.name || 'Playing dashboard media')
+            : (mediaPlaybackStatus?.error || mediaPlaybackStatus?.label || 'Awaiting kiosk confirmation');
+        const ck50TerminalState = kiosk.activity?.terminal?.currentState || kiosk.terminalState || kiosk.uistate || '---';
+
         return (
             <div className="flex max-h-[60vh] flex-col items-center gap-3 overflow-y-auto p-2 pb-4">
                 <div className="w-full space-y-2.5">
@@ -1493,15 +1621,46 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                     <div className="flex items-start justify-between gap-2 rounded-lg bg-gray-900 px-3 py-2 text-white">
                         <div className="min-w-0">
                             <p className="text-[9px] font-semibold uppercase tracking-[0.15em] text-white/50">Screen media</p>
-                            <p className="truncate text-xs font-semibold" title={primaryMediaAsset?.name || ''}>
-                                {primaryMediaAsset?.name || (v1MediaLoadState === 'loading' ? 'Loading…' : 'No media assigned')}
+                            <p className="truncate text-xs font-semibold" title={screenMediaTitle}>
+                                {screenMediaLabel}
                             </p>
                         </div>
-                        {mediaPlaylist.length > 1 && (
+                        {shouldDisplayMediaArtwork && mediaPlaylist.length > 1 && (
                             <span className="shrink-0 rounded-full bg-white/10 px-2 py-1 text-[10px] font-semibold text-white/70">
                                 {(activeMediaIndex % mediaPlaylist.length) + 1}/{mediaPlaylist.length}
                             </span>
                         )}
+                    </div>
+
+                    <div
+                        className="rounded-lg border border-gray-700 bg-gray-900 px-3 py-2 text-white shadow-inner"
+                        data-kiosk-ck50-profile-summary="true"
+                        data-kiosk-profile-state={uiProfileStatus.state}
+                    >
+                        <div className="flex min-w-0 items-start justify-between gap-2">
+                            <div className="min-w-0">
+                                <p className="text-[9px] font-semibold uppercase tracking-[0.15em] text-white/45">Profile</p>
+                                <p className="truncate text-xs font-bold text-white" title={uiProfileStatus.profileName}>
+                                    {uiProfileStatus.profileName}
+                                </p>
+                                <p className="mt-0.5 text-[9px] text-white/50">{uiProfileStatus.versionLabel}</p>
+                            </div>
+                            <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${UI_PROFILE_STATUS_CLASSES[uiProfileStatus.state]}`}>
+                                {uiProfileStatus.statusLabel}
+                            </span>
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-3 border-t border-white/10 pt-2">
+                            <div className="min-w-0">
+                                <p className="text-[9px] uppercase tracking-wide text-white/35">UI Mode</p>
+                                <p className="truncate text-[11px] font-semibold text-white/80">{kiosk.ui?.mode || '---'}</p>
+                            </div>
+                            <div className="min-w-0">
+                                <p className="text-[9px] uppercase tracking-wide text-white/35">Terminal State</p>
+                                <p className="truncate text-[11px] font-semibold text-white/80" title={String(ck50TerminalState)}>
+                                    {ck50TerminalState}
+                                </p>
+                            </div>
+                        </div>
                     </div>
 
                     <div className="grid w-full grid-cols-2 gap-2" data-kiosk-ck50-modules="all">

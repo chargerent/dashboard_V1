@@ -134,6 +134,48 @@ function updateStationsModuleChargeControl(stations, stationRef, moduleRef, enab
   return updated ? nextStations : stations;
 }
 
+function updateStationsModuleOperationalState(stations, stationRef, moduleRef, enabled, details = {}) {
+  let updated = false;
+  const nextStations = stations.map((station) => {
+    if (!stationMatchesResponse(station, stationRef) || !Array.isArray(station.modules)) return station;
+    let stationUpdated = false;
+    const modules = station.modules.map((module) => {
+      if (!moduleMatchesResponse(module, moduleRef)) return module;
+      stationUpdated = true;
+      return {
+        ...module,
+        operationalEnabled: enabled,
+        operationalState: {
+          ...(module.operationalState || {}),
+          enabled,
+          updatedAt: details.updatedAt || Date.now(),
+          updatedBy: details.updatedBy || '',
+          requestId: details.requestId || '',
+        },
+      };
+    });
+    if (!stationUpdated) return station;
+    updated = true;
+    return { ...station, modules };
+  });
+  return updated ? nextStations : stations;
+}
+
+function updateStationsModuleLocks(stations, stationRef, moduleRef, locked) {
+  return stations.map((station) => {
+    if (!stationMatchesResponse(station, stationRef) || !Array.isArray(station.modules)) return station;
+    return {
+      ...station,
+      modules: station.modules.map((module) => moduleMatchesResponse(module, moduleRef) ? {
+        ...module,
+        slots: Array.isArray(module.slots)
+          ? module.slots.map((slot) => ({ ...slot, isLocked: locked, lockReason: locked ? 'Module locked manually from dashboard' : '' }))
+          : module.slots,
+      } : module),
+    };
+  });
+}
+
 function getModuleChargeOverrideKey(stationRef, moduleRef) {
   const stationId = String(stationRef || '').trim().toLowerCase();
   const moduleId = String(moduleRef || '').trim().toLowerCase().split('m').pop();
@@ -2299,6 +2341,8 @@ function App() {
         case 'reboot module':
         case 'start charge module':
         case 'stop charge module':
+        case 'enable module':
+        case 'disable module':
           commandData = { ...baseData, ...details };
           break;
         case 'update module':
@@ -2768,6 +2812,35 @@ function App() {
               rememberModuleChargeControlOverride(stationId, moduleId, enabled, data.requestId, data.action);
               setAllStationsData((prevStations) => {
                 const nextStations = updateStationsModuleChargeControl(prevStations, stationId, moduleId, enabled);
+                allStationsDataRef.current = nextStations;
+                return nextStations;
+              });
+            }
+          } else if (data.action === 'enable module' || data.action === 'disable module') {
+            const isSuccess = Number(data.status) === 1 || data.status === 'accepted' || data.status === 'success';
+            const stationId = data.kiosk || data.stationid;
+            const moduleId = data.moduleid || data.module;
+            const enabled = data.action === 'enable module' || data.enabled === true;
+            setScopedCommandStatus(data, { state: isSuccess ? 'success' : 'error', message: data.status_en || (isSuccess ? t('command_success') : t('command_failed')) });
+            if (isSuccess && stationId && moduleId) {
+              setAllStationsData((prevStations) => {
+                const nextStations = updateStationsModuleOperationalState(prevStations, stationId, moduleId, enabled, {
+                  requestId: data.requestId,
+                  updatedAt: data.updatedAt || data.timestamp,
+                  updatedBy: data.admin,
+                });
+                allStationsDataRef.current = nextStations;
+                return nextStations;
+              });
+            }
+          } else if (data.action === 'lock module') {
+            const isSuccess = Number(data.status) === 1 || data.status === 'accepted' || data.status === 'success';
+            const stationId = data.kiosk || data.stationid;
+            const moduleId = data.moduleid || data.module;
+            setScopedCommandStatus(data, { state: isSuccess ? 'success' : 'error', message: data.status_en || (isSuccess ? t('command_success') : t('command_failed')) });
+            if (isSuccess && stationId && moduleId) {
+              setAllStationsData((prevStations) => {
+                const nextStations = updateStationsModuleLocks(prevStations, stationId, moduleId, true);
                 allStationsDataRef.current = nextStations;
                 return nextStations;
               });

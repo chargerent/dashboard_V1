@@ -79,6 +79,7 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
         let totalPhysicalSlots = 0;
 
         kiosk.modules.forEach(module => {
+            const moduleRentalsEnabled = module?.operationalEnabled !== false;
             totalPhysicalSlots += module.slots.length;
             if (module.slots && Array.isArray(module.slots)) {
                 module.slots.forEach(s => {
@@ -88,7 +89,7 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
 
                     if (s.sn && s.sn !== 0) {
                         total++;
-                        if (!kiosk.disabled && !s.isLocked && s.batteryLevel >= fullPowerThreshold) {
+                        if (moduleRentalsEnabled && !kiosk.disabled && !s.isLocked && s.batteryLevel >= fullPowerThreshold) {
                             full++;
                         }
                         if (isSlotActivelyCharging(s)) {
@@ -171,8 +172,12 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                                 const moduleStatus = outputOk ? t('online') : t('offline');
                                 const showModuleChargeIndicator = !isV2Kiosk;
                                 const moduleChargeEnabled = module?.chargeControl?.enabled !== false;
+                                const moduleOperationalEnabled = module?.operationalEnabled !== false;
                                 const moduleChargeStatus = moduleChargeEnabled ? 'Charging enabled' : 'Charging disabled';
-                                const moduleTitle = `${module.id}: ${moduleStatus}${showModuleFw ? `, FW ${moduleFw}` : ''}${showModuleChargeIndicator ? `, ${moduleChargeStatus}` : ''}`;
+                                const moduleTitle = `${module.id}: ${moduleOperationalEnabled ? moduleStatus : 'Rentals disabled'}${showModuleFw ? `, FW ${moduleFw}` : ''}${showModuleChargeIndicator ? `, ${moduleChargeStatus}` : ''}`;
+                                const heartColorClass = !moduleOperationalEnabled
+                                    ? 'text-gray-400'
+                                    : outputOk ? 'text-green-700' : 'text-red-700';
 
                                 return (
                                     <span
@@ -186,9 +191,9 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                                     >
                                         <span className="relative inline-flex h-5 w-5 items-center justify-center">
                                             {isV2Kiosk || moduleFw === '2' ? (
-                                                <HeartIcon aria-hidden="true" className={`h-5 w-5 ${outputOk ? 'text-green-700' : 'text-red-700'}`} />
+                                                <HeartIcon aria-hidden="true" className={`h-5 w-5 ${heartColorClass}`} />
                                             ) : (
-                                                <BrokenHeartIcon className={`h-5 w-5 ${outputOk ? 'text-green-700' : 'text-red-700'}`} />
+                                                <BrokenHeartIcon className={`h-5 w-5 ${heartColorClass}`} />
                                             )}
                                         </span>
                                         {showModuleChargeIndicator && (
