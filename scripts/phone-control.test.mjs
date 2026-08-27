@@ -50,6 +50,10 @@ test('keeps the live phone frame and assignment panel inside a mobile viewport',
   assert.match(phoneControlSource, /sm:max-w-\[240px\]/);
   assert.match(phoneControlSource, /min-w-0 overflow-hidden rounded-xl/);
   assert.match(phoneControlSource, /w-full rounded-xl border border-slate-200 bg-slate-50 p-3 sm:w-auto sm:min-w-\[300px\]/);
+  assert.match(phoneControlSource, /grid min-w-0 grid-cols-1 gap-5 xl:grid-cols/);
+  assert.match(phoneControlSource, /min-w-0 flex-1 truncate font-mono/);
+  assert.doesNotMatch(phoneControlSource, />Phone location</);
+  assert.doesNotMatch(phoneControlSource, /phoneHotspotControlLabel\(inventory\)/);
 });
 
 test('validates the signed Agent release metadata used for updates', () => {
