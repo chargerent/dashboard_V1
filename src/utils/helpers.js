@@ -276,6 +276,40 @@ export const isModuleOnline = (module, referenceTime) => (
     hasRecentTimestamp(module?.lastUpdated, referenceTime, ONLINE_WINDOW_MS)
 );
 
+const normalizeWifiModuleId = (value) => (
+    String(value || '').trim().replace(/^1000/, '')
+);
+
+export const resolveModuleWifiStatus = (kiosk, moduleId) => {
+    const observedByModule = isPlainObject(kiosk?.observedWifiByModule)
+        ? kiosk.observedWifiByModule
+        : {};
+    const requestedModuleId = String(moduleId || '').trim();
+    const normalizedRequestedModuleId = normalizeWifiModuleId(requestedModuleId);
+    const observedEntry = observedByModule[requestedModuleId] || Object.entries(observedByModule)
+        .find(([observedModuleId]) => (
+            normalizeWifiModuleId(observedModuleId) === normalizedRequestedModuleId
+        ))?.[1];
+    const reportedSsid = String(observedEntry?.ssid || '').trim();
+    const configuredSsid = String(kiosk?.wifi?.name || kiosk?.wifi?.ssid || '').trim();
+    const rawSignalDbm = observedEntry?.signalDbm;
+    const signalDbm = rawSignalDbm == null || rawSignalDbm === ''
+        ? Number.NaN
+        : Number(rawSignalDbm);
+
+    return {
+        ssid: reportedSsid || configuredSsid,
+        source: reportedSsid ? 'reported' : configuredSsid ? 'configured' : 'unavailable',
+        signalDbm: Number.isFinite(signalDbm) ? signalDbm : null,
+        reportedAt: observedEntry?.reportedAt || null,
+        matchesConfiguredSsid: typeof observedEntry?.matchesConfiguredSsid === 'boolean'
+            ? observedEntry.matchesConfiguredSsid
+            : reportedSsid && configuredSsid
+                ? reportedSsid === configuredSsid
+                : null,
+    };
+};
+
 /**
  * Normalizes the raw kiosk data from the API into a more consistent and usable format.
  * @param {Array} kiosks - The array of kiosk objects from the API.
@@ -458,6 +492,9 @@ export const normalizeKioskData = (kiosks) => {
                 name: kiosk.wifi?.name || defaultWifi.name,
                 password: kiosk.wifi?.password ?? defaultWifi.password,
             },
+            observedWifiByModule: isPlainObject(kiosk.observedWifiByModule)
+                ? { ...kiosk.observedWifiByModule }
+                : {},
             formoptions: {
                 active: kiosk.formoptions?.active === true || DEFAULT_FORM_OPTIONS.active,
             },
@@ -545,11 +582,13 @@ export const isKioskOnline = (kiosk, referenceTime) => {
 };
 
 /**
- * Checks if a kiosk is considered active based on its last update time (10-day threshold).
+ * Checks whether a kiosk is administratively enabled and has reported within 10 days.
+ * Missing active flags remain enabled for backward compatibility with legacy records.
  * @param {Object} kiosk - The kiosk object.
  * @param {string} referenceTime - The reference time (ISO string) to compare against.
  * @returns {boolean} - True if the kiosk is active, false otherwise.
  */
 export const isKioskActive = (kiosk, referenceTime) => {
-    return hasRecentTimestamp(kiosk?.lastUpdated, referenceTime, 10 * 24 * 60 * 60 * 1000);
+    return kiosk?.active !== false &&
+        hasRecentTimestamp(kiosk?.lastUpdated, referenceTime, 10 * 24 * 60 * 60 * 1000);
 };

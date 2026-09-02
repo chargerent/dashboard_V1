@@ -317,6 +317,11 @@ export default function useKioskCommandFlow({
       action = 'enable';
     }
 
+    if (action === 'activechange') {
+      onCommand(stationid, action, moduleid, provisionid, uiVersion, details);
+      return;
+    }
+
     if (action === 'reboot') {
       confirmationText = t('reboot_confirmation');
     } else if (action === 'ngrok connect') {

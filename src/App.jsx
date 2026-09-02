@@ -384,7 +384,7 @@ function normalizeWifiCommandPayload(kioskPayload) {
     ? kioskPayload.wifi
     : {};
   const ssid = String(wifi.ssid || wifi.name || '').trim();
-  const password = String(wifi.password || '').trim();
+  const password = String(wifi.password || '');
 
   return {
     wifi: {
@@ -398,6 +398,7 @@ function normalizeWifiCommandPayload(kioskPayload) {
 }
 
 const FIREBASE_SAVE_ACTIONS = {
+  activechange: 'active',
   infochange: 'info',
   formoptionschange: 'formoptions',
   marketingoptionschange: 'marketingoptions',
@@ -2120,7 +2121,7 @@ function App() {
     const shouldUseFirebaseForSave = Boolean(
       firebaseSection &&
       targetKiosk &&
-      targetIsV2Kiosk &&
+      (targetIsV2Kiosk || firebaseSection === 'active') &&
       details?.pushOnly !== true
     );
     const normalizedKioskPayload = normalizeKioskPayloadForSave(

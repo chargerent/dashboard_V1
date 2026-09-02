@@ -15,7 +15,8 @@ test('activity history is lazy-loaded outside kiosk cards', async () => {
     assert.match(app, /lazy\(\(\) => import\('\.\/pages\/ActivityPage\.jsx'\)\)/);
     assert.doesNotMatch(kioskPanel, /kioskEvents|onSnapshot|KioskEventLog/);
     assert.match(kioskPanel, /KioskStatusAlert/);
-    assert.match(kioskPanel, /onNavigateToActivity=\{clientInfo\.isAdmin \? onNavigateToActivity : undefined\}/);
+    assert.match(kioskPanel, /onNavigateToActivity\(kiosk\.stationid\)/);
+    assert.match(kioskPanel, /\{t\('activity'\)\}/);
     assert.match(rentalStats, /aria-label=\{`View activity for \$\{stationId\}`\}/);
     assert.match(rentalStats, /data-icon="activity-pulse" className="h-4 w-4 shrink-0"/);
     assert.match(rentalStats, /onNavigateToActivity\(stationId\)/);
@@ -34,6 +35,22 @@ test('offline kiosk cards consolidate status and suppress telemetry overdue dupl
     assert.match(statusAlert, /incidents\.filter/);
     assert.match(statusAlert, /Kiosk offline/);
     assert.doesNotMatch(statusAlert, /Offline since/);
+});
+
+test('location summary active pill deactivates every active kiosk in the location', async () => {
+    const [locationSummary, dashboard] = await Promise.all([
+        readSource('../src/components/Dashboard/LocationSummary.jsx'),
+        readSource('../src/pages/DashboardPage.jsx'),
+    ]);
+
+    assert.match(locationSummary, /const activeKiosks = useMemo\(\(\) => kiosks\.filter\(kiosk => kiosk\.active !== false\)/);
+    assert.match(locationSummary, /data-location-active-pill=\{location\}/);
+    assert.match(locationSummary, /data-location-active=\{locationIsActive \? 'true' : 'false'\}/);
+    assert.match(locationSummary, /activeKiosks\.forEach\(\(kiosk\) => \{/);
+    assert.match(locationSummary, /onCommand\(kiosk\.stationid, 'activechange', null, kiosk\.provisionid, null, \{/);
+    assert.match(locationSummary, /kiosk: \{ active: false \}/);
+    assert.match(locationSummary, /disabled=\{!canDeactivateLocation\}/);
+    assert.match(dashboard, /<LocationSummary[\s\S]*onCommand=\{handleGeneralCommand\}/);
 });
 
 test('dashboard activity navigation uses a distinct purple activity control', async () => {

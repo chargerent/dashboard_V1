@@ -2853,7 +2853,7 @@ async function kioskUpdateSectionImpl(data, authState) {
   const kioskPatch = clonePlain(data?.kiosk) || {};
   const autoGeocode = data?.autoGeocode === true;
   const requestId = String(data?.requestId || "").trim();
-  const allowedSections = new Set(["info", "wifi", "formoptions", "marketingoptions", "analyticsoptions", "hardware", "pricing", "ui", "media"]);
+  const allowedSections = new Set(["active", "info", "wifi", "formoptions", "marketingoptions", "analyticsoptions", "hardware", "pricing", "ui", "media"]);
 
   if (!stationid) {
     throw new functions.https.HttpsError(
@@ -2865,7 +2865,7 @@ async function kioskUpdateSectionImpl(data, authState) {
   if (!allowedSections.has(section)) {
       throw new functions.https.HttpsError(
         "invalid-argument",
-        "section must be one of info, wifi, formoptions, marketingoptions, analyticsoptions, hardware, pricing, ui, media",
+        "section must be one of active, info, wifi, formoptions, marketingoptions, analyticsoptions, hardware, pricing, ui, media",
       );
   }
 
@@ -2927,7 +2927,7 @@ async function kioskUpdateSectionImpl(data, authState) {
       );
     }
 
-    if (!isNewSchemaKioskDocument(liveKiosk)) {
+    if (section !== "active" && !isNewSchemaKioskDocument(liveKiosk)) {
       throw new functions.https.HttpsError(
           "failed-precondition",
           `${stationid} is not a V2 kiosk.`,
@@ -2935,7 +2935,14 @@ async function kioskUpdateSectionImpl(data, authState) {
     }
 
     let nextSectionValue = clonePlain(kioskPatch[section]);
-    if (!nextSectionValue || typeof nextSectionValue !== "object") {
+    if (section === "active" && nextSectionValue !== false) {
+      throw new functions.https.HttpsError(
+          "invalid-argument",
+          "active can only be set to false manually; a heartbeat must reactivate the kiosk",
+      );
+    }
+
+    if (section !== "active" && (!nextSectionValue || typeof nextSectionValue !== "object")) {
       throw new functions.https.HttpsError(
           "invalid-argument",
           `${section} payload must be an object`,
@@ -2977,7 +2984,9 @@ async function kioskUpdateSectionImpl(data, authState) {
     }
 
     const recalculatedKiosk = recalculateKioskTotals(mergedKiosk);
-    const updateData = {
+    const updateData = section === "active" ? {
+      active: recalculatedKiosk.active === true,
+    } : {
       [section]: clonePlain(recalculatedKiosk[section]) || {},
       count: Number(recalculatedKiosk.count || 0),
       slotscount: Number(recalculatedKiosk.slotscount || 0),

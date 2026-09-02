@@ -13,6 +13,7 @@ import {
   isPhoneAgentUpdateAvailable,
   isPhoneRemoteInputAvailable,
   phoneLocationMapUrls,
+  phoneKioskPlaceLabel,
   phoneLineNumberKey,
   phoneNetworkLabel,
   phoneSignalLevelFromDbm,
@@ -54,6 +55,27 @@ test('keeps the live phone frame and assignment panel inside a mobile viewport',
   assert.match(phoneControlSource, /min-w-0 flex-1 truncate font-mono/);
   assert.doesNotMatch(phoneControlSource, />Phone location</);
   assert.doesNotMatch(phoneControlSource, /phoneHotspotControlLabel\(inventory\)/);
+});
+
+test('shows both kiosk place and location on assigned phone cards', () => {
+  assert.equal(phoneKioskPlaceLabel({
+    info: {place: 'RBC Canadian Open', location: 'TOUR'},
+  }), 'RBC Canadian Open · TOUR');
+  assert.equal(phoneKioskPlaceLabel({
+    info: {place: 'Los Angeles', location: 'los angeles'},
+  }), 'Los Angeles');
+  assert.equal(phoneKioskPlaceLabel({info: {}}), '');
+  assert.match(phoneControlSource, /phoneKioskPlaceLabel\(kiosk\)/);
+});
+
+test('shows kiosk place and location in phone lines and filters the needs-attention summary', () => {
+  assert.match(phoneControlSource, /kioskByStationId=\{kioskByStationId\}/);
+  assert.match(phoneControlSource, /kiosk\?\.info\?\.place/);
+  assert.match(phoneControlSource, /kiosk\?\.info\?\.location/);
+  assert.match(phoneControlSource, />Place:<\/span>/);
+  assert.match(phoneControlSource, />Location:<\/span>/);
+  assert.match(phoneControlSource, /setPhoneCardFilter\('attention'\)/);
+  assert.match(phoneControlSource, /onClick=\{showPhonesNeedingAttention\}/);
 });
 
 test('validates the signed Agent release metadata used for updates', () => {

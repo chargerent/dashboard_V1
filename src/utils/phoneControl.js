@@ -409,6 +409,15 @@ export function phoneNetworkLabel(inventory = {}) {
   return network ? network.charAt(0).toUpperCase() + network.slice(1) : 'Offline';
 }
 
+export function phoneKioskPlaceLabel(kiosk = {}) {
+  const labels = [kiosk?.info?.place, kiosk?.info?.location]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+  return labels.filter((label, index) => (
+    labels.findIndex((candidate) => candidate.toLowerCase() === label.toLowerCase()) === index
+  )).join(' · ');
+}
+
 export function phoneHotspotLabel(inventory = {}) {
   const mode = String(inventory.hotspotControlMode || '').trim().toLowerCase();
   const compatibility = mode === 'settings_automation';

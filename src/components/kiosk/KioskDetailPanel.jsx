@@ -10,6 +10,7 @@ import {
     isModuleOnline,
     isNewSchemaKiosk,
     isSlotActivelyCharging,
+    resolveModuleWifiStatus,
 } from '../../utils/helpers';
 import { formatModuleFirmwareVersion } from '../../utils/firmwareVersion';
 import { installKioskInteractionDebugCapture, logKioskInteraction } from '../../utils/kioskInteractionDebug';
@@ -131,6 +132,41 @@ const getModuleTypeOutlineClass = (module) => {
     if (modtype === '03') return 'ring-2 ring-black';
 
     return '';
+};
+
+const ModuleWifiStatus = ({ moduleId, status }) => {
+    const ssid = String(status?.ssid || '').trim();
+    const source = String(status?.source || 'unavailable');
+    const signalLabel = Number.isFinite(status?.signalDbm) ? `${status.signalDbm} dBm` : '';
+    const sourceLabel = source === 'reported'
+        ? signalLabel || 'Live'
+        : source === 'configured'
+            ? 'Saved'
+            : '—';
+    const displaySsid = ssid || 'Not reported';
+    const title = source === 'reported'
+        ? `Reported Wi-Fi: ${displaySsid}${signalLabel ? ` (${signalLabel})` : ''}`
+        : source === 'configured'
+            ? `Saved Wi-Fi: ${displaySsid}; no module report yet`
+            : 'Wi-Fi has not been reported';
+
+    return (
+        <div
+            className="mt-1 flex min-w-0 items-center gap-1.5 rounded-md bg-sky-50 px-1.5 py-1 text-[10px] text-sky-800"
+            title={title}
+            aria-label={`${moduleId} ${title}`}
+            data-kiosk-module-wifi={moduleId}
+            data-kiosk-wifi-source={source}
+            data-kiosk-wifi-ssid={ssid}
+        >
+            <svg className="h-3 w-3 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                <path strokeLinecap="round" d="M5 12.55a11 11 0 0114.08 0M8.53 16.11a6 6 0 016.95 0M12 20h.01" />
+            </svg>
+            <span className="shrink-0 font-semibold">Wi-Fi</span>
+            <span className="min-w-0 flex-1 truncate font-mono font-semibold">{displaySsid}</span>
+            <span className="shrink-0 text-[9px] font-semibold text-sky-600">{sourceLabel}</span>
+        </div>
+    );
 };
 
 const resolvePlaylistAssetKind = (asset) => {
@@ -315,6 +351,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                     return {
                         moduleId,
                         moduleOnline: isModuleOnline(module, mockNow),
+                        wifiStatus: resolveModuleWifiStatus(kiosk, moduleId),
                         firmwareLabel: `FW ${firmwareVersion}`,
                         fotaVersionLabel: fotaVersion.label,
                         fotaVersionTitle: fotaVersion.title,
@@ -323,7 +360,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                 })
                 .filter((entry) => entry.moduleId)
             : []
-    ), [formatFotaVersion, mockNow, orderedModules, t]);
+    ), [formatFotaVersion, kiosk, mockNow, orderedModules, t]);
     const moduleIds = useMemo(() => (
         moduleEntries.map((entry) => entry.moduleId)
     ), [moduleEntries]);
@@ -487,6 +524,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                     key: `${module?.id || 'module'}-${index}`,
                     moduleId,
                     moduleOnline: isModuleOnline(module, mockNow),
+                    wifiStatus: resolveModuleWifiStatus(kiosk, moduleId),
                     updateLabel: t('update_module'),
                     firmwareLabel: `FW ${formatModuleFirmwareVersion(
                         module?.softwareVersion,
@@ -501,7 +539,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                 };
             })
             : []
-    ), [chargeReadyThreshold, formatChargeRate, formatEtaToReady, formatFotaVersion, mockNow, orderedModules, t]);
+    ), [chargeReadyThreshold, formatChargeRate, formatEtaToReady, formatFotaVersion, kiosk, mockNow, orderedModules, t]);
     const showLegacySideIndicators = !kiosk.isNewSchema;
 
     const ejectingSet = useMemo(
@@ -946,6 +984,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                 fotaVersionTitle: 'No FOTA version reported',
                                 avgChargeRate: '--',
                                 etaToReady: '--',
+                                wifiStatus: { ssid: '', source: 'unavailable', signalDbm: null },
                             }]).map((module, moduleIndex) => {
                                 const isSelected = !hasMultipleModules || moduleIdsMatch(module.moduleId, selectedModule?.id);
                                 return (
@@ -968,6 +1007,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                             <div className="min-w-0 truncate font-mono text-xs text-gray-700">{module.moduleId}</div>
                                             {renderModuleQuickActions(module.moduleId)}
                                         </div>
+                                        <ModuleWifiStatus moduleId={module.moduleId} status={module.wifiStatus} />
                                         {hasMultipleModules && canUpdateModules && (
                                             <div className="mt-1 flex gap-1">
                                                 <button
@@ -1745,6 +1785,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                             <span className="min-w-0 truncate font-mono text-xs text-gray-700">{entry.moduleId}</span>
                                             {renderModuleQuickActions(entry.moduleId)}
                                         </div>
+                                        <ModuleWifiStatus moduleId={entry.moduleId} status={entry.wifiStatus} />
                                         {hasMultipleModules && (
                                             <div className="flex gap-1">
                                                 <button
@@ -1819,6 +1860,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                             <span className="min-w-0 truncate">{entry.moduleId}</span>
                                             {renderModuleQuickActions(entry.moduleId)}
                                         </div>
+                                        <ModuleWifiStatus moduleId={entry.moduleId} status={entry.wifiStatus} />
                                         {showModuleFirmwareMetadata && (
                                             <>
                                                 <span className="text-[10px] text-gray-500">{entry.firmwareLabel}</span>

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { filterProvisionedStations } from '../src/utils/helpers.js';
+import { filterProvisionedStations, isKioskActive } from '../src/utils/helpers.js';
 
 test('keeps pending AI booth registrations off the dashboard', () => {
   const stations = [
@@ -45,4 +45,15 @@ test('keeps legitimate inactive or disabled provisioned kiosks visible', () => {
   };
 
   assert.deepEqual(filterProvisionedStations([station]), [station]);
+});
+
+test('requires both the manual active flag and a recent kiosk heartbeat', () => {
+  const referenceTime = '2026-08-31T12:00:00.000Z';
+  const recentHeartbeat = '2026-08-30T12:00:00.000Z';
+  const staleHeartbeat = '2026-08-01T12:00:00.000Z';
+
+  assert.equal(isKioskActive({ active: true, lastUpdated: recentHeartbeat }, referenceTime), true);
+  assert.equal(isKioskActive({ lastUpdated: recentHeartbeat }, referenceTime), true);
+  assert.equal(isKioskActive({ active: false, lastUpdated: recentHeartbeat }, referenceTime), false);
+  assert.equal(isKioskActive({ active: true, lastUpdated: staleHeartbeat }, referenceTime), false);
 });

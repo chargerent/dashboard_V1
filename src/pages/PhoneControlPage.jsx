@@ -45,6 +45,7 @@ import {
   normalizePaymentAppRelease,
   normalizePhoneDevice,
   phoneLocationMapUrls,
+  phoneKioskPlaceLabel,
   phoneHotspotLabel,
   phoneMatchesSearch,
   phoneNetworkLabel,
@@ -363,7 +364,7 @@ function PhoneListCard({ device, kiosk, now, selected, onSelect, onNavigateToDas
   const subtitle = unassigned
     ? [device.inventory.model || device.displayName || 'Android phone', deviceSuffix ? `Device …${deviceSuffix}` : '']
       .filter(Boolean).join(' · ')
-    : kiosk?.info?.location || kiosk?.info?.place || device.displayName || device.id;
+    : phoneKioskPlaceLabel(kiosk) || device.displayName || device.id;
 
   return (
     <article
@@ -637,6 +638,7 @@ function PhoneLinesModal({
   isOpen,
   onClose,
   devices,
+  kioskByStationId,
   now,
   isAdmin,
   onSaveNumber,
@@ -656,19 +658,24 @@ function PhoneLinesModal({
   const filteredDevices = useMemo(() => {
     const needle = search.trim().toLowerCase();
     return [...devices]
-      .filter((device) => !needle || [
-        device.stationId,
-        device.phoneLine?.number,
-        device.inventory?.cellularCarrier,
-        device.inventory?.model,
-        device.displayName,
-        device.id,
-      ].some((value) => String(value || '').toLowerCase().includes(needle)))
+      .filter((device) => {
+        const kiosk = kioskByStationId.get(device.stationId);
+        return !needle || [
+          device.stationId,
+          device.phoneLine?.number,
+          device.inventory?.cellularCarrier,
+          device.inventory?.model,
+          device.displayName,
+          device.id,
+          kiosk?.info?.place,
+          kiosk?.info?.location,
+        ].some((value) => String(value || '').toLowerCase().includes(needle));
+      })
       .sort((left, right) => (
         (left.stationId || 'ZZZZ').localeCompare(right.stationId || 'ZZZZ') ||
         left.id.localeCompare(right.id)
       ));
-  }, [devices, search]);
+  }, [devices, kioskByStationId, search]);
 
   useEffect(() => {
     if (!isOpen) return undefined;
@@ -766,7 +773,7 @@ function PhoneLinesModal({
             <input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search number, kiosk, carrier, model, or device ID"
+              placeholder="Search number, kiosk, place, location, carrier, model, or device ID"
               aria-label="Search phone lines"
               className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
             />
@@ -782,6 +789,9 @@ function PhoneLinesModal({
                   const connection = getPhoneConnectionState(device, now);
                   const style = STATE_STYLES[connection];
                   const line = device.phoneLine || {};
+                  const kiosk = kioskByStationId.get(device.stationId);
+                  const kioskPlace = String(kiosk?.info?.place || '').trim();
+                  const kioskLocation = String(kiosk?.info?.location || '').trim();
                   const editing = editingDeviceId === device.id;
                   const saving = savingDeviceId === device.id;
                   const duplicate = line.key && duplicateKeys.has(line.key);
@@ -804,7 +814,13 @@ function PhoneLinesModal({
                               Unassigned phone
                             </button>
                           )}
-                          <p className="mt-0.5 truncate text-[11px] text-slate-500">{device.inventory.model || device.displayName || device.id}</p>
+                          {device.stationId && (
+                            <div className="mt-1 space-y-0.5 text-[11px] leading-4 text-slate-500">
+                              <p className="truncate"><span className="font-bold text-slate-600">Place:</span> {kioskPlace || 'Unavailable'}</p>
+                              <p className="truncate"><span className="font-bold text-slate-600">Location:</span> {kioskLocation || 'Unavailable'}</p>
+                            </div>
+                          )}
+                          <p className="mt-1 truncate text-[10px] text-slate-400">{device.inventory.model || device.displayName || device.id}</p>
                         </div>
 
                         <div className="min-w-0 flex-1">
@@ -1946,6 +1962,10 @@ export default function PhoneControlPage({
   const closeAddPhone = useCallback(() => setAddPhoneOpen(false), []);
   const openPhoneLines = useCallback(() => setPhoneLinesOpen(true), []);
   const closePhoneLines = useCallback(() => setPhoneLinesOpen(false), []);
+  const showPhonesNeedingAttention = useCallback(() => {
+    setSearch('');
+    setPhoneCardFilter('attention');
+  }, []);
   const closeWifiJoin = useCallback(() => setWifiJoinNetwork(null), []);
   const changeEnrollmentMode = useCallback((mode) => {
     setEnrollmentMode(mode === 'assigned' ? 'assigned' : 'unassigned');
@@ -2471,6 +2491,7 @@ export default function PhoneControlPage({
         isOpen={phoneLinesOpen}
         onClose={closePhoneLines}
         devices={devices}
+        kioskByStationId={kioskByStationId}
         now={now}
         isAdmin={isAdmin}
         onSaveNumber={saveManualPhoneNumber}
@@ -2535,7 +2556,13 @@ export default function PhoneControlPage({
             tone={phoneLineSummary.unavailableCount || phoneLineSummary.duplicateCount ? 'amber' : 'green'}
             onClick={openPhoneLines}
           />
-          <SummaryCard label="Needs attention" value={attentionCount} detail="Offline or missing control access" tone={attentionCount ? 'red' : 'green'} />
+          <SummaryCard
+            label="Needs attention"
+            value={attentionCount}
+            detail="Offline or missing control access"
+            tone={attentionCount ? 'red' : 'green'}
+            onClick={showPhonesNeedingAttention}
+          />
           {isAdmin && (
             <SummaryCard
               label="Unassigned"

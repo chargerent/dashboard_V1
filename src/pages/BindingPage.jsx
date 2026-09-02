@@ -226,13 +226,14 @@ export default function BindingPage({
   const [moveError, setMoveError] = useState('');
   const [status, setStatus] = useState(null);
   const [firebaseUser, setFirebaseUser] = useState(auth.currentUser || null);
+  const [moveSourceCountry, setMoveSourceCountry] = useState('');
   const [moveSourceStationId, setMoveSourceStationId] = useState('');
   const [moveModuleId, setMoveModuleId] = useState('');
   const [moveDestinationMode, setMoveDestinationMode] = useState('existing');
   const [moveDestinationStationId, setMoveDestinationStationId] = useState('');
   const [moveDestinationCountry, setMoveDestinationCountry] = useState('');
   const [moveDestinationKioskType, setMoveDestinationKioskType] = useState(DEFAULT_KIOSK_TYPE);
-  const [moveDestinationInfo, setMoveDestinationInfo] = useState({ stationid: '', qrUrl: '' });
+  const [moveNewStationId, setMoveNewStationId] = useState('');
   const [loadingMoveNextStation, setLoadingMoveNextStation] = useState(false);
 
   useEffect(() => {
@@ -266,23 +267,18 @@ export default function BindingPage({
 
   const syncMoveDestinationInfo = useCallback((payload) => {
     const nextStationid = String(payload?.nextStationid || payload?.stationid || '').trim().toUpperCase();
-    const nextQrUrl = String(payload?.nextQrUrl || payload?.qrUrl || buildStationQrUrl(nextStationid));
-
-    setMoveDestinationInfo({
-      stationid: nextStationid,
-      qrUrl: nextQrUrl,
-    });
+    setMoveNewStationId(nextStationid);
   }, []);
 
   const loadMoveNextStation = useCallback(async (selectedCountry, selectedKioskType = moveDestinationKioskType) => {
     if (!canManageBindings || !selectedCountry) {
-      setMoveDestinationInfo({ stationid: '', qrUrl: '' });
+      setMoveNewStationId('');
       return;
     }
 
     if (!firebaseUser) {
       setMoveError('Not signed in');
-      setMoveDestinationInfo({ stationid: '', qrUrl: '' });
+      setMoveNewStationId('');
       return;
     }
 
@@ -298,7 +294,7 @@ export default function BindingPage({
       syncMoveDestinationInfo(response || {});
     } catch (error) {
       console.error(error);
-      setMoveDestinationInfo({ stationid: '', qrUrl: '' });
+      setMoveNewStationId('');
       setMoveError(error?.message || t('fetch_next_station_failed'));
     } finally {
       setLoadingMoveNextStation(false);
@@ -325,12 +321,12 @@ export default function BindingPage({
 
   useEffect(() => {
     if (moveDestinationMode !== 'new') {
-      setMoveDestinationInfo({ stationid: '', qrUrl: '' });
+      setMoveNewStationId('');
       return;
     }
 
     if (!moveDestinationCountry) {
-      setMoveDestinationInfo({ stationid: '', qrUrl: '' });
+      setMoveNewStationId('');
       return;
     }
 
@@ -340,6 +336,9 @@ export default function BindingPage({
   const newKioskStations = (allStationsData || [])
     .filter((kiosk) => isNewKioskStation(kiosk?.stationid))
     .sort((left, right) => normalizeStationId(left?.stationid).localeCompare(normalizeStationId(right?.stationid)));
+  const filteredSourceStations = moveSourceCountry ? newKioskStations.filter(
+    (kiosk) => getCountryFromStationId(kiosk?.stationid) === moveSourceCountry,
+  ) : [];
   const selectedSourceKiosk = newKioskStations.find(
     (kiosk) => normalizeStationId(kiosk?.stationid) === moveSourceStationId,
   ) || null;
@@ -347,9 +346,20 @@ export default function BindingPage({
   const selectedSourceModule = selectedSourceModules.find(
     (module) => normalizeModuleId(module?.id) === moveModuleId,
   ) || null;
-  const availableDestinationStations = newKioskStations.filter(
-    (kiosk) => normalizeStationId(kiosk?.stationid) !== moveSourceStationId,
+  const availableDestinationStations = moveDestinationCountry ? newKioskStations.filter(
+    (kiosk) =>
+      normalizeStationId(kiosk?.stationid) !== moveSourceStationId &&
+      getCountryFromStationId(kiosk?.stationid) === moveDestinationCountry,
+  ) : [];
+  const normalizedMoveNewStationId = normalizeStationId(moveNewStationId);
+  const moveNewStationIdIsValid = isBindingStationId(normalizedMoveNewStationId) &&
+    getCountryFromStationId(normalizedMoveNewStationId) === moveDestinationCountry;
+  const moveNewStationIdExists = newKioskStations.some(
+    (kiosk) => normalizeStationId(kiosk?.stationid) === normalizedMoveNewStationId,
   );
+  const moveNewStationIdError = normalizedMoveNewStationId && !moveNewStationIdIsValid ?
+    t('new_station_id_invalid') :
+    (moveNewStationIdExists ? t('new_station_id_exists') : '');
 
   useEffect(() => {
     if (!selectedSourceKiosk) {
@@ -374,10 +384,16 @@ export default function BindingPage({
   }, [moveDestinationCountry, moveModuleId, selectedSourceKiosk]);
 
   useEffect(() => {
-    if (moveDestinationStationId && moveDestinationStationId === moveSourceStationId) {
+    if (
+      moveDestinationStationId &&
+      (
+        moveDestinationStationId === moveSourceStationId ||
+        getCountryFromStationId(moveDestinationStationId) !== moveDestinationCountry
+      )
+    ) {
       setMoveDestinationStationId('');
     }
-  }, [moveDestinationStationId, moveSourceStationId]);
+  }, [moveDestinationCountry, moveDestinationStationId, moveSourceStationId]);
 
   const focusStationQrInput = useCallback(() => {
     setTimeout(() => {
@@ -775,8 +791,10 @@ export default function BindingPage({
       return;
     }
 
-    if (moveDestinationMode === 'new' && !moveDestinationInfo.stationid) {
-      setStatus({ state: 'error', message: t('fetch_next_station_failed') });
+    if (moveDestinationMode === 'new' && (!moveNewStationIdIsValid || moveNewStationIdExists)) {
+      const message = moveNewStationIdError || t('new_station_id_invalid');
+      setMoveError(message);
+      setStatus({ state: 'error', message });
       return;
     }
 
@@ -790,7 +808,7 @@ export default function BindingPage({
         moduleId: moveModuleId,
         createNewStation: moveDestinationMode === 'new',
         destinationStationid: moveDestinationMode === 'new' ?
-          moveDestinationInfo.stationid :
+          normalizedMoveNewStationId :
           moveDestinationStationId,
         destinationCountry: moveDestinationMode === 'new' ? moveDestinationCountry : '',
         kioskType: moveDestinationMode === 'new' ? moveDestinationKioskType : '',
@@ -809,20 +827,20 @@ export default function BindingPage({
       console.error(error);
       setMoveError(error?.message || t('command_failed'));
       setStatus({ state: 'error', message: error?.message || t('command_failed') });
-      if (moveDestinationMode === 'new' && moveDestinationCountry) {
-        await loadMoveNextStation(moveDestinationCountry, moveDestinationKioskType);
-      }
     }
   }, [
     ensureSignedIn,
     loadMoveNextStation,
     moveDestinationCountry,
-    moveDestinationInfo.stationid,
     moveDestinationKioskType,
     moveDestinationMode,
     moveDestinationStationId,
     moveModuleId,
+    moveNewStationIdError,
+    moveNewStationIdExists,
+    moveNewStationIdIsValid,
     moveSourceStationId,
+    normalizedMoveNewStationId,
     syncMoveDestinationInfo,
     t,
   ]);
@@ -979,39 +997,69 @@ export default function BindingPage({
                 </div>
 
                 <div className="space-y-6 px-6 py-6">
-                  <div className="grid gap-5 md:grid-cols-2">
-                    <label className="block">
-                      <span className="mb-2 block text-sm font-semibold text-gray-700">{t('source_station')}</span>
-                      <select
-                        value={moveSourceStationId}
-                        onChange={(event) => setMoveSourceStationId(normalizeStationId(event.target.value))}
-                        className="w-full rounded-md border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
-                      >
-                        <option value="">{t('select_source_station')}</option>
-                        {newKioskStations.map((kiosk) => (
-                          <option key={kiosk.stationid} value={kiosk.stationid}>
-                            {kiosk.stationid} ({Array.isArray(kiosk.modules) ? kiosk.modules.length : 0} modules)
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                  <div className="space-y-3">
+                    <div>
+                      <p className="mb-2 text-sm font-semibold text-gray-700">{t('source_country')}</p>
+                      <div className="inline-flex rounded-lg border border-gray-200 bg-gray-100 p-1">
+                        {COUNTRY_OPTIONS.map((option) => {
+                          const active = moveSourceCountry === option.code;
+                          return (
+                            <button
+                              key={option.code}
+                              type="button"
+                              onClick={() => {
+                                setMoveSourceCountry(option.code);
+                                setMoveSourceStationId('');
+                                setMoveModuleId('');
+                              }}
+                              className={`rounded-md px-4 py-2 text-sm font-bold transition ${
+                                active
+                                  ? 'bg-blue-600 text-white shadow-sm'
+                                  : 'text-gray-600 hover:bg-white hover:text-gray-900'
+                              }`}
+                            >
+                              {option.code}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
 
-                    <label className="block">
-                      <span className="mb-2 block text-sm font-semibold text-gray-700">{t('source_module')}</span>
-                      <select
-                        value={moveModuleId}
-                        onChange={(event) => setMoveModuleId(normalizeModuleId(event.target.value))}
-                        disabled={!moveSourceStationId}
-                        className="w-full rounded-md border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
-                      >
-                        <option value="">{t('select_source_module')}</option>
-                        {selectedSourceModules.map((module) => (
-                          <option key={module.id} value={module.id}>
-                            {module.id} ({Array.isArray(module.slots) ? module.slots.length : 0} slots)
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="block">
+                        <span className="mb-1 block text-xs font-semibold text-gray-700">{t('source_station')}</span>
+                        <select
+                          value={moveSourceStationId}
+                          onChange={(event) => setMoveSourceStationId(normalizeStationId(event.target.value))}
+                          disabled={!moveSourceCountry}
+                          className="w-full min-w-0 rounded-md border border-gray-300 bg-white px-2 py-2 text-xs font-medium text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400 sm:px-3 sm:text-sm"
+                        >
+                          <option value="">{moveSourceCountry ? t('select_source_station') : t('select_country_first')}</option>
+                          {filteredSourceStations.map((kiosk) => (
+                            <option key={kiosk.stationid} value={kiosk.stationid}>
+                              {kiosk.stationid} ({Array.isArray(kiosk.modules) ? kiosk.modules.length : 0} modules)
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+
+                      <label className="block">
+                        <span className="mb-1 block text-xs font-semibold text-gray-700">{t('source_module')}</span>
+                        <select
+                          value={moveModuleId}
+                          onChange={(event) => setMoveModuleId(normalizeModuleId(event.target.value))}
+                          disabled={!moveSourceStationId}
+                          className="w-full min-w-0 rounded-md border border-gray-300 bg-white px-2 py-2 text-xs font-medium text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400 sm:px-3 sm:text-sm"
+                        >
+                          <option value="">{t('select_source_module')}</option>
+                          {selectedSourceModules.map((module) => (
+                            <option key={module.id} value={module.id}>
+                              {module.id} ({Array.isArray(module.slots) ? module.slots.length : 0} slots)
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
                   </div>
 
                   <div>
@@ -1043,22 +1091,51 @@ export default function BindingPage({
                   </div>
 
                   {moveDestinationMode === 'existing' ? (
-                    <label className="block">
-                      <span className="mb-2 block text-sm font-semibold text-gray-700">{t('destination_station')}</span>
-                      <select
-                        value={moveDestinationStationId}
-                        onChange={(event) => setMoveDestinationStationId(normalizeStationId(event.target.value))}
-                        disabled={!moveFormReady}
-                        className="w-full rounded-md border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
-                      >
-                        <option value="">{t('select_destination_station')}</option>
-                        {availableDestinationStations.map((kiosk) => (
-                          <option key={kiosk.stationid} value={kiosk.stationid}>
-                            {kiosk.stationid} ({Array.isArray(kiosk.modules) ? kiosk.modules.length : 0} modules)
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-end gap-3">
+                      <div>
+                        <p className="mb-1 text-xs font-semibold text-gray-700">{t('destination_country')}</p>
+                        <div className="inline-flex rounded-lg border border-gray-200 bg-gray-100 p-1">
+                          {COUNTRY_OPTIONS.map((option) => {
+                            const active = moveDestinationCountry === option.code;
+                            return (
+                              <button
+                                key={option.code}
+                                type="button"
+                                onClick={() => {
+                                  setMoveDestinationCountry(option.code);
+                                  setMoveDestinationStationId('');
+                                }}
+                                disabled={!moveFormReady}
+                                className={`rounded-md px-3 py-1.5 text-xs font-bold transition sm:text-sm ${
+                                  active
+                                    ? 'bg-blue-600 text-white shadow-sm'
+                                    : 'text-gray-600 hover:bg-white hover:text-gray-900'
+                                } disabled:cursor-not-allowed disabled:text-gray-400`}
+                              >
+                                {option.code}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <label className="block">
+                        <span className="mb-1 block text-xs font-semibold text-gray-700">{t('destination_station')}</span>
+                        <select
+                          value={moveDestinationStationId}
+                          onChange={(event) => setMoveDestinationStationId(normalizeStationId(event.target.value))}
+                          disabled={!moveFormReady || !moveDestinationCountry}
+                          className="w-full min-w-0 rounded-md border border-gray-300 bg-white px-2 py-2 text-xs font-medium text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200 disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400 sm:px-3 sm:text-sm"
+                        >
+                          <option value="">{moveDestinationCountry ? t('select_destination_station') : t('select_country_first')}</option>
+                          {availableDestinationStations.map((kiosk) => (
+                            <option key={kiosk.stationid} value={kiosk.stationid}>
+                              {kiosk.stationid} ({Array.isArray(kiosk.modules) ? kiosk.modules.length : 0} modules)
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    </div>
                   ) : (
                     <div className="grid gap-5">
                       <div>
@@ -1110,21 +1187,28 @@ export default function BindingPage({
                       </div>
 
                       <label className="block">
-                        <span className="mb-2 block text-sm font-semibold text-gray-700">{t('next_station_qr')}</span>
+                        <span className="mb-2 block text-sm font-semibold text-gray-700">{t('new_station_id')}</span>
                         <input
                           type="text"
-                          readOnly
-                          value={moveDestinationCountry ? (loadingMoveNextStation ? t('loading') : moveDestinationInfo.qrUrl) : ''}
+                          value={moveDestinationCountry ? (loadingMoveNextStation ? '' : moveNewStationId) : ''}
+                          onChange={(event) => setMoveNewStationId(normalizeStationId(event.target.value))}
                           placeholder={t('select_country_first')}
-                          disabled={!moveDestinationCountry || !moveFormReady}
-                          className="w-full rounded-md border border-gray-300 bg-gray-50 px-4 py-3 font-mono text-sm text-gray-700 outline-none disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400"
+                          disabled={!moveDestinationCountry || !moveFormReady || loadingMoveNextStation}
+                          className={`w-full rounded-md border bg-white px-4 py-3 font-mono text-sm text-gray-700 outline-none transition disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-400 ${
+                            moveNewStationIdError
+                              ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-100'
+                              : 'border-gray-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200'
+                          }`}
                         />
+                        <span className={`mt-2 block text-xs ${moveNewStationIdError ? 'text-red-600' : 'text-gray-500'}`}>
+                          {moveNewStationIdError || t('new_station_id_hint')}
+                        </span>
                       </label>
 
                       <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-4">
-                        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-700">{t('destination_station')}</p>
-                        <p className="mt-1 text-2xl font-bold tracking-[0.08em] text-gray-900">
-                          {!moveDestinationCountry ? '--' : (loadingMoveNextStation ? '...' : (moveDestinationInfo.stationid || '--'))}
+                        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-blue-700">{t('next_station_qr')}</p>
+                        <p className="mt-1 break-all font-mono text-sm font-semibold text-gray-900">
+                          {!moveDestinationCountry ? '--' : (loadingMoveNextStation ? '...' : (moveNewStationIdIsValid ? buildStationQrUrl(normalizedMoveNewStationId) : '--'))}
                         </p>
                       </div>
                     </div>
@@ -1140,7 +1224,7 @@ export default function BindingPage({
                     disabled={
                       !moveFormReady ||
                       (moveDestinationMode === 'existing' && !moveDestinationStationId) ||
-                      (moveDestinationMode === 'new' && (!moveDestinationCountry || !moveDestinationInfo.stationid || loadingMoveNextStation))
+                      (moveDestinationMode === 'new' && (!moveDestinationCountry || !moveNewStationIdIsValid || moveNewStationIdExists || loadingMoveNextStation))
                     }
                     className="inline-flex w-full items-center justify-center rounded-md bg-blue-600 px-5 py-3 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
                   >

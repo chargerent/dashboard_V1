@@ -36,6 +36,8 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
     const isPending = String(kiosk.status || '').toLowerCase() === 'pending';
     const hasPricing = kiosk.pricing && Object.keys(kiosk.pricing).length > 0;
     const isPricingOnlineDisabled = hasPricing && kiosk.pricing?.online === false;
+    const kioskIsActive = kiosk.active !== false;
+    const canDeactivateKiosk = clientInfo.commands.edit && kioskIsActive;
     const fullPowerThreshold = getKioskPowerThreshold(kiosk);
     const kioskFlowVersion = getDisplayVersion(kiosk.fversion);
     const currentServerFlowVersion = getDisplayVersion(serverFlowVersion ?? clientInfo?.serverFlowVersion);
@@ -127,6 +129,15 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
     const handleShowRentalPeriod = useCallback((period) => {
         onShowRentalDetails(kiosk.stationid, period);
     }, [kiosk.stationid, onShowRentalDetails]);
+
+    const handleDeactivateKiosk = useCallback((event) => {
+        event.stopPropagation();
+        if (!canDeactivateKiosk) return;
+
+        onCommand(kiosk.stationid, 'activechange', null, kiosk.provisionid, null, {
+            kiosk: { active: false },
+        });
+    }, [canDeactivateKiosk, kiosk.provisionid, kiosk.stationid, onCommand]);
     
     return (
         <div
@@ -278,7 +289,7 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                     stationId={kiosk.stationid}
                     onNavigateToActivity={onNavigateToActivity}
                 />
-                {clientInfo.features.rentals && (
+                {(clientInfo.features.rentals || clientInfo.commands.edit) && (
                     <div
                         className={`relative mt-4 ${isOnline ? 'border-t' : ''} pt-4`}
                         data-kiosk-rental-section={kiosk.stationid}
@@ -294,22 +305,64 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                                 F:{kioskFlowVersion}
                             </span>
                         )}
-                        <RentalStats 
-                            rentalData={rentalData} 
-                            dashboardStats={rentalDashboardStats}
-                            clientInfo={clientInfo}
-                            stationId={kiosk.stationid} 
-                            referenceTime={mockNow}
-                            gatewayOptions={kiosk.hardware?.gatewayoptions}
-                            t={t}
-                            onShowRentalDetails={handleShowRentalPeriod}
-                            onNavigateToActivity={clientInfo.isAdmin ? onNavigateToActivity : undefined}
-                        />
+                        <button
+                            type="button"
+                            data-kiosk-active-pill={kiosk.stationid}
+                            data-kiosk-active={kioskIsActive ? 'true' : 'false'}
+                            onClick={handleDeactivateKiosk}
+                            disabled={!canDeactivateKiosk}
+                            title={kioskIsActive
+                                ? `Mark ${kiosk.stationid} inactive until its next heartbeat`
+                                : `${kiosk.stationid} can only become active after a heartbeat`}
+                            className={`mb-2 inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold transition focus:outline-none focus:ring-2 focus:ring-offset-1 ${
+                                kioskIsActive
+                                    ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 focus:ring-emerald-500 disabled:hover:bg-emerald-100'
+                                    : 'cursor-not-allowed bg-gray-200 text-gray-500'
+                            }`}
+                        >
+                            <span className={`h-2 w-2 rounded-full ${kioskIsActive ? 'bg-emerald-500' : 'bg-gray-400'}`} aria-hidden="true" />
+                            {kioskIsActive ? t('active') : t('inactive')}
+                        </button>
+                        {clientInfo.features.rentals && (
+                            <RentalStats
+                                rentalData={rentalData}
+                                dashboardStats={rentalDashboardStats}
+                                clientInfo={clientInfo}
+                                stationId={kiosk.stationid}
+                                referenceTime={mockNow}
+                                gatewayOptions={kiosk.hardware?.gatewayoptions}
+                                t={t}
+                                onShowRentalDetails={handleShowRentalPeriod}
+                                hideTitle
+                            />
+                        )}
                     </div>
                 )}
                 {clientInfo.features.pricing && kiosk.pricing && (
                     <div className={`mt-4 ${isOnline ? 'border-t' : ''} pt-4 text-xs text-gray-600`}>
-                        <h4 className="font-semibold text-gray-700 mb-2">{t('pricing_structure')}</h4>
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                            <h4 className="font-semibold text-gray-700">{t('pricing_structure')}</h4>
+                            {clientInfo.features.rentals && (
+                                typeof onNavigateToActivity === 'function' && clientInfo.isAdmin ? (
+                                    <button
+                                        type="button"
+                                        className="ml-auto inline-flex items-center gap-1.5 rounded-sm text-right font-semibold text-[#9D6B8F] underline decoration-[#D7B4CA] underline-offset-2 hover:text-[#7F536F] focus:outline-none focus:ring-2 focus:ring-[#B784A7]"
+                                        aria-label={`View activity for ${kiosk.stationid}`}
+                                        onClick={(event) => {
+                                            event.stopPropagation();
+                                            onNavigateToActivity(kiosk.stationid);
+                                        }}
+                                    >
+                                        <svg data-icon="activity-pulse" className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 12h4l2.25-6 4.5 12L16 12h5" />
+                                        </svg>
+                                        {t('activity')}
+                                    </button>
+                                ) : (
+                                    <span className="ml-auto font-semibold text-gray-700">{t('activity')}</span>
+                                )
+                            )}
+                        </div>
                         <div className="space-y-1">
                             <div className="flex justify-between">
                                 <span>{t('profile')}:</span>

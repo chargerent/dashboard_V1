@@ -61,7 +61,7 @@ const CommissionStats = ({ clientInfo, accountMTD, accountYTD, repMTD, repYTD, s
     );
 };
 
-function LocationSummary({ location, kiosks, _chargerThreshold, clientInfo, rentalData, rentalDashboardStatsByStationId, useRentalDashboardSummaries = false, referenceTime, t, onNavigateToRentals }) {
+function LocationSummary({ location, kiosks, _chargerThreshold, clientInfo, rentalData, rentalDashboardStatsByStationId, useRentalDashboardSummaries = false, referenceTime, t, onNavigateToRentals, onCommand }) {
     const clientRevShare = useMemo(() => {
         const value = Number(clientInfo?.revShare ?? clientInfo?.commission);
         return Number.isFinite(value) ? value : 0;
@@ -212,9 +212,21 @@ function LocationSummary({ location, kiosks, _chargerThreshold, clientInfo, rent
     const canShowRentalInfo = clientInfo.features.rentals || clientInfo.features.lease_revenue || clientInfo.features.rental_counts || clientInfo.features.rental_revenue;
     const canViewRentalDetails = clientInfo.isAdmin || clientInfo.features.rentals;
     const stationIds = useMemo(() => kiosks.map(kiosk => kiosk.stationid), [kiosks]);
+    const activeKiosks = useMemo(() => kiosks.filter(kiosk => kiosk.active !== false), [kiosks]);
+    const locationIsActive = activeKiosks.length > 0;
+    const canDeactivateLocation = clientInfo.commands.edit && locationIsActive && typeof onCommand === 'function';
     const handleShowRentalDetails = useCallback((period) => {
         onNavigateToRentals?.({ period, stationIds });
     }, [onNavigateToRentals, stationIds]);
+    const handleDeactivateLocation = useCallback(() => {
+        if (!canDeactivateLocation) return;
+
+        activeKiosks.forEach((kiosk) => {
+            onCommand(kiosk.stationid, 'activechange', null, kiosk.provisionid, null, {
+                kiosk: { active: false },
+            });
+        });
+    }, [activeKiosks, canDeactivateLocation, onCommand]);
 
     const showAccountCommission = clientInfo.isAdmin
         ? kiosks.some(k => Number(k.info.accountpercent) > 0)
@@ -228,6 +240,24 @@ function LocationSummary({ location, kiosks, _chargerThreshold, clientInfo, rent
                     <h2 className="text-2xl font-bold text-gray-800">{location}</h2>
                     {clientInfo.features.address && <p className="text-sm text-gray-500 mt-1">{summary.addressInfo}</p>}
                 </div>
+                <button
+                    type="button"
+                    data-location-active-pill={location}
+                    data-location-active={locationIsActive ? 'true' : 'false'}
+                    onClick={handleDeactivateLocation}
+                    disabled={!canDeactivateLocation}
+                    title={locationIsActive
+                        ? `Mark all kiosks at ${location} inactive until each kiosk sends a heartbeat`
+                        : `Kiosks at ${location} can only become active after a heartbeat`}
+                    className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold transition focus:outline-none focus:ring-2 focus:ring-offset-1 ${
+                        locationIsActive
+                            ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 focus:ring-emerald-500 disabled:hover:bg-emerald-100'
+                            : 'cursor-not-allowed bg-gray-200 text-gray-500'
+                    }`}
+                >
+                    <span className={`h-2 w-2 rounded-full ${locationIsActive ? 'bg-emerald-500' : 'bg-gray-400'}`} aria-hidden="true" />
+                    {locationIsActive ? t('active') : t('inactive')}
+                </button>
             </div>
             <div className={`grid grid-cols-1 md:grid-cols-2 ${canShowRentalInfo ? 'lg:grid-cols-4' : 'lg:grid-cols-2'} gap-4`}>
                 <RectangularProgress
