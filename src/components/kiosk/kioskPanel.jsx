@@ -1,12 +1,14 @@
 // src/components/kiosk/KioskPanel.jsx
 
-import { memo, useMemo, useCallback } from 'react';
+import { memo, useMemo, useCallback, useState } from 'react';
 import { BoltIcon, HeartIcon } from '@heroicons/react/24/solid';
 import { DevicePhoneMobileIcon } from '@heroicons/react/24/outline';
 import { isKioskOnline, getKioskPowerThreshold, isModuleOnline, isNewSchemaKiosk, isSlotActivelyCharging } from '../../utils/helpers';
+import { getPhonePowerState, phoneTimestampToMillis } from '../../utils/phoneControl';
 import RentalStats from '../Dashboard/RentalStats';
 import GatewayIcon from './GatewayIcon';
 import KioskStatusAlert from './KioskStatusAlert';
+import ScannerAdminBarcodeModal from './ScannerAdminBarcodeModal';
 
 const BrokenHeartIcon = ({ className = '' }) => (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
@@ -28,7 +30,8 @@ const getNumericVersion = (version) => {
     return Number.isFinite(parsedVersion) ? parsedVersion : null;
 };
 
-function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rentalData, rentalDashboardStats, clientInfo, t, onCommand, onShowRentalDetails, urgentIncidents, onNavigateToActivity, serverFlowVersion, hasAssignedPhone = false, onNavigateToPhoneControl }) {
+function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rentalData, rentalDashboardStats, clientInfo, t, onCommand, onShowRentalDetails, urgentIncidents, onNavigateToActivity, serverFlowVersion, hasAssignedPhone = false, phoneDevice = null, onNavigateToPhoneControl }) {
+    const [scannerBarcodeModalOpen, setScannerBarcodeModalOpen] = useState(false);
     const isOnline = isKioskOnline(kiosk, mockNow);
     const isV2Kiosk = isNewSchemaKiosk(kiosk);
     const canEditKiosk = isOnline || isV2Kiosk;
@@ -38,6 +41,8 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
     const isPricingOnlineDisabled = hasPricing && kiosk.pricing?.online === false;
     const kioskIsActive = kiosk.active !== false;
     const canDeactivateKiosk = clientInfo.commands.edit && kioskIsActive;
+    const canShowScannerAdminBarcodes = clientInfo?.isAdmin === true
+        && String(kiosk.hardware?.gateway || '').trim().toUpperCase() === 'SCANNER';
     const fullPowerThreshold = getKioskPowerThreshold(kiosk);
     const kioskFlowVersion = getDisplayVersion(kiosk.fversion);
     const currentServerFlowVersion = getDisplayVersion(serverFlowVersion ?? clientInfo?.serverFlowVersion);
@@ -56,6 +61,28 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
             : kioskFlowNumber !== null && currentServerFlowNumber !== null && kioskFlowNumber > currentServerFlowNumber
                 ? 'ahead'
                 : 'unknown';
+    const phonePowerState = getPhonePowerState(
+        phoneDevice,
+        phoneTimestampToMillis(mockNow),
+    );
+    const rawPhoneBatteryPercent = phoneDevice?.inventory?.batteryPercent;
+    const phoneBatteryPercent = Number(rawPhoneBatteryPercent);
+    const hasPhoneBatteryPercent = rawPhoneBatteryPercent !== null
+        && rawPhoneBatteryPercent !== undefined
+        && rawPhoneBatteryPercent !== ''
+        && Number.isFinite(phoneBatteryPercent)
+        && phoneBatteryPercent >= 0
+        && phoneBatteryPercent <= 100;
+    const phoneBatteryLabel = hasPhoneBatteryPercent ? `${Math.round(phoneBatteryPercent)}%` : '';
+    const phonePowerStyles = {
+        powered: 'text-green-600 hover:bg-green-100 hover:text-green-700',
+        unplugged: 'text-orange-500 hover:bg-orange-100 hover:text-orange-700',
+        offline: 'text-red-600 hover:bg-red-100 hover:text-red-700',
+    };
+    const phonePowerDescription = phonePowerState === 'powered'
+        ? phoneDevice?.inventory?.batteryCharging === true ? 'charging' : 'connected to power'
+        : phonePowerState === 'unplugged' ? 'unplugged' : 'offline';
+    const phoneTitle = `Phone ${phonePowerDescription}${phoneBatteryLabel ? ` · ${phoneBatteryLabel}` : ''}`;
     const phoneLink = hasAssignedPhone && typeof onNavigateToPhoneControl === 'function' ? (
         <button
             type="button"
@@ -63,12 +90,14 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                 event.stopPropagation();
                 onNavigateToPhoneControl(kiosk.stationid);
             }}
-            className="rounded-full p-0.5 text-violet-500 transition-colors hover:bg-violet-100 hover:text-violet-700"
-            title={`Open phone assigned to ${kiosk.stationid}`}
-            aria-label={`Open phone assigned to ${kiosk.stationid}`}
+            className={`inline-flex min-h-6 items-center gap-0.5 rounded-full px-1 py-0.5 text-[10px] font-bold transition-colors ${phonePowerStyles[phonePowerState]}`}
+            title={`${phoneTitle}. Open phone assigned to ${kiosk.stationid}`}
+            aria-label={`${phoneTitle}. Open phone assigned to ${kiosk.stationid}`}
             data-kiosk-phone-link={kiosk.stationid}
+            data-phone-power-state={phonePowerState}
         >
             <DevicePhoneMobileIcon className="h-4 w-4" />
+            {phoneBatteryLabel && <span>{phoneBatteryLabel}</span>}
         </button>
     ) : null;
     
@@ -166,9 +195,25 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                         )}
                     </div>
                     <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-1.5" title={t('gateway_type')}>
-                            <GatewayIcon gateway={kiosk.hardware?.gateway} t={t} />
-                        </div>
+                        {canShowScannerAdminBarcodes ? (
+                            <button
+                                type="button"
+                                onClick={(event) => {
+                                    event.stopPropagation();
+                                    setScannerBarcodeModalOpen(true);
+                                }}
+                                className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-full text-gray-600 transition-colors hover:bg-blue-100 hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:min-h-8 sm:min-w-8"
+                                title="Show scanner admin barcodes"
+                                aria-label={`Show scanner admin barcodes for ${kiosk.stationid}`}
+                                data-scanner-barcode-trigger={kiosk.stationid}
+                            >
+                                <GatewayIcon gateway={kiosk.hardware?.gateway} t={t} />
+                            </button>
+                        ) : (
+                            <div className="flex items-center gap-1.5" title={t('gateway_type')}>
+                                <GatewayIcon gateway={kiosk.hardware?.gateway} t={t} />
+                            </div>
+                        )}
                         <div className="flex items-center gap-1.5" title={t('module_output_status')}>
                             {kiosk.modules.map(module => {
                                 const hasHeartbeatOutput = module.heartbeatOutput !== undefined && module.heartbeatOutput !== null;
@@ -399,6 +444,11 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
                     </div>
                 )}
             </div>
+            <ScannerAdminBarcodeModal
+                stationId={kiosk.stationid}
+                isOpen={scannerBarcodeModalOpen}
+                onClose={() => setScannerBarcodeModalOpen(false)}
+            />
         </div>
     );
 };

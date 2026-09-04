@@ -9,6 +9,7 @@ import {
   getPhoneKioskCountryCode,
   getPhoneStationCountryCode,
   getPhoneConnectionState,
+  getPhonePowerState,
   isPhoneWebRtcActive,
   isPhoneAgentUpdateAvailable,
   isPhoneRemoteInputAvailable,
@@ -156,6 +157,11 @@ test('normalizes kiosk assignment and Android inventory', () => {
       systemUpdateReceivedAt: 900,
       agentVersionCode: 15,
       batteryPercent: 84,
+      batteryCharging: true,
+      batteryPowerConnected: true,
+      batteryPowerSource: 'usb',
+      batteryProtectionEnabled: true,
+      batteryProtectionThresholdPercent: 50,
       isDeviceOwner: true,
       network: 'wifi',
       networkStatus: 'online',
@@ -212,6 +218,12 @@ test('normalizes kiosk assignment and Android inventory', () => {
   assert.equal(device.inventory.systemUpdatePending, true);
   assert.equal(device.inventory.systemUpdateReceivedAt, 900);
   assert.equal(device.inventory.agentVersionCode, 15);
+  assert.equal(device.inventory.batteryPercent, 84);
+  assert.equal(device.inventory.batteryCharging, true);
+  assert.equal(device.inventory.batteryPowerConnected, true);
+  assert.equal(device.inventory.batteryPowerSource, 'usb');
+  assert.equal(device.inventory.batteryProtectionEnabled, true);
+  assert.equal(device.inventory.batteryProtectionThresholdPercent, 50);
   assert.equal(device.inventory.isDeviceOwner, true);
   assert.equal(device.inventory.wifiSsid, 'OurHome');
   assert.equal(device.inventory.phoneNumber, '+33612345678');
@@ -232,6 +244,46 @@ test('normalizes kiosk assignment and Android inventory', () => {
   assert.equal(phoneHotspotControlLabel(device.inventory), 'Compatibility control');
   assert.equal(device.location.latitude, 45.5019);
   assert.equal(device.location.capturedAtMs, 1234);
+});
+
+test('maps kiosk phone power state with offline status taking priority', () => {
+  const now = 2_000_000;
+  const device = normalizePhoneDevice({
+    lastSeenAt: now - 1_000,
+    inventory: {batteryPercent: 72, batteryPowerConnected: true},
+  }, 'powered-phone');
+  assert.equal(getPhonePowerState(device, now), 'powered');
+
+  device.inventory.batteryPowerConnected = false;
+  assert.equal(getPhonePowerState(device, now), 'unplugged');
+
+  device.inventory.batteryPowerConnected = true;
+  assert.equal(getPhonePowerState(device, now + 91_000), 'offline');
+
+  const legacyDevice = normalizePhoneDevice({
+    lastSeenAt: now,
+    inventory: {batteryCharging: true},
+  }, 'legacy-phone');
+  assert.equal(legacyDevice.inventory.batteryPowerConnected, true);
+  assert.equal(getPhonePowerState(legacyDevice, now), 'powered');
+});
+
+test('feeds Agent battery telemetry into the clickable kiosk-card phone status', () => {
+  const kioskPanelSource = readFileSync(
+    new URL('../src/components/kiosk/kioskPanel.jsx', import.meta.url),
+    'utf8',
+  );
+  const dashboardSource = readFileSync(
+    new URL('../src/pages/DashboardPage.jsx', import.meta.url),
+    'utf8',
+  );
+  assert.match(appSource, /phoneControl_listDevices/);
+  assert.match(appSource, /setAssignedPhoneDevicesByStationId/);
+  assert.match(dashboardSource, /phoneDevice=\{assignedPhoneDevicesByStationId\.get/);
+  assert.match(kioskPanelSource, /data-phone-power-state=\{phonePowerState\}/);
+  assert.match(kioskPanelSource, /powered: 'text-green-600/);
+  assert.match(kioskPanelSource, /unplugged: 'text-orange-500/);
+  assert.match(kioskPanelSource, /offline: 'text-red-600/);
 });
 
 test('distinguishes direct, compatibility, and unavailable hotspot control', () => {

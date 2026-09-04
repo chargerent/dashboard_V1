@@ -10,6 +10,7 @@ import DashboardPage from './pages/DashboardPage.jsx';
 import { isKioskOnline, isNewSchemaKiosk, isV2Kiosk, normalizeKioskData, normalizeKioskInfoForSchema } from './utils/helpers.js';
 import { callFunctionWithAuth } from './utils/callableRequest.js';
 import { getFirestoreKioskStationId } from './utils/firestoreStationId.js';
+import { normalizePhoneDevice } from './utils/phoneControl.js';
 import {
   applyRefundConfirmationToRental,
   isPendingRefundStatus,
@@ -851,6 +852,9 @@ function App() {
   const [serverFlowVersion, setServerFlowVersion] = useState('');
   const [serverUiVersion, setServerUiVersion] = useState('');
   const [assignedPhoneStationIds, setAssignedPhoneStationIds] = useState(() => new Set());
+  const [assignedPhoneDevicesByStationId, setAssignedPhoneDevicesByStationId] = useState(
+    () => new Map(),
+  );
   const [language, setLanguage] = useState('en');
   const [page, setPage] = useState(() => readActivityNavigation().page); // 'dashboard', 'activity', 'admin', 'media', 'binding', 'templates', 'kiosk-editor', 'rentals', 'chargers', 'provision', 'reporting', 'analytics', 'testing'
   const [activityInitialStation, setActivityInitialStation] = useState(() => readActivityNavigation().stationId);
@@ -1062,6 +1066,7 @@ function App() {
     setServerFlowVersion('');
     setServerUiVersion('');
     setAssignedPhoneStationIds(new Set());
+    setAssignedPhoneDevicesByStationId(new Map());
     setLanguage('en');
     setPage('dashboard');
     setInitialStatusCheck(false);
@@ -1171,6 +1176,7 @@ function App() {
         setServerFlowVersion('');
         setServerUiVersion('');
         setAssignedPhoneStationIds(new Set());
+        setAssignedPhoneDevicesByStationId(new Map());
         setLanguage('en');
         setInitialStatusCheck(false);
         setAllStationsData([]);
@@ -1285,6 +1291,51 @@ function App() {
       setAssignedPhoneStationIds(new Set());
     });
   }, [canUsePhoneControl, hasAuthToken, serverVersionListenerUid]);
+
+  useEffect(() => {
+    if (!hasAuthToken || !auth.currentUser || !serverVersionListenerUid || !canUsePhoneControl) {
+      setAssignedPhoneDevicesByStationId(new Map());
+      return undefined;
+    }
+    if (page !== 'dashboard') return undefined;
+
+    let disposed = false;
+    let requestInFlight = false;
+    const loadPhoneStatus = async () => {
+      if (requestInFlight) return;
+      requestInFlight = true;
+      try {
+        const response = await callFunctionWithAuth('phoneControl_listDevices');
+        if (disposed) return;
+        const devicesByStationId = new Map();
+        (Array.isArray(response?.devices) ? response.devices : []).forEach((rawDevice) => {
+          const device = normalizePhoneDevice(
+            rawDevice,
+            rawDevice?.id || rawDevice?.deviceId,
+          );
+          if (!device.stationId) return;
+          const existing = devicesByStationId.get(device.stationId);
+          if (!existing || device.lastSeenAtMs >= existing.lastSeenAtMs) {
+            devicesByStationId.set(device.stationId, device);
+          }
+        });
+        setAssignedPhoneDevicesByStationId(devicesByStationId);
+      } catch (error) {
+        // Preserve the last snapshot. Its heartbeat timestamp will still turn the icon red if
+        // the Agent stays unreachable, while a temporary request failure will not hide it.
+        console.warn('Unable to refresh managed-phone battery status:', error);
+      } finally {
+        requestInFlight = false;
+      }
+    };
+
+    loadPhoneStatus();
+    const interval = window.setInterval(loadPhoneStatus, 60_000);
+    return () => {
+      disposed = true;
+      window.clearInterval(interval);
+    };
+  }, [canUsePhoneControl, hasAuthToken, page, serverVersionListenerUid]);
 
   // Effect to handle token expiration when tab/PWA becomes visible again
   useEffect(() => {
@@ -2955,6 +3006,7 @@ function App() {
       onNavigateToActivity={onNavigateToActivity}
       onNavigateToPhoneControl={onNavigateToPhoneControl}
       assignedPhoneStationIds={assignedPhoneStationIds}
+      assignedPhoneDevicesByStationId={assignedPhoneDevicesByStationId}
       operationalActivityEnabled={clientInfo?.isAdmin === true}
       initialSearch={dashboardSearchTerm}
       onNavigateToReporting={() => {

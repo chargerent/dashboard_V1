@@ -217,6 +217,7 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
   const agentPhoneNumber = currentAgentPhoneNumber || retainedAgentPhoneNumber;
   const manualPhoneNumber = String(rawDevice.manualPhoneNumber || '').trim();
   const effectivePhoneNumber = agentPhoneNumber || manualPhoneNumber;
+  const batteryPercent = optionalNumber(inventory.batteryPercent);
 
   return {
     id: String(rawDevice.deviceId || documentId || '').trim(),
@@ -284,10 +285,27 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
       agentVersionCode: Number.isSafeInteger(Number(inventory.agentVersionCode))
         ? Number(inventory.agentVersionCode)
         : 0,
-      batteryPercent: Number.isFinite(Number(inventory.batteryPercent))
-        ? Number(inventory.batteryPercent)
+      batteryPercent: batteryPercent !== null && batteryPercent >= 0 && batteryPercent <= 100
+        ? batteryPercent
         : null,
       batteryCharging: inventory.batteryCharging === true,
+      batteryPowerConnected: inventory.batteryPowerConnected === true
+        ? true
+        : inventory.batteryPowerConnected === false
+          ? false
+          : inventory.batteryCharging === true,
+      batteryPowerSource: String(inventory.batteryPowerSource || '').trim().toLowerCase(),
+      batteryProtectionEnabled: inventory.batteryProtectionEnabled === true,
+      batteryProtectionThresholdPercent: optionalNumber(
+        inventory.batteryProtectionThresholdPercent,
+      ),
+      batteryProtectionShutdownLatched: inventory.batteryProtectionShutdownLatched === true,
+      batteryProtectionLowUnpluggedSince: phoneTimestampToMillis(
+        inventory.batteryProtectionLowUnpluggedSince,
+      ),
+      batteryProtectionLastAttemptAt: phoneTimestampToMillis(
+        inventory.batteryProtectionLastAttemptAt,
+      ),
       network: String(inventory.network || 'offline').toLowerCase(),
       networkStatus: String(inventory.networkStatus || '').trim().toLowerCase(),
       networkValidated: inventory.networkValidated === true,
@@ -348,6 +366,11 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
 export function getPhoneConnectionState(device, now = Date.now()) {
   if (!device?.lastSeenAtMs) return 'never';
   return now - device.lastSeenAtMs <= PHONE_ONLINE_WINDOW_MS ? 'online' : 'offline';
+}
+
+export function getPhonePowerState(device, now = Date.now()) {
+  if (getPhoneConnectionState(device, now) !== 'online') return 'offline';
+  return device?.inventory?.batteryPowerConnected === true ? 'powered' : 'unplugged';
 }
 
 export function summarizePhoneLines(devices = [], now = Date.now()) {

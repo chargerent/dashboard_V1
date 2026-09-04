@@ -2736,7 +2736,23 @@ export default function PhoneControlPage({
                     </div>
 
                     <div className="mt-5 grid grid-cols-2 gap-2 md:grid-cols-5">
-                      <Metric icon={Battery100Icon} label="Battery" value={selectedDevice.inventory.batteryPercent == null ? 'Unknown' : `${selectedDevice.inventory.batteryPercent}%${selectedDevice.inventory.batteryCharging ? ' · Charging' : ''}`} />
+                      <Metric
+                        icon={Battery100Icon}
+                        label="Battery"
+                        value={selectedDevice.inventory.batteryPercent == null
+                          ? 'Unknown'
+                          : `${selectedDevice.inventory.batteryPercent}% · ${selectedDevice.inventory.batteryPowerConnected
+                            ? selectedDevice.inventory.batteryCharging ? 'Charging' : 'Power connected'
+                            : 'Unplugged'}`}
+                        detail={selectedDevice.inventory.batteryProtectionShutdownLatched
+                          ? 'Shutdown used · stable power required to re-arm'
+                          : selectedDevice.inventory.batteryProtectionEnabled
+                            ? 'Protected below 50% while unplugged'
+                            : ''}
+                        detailTone={selectedDevice.inventory.batteryProtectionShutdownLatched
+                          ? 'red'
+                          : 'slate'}
+                      />
                       <Metric
                         icon={SignalIcon}
                         label="Network"
