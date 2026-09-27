@@ -56,7 +56,7 @@ const getEffectiveAdminFeatures = (account, featuresList) => {
     };
 };
 
-const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsList, t, isEditing, editedData, onEdit, onCancel, onSave, onDataChange, onDelete, currentUser, lockoutData, onUnlock, onSendLoginInvite, inviteBusy }) => {
+const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsList, t, isEditing, editedData, onEdit, onCancel, onSave, onDataChange, onDelete, currentUser, lockoutData, onUnlock, onSendLoginInvite, inviteBusy, workspaceStatusContent }) => {
     const [openSection, setOpenSection] = useState(null);
 
     useEffect(() => {
@@ -315,6 +315,7 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
 
         return (
             <>
+                {workspaceStatusContent && <div className="p-3">{workspaceStatusContent}</div>}
                 <div className={`p-4 border-b ${isLocked ? 'border-red-200' : 'border-gray-200'}`}>
                     {isLocked && (
                         <div className="mb-2 flex items-center gap-1.5">

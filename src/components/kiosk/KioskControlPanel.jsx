@@ -1,7 +1,7 @@
 // src/components/kiosk/KioskControlPanel.jsx
 
 import { useMemo } from 'react';
-import { SpeakerXMarkIcon } from '@heroicons/react/24/outline';
+import { CameraIcon, SpeakerXMarkIcon } from '@heroicons/react/24/outline';
 import { getKioskPowerThreshold } from '../../utils/helpers';
 import { logKioskInteraction } from '../../utils/kioskInteractionDebug';
 
@@ -287,6 +287,18 @@ function KioskControlPanel({ kiosk, t, onCommand, serverUiVersion, serverFlowVer
 
                 {canControlAudio && (
                     <V2AudioControl kiosk={kiosk} t={t} onCommand={onCommand} disabled={disabled} />
+                )}
+
+                {clientInfo.commands.screenshot && (
+                    <ControlButton
+                        debugAction="screenshot"
+                        debugContext={debugContext}
+                        onClick={() => onCommand(kiosk.stationid, 'screenshot')}
+                        disabled={disabled}
+                        label={t('capture_screen')}
+                        className="col-span-2 bg-cyan-100 hover:bg-cyan-200 text-cyan-800"
+                        icon={<CameraIcon className="h-5 w-5 stroke-2" />}
+                    />
                 )}
                 
                 {clientInfo.commands.updates && !isV2 && (

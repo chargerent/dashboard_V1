@@ -1,0 +1,63 @@
+services:
+  runtime:
+    build:
+      context: ../../..
+      dockerfile: services/apollo-us-runtime/Dockerfile
+    restart: unless-stopped
+    environment:
+      APOLLO_ENVIRONMENT: us-lab
+      AVAILABILITY_MIN_DISPLAY_MS: 0
+      CALLBACK_TOKEN_SECRET: apollo-us-lab-callback-token
+      CPS_ENVIRONMENT: test
+      FIRESTORE_DATABASE: apollo-us-lab
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT}
+      INTERNAL_HMAC_SECRET: apollo-us-lab-internal-hmac
+      PAYTER_API_KEY_SECRET: apollo-us-lab-payter-cps-api-key
+      PORT: 8080
+      PUBLIC_BASE_URL: https://${PUBLIC_HOST}
+      PUBSUB_SUBSCRIPTION: apollo-us-lab-runtime
+      PUBSUB_TOPIC: apollo-us-lab-events
+      QR_HASH_SECRET: apollo-us-lab-qr-hash-key
+      QR_READER_TIMEOUT_MS: 45000
+      QR_READER_STATE_ATTEMPTS: 20
+      QR_READER_STATE_POLL_MS: 100
+      SCREEN_RETURN_DELAY_MS: 7000
+      TERMINAL_RECOVERY_POLL_MS: 3000
+      V2_MQTT_CREDENTIALS_SECRET: BESITER_MQTT_CREDENTIALS
+      V2_MQTT_URL: mqtt://${V2_MQTT_HOST}:1883
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/healthz').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "5"}
+    networks: [private]
+
+  proxy:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PUBLIC_HOST: ${PUBLIC_HOST}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      runtime:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "5"}
+    networks: [private]
+
+networks:
+  private:
+
+volumes:
+  caddy_config:
+  caddy_data:

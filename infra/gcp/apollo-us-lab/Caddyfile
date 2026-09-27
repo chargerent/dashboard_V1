@@ -1,0 +1,22 @@
+{
+  email infrastructure@chargerent.net
+  admin off
+}
+
+{$PUBLIC_HOST} {
+  @callbackPaths path /callbacks/*
+  log_skip @callbackPaths
+  encode zstd gzip
+  header {
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    X-Content-Type-Options nosniff
+    X-Frame-Options DENY
+    Referrer-Policy no-referrer
+    -Server
+  }
+  reverse_proxy runtime:8080
+  log {
+    output stdout
+    format json
+  }
+}

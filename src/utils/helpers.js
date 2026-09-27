@@ -504,6 +504,7 @@ export const normalizeKioskData = (kiosks) => {
             },
             media: normalizeMediaOptions(kiosk.media),
             pricing: kiosk.pricing || {},
+            screen: isPlainObject(kiosk.screen) ? { ...kiosk.screen } : {},
             ui: kiosk.ui || {},
             uiProfileId: kiosk.uiProfileId || kiosk.ui?.profileId || '',
             reportedUiProfile: kiosk.reportedUiProfile || null,

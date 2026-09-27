@@ -16,6 +16,7 @@ import {
     applyDashboardAssignedStationId,
     isAiBoothProvision,
 } from '../utils/provisioning';
+import { toGatewayOption, toStoredKioskGateway } from '../utils/kioskGateway';
 
 const initialFormData = {
     provisionid: '',
@@ -681,7 +682,7 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAdmin, onLogout, t, 
                                     <FormMultiSwitch label="Audio" name="audio" options={['on', 'off']} value={formData.hardware.audio} section="hardware" onDataChange={onDataChange} />
                                     <FormSlider label="Volume" name="volume" value={formData.hardware.volume} section="hardware" min="0" max="100" onDataChange={onDataChange} />
                                     <FormSlider label="Power Threshold" name="power" value={formData.hardware.power} section="hardware" min="0" max="100" onDataChange={onDataChange} />
-                                    <FormMultiSwitch label="Gateway" name="gateway" options={GATEWAYS} value={{'PAYTERP68': 'P68', 'APOLLO': 'APO'}[formData.hardware.gateway] || formData.hardware.gateway} section="hardware" onDataChange={(sec, name, val) => handleMultiSwitchChange(sec, name, val, {'P68': 'PAYTERP68', 'APO': 'APOLLO'})} />
+                                    <FormMultiSwitch label="Gateway" name="gateway" options={GATEWAYS} value={toGatewayOption(formData.hardware.gateway)} section="hardware" onDataChange={(sec, name, val) => onDataChange(sec, name, toStoredKioskGateway(val))} />
                                     <FormInput label={selectedIsAiBooth ? 'SN (Optional)' : 'SN'} name="sn" value={formData.hardware.sn} section="hardware" onDataChange={onDataChange} isInvalid={missingFields.includes('hardware.sn')} />
                                     <FormMultiSwitch label="Gateway Options" name="gatewayoptions" options={selectedIsV2Kiosk ? V2_GATEWAY_OPTIONS : V1_GATEWAY_OPTIONS} value={{'INITIALPRICE': 'INITIAL', 'FULLPRICE':'FULL', 'OPENMODE':'OPEN', 'CLOSEDLOOP':'CLOSED', 'RESERVATION':'RES'}[formData.hardware.gatewayoptions] || formData.hardware.gatewayoptions} section="hardware" onDataChange={(sec, name, val) => handleMultiSwitchChange(sec, name, val, {'INITIAL': 'INITIALPRICE', 'FULL': 'FULLPRICE', 'OPEN': 'OPENMODE', 'CLOSED': 'CLOSEDLOOP', 'RES': 'RESERVATION'})} />
                                     <FormMultiSwitch label="Screen" name="screen" options={['7', '10', '16', '21', '32', '49']} value={String(formData.hardware.screen || '49').toUpperCase().replace('IN', '')} section="hardware" onDataChange={onDataChange} />

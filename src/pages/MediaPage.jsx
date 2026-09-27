@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArchiveBoxIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { ArchiveBoxIcon, ComputerDesktopIcon, TrashIcon } from '@heroicons/react/24/outline';
 import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
 import ConfirmationModal from '../components/UI/ConfirmationModal.jsx';
 import LoadingSpinner from '../components/UI/LoadingSpinner.jsx';
@@ -1257,6 +1257,20 @@ export default function MediaPage({
           </div>
 
           <div className="flex items-center gap-3">
+            {import.meta.env.DEV && (
+              <a href="?page=kiosk-control-lab" className="rounded-md bg-emerald-100 p-2 text-emerald-700 hover:bg-emerald-200" title="Open local Kiosk Control" aria-label="Kiosk Control">
+                <ComputerDesktopIcon className="h-6 w-6" />
+              </a>
+            )}
+            {import.meta.env.DEV && (
+              <a
+                href="?page=media-lab"
+                className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
+                title="Open local media studio"
+              >
+                Android media lab
+              </a>
+            )}
             <button
               type="button"
               onClick={onNavigateToDashboard}

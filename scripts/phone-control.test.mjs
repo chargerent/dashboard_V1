@@ -5,6 +5,7 @@ import {readFileSync} from 'node:fs';
 import {
   createPhoneCommandRequestId,
   formatPhoneRelativeTime,
+  getPhoneAndroidUpdateState,
   getKioskForPhone,
   getPhoneKioskCountryCode,
   getPhoneStationCountryCode,
@@ -48,6 +49,8 @@ test('routes assigned phone Station IDs to an exact dashboard filter', () => {
 });
 
 test('keeps the live phone frame and assignment panel inside a mobile viewport', () => {
+  assert.match(phoneControlSource, /min-h-screen w-full max-w-full touch-pan-y overflow-x-hidden/);
+  assert.match(phoneControlSource, /mx-auto w-full min-w-0 max-w-screen-2xl space-y-5 overflow-x-hidden/);
   assert.match(phoneControlSource, /max-w-\[160px\]/);
   assert.match(phoneControlSource, /sm:max-w-\[240px\]/);
   assert.match(phoneControlSource, /min-w-0 overflow-hidden rounded-xl/);
@@ -195,6 +198,15 @@ test('normalizes kiosk assignment and Android inventory', () => {
       hotspotAlwaysOn: true,
       hotspotActive: true,
       hotspotState: 'on',
+      usbTetherDesired: true,
+      usbConnected: true,
+      usbConfigured: true,
+      usbTetherFunctionEnabled: true,
+      usbTetherLinkActive: true,
+      usbTetherState: 'active',
+      usbTetherRetryCount: 0,
+      usbTetherControlMode: 'settings_automation',
+      usbTetherControlGranted: true,
     },
     location: {
       latitude: 45.5019,
@@ -240,10 +252,44 @@ test('normalizes kiosk assignment and Android inventory', () => {
   assert.equal(device.inventory.availableWifiNetworks[0].security, 'wpa2_wpa3');
   assert.equal(device.inventory.hotspotActive, true);
   assert.equal(device.inventory.hotspotControlMode, 'settings_automation');
+  assert.equal(device.inventory.usbTetherDesired, true);
+  assert.equal(device.inventory.usbConnected, true);
+  assert.equal(device.inventory.usbTetherFunctionEnabled, true);
+  assert.equal(device.inventory.usbTetherLinkActive, true);
+  assert.equal(device.inventory.usbTetherState, 'active');
+  assert.equal(device.inventory.usbTetherControlGranted, true);
   assert.equal(phoneHotspotLabel(device.inventory), 'Last confirmed on');
   assert.equal(phoneHotspotControlLabel(device.inventory), 'Compatibility control');
   assert.equal(device.location.latitude, 45.5019);
   assert.equal(device.location.capturedAtMs, 1234);
+});
+
+test('presents Android update requests as an Android-managed lifecycle', () => {
+  assert.deepEqual(getPhoneAndroidUpdateState({
+    systemUpdateWindowActive: true,
+    systemUpdatePending: true,
+    systemUpdatePolicy: 'automatic',
+  }), {
+    key: 'pending-requested',
+    buttonLabel: 'Requested',
+    detail: 'Update pending · Android will install and restart automatically',
+  });
+  assert.deepEqual(getPhoneAndroidUpdateState({
+    systemUpdateWindowActive: true,
+    systemUpdatePending: false,
+    systemUpdatePolicy: 'automatic',
+  }), {
+    key: 'requested',
+    buttonLabel: 'Requested',
+    detail: 'Automatic update requested · waiting for Android',
+  });
+  assert.equal(getPhoneAndroidUpdateState({
+    systemUpdateWindowActive: false,
+    systemUpdatePending: true,
+    systemUpdatePolicy: 'postponed',
+  }).buttonLabel, 'Start');
+  assert.match(phoneControlSource, /Start Android's automatic update process/);
+  assert.match(phoneControlSource, /displayState = command\.operation === 'INSTALL_SYSTEM_UPDATE'/);
 });
 
 test('maps kiosk phone power state with offline status taking priority', () => {

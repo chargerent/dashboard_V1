@@ -165,8 +165,9 @@ function KioskPanel({ kiosk, isExpanded, onToggle, onToggleEdit, mockNow, rental
 
         onCommand(kiosk.stationid, 'activechange', null, kiosk.provisionid, null, {
             kiosk: { active: false },
+            confirmationText: t('deactivate_kiosk_confirmation').replace('{stationid}', kiosk.stationid),
         });
-    }, [canDeactivateKiosk, kiosk.provisionid, kiosk.stationid, onCommand]);
+    }, [canDeactivateKiosk, kiosk.provisionid, kiosk.stationid, onCommand, t]);
     
     return (
         <div

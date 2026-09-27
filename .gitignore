@@ -14,6 +14,9 @@ dist-ssr
 *.local
 tmp/hq-vm.json
 
+# Local vendor API collections may contain test credentials.
+Apollo API/*.postman_collection.json
+
 # Env files
 .env
 .env.*

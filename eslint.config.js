@@ -88,6 +88,10 @@ export default [
     },
   },
   {
+    files: ["functions/**/*.mjs"],
+    languageOptions: {sourceType: "module", globals: {...globals.node}},
+  },
+  {
     files: [
       "scripts/**/*.{js,mjs,cjs}",
       "*.config.js",

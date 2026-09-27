@@ -1,7 +1,15 @@
 // src/pages/CreateClientForm.jsx
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline';
 import MultiSwitch from "../utils/MultiSwitch";
+import {
+  DEFAULT_WORKSPACE_DOMAIN,
+  buildWorkspaceMailboxRequest,
+  getWorkspaceMailboxDetails,
+  normalizeWorkspaceLocalPart,
+  validateContactEmail,
+  workspaceLocalPartError,
+} from '../utils/workspaceEmail.js';
 
 const AUTH_MAPPING_DOMAIN = "auth.charge.rent";
 const REVENUE_MODEL_OPTIONS = [
@@ -31,7 +39,7 @@ const getEffectiveAdminFeatures = (features, featuresList, username = '') => {
   };
 };
 
-const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, commandsList }) => {
+const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, commandsList, workspaceStatus, creating = false, onCheckWorkspaceEmail }) => {
   const [newClient, setNewClient] = useState({
     username: '',
     password: '',
@@ -61,10 +69,32 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
   const [formError, setFormError] = useState(null);
   const [showPassword, setShowPassword] = useState(false);
   const [emailCredentials, setEmailCredentials] = useState(false);
+  const [includePartnerKit, setIncludePartnerKit] = useState(false);
+  const [createWorkspaceMailbox, setCreateWorkspaceMailbox] = useState(false);
+  const [workspaceOverrides, setWorkspaceOverrides] = useState({});
+  const [workspaceAvailability, setWorkspaceAvailability] = useState(null);
+  const [checkingWorkspaceEmail, setCheckingWorkspaceEmail] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const submitInFlight = useRef(false);
+  const checkInFlight = useRef(false);
+  const availabilityVersion = useRef(0);
   const isAdminRole = newClient.role === 'admin';
   const isPartnerRole = newClient.role === 'partner';
   const isPurchaseClient = !isAdminRole && !isPartnerRole && newClient.revShareModel === 'purchase';
   const showPayoutFields = isPartnerRole || isPurchaseClient;
+  const workspaceEligible = isPartnerRole;
+  const workspaceDomain = workspaceStatus?.domain || DEFAULT_WORKSPACE_DOMAIN;
+  const workspaceConfigured = workspaceStatus?.configured === true && workspaceStatus?.loading !== true;
+  const workspaceDetails = getWorkspaceMailboxDetails({
+    contactName: newClient.contact.name,
+    contactEmail: newClient.contact.email,
+    overrides: workspaceOverrides,
+    domain: workspaceDomain,
+  });
+  const workspaceEmail = `${normalizeWorkspaceLocalPart(workspaceDetails.localPart)}@${workspaceDomain}`;
+  const availabilityKey = JSON.stringify([workspaceEmail, workspaceDetails.givenName, workspaceDetails.familyName]);
+  const currentAvailability = workspaceAvailability?.key === availabilityKey ? workspaceAvailability : null;
+  const busy = creating || submitting;
 
   const normalizeUsername = (u) => String(u || '').trim().toLowerCase();
   const isValidUsername = (u) => /^[a-z0-9._-]+$/.test(u);
@@ -81,11 +111,17 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
 
   const toggleSection = (section) => setOpenSection(prev => (prev === section ? null : section));
 
+  const invalidateWorkspaceAvailability = () => {
+    availabilityVersion.current += 1;
+    setWorkspaceAvailability(null);
+  };
+
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
 
     if (name.includes('contact.')) {
       const contactKey = name.split('.')[1];
+      if (contactKey === 'name') invalidateWorkspaceAvailability();
       setNewClient(prev => ({ ...prev, contact: { ...prev.contact, [contactKey]: value } }));
       return;
     }
@@ -96,6 +132,12 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
     }
 
     if (name === 'role') {
+      invalidateWorkspaceAvailability();
+      if (value !== 'partner') {
+        setIncludePartnerKit(false);
+        setCreateWorkspaceMailbox(false);
+        setWorkspaceOverrides({});
+      }
       setNewClient(prev => ({
         ...prev,
         role: value,
@@ -116,8 +158,44 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
   const handleLanguageChange = (value) =>
     handlePermissionChange('features', 'defaultlanguage', value.toLowerCase());
 
+  const handleWorkspaceChange = (event) => {
+    const { name, value } = event.target;
+    if (name !== 'recoveryEmail') invalidateWorkspaceAvailability();
+    setWorkspaceOverrides((previous) => ({ ...previous, [name]: value }));
+  };
+
+  const handleCheckWorkspaceEmail = async () => {
+    if (!onCheckWorkspaceEmail || checkInFlight.current || busy || !workspaceConfigured || !createWorkspaceMailbox) return;
+    const addressError = workspaceLocalPartError(workspaceDetails.localPart);
+    if (addressError) {
+      setWorkspaceAvailability({ key: availabilityKey, status: 'error', message: addressError });
+      return;
+    }
+    checkInFlight.current = true;
+    const checkVersion = ++availabilityVersion.current;
+    setCheckingWorkspaceEmail(true);
+    setWorkspaceAvailability(null);
+    try {
+      const result = await onCheckWorkspaceEmail(normalizeWorkspaceLocalPart(workspaceDetails.localPart));
+      if (checkVersion !== availabilityVersion.current) return;
+      setWorkspaceAvailability({
+        key: availabilityKey,
+        status: result?.available === true ? 'available' : 'unavailable',
+        message: result?.message || (result?.available === true ? 'This address is available.' : 'This address is already in use. Choose another email name.'),
+      });
+    } catch (error) {
+      if (checkVersion === availabilityVersion.current) {
+        setWorkspaceAvailability({ key: availabilityKey, status: 'error', message: error?.message || 'The address could not be checked. Please try again.' });
+      }
+    } finally {
+      checkInFlight.current = false;
+      setCheckingWorkspaceEmail(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (submitInFlight.current || busy || checkingWorkspaceEmail) return;
     setFormError(null);
 
     const usernameNorm = normalizeUsername(newClient.username);
@@ -139,12 +217,35 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
       return;
     }
 
+    let workspaceMailbox;
+    let contactEmail;
+    try {
+      const contactResult = validateContactEmail(newClient.contact?.email, {
+        companyEmail: createWorkspaceMailbox && isPartnerRole ? workspaceEmail : '',
+      });
+      if (contactResult.error) throw new Error(contactResult.error);
+      contactEmail = contactResult.email;
+      workspaceMailbox = buildWorkspaceMailboxRequest({
+        enabled: createWorkspaceMailbox,
+        role: newClient.role,
+        configured: workspaceConfigured,
+        details: workspaceDetails,
+        domain: workspaceDomain,
+      });
+      if (workspaceMailbox && currentAvailability?.status === 'unavailable') {
+        throw new Error('This company email address is already in use. Choose another email name.');
+      }
+    } catch (error) {
+      setFormError(error.message);
+      return;
+    }
+
     const profile = {
       username: usernameNorm,
       clientId: isAdminRole ? '' : String(newClient.clientId).trim().toUpperCase(),
       contact: {
         name: String(newClient.contact?.name || '').trim(),
-        email: String(newClient.contact?.email || '').trim(),
+        email: contactEmail,
       },
       features: { ...newClient.features, defaultlanguage: (newClient.features?.defaultlanguage || 'en').toLowerCase() },
       commands: { ...newClient.commands },
@@ -158,17 +259,30 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
       authEmail: mappedEmail || undefined
     };
 
-    onCreate({
-      username: usernameNorm,
-      password: newClient.password, // only sent to Cloud Function; NOT stored in Firestore
-      clientId: profile.clientId,
-      profile,
-      sendCredentials: emailCredentials && !!profile.contact.email,
-    });
-
-    // Clear password immediately after submit
-    setNewClient(prev => ({ ...prev, password: '' }));
-    setShowPassword(false);
+    submitInFlight.current = true;
+    setSubmitting(true);
+    try {
+      const result = await onCreate({
+        username: usernameNorm,
+        password: newClient.password, // only sent to Cloud Function; NOT stored in Firestore
+        clientId: profile.clientId,
+        profile,
+        sendCredentials: (emailCredentials || (isPartnerRole && includePartnerKit)) && !!profile.contact.email,
+        includePartnerKit: isPartnerRole && includePartnerKit,
+        ...(workspaceMailbox ? { workspaceMailbox } : {}),
+      });
+      if (result?.ok === true) {
+        setNewClient(prev => ({ ...prev, password: '' }));
+        setShowPassword(false);
+      } else {
+        setFormError(result?.message || 'The account could not be created. Your entries have been kept so you can try again.');
+      }
+    } catch (error) {
+      setFormError(error?.message || 'The account could not be created. Please try again.');
+    } finally {
+      submitInFlight.current = false;
+      setSubmitting(false);
+    }
   };
 
   const SectionButton = ({ section }) => (
@@ -199,19 +313,19 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
       <h3 className="font-bold text-xl text-gray-800 mb-4">{t('add_new_client')}</h3>
 
       <div className="bg-blue-50 border border-blue-200 text-blue-800 px-4 py-3 rounded mb-4 text-sm">
-        This will create Firebase Auth user: <span className="font-mono">{mappedEmail || `username@${AUTH_MAPPING_DOMAIN}`}</span><br />
-        Password is not stored in Firestore.
+        Create dashboard access for a client, partner, or administrator.
       </div>
 
       {formError && <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">{formError}</div>}
 
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} aria-busy={busy}>
+        <fieldset disabled={busy} className="min-w-0">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
           <div>
             <label className="block text-sm font-medium text-gray-700">{t('username')} <span className="text-red-500">*</span></label>
             <input type="text" name="username" value={newClient.username} onChange={handleInputChange}
               className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" required />
-            <p className="text-xs text-gray-500 mt-1">Auth email: <span className="font-mono">{mappedEmail || `username@${AUTH_MAPPING_DOMAIN}`}</span></p>
+            <p className="text-xs text-gray-500 mt-1">Used to sign in to the dashboard.</p>
           </div>
 
           <div>
@@ -273,10 +387,81 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
           </div>
 
           <div className="md:col-span-2">
-            <label className="block text-sm font-medium text-gray-700">{t('contact_email')} (Optional)</label>
-            <input type="email" name="contact.email" value={newClient.contact.email} onChange={handleInputChange}
+            <label htmlFor="contact-email" className="block text-sm font-medium text-gray-700">Contact Email <span className="text-red-500">*</span></label>
+            <input id="contact-email" type="email" name="contact.email" value={newClient.contact.email} onChange={handleInputChange}
+              required maxLength={254} autoCapitalize="none" spellCheck={false} aria-describedby="contact-email-hint"
               className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
+            <p id="contact-email-hint" className="mt-1 text-xs text-gray-500">Use an existing email address they can already access.</p>
           </div>
+
+          {workspaceEligible && (
+            <div className="md:col-span-2 rounded-lg border border-blue-200 bg-blue-50/50 p-4">
+              <label className={`flex items-start gap-3 text-sm font-semibold ${workspaceConfigured ? 'text-gray-800' : 'text-gray-500'}`}>
+                <input
+                  type="checkbox"
+                  checked={createWorkspaceMailbox}
+                  disabled={!workspaceConfigured && !createWorkspaceMailbox}
+                  onChange={(event) => {
+                    invalidateWorkspaceAvailability();
+                    setCreateWorkspaceMailbox(event.target.checked);
+                  }}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                />
+                Create a company email account in Google Workspace
+              </label>
+              {!workspaceConfigured ? (
+                <p className="mt-2 text-sm text-gray-600" role="status">
+                  {workspaceStatus?.loading ? 'Checking company email availability…' : (workspaceStatus?.message || 'Company email creation is not available yet. You can still create dashboard access.')}
+                </p>
+              ) : (
+                <p className="mt-2 text-sm text-gray-600">Add an @{workspaceDomain} mailbox with its own Google sign-in. A Google Workspace license may add a recurring charge.</p>
+              )}
+              {createWorkspaceMailbox && (
+                <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <p className="rounded-md border border-blue-200 bg-white px-3 py-2 text-sm text-blue-800 md:col-span-2">
+                    We will email the new company address to {String(newClient.contact.email || '').trim() || 'the contact email above'} after Google creates the account.
+                  </p>
+                  <div>
+                    <label htmlFor="workspace-given-name" className="block text-sm font-medium text-gray-700">First name <span className="text-red-500">*</span></label>
+                    <input id="workspace-given-name" name="givenName" type="text" value={workspaceDetails.givenName} onChange={handleWorkspaceChange}
+                      maxLength={60} required className="mt-1 block w-full rounded-md border border-gray-300 p-2 shadow-sm" />
+                  </div>
+                  <div>
+                    <label htmlFor="workspace-family-name" className="block text-sm font-medium text-gray-700">Last name <span className="text-red-500">*</span></label>
+                    <input id="workspace-family-name" name="familyName" type="text" value={workspaceDetails.familyName} onChange={handleWorkspaceChange}
+                      maxLength={60} required className="mt-1 block w-full rounded-md border border-gray-300 p-2 shadow-sm" />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label htmlFor="workspace-email-name" className="block text-sm font-medium text-gray-700">Company email <span className="text-red-500">*</span></label>
+                    <div className="mt-1 flex min-w-0 flex-wrap gap-2">
+                      <div className="flex min-w-0 flex-1 rounded-md border border-gray-300 bg-white shadow-sm">
+                        <input id="workspace-email-name" name="localPart" type="text" autoCapitalize="none" spellCheck={false}
+                          value={workspaceDetails.localPart} onChange={handleWorkspaceChange} maxLength={64} required
+                          aria-describedby="workspace-email-hint" placeholder="g.gazelian"
+                          className="min-w-0 w-full flex-1 rounded-l-md p-2 outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500" />
+                        <span className="flex shrink-0 items-center rounded-r-md border-l border-gray-300 bg-gray-50 px-2 text-sm text-gray-600">@{workspaceDomain}</span>
+                      </div>
+                      {onCheckWorkspaceEmail && (
+                        <button type="button" onClick={handleCheckWorkspaceEmail} disabled={checkingWorkspaceEmail || !workspaceConfigured || !workspaceDetails.localPart}
+                          className="rounded-md border border-blue-300 bg-white px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50">
+                          {checkingWorkspaceEmail ? 'Checking…' : 'Check availability'}
+                        </button>
+                      )}
+                    </div>
+                    <p id="workspace-email-hint" className="mt-1 text-xs text-gray-500">Suggested format: first initial.last name. You can edit it before creating the account.</p>
+                    {currentAvailability && <p role="status" className={`mt-2 text-sm ${currentAvailability.status === 'available' ? 'text-green-700' : 'text-red-700'}`}>{currentAvailability.message}</p>}
+                  </div>
+                  <div className="md:col-span-2">
+                    <label htmlFor="workspace-recovery-email" className="block text-sm font-medium text-gray-700">Alternate email for account recovery (Optional)</label>
+                    <input id="workspace-recovery-email" name="recoveryEmail" type="email" value={workspaceDetails.recoveryEmail} onChange={handleWorkspaceChange}
+                      maxLength={254} className="mt-1 block w-full rounded-md border border-gray-300 p-2 shadow-sm" />
+                    <p className="mt-1 text-xs text-gray-500">Use an existing email address they can already access.</p>
+                  </div>
+                  <p className="text-sm text-gray-600 md:col-span-2">Google will use a separate temporary password, shown after creation. They must change it when they first sign in.</p>
+                </div>
+              )}
+            </div>
+          )}
 
           {!isAdminRole && !isPartnerRole && (
             <div>
@@ -290,16 +475,36 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
             </div>
           )}
 
-          <div className="md:col-span-2">
+          <div className="space-y-3 md:col-span-2">
             <label className="flex items-center gap-3 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-medium text-gray-700">
               <input
                 checked={emailCredentials}
                 className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                onChange={(event) => setEmailCredentials(event.target.checked)}
+                onChange={(event) => {
+                  setEmailCredentials(event.target.checked);
+                  if (!event.target.checked) setIncludePartnerKit(false);
+                }}
                 type="checkbox"
               />
-              Email login credentials after creating this client
+              Email dashboard login credentials after creating this client
             </label>
+            {isPartnerRole && (
+              <div className="rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
+                <label className="flex items-center gap-3 text-sm font-medium text-gray-700">
+                  <input
+                    checked={includePartnerKit}
+                    className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    onChange={(event) => {
+                      setIncludePartnerKit(event.target.checked);
+                      if (event.target.checked) setEmailCredentials(true);
+                    }}
+                    type="checkbox"
+                  />
+                  Include partner kit with login details
+                </label>
+                <p className="mt-1 pl-7 text-xs text-gray-500">Attach the partner launch kit PDF to the same email as their dashboard login details.</p>
+              </div>
+            )}
           </div>
 
           {showPayoutFields && (
@@ -375,10 +580,11 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
           <button type="button" onClick={onCancel} className="bg-gray-300 text-gray-800 font-bold py-2 px-5 rounded-md hover:bg-gray-400 transition-all">
             {t('cancel')}
           </button>
-          <button type="submit" className="bg-green-600 text-white font-bold py-2 px-5 rounded-md hover:bg-green-700 transition-all">
-            {t('create_client')}
+          <button type="submit" disabled={busy || checkingWorkspaceEmail} className="bg-green-600 text-white font-bold py-2 px-5 rounded-md hover:bg-green-700 transition-all disabled:cursor-not-allowed disabled:opacity-60">
+            {busy ? 'Creating account…' : t('create_client')}
           </button>
         </div>
+        </fieldset>
       </form>
     </div>
   );

@@ -5,8 +5,9 @@ import ConfirmationModal from '../components/UI/ConfirmationModal';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
 import { formatDateTime, formatDuration } from '../utils/dateFormatter';
 import { formatRentalChargeAmount, isReturnedRentalStatus, normalizeRefundStatus } from '../utils/rentals.js';
-import { normalizeText, textEquals, textIncludes, toText } from '../utils/text';
+import { normalizeText, textEquals, toText } from '../utils/text';
 import { isKioskOnline } from '../utils/helpers';
+import { chargerMatchesSearchTerm } from '../utils/chargerSearch.js';
 
 const firstPresent = (...values) => (
     values.find(value => value !== null && value !== undefined && String(value).trim() !== '')
@@ -168,10 +169,12 @@ const RentalHistoryItem = ({ rental, t, onOpen }) => {
         },
     ].filter(pill => pill.label);
 
+    const RentalHistoryContainer = onOpen ? 'button' : 'div';
+
     return (
-        <div
-            onClick={onOpen}
-            className={`text-xs rounded-md border border-gray-200 bg-white p-3 ${onOpen ? 'cursor-pointer hover:border-gray-400 transition-colors' : ''}`}
+        <RentalHistoryContainer
+            {...(onOpen ? { type: 'button', onClick: onOpen } : {})}
+            className={`block w-full text-left text-xs rounded-md border border-gray-200 bg-white p-3 ${onOpen ? 'cursor-pointer hover:border-gray-400 transition-colors' : ''}`}
         >
             <div className="flex items-start justify-between gap-3 border-b border-gray-100 pb-2">
                 <div className="min-w-0">
@@ -262,7 +265,7 @@ const RentalHistoryItem = ({ rental, t, onOpen }) => {
                 </div>
             )}
 
-        </div>
+        </RentalHistoryContainer>
     );
 };
 
@@ -372,7 +375,11 @@ const ChargerCard = ({ charger, t, onCommand, onNavigateToRentals, onNavigateToD
                                     key={rental.rawid || rental.orderid || `${rental.rentalTime}-${index}`}
                                     rental={rental}
                                     t={t}
-                                    onOpen={onNavigateToRentals ? () => onNavigateToRentals(charger.sn) : null}
+                                    onOpen={onNavigateToRentals ? () => onNavigateToRentals({
+                                        period: '30days',
+                                        searchTerm: charger.sn,
+                                        rentals: charger.rentals,
+                                    }) : null}
                                 />
                             ))}
                         </div>
@@ -396,7 +403,7 @@ const ChargerCard = ({ charger, t, onCommand, onNavigateToRentals, onNavigateToD
     );
 };
 
-export default function ChargersPage({ onNavigateToDashboard, onNavigateToRentals, rentalData, kioskData, t, language, setLanguage, onLogout, onCommand, commandStatus, setCommandStatus, clientInfo, initialSearch = '' }) {
+export default function ChargersPage({ onNavigateToDashboard, onNavigateToRentals, rentalData, rentalsLoading = false, kioskData, t, language, setLanguage, onLogout, onCommand, commandStatus, setCommandStatus, clientInfo, initialSearch = '' }) {
     const [searchTerm, setSearchTerm] = useState(initialSearch);
     const [activeFilter, setActiveFilter] = useState('all');
 
@@ -605,11 +612,7 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
 
         if (!searchTerm) return filtered;
 
-        const lowercasedSearch = searchTerm.toLowerCase();
-        return filtered.filter(charger =>
-            textIncludes(charger.sn, lowercasedSearch) ||
-            textIncludes(charger.location?.stationId, lowercasedSearch)
-        );
+        return filtered.filter(charger => chargerMatchesSearchTerm(charger, searchTerm));
     }, [chargers, searchTerm, activeFilter]);
 
     const [commandDetails, setCommandDetails] = useState(null);
@@ -670,8 +673,14 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
                         ))}
                         <div className="flex-grow"></div>
                         <div className="text-right">
-                            <span className="text-lg font-bold text-gray-800">{filteredChargers.length}</span>
-                            <span className="text-sm text-gray-500 ml-2">{t('chargers')}</span>
+                            {rentalsLoading ? (
+                                <span className="text-sm font-semibold text-gray-500">{t('loading_charger_history')}</span>
+                            ) : (
+                                <>
+                                    <span className="text-lg font-bold text-gray-800">{filteredChargers.length}</span>
+                                    <span className="text-sm text-gray-500 ml-2">{t('chargers')}</span>
+                                </>
+                            )}
                         </div>
                     </div>
                     <div className="relative mt-4">
@@ -696,11 +705,19 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
                     </div>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                    {filteredChargers.map(charger => (
-                        <ChargerCard key={charger.sn} charger={charger} t={t} onCommand={handleCommand} onNavigateToRentals={onNavigateToRentals} onNavigateToDashboard={onNavigateToDashboard} />
-                    ))}
-                </div>
+                {rentalsLoading ? (
+                    <div className="flex min-h-48 flex-col items-center justify-center rounded-lg bg-white p-8 text-center shadow-md">
+                        <div className="h-10 w-10 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600"></div>
+                        <p className="mt-4 font-semibold text-gray-700">{t('loading_charger_history')}</p>
+                        <p className="mt-1 text-sm text-gray-500">{t('please_wait')}</p>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                        {filteredChargers.map(charger => (
+                            <ChargerCard key={charger.sn} charger={charger} t={t} onCommand={handleCommand} onNavigateToRentals={onNavigateToRentals} onNavigateToDashboard={onNavigateToDashboard} />
+                        ))}
+                    </div>
+                )}
             </main>
         </div>
     );

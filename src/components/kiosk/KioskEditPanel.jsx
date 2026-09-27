@@ -10,6 +10,7 @@ import {
     FormColorPicker
 } from '../forms/FormFields.jsx';
 import { getKioskPowerThreshold, isNewBoundKioskStation, isV2Kiosk, normalizeKioskInfoForSchema } from '../../utils/helpers';
+import { canEditTerminalSerial, canUseApolloScannerOnly, toGatewayOption, toStoredKioskGateway } from '../../utils/kioskGateway';
 
 const DEFAULT_WIFI = { name: 'chargerent', password: 'Charger33' };
 const V2_DEFAULT_WIFI = { name: 'powerbank', password: '123456789' };
@@ -100,10 +101,15 @@ const getInitialMarketingOptions = (kiosk) => {
         buttonText: mergeMarketingLocaleValues(marketingoptions.buttonText, DEFAULT_MARKETING_OPTIONS.buttonText),
     };
 };
-const getInitialHardware = (kiosk) => ({
-    ...(kiosk?.hardware || {}),
-    power: getKioskPowerThreshold(kiosk),
-});
+const getInitialHardware = (kiosk) => {
+    const hardware = kiosk?.hardware || {};
+
+    return {
+        ...hardware,
+        power: getKioskPowerThreshold(kiosk),
+        scannerOnly: canUseApolloScannerOnly(hardware.gateway) && hardware.scannerOnly === true,
+    };
+};
 const getInitialPricing = (kiosk) => {
     const pricing = { ...(kiosk?.pricing || {}) };
 
@@ -312,13 +318,11 @@ function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVe
     };
 
     const handleGatewayChange = (section, name, option) => {
-        let valueToSave = option;
-        if (option === 'P68') {
-            valueToSave = 'PAYTERP68';
-        } else if (option === 'APO') {
-            valueToSave = 'APOLLO';
+        const storedGateway = toStoredKioskGateway(option);
+        onDataChange(section, name, storedGateway, false);
+        if (!canUseApolloScannerOnly(storedGateway)) {
+            onDataChange(section, 'scannerOnly', false, false);
         }
-        onDataChange(section, name, valueToSave, false);
     };
 
     const handleScreenChange = (section, name, option) => {
@@ -468,7 +472,7 @@ function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVe
                         label="Gateway" 
                         name="gateway" 
                         options={GATEWAYS}
-                        value={{'PAYTERP68': 'P68', 'APOLLO': 'APO'}[formData.hardware?.gateway] || formData.hardware?.gateway} 
+                        value={toGatewayOption(formData.hardware?.gateway)}
                         section="hardware" 
                         onDataChange={handleGatewayChange} />
                     <FormMultiSwitch 
@@ -479,6 +483,29 @@ function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVe
                         section="hardware" 
                         onDataChange={handleGatewayOptionsChange} 
                     />
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 md:items-end">
+                        <FormInput
+                            label="Terminal SN"
+                            name="sn"
+                            value={formData.hardware?.sn}
+                            section="hardware"
+                            onDataChange={onDataChange}
+                            disabled={!canEditTerminalSerial(formData.hardware?.gateway)}
+                        />
+                        <label
+                            className={`flex min-h-[42px] items-center gap-3 rounded-md border px-3 py-2 ${canUseApolloScannerOnly(formData.hardware?.gateway) ? 'cursor-pointer border-gray-300 bg-white text-gray-700' : 'cursor-not-allowed border-gray-200 bg-gray-100 text-gray-400'}`}
+                        >
+                            <input
+                                type="checkbox"
+                                name="scannerOnly"
+                                checked={formData.hardware?.scannerOnly === true}
+                                disabled={!canUseApolloScannerOnly(formData.hardware?.gateway)}
+                                onChange={(event) => onDataChange('hardware', 'scannerOnly', event.target.checked, false)}
+                                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:cursor-not-allowed disabled:text-gray-400"
+                            />
+                            <span className="text-sm font-medium">Scanner only</span>
+                        </label>
+                    </div>
                     <FormInput label="Quarantine Time" name="quarantine.time" value={formData.hardware?.quarantine?.time} section="hardware" onDataChange={onDataChange} />
                     <FormMultiSwitch label="Quarantine Unit" name="quarantine.unit" options={['min', 'hours', 'days']} value={formData.hardware?.quarantine?.unit} section="hardware" onDataChange={onDataChange} />
                     <FormMultiSwitch label="Audio" name="audio" options={['on', 'off']} value={formData.hardware?.audio} section="hardware" onDataChange={onDataChange} />
@@ -503,7 +530,6 @@ function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVe
                             <FormSlider label="Volume" name="volume" value={formData.hardware?.volume} section="hardware" min="0" max="100" onDataChange={onDataChange} />
                             <FormInput label="Port" name="port" value={formData.hardware?.port} section="hardware" onDataChange={onDataChange} />
                             <FormInput label="Server" name="server" value={formData.hardware?.server} section="hardware" onDataChange={onDataChange} />
-                            <FormInput label="SN" name="sn" value={formData.hardware?.sn} section="hardware" onDataChange={onDataChange} />
                         </>
                     )}
                 </Section>

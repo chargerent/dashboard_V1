@@ -13,8 +13,60 @@ service cloud.firestore {
 
     // Keep users locked down: only owner can read/write their profile
     match /users/{uid} {
-      allow read, create, update: if request.auth != null && request.auth.uid == uid;
+      allow read: if request.auth != null && request.auth.uid == uid;
+      // Google account state is written only by the provisioning backend.
+      allow create: if request.auth != null && request.auth.uid == uid &&
+        !request.resource.data.keys().hasAny(['workspaceMailbox']);
+      allow update: if request.auth != null && request.auth.uid == uid &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['workspaceMailbox']);
       allow delete: if false;
+    }
+
+    // Account provisioning requests and ownership markers are server-only.
+    match /workspaceProvisioning/{uid} {
+      allow read, write: if false;
+    }
+
+    // Website inquiries and their message history contain customer contact and
+    // payment-identification data. Administrators may read them in the support
+    // workspace; all writes are validated by Cloud Functions.
+    match /supportTickets/{ticketId} {
+      allow read: if isAdmin();
+      allow write: if false;
+
+      match /messages/{messageId} {
+        allow read: if isAdmin();
+        allow write: if false;
+      }
+    }
+
+    // ChargeDrops agreements contain immutable contract snapshots, signer
+    // evidence, one-time-code hashes, and audit events. Clients and admins use
+    // authenticated Cloud Functions so no browser can alter the record trail.
+    match /chargeDropsAgreements/{agreementId} {
+      allow read, write: if false;
+
+      match /events/{eventId} {
+        allow read, write: if false;
+      }
+    }
+
+    match /chargeDropsAgreementChallenges/{uid} {
+      allow read, write: if false;
+    }
+
+    // Partner onboarding updates contain recipient addresses and delivery audit
+    // state. Only trusted Cloud Functions may create or inspect these records.
+    match /chargeDropsPartnerNotifications/{notificationId} {
+      allow read, write: if false;
+    }
+
+    // Financial records and bank-connection metadata are never exposed to the
+    // browser SDK. Admins use Cloud Functions so access is checked and audited
+    // server-side. Plaid application secrets belong in Secret Manager, and
+    // per-connection tokens must never be returned to the browser.
+    match /accounting/{document=**} {
+      allow read, write: if false;
     }
 
     // TEMP: allow the legacy site to read these without Firebase Auth
@@ -60,6 +112,64 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Payter state is mirrored from the existing Node-RED runtime. Only
+    // Chargerent administrators can view it, and all mutations must pass
+    // through authenticated Cloud Functions after the bridge is enabled.
+    match /payterTerminals/{docId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /payterRuntime/{docId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /payterUiConfig/{docId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // Contains terminal serials, callback correlation and frozen profile data.
+    // Test sessions are available only through authenticated Cloud Functions.
+    match /apolloProfileTests/{docId} {
+      allow read, write: if false;
+    }
+
+    match /apolloProfileTestLocks/{docId} {
+      allow read, write: if false;
+    }
+
+    // U.S. Apollo orchestration contains terminal allowlists, immutable releases,
+    // callback state, hashed QR credentials, and vend state. Server identities only.
+    match /apolloProfileTemplates/{docId} {
+      allow read, write: if false;
+    }
+    match /apolloProfileReleases/{docId} {
+      allow read, write: if false;
+    }
+    match /apolloClientAssignments/{docId} {
+      allow read, write: if false;
+    }
+    match /apolloTerminalRegistry/{docId} {
+      allow read, write: if false;
+    }
+    match /apolloTerminalRuntime/{docId} {
+      allow read, write: if false;
+    }
+    match /apolloQrCredentials/{docId} {
+      allow read, write: if false;
+    }
+    match /apolloRuntimeEvents/{docId} {
+      allow read, write: if false;
+    }
+    match /apolloVendSessions/{docId} {
+      allow read, write: if false;
+    }
+    match /apolloLabRentals/{docId} {
+      allow read, write: if false;
+    }
+
     // Login lockout state — public read so LoginPage can check before auth
     // Writes are only via Cloud Functions (Admin SDK bypasses these rules)
     match /loginAttempts/{username} {
@@ -76,12 +186,32 @@ service cloud.firestore {
     // Everything else: no public read, no writes
     match /{collection}/{document=**} {
       allow read: if request.auth != null &&
+        collection != 'workspaceProvisioning' &&
+        collection != 'supportTickets' &&
+        collection != 'chargeDropsAgreements' &&
+        collection != 'chargeDropsAgreementChallenges' &&
+        collection != 'chargeDropsPartnerNotifications' &&
+        collection != 'accounting' &&
         collection != 'kioskEvents' &&
         collection != 'kioskIncidents' &&
         collection != 'phoneDevices' &&
         collection != 'phoneDeviceCommands' &&
         collection != 'phoneKioskAssignments' &&
-        collection != 'phoneDeviceEnrollments'; // signed-in only, except protected data above
+        collection != 'phoneDeviceEnrollments' &&
+        collection != 'payterTerminals' &&
+        collection != 'payterRuntime' &&
+        collection != 'payterUiConfig' &&
+        collection != 'apolloProfileTests' &&
+        collection != 'apolloProfileTestLocks' &&
+        collection != 'apolloProfileTemplates' &&
+        collection != 'apolloProfileReleases' &&
+        collection != 'apolloClientAssignments' &&
+        collection != 'apolloTerminalRegistry' &&
+        collection != 'apolloTerminalRuntime' &&
+        collection != 'apolloQrCredentials' &&
+        collection != 'apolloRuntimeEvents' &&
+        collection != 'apolloVendSessions' &&
+        collection != 'apolloLabRentals'; // signed-in only, except protected data above
       allow write: if false;
     }
   }

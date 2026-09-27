@@ -34,6 +34,7 @@ import {
   PHONE_KIOSK_COUNTRIES,
   createPhoneCommandRequestId,
   formatPhoneRelativeTime,
+  getPhoneAndroidUpdateState,
   getKioskForPhone,
   getPhoneKioskCountryCode,
   getPhoneStationCountryCode,
@@ -78,9 +79,13 @@ const TERMINAL_AGENT_MIN_VERSION_CODE = 29;
 const ANDROID_UPDATE_AGENT_MIN_VERSION_CODE = 47;
 
 function phoneNeedsAttention(device, now = Date.now()) {
+  const usbTetherState = String(device?.inventory?.usbTetherState || '').trim().toLowerCase();
   return getPhoneConnectionState(device, now) !== 'online' ||
     device?.inventory?.isDeviceOwner !== true ||
-    !isPhoneRemoteInputAvailable(device, now);
+    !isPhoneRemoteInputAvailable(device, now) ||
+    (device?.inventory?.usbConnected === true && (
+      usbTetherState === 'needs_attention' || usbTetherState === 'permission_required'
+    ));
 }
 
 const STATE_STYLES = {
@@ -93,6 +98,7 @@ const COMMAND_STYLES = {
   queued: 'bg-amber-100 text-amber-700',
   delivered: 'bg-blue-100 text-blue-700',
   running: 'bg-blue-100 text-blue-700',
+  requested: 'bg-blue-100 text-blue-700',
   completed: 'bg-emerald-100 text-emerald-700',
   failed: 'bg-red-100 text-red-700',
   rejected: 'bg-red-100 text-red-700',
@@ -118,7 +124,7 @@ const PHONE_COMMAND_LABELS = {
   PING: 'Ping phone',
   GET_INVENTORY: 'Refresh device details',
   GET_LOCATION: 'Refresh location',
-  SET_LOCATION_ENABLED: 'GPS',
+  SET_LOCATION_ENABLED: 'Location services',
   SET_WIFI_ENABLED: 'Wi-Fi',
   SET_HOTSPOT_ENABLED: 'Hotspot',
   SCAN_WIFI_NETWORKS: 'Scan Wi-Fi networks',
@@ -156,7 +162,7 @@ const PHONE_COMMAND_LABELS = {
   START_WEBRTC_SCREEN: 'Start live screen',
   SET_WEBRTC_PROFILE: 'Live screen quality',
   STOP_WEBRTC_SCREEN: 'Stop live screen',
-  INSTALL_SYSTEM_UPDATE: 'Update Android',
+  INSTALL_SYSTEM_UPDATE: 'Start Android update',
   INSTALL_APP_UPDATE: 'Install app update',
   INSTALL_PAYMENT_APP: 'Update payment app',
   WIPE_DEVICE: 'Erase phone',
@@ -182,7 +188,7 @@ function commandLabel(operation) {
 
 function commandActionLabel(operation, args = {}) {
   if (operation === 'SET_WIFI_ENABLED') return `Turn Wi-Fi ${args.enabled === true ? 'on' : 'off'}`;
-  if (operation === 'SET_LOCATION_ENABLED') return `Turn GPS ${args.enabled === true ? 'on' : 'off'}`;
+  if (operation === 'SET_LOCATION_ENABLED') return `Turn location services ${args.enabled === true ? 'on' : 'off'}`;
   if (operation === 'SCAN_WIFI_NETWORKS') return 'Scan nearby Wi-Fi networks';
   if (operation === 'CONNECT_WIFI') return `Join ${args.ssid || 'Wi-Fi network'}`;
   if (operation === 'OPEN_CAPTIVE_PORTAL') return 'Open public Wi-Fi sign-in';
@@ -191,14 +197,18 @@ function commandActionLabel(operation, args = {}) {
   if (operation === 'SET_TERMINAL_LOCKDOWN') return `${args.enabled === true ? 'Lock' : 'Unlock'} payment app`;
   if (operation === 'LAUNCH_PAYMENT_APP') return 'Launch payment app';
   if (operation === 'POWER_OFF') return 'Shut down phone';
-  if (operation === 'INSTALL_SYSTEM_UPDATE') return 'Start Android update';
+  if (operation === 'INSTALL_SYSTEM_UPDATE') return 'Request automatic Android update';
   if (operation === 'INSTALL_APP_UPDATE' && args.versionName) return `Install Agent ${args.versionName}`;
   if (operation === 'INSTALL_PAYMENT_APP' && args.versionName) return `Install payment app ${args.versionName}`;
   return commandLabel(operation);
 }
 
 function humanizePhoneMessage(message) {
-  return String(message || '').replace(
+  const normalizedMessage = String(message || '').trim();
+  if (/^Android update window opened/i.test(normalizedMessage)) {
+    return 'Automatic Android update requested. Android will install and restart when ready.';
+  }
+  return normalizedMessage.replace(
     /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g,
     (operation) => commandLabel(operation),
   );
@@ -270,9 +280,9 @@ function phoneCommandConfirmationDetails(confirmation, device) {
   if (operation === 'INSTALL_SYSTEM_UPDATE') {
     const timeoutHours = Number(confirmation?.args?.timeoutHours || 24);
     return {
-      title: 'Update Android',
+      title: 'Start Android Update',
       action: operation,
-      confirmationText: `Allow Android to download, install, and reboot the phone assigned to ${stationLabel} during the next ${timeoutHours} hours? Agent will postpone updates again after the Android build changes or the window expires.`,
+      confirmationText: `Start Android's automatic update process on the phone assigned to ${stationLabel}? Android will download, install, and restart the phone when ready during the next ${timeoutHours} hours. Do not reboot it manually while the update is preparing.`,
     };
   }
 
@@ -898,13 +908,13 @@ async function fetchCurrentPaymentAppRelease() {
 
 function Metric({ icon: Icon, label, value, detail = '', detailTone = 'slate', active = null }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+    <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
       <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
         <Icon className={`h-4 w-4 ${active === false ? 'text-slate-300' : 'text-slate-500'}`} />
         {label}
       </div>
-      <p className="mt-1 truncate text-sm font-bold text-slate-800">{value}</p>
-      {detail && <p className={`mt-0.5 truncate text-[11px] font-semibold ${detailTone === 'red' ? 'text-red-600' : 'text-slate-500'}`}>{detail}</p>}
+      <p className="mt-1 break-words text-sm font-bold leading-snug text-slate-800">{value}</p>
+      {detail && <p className={`mt-1 break-words text-[11px] font-semibold leading-4 ${detailTone === 'red' ? 'text-red-600' : 'text-slate-500'}`}>{detail}</p>}
     </div>
   );
 }
@@ -962,13 +972,14 @@ function AndroidMetric({
   onUpdate,
 }) {
   const updateWindowActive = inventory.systemUpdateWindowActive === true;
+  const updateState = getPhoneAndroidUpdateState(inventory);
   const agentReady = Number(inventory.agentVersionCode || 0) >=
     ANDROID_UPDATE_AGENT_MIN_VERSION_CODE;
   const expiresAt = Number(inventory.systemUpdateWindowExpiresAt || 0);
   const buttonEnabled = canManage && canControl && inventory.isDeviceOwner === true &&
     agentReady && !updateWindowActive;
   const buttonTitle = updateWindowActive
-    ? 'Android updates are temporarily allowed on this phone'
+    ? `Automatic update requested. Android will install and restart when ready${expiresAt ? ` before ${new Date(expiresAt).toLocaleString()}` : ''}`
     : !canManage
       ? 'Only Chargerent administrators can control Android updates'
       : !canControl
@@ -977,14 +988,7 @@ function AndroidMetric({
           ? 'Device Owner enrollment is required'
           : !agentReady
             ? 'Update Agent before controlling Android updates'
-            : 'Allow Android to install the latest available system update';
-  const policyDetail = updateWindowActive
-    ? `Updates allowed${expiresAt ? ` until ${new Date(expiresAt).toLocaleString()}` : ''}`
-    : inventory.systemUpdatePending
-      ? 'Android reports an update is available'
-      : inventory.systemUpdatePolicy === 'postponed'
-        ? 'Automatic updates paused'
-        : 'Update status unknown';
+            : 'Start Android automatic installation for the latest available system update';
 
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
@@ -1001,7 +1005,7 @@ function AndroidMetric({
           className="inline-flex min-h-7 shrink-0 items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-2 text-[10px] font-bold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400"
         >
           <ArrowPathIcon className="h-3.5 w-3.5" />
-          {updateWindowActive ? 'Updating' : 'Update'}
+          {updateState.buttonLabel}
         </button>
       </div>
       <p
@@ -1014,7 +1018,7 @@ function AndroidMetric({
         {cohortDetail}
       </p>
       <p className={`mt-0.5 truncate text-[10px] font-semibold ${updateWindowActive ? 'text-blue-600' : inventory.systemUpdatePending ? 'text-amber-700' : 'text-slate-400'}`}>
-        {policyDetail}
+        {updateState.detail}
       </p>
     </div>
   );
@@ -1183,30 +1187,38 @@ function PhoneLocationCard({ device, now, onRefresh, onToggleLocation, locationE
 
   return (
     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="flex items-center justify-between gap-3 px-4 py-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <MapPinIcon className="h-4 w-4 shrink-0 text-blue-600" />
-          <p className="min-w-0 text-[11px] text-slate-500">
-            {mapUrls
-              ? `${Number.isFinite(accuracy) ? `±${Math.round(accuracy)} m · ` : ''}${capturedAtMs ? formatPhoneRelativeTime(capturedAtMs, now) : 'Current result'}`
-              : 'No successful location result yet'}
-          </p>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
+      <div className="flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+        <div className="flex min-w-0 items-center justify-between gap-2 sm:justify-start">
+          <div className="flex min-w-0 items-center gap-2">
+            <MapPinIcon className="h-4 w-4 shrink-0 text-blue-600" />
+            <p className="min-w-0 text-[11px] text-slate-500">
+              {mapUrls
+                ? `${Number.isFinite(accuracy) ? `±${Math.round(accuracy)} m · ` : ''}${capturedAtMs ? formatPhoneRelativeTime(capturedAtMs, now) : 'Current result'}`
+                : 'No successful location result yet'}
+            </p>
+          </div>
           {mapUrls && (
-            <a href={mapUrls.external} target="_blank" rel="noreferrer" className="text-[11px] font-bold text-blue-600 hover:text-blue-800">
+            <a href={mapUrls.external} target="_blank" rel="noreferrer" className="shrink-0 text-[11px] font-bold text-blue-600 hover:text-blue-800 sm:hidden">
               Open map
             </a>
           )}
-          <button
-            type="button"
-            onClick={onToggleLocation}
+        </div>
+        <div className="flex min-w-0 items-center gap-2 sm:shrink-0">
+          {mapUrls && (
+            <a href={mapUrls.external} target="_blank" rel="noreferrer" className="hidden shrink-0 text-[11px] font-bold text-blue-600 hover:text-blue-800 sm:inline">
+              Open map
+            </a>
+          )}
+          <WifiToggle
+            enabled={locationEnabled}
+            onToggle={onToggleLocation}
             disabled={!canRefresh}
-            className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-bold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <MapPinIcon className="h-3.5 w-3.5" />
-            {locationEnabled ? 'GPS off' : 'GPS on'}
-          </button>
+            label="Location"
+            icon={MapPinIcon}
+            compact
+            title={`Location services are ${locationEnabled ? 'on' : 'off'}. Select to turn them ${locationEnabled ? 'off' : 'on'}.`}
+            className="min-h-8 flex-1 !bg-white sm:flex-none"
+          />
           <button
             type="button"
             onClick={onRefresh}
@@ -1404,6 +1416,20 @@ function PhoneNetworkCard({
       : hotspotCompatibility
         ? 'Agent will use this phone’s trusted Android Settings screen'
         : 'Agent will use Android’s direct tethering control';
+  const usbTetherState = String(inventory.usbTetherState || 'unknown').trim().toLowerCase();
+  const usbTetherStatus = inventory.usbTetherLinkActive
+    ? { label: 'Link active', tone: 'bg-emerald-100 text-emerald-700', detail: 'USB network link is active on the connected computer.' }
+    : inventory.usbTetherFunctionEnabled
+      ? { label: 'Enabled', tone: 'bg-blue-100 text-blue-700', detail: 'USB tethering is selected; waiting for the computer network link.' }
+      : usbTetherState === 'recovering' || usbTetherState === 'verifying' || usbTetherState === 'waiting_for_usb'
+        ? { label: 'Recovering', tone: 'bg-amber-100 text-amber-800', detail: 'Agent is safely restoring USB tethering.' }
+        : usbTetherState === 'needs_attention' || usbTetherState === 'permission_required'
+          ? { label: 'Needs attention', tone: 'bg-red-100 text-red-700', detail: inventory.usbTetherLastError || 'USB tethering could not be restored automatically.' }
+          : inventory.usbConnected
+            ? { label: 'USB connected', tone: 'bg-amber-100 text-amber-800', detail: 'The cable is connected, but the USB tethering link is not active.' }
+            : usbTetherState === 'disconnected'
+              ? { label: 'USB disconnected', tone: 'bg-slate-100 text-slate-600', detail: 'Agent will enable tethering automatically when a USB host is attached.' }
+              : { label: 'Update Agent', tone: 'bg-slate-100 text-slate-600', detail: 'Install Agent 1.2.52 or newer to monitor USB tethering.' };
   const status = inventory.wifiCaptivePortal
     ? { label: 'Sign-in required', tone: 'bg-amber-100 text-amber-800' }
     : inventory.networkStatus === 'online'
@@ -1439,7 +1465,7 @@ function PhoneNetworkCard({
               Open sign-in
             </button>
           )}
-          <button type="button" onClick={onScan} disabled={!canControl || !inventory.wifiEnabled || !inventory.locationEnabled || !networkToolsReady} title={!networkToolsReady ? 'Update Agent to enable network scanning' : !inventory.locationEnabled ? 'Turn GPS on before scanning for Wi-Fi networks' : ''} className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-2.5 text-[11px] font-bold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40">
+          <button type="button" onClick={onScan} disabled={!canControl || !inventory.wifiEnabled || !inventory.locationEnabled || !networkToolsReady} title={!networkToolsReady ? 'Update Agent to enable network scanning' : !inventory.locationEnabled ? 'Turn location services on before scanning for Wi-Fi networks' : ''} className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-blue-200 bg-blue-50 px-2.5 text-[11px] font-bold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40">
             <ArrowPathIcon className="h-3.5 w-3.5" />
             Scan
           </button>
@@ -1475,6 +1501,29 @@ function PhoneNetworkCard({
             {humanizePhoneMessage(inventory.hotspotLastError)}
           </p>
         )}
+      </div>
+
+      <div className="border-t border-slate-100 bg-slate-50/60 px-3 py-3">
+        <div className="rounded-lg border border-slate-200 bg-white p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="flex items-center gap-2 text-xs font-bold text-slate-700">
+              <BoltIcon className="h-4 w-4 text-blue-600" />
+              USB tethering
+            </span>
+            <div className="flex items-center gap-2">
+              {inventory.usbTetherDesired && (
+                <span className="rounded-full bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-700">Always on</span>
+              )}
+              <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${usbTetherStatus.tone}`}>{usbTetherStatus.label}</span>
+            </div>
+          </div>
+          <p className="mt-2 text-[11px] leading-4 text-slate-500">{humanizePhoneMessage(usbTetherStatus.detail)}</p>
+          {inventory.usbTetherRetryCount > 0 && !inventory.usbTetherFunctionEnabled && (
+            <p className="mt-1 text-[10px] font-semibold text-amber-700">
+              Recovery attempt {Math.min(inventory.usbTetherRetryCount, 3)} of 3
+            </p>
+          )}
+        </div>
       </div>
 
       <div className="grid gap-2 border-t border-slate-100 bg-slate-50/60 p-3 sm:grid-cols-2">
@@ -1534,7 +1583,7 @@ function PhoneNetworkCard({
             {!networkToolsReady
               ? 'Update Agent to enable network diagnostics.'
               : !inventory.locationEnabled
-                ? 'Turn GPS on above to scan nearby Wi-Fi networks.'
+                ? 'Turn location services on above to scan nearby Wi-Fi networks.'
               : inventory.wifiEnabled
                 ? 'No nearby networks reported yet.'
                 : 'Turn Wi-Fi on to scan nearby networks.'}
@@ -2480,7 +2529,7 @@ export default function PhoneControlPage({
   }
 
   return (
-    <div className="min-h-screen bg-gray-100 text-slate-900">
+    <div className="min-h-screen w-full max-w-full touch-pan-y overflow-x-hidden bg-gray-100 text-slate-900">
       <CommandStatusToast status={commandStatus} onDismiss={() => setCommandStatus(null)} />
       <WifiJoinModal
         network={wifiJoinNetwork}
@@ -2531,10 +2580,10 @@ export default function PhoneControlPage({
         />
       )}
 
-      <header className="bg-white shadow-sm">
-        <div className="mx-auto flex max-w-screen-2xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-          <h1 className="truncate text-xl font-black text-slate-900">Mobile Device Management</h1>
-          <div className="flex items-center gap-3">
+      <header className="w-full max-w-full overflow-x-hidden bg-white shadow-sm">
+        <div className="mx-auto flex min-w-0 max-w-screen-2xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
+          <h1 className="min-w-0 flex-1 truncate text-xl font-black text-slate-900">Mobile Device Management</h1>
+          <div className="flex shrink-0 items-center gap-3">
             <button type="button" onClick={() => onNavigateToDashboard()} className="rounded-md bg-gray-200 p-2 text-gray-700 hover:bg-gray-300" title="Back to dashboard" aria-label="Back to dashboard">
               <HomeIcon className="h-6 w-6" />
             </button>
@@ -2545,7 +2594,7 @@ export default function PhoneControlPage({
         </div>
       </header>
 
-      <main className="mx-auto max-w-screen-2xl space-y-5 px-4 py-6 sm:px-6 lg:px-8">
+      <main className="mx-auto w-full min-w-0 max-w-screen-2xl space-y-5 overflow-x-hidden px-4 py-6 sm:px-6 lg:px-8">
         <section className={`grid grid-cols-2 gap-3 ${isAdmin ? 'lg:grid-cols-3 xl:grid-cols-6' : 'lg:grid-cols-4'}`}>
           <SummaryCard label="Managed phones" value={devices.length} detail="Assigned and staged inventory" />
           <SummaryCard label="Online" value={onlineCount} detail="Heartbeat within 90 seconds" tone="green" />
@@ -2847,11 +2896,14 @@ export default function PhoneControlPage({
                       <div className="mt-4 space-y-2">
                         {commands.length === 0 ? <p className="rounded-lg bg-slate-50 p-4 text-center text-xs text-slate-500">No commands recorded for this phone.</p> : commands.map((command) => {
                           const state = String(command.status || 'queued').toLowerCase();
+                          const displayState = command.operation === 'INSTALL_SYSTEM_UPDATE' && state === 'completed'
+                            ? 'requested'
+                            : state;
                           return (
                             <div key={command.id} className="min-w-0 rounded-lg border border-slate-200 px-3 py-3">
                               <div className="flex min-w-0 items-center justify-between gap-3">
                                 <span className="min-w-0 flex-1 truncate text-xs font-bold text-slate-800">{commandLabel(command.operation)}</span>
-                                <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold ${COMMAND_STYLES[state] || COMMAND_STYLES.queued}`}>{state}</span>
+                                <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-bold ${COMMAND_STYLES[displayState] || COMMAND_STYLES.queued}`}>{displayState}</span>
                               </div>
                               <div className="mt-1 flex min-w-0 items-center justify-between gap-3 text-[11px] text-slate-400">
                                 <span className="min-w-0 flex-1 truncate font-mono">{command.id}</span>

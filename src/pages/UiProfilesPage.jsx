@@ -5,6 +5,7 @@ import {
   BoltIcon,
   ChevronRightIcon,
   CreditCardIcon,
+  ComputerDesktopIcon,
   HomeIcon,
   LockClosedIcon,
   MapPinIcon,
@@ -16,6 +17,15 @@ import {
   ExclamationTriangleIcon,
 } from '@heroicons/react/24/solid';
 import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
+import TerminalProfileEditor from '../components/profiles/TerminalProfileEditor.jsx';
+import StripeProfileEditor, {stripeProfileHosted} from '../media-lab/StripeProfileEditor.jsx';
+
+// STRIPE_LOCAL_PROFILE_TAB: isolated development integration for LAB-US8004.
+const stripeLocalProfileEnabled = import.meta.env.DEV;
+import {PROFILE_SECTIONS, getProfileDeviceTypes, getTerminalProfileCopy, isProfileSectionTarget, hasTerminalOverride, mergeProfileSection} from '../../functions/uiProfileSections.mjs';
+import {getApolloScreenFlowError} from '../../functions/apolloScreens.mjs';
+import {profileDeviceStatus, profileSectionContent} from '../utils/profileDevices.js';
+import {createProfilePreviewApi, PROFILE_PREVIEW_KIOSKS} from '../utils/profilePreview.js';
 import LoadingSpinner from '../components/UI/LoadingSpinner.jsx';
 import { callFunctionWithAuth } from '../utils/callableRequest.js';
 import { formatDateTime } from '../utils/dateFormatter.js';
@@ -24,7 +34,6 @@ import {
   DEFAULT_KIOSK_UI,
   KIOSK_PROFILE_LANGUAGES,
   cloneProfileValue,
-  createDefaultKioskUiProfile,
   createKioskUiProfileFromTemplate,
   flattenLanguageFields,
   getNestedValue,
@@ -36,7 +45,6 @@ import {
 const EDITOR_TABS = [
   { key: 'Content', label: 'Text' },
   { key: 'Colors', label: 'Colors' },
-  { key: 'Admin', label: 'Admin' },
 ];
 const LANGUAGE_LABELS = Object.fromEntries(KIOSK_PROFILE_LANGUAGES.map((language) => [language.key, language.label]));
 const CONTENT_SECTIONS = [
@@ -58,7 +66,6 @@ const CONTENT_SECTIONS = [
   { key: 'pricingCommon', label: 'Cables', path: 'pricing.common' },
   { key: 'payment', label: 'Payment', path: 'pricing.payment' },
   { key: 'pricingUnavailable', label: 'Pricing unavailable', path: 'pricing.unavailable' },
-  { key: 'terminal', label: 'Payment terminal', path: 'terminals.PAYTERP68' },
   { key: 'support', label: 'Support message', path: 'support' },
 ];
 
@@ -504,11 +511,25 @@ export default function UiProfilesPage({
   onNavigateToDashboard,
   onNavigateToAdmin,
   currentUser,
-  allStationsData = [],
+  allStationsData: suppliedStations = [],
+  initialClientId = '',
+  initialSection = '',
+  previewMode = false,
   referenceTime,
   onCommand,
   t,
 }) {
+  const allStationsData = previewMode ? PROFILE_PREVIEW_KIOSKS : suppliedStations;
+  const [previewApi] = useState(() => previewMode ? createProfilePreviewApi() : null);
+  const profileRequest = useCallback((name, data) => previewMode ? previewApi(name, data) : callFunctionWithAuth(name, data), [previewMode, previewApi]);
+  const draftCache = useRef(new Map());
+  const [capabilities, setCapabilities] = useState({});
+  const [deviceSection, setDeviceSection] = useState(initialSection);
+  const [terminalTargetId, setTerminalTargetId] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [apolloTesting, setApolloTesting] = useState(false);
+  const [apolloTestStationId, setApolloTestStationId] = useState('');
+  const [apolloTestSession, setApolloTestSession] = useState(null);
   const [profiles, setProfiles] = useState([]);
   const [selectedProfileId, setSelectedProfileId] = useState('');
   const [draftProfile, setDraftProfile] = useState(null);
@@ -523,10 +544,11 @@ export default function UiProfilesPage({
   const [publishingAll, setPublishingAll] = useState(false);
   const [publishedAtOverrides, setPublishedAtOverrides] = useState({});
   const requestedProfileLoadKeysRef = useRef(new Set());
+  const profileLoadSequenceRef = useRef(0);
   const isDesktopViewport = useDesktopViewport();
 
   const canUseUiEditor = currentUser?.isAdmin || currentUser?.username === 'chargerent' || currentUser?.features?.ui_editor === true || currentUser?.commands?.['client edit'] === true;
-  const canLoadUiEditor = canUseUiEditor && isDesktopViewport;
+  const canLoadUiEditor = canUseUiEditor && (isDesktopViewport || (stripeLocalProfileEnabled && (previewMode || deviceSection === 'stripe')));
   const isAdmin = currentUser?.isAdmin || currentUser?.role === 'admin' || currentUser?.username === 'chargerent';
   const userClientId = normalizeClientId(currentUser?.clientId);
 
@@ -555,64 +577,110 @@ export default function UiProfilesPage({
     })
     .sort((a, b) => String(a.stationid || '').localeCompare(String(b.stationid || ''))), [allStationsData, profileClientId]);
 
-  const loadProfiles = useCallback(async (preferredProfileId = '') => {
+  const deviceSections = [...PROFILE_SECTIONS.filter(({key}) => matchingKiosks.some((kiosk) => isProfileSectionTarget(kiosk, key))), ...(stripeLocalProfileEnabled ? [{key: 'stripe', label: 'Stripe'}] : [])];
+  const activeDevice = deviceSections.find(({key}) => key === deviceSection)?.key || deviceSections[0]?.key || '';
+  const deviceLabel = deviceSections.find(({key}) => key === activeDevice)?.label || 'No compatible profile';
+  const targetKiosks = activeDevice ? matchingKiosks.filter((kiosk) => isProfileSectionTarget(kiosk, activeDevice)) : [];
+  const isTerminal = ['apollo', 'p68'].includes(activeDevice);
+  const supportsTerminalOverrides = activeDevice === 'p68';
+  const targetStationId = supportsTerminalOverrides && targetKiosks.some((kiosk) => kiosk.stationid === terminalTargetId) ? terminalTargetId : '';
+  const busy = saving || publishingAll || Boolean(publishingStationId) || apolloTesting;
+  const sectionAllowed = activeDevice !== 'apollo' || isAdmin;
+  const apolloFlow = activeDevice === 'apollo' ? getTerminalProfileCopy(draftProfile, 'apollo', targetStationId).screenFlow : undefined;
+  const apolloFlowError = getApolloScreenFlowError(apolloFlow);
+  const screenServiceReady = apolloFlow === undefined || capabilities.apolloScreens === 1;
+  const removalServiceReady = !apolloFlow?.removedEstablishedScreenIds?.length || capabilities.apolloEstablishedScreenRemoval === 1;
+  const canSave = Boolean(activeDevice) && activeDevice !== 'stripe' && capabilities.scopedProfiles === 1 && screenServiceReady && removalServiceReady && !loading && sectionAllowed;
+  const canPublish = canSave && activeDevice !== 'apollo' && !previewMode && targetKiosks.length > 0;
+  const savedProfile = profiles.find(({id}) => id === selectedProfileId);
+  const dirty = activeDevice && activeDevice !== 'stripe'
+    ? JSON.stringify(profileSectionContent(draftProfile, activeDevice, targetStationId)) !== JSON.stringify(profileSectionContent(savedProfile, activeDevice, targetStationId))
+    : false;
+  const allowedApolloTestIds = new Set((Array.isArray(capabilities.apolloTestStationIds) ? capabilities.apolloTestStationIds : []).map((stationId) => String(stationId || '').trim().toUpperCase()));
+  const apolloTestKiosks = activeDevice === 'apollo' ? targetKiosks.filter((kiosk) => allowedApolloTestIds.has(String(kiosk.stationid || '').trim().toUpperCase())) : [];
+  const selectedApolloTestStationId = apolloTestKiosks.some((kiosk) => kiosk.stationid === apolloTestStationId) ? apolloTestStationId : '';
+  const canTestApollo = capabilities.apolloTestScreens === 1
+    && capabilities.apolloProfileTestsEnabled === true
+    && Boolean(selectedApolloTestStationId)
+    && Number(savedProfile?.version) > 0
+    && savedProfile?.id === draftProfile?.id
+    && !dirty
+    && !apolloFlowError
+    && Boolean(apolloFlow?.entryScreenId)
+    && apolloTestSession?.status !== 'waiting'
+    && !previewMode;
+
+  useEffect(() => {
+    if (draftProfile?.id) draftCache.current.set(draftProfile.id, draftProfile);
+  }, [draftProfile]);
+
+  const selectProfile = (id) => {
+    const profile = profiles.find((candidate) => candidate.id === id);
+    if (!profile) return;
+    setSelectedProfileId(id);
+    setDraftProfile(cloneProfileValue(draftCache.current.get(id) || profile));
+    setDeviceSection('');
+    setTerminalTargetId('');
+    setApolloTestStationId('');
+    setApolloTestSession(null);
+    setSaveStatus(null);
+  };
+
+  const loadProfiles = useCallback(async () => {
+    const sequence = ++profileLoadSequenceRef.current;
     setLoading(true);
     setSaveStatus(null);
     try {
-      const payload = await callFunctionWithAuth('uiProfile_list', {});
+      const payload = await profileRequest('uiProfile_list', {});
+      if (sequence !== profileLoadSequenceRef.current) return;
+      setCapabilities(payload?.capabilities || {});
       const loadedProfiles = oneProfilePerClient(Array.isArray(payload?.profiles) ? payload.profiles : []);
       const loadedClientIds = new Set(loadedProfiles.map((profile) => normalizeClientId(profile.clientId)));
-      const missingClientIds = clientOptions.filter((clientId) => !loadedClientIds.has(clientId));
       const testProfile = loadedProfiles.find((profile) => normalizeClientId(profile.clientId) === 'TEST');
-      const createdProfiles = [];
-
-      for (const clientId of missingClientIds) {
-        const defaultProfile = {
-          ...createKioskUiProfileFromTemplate(clientId, testProfile),
-          id: clientProfileDocumentId(clientId),
-        };
-        const createPayload = await callFunctionWithAuth('uiProfile_upsert', { profile: defaultProfile });
-        if (createPayload?.profile) createdProfiles.push(createPayload.profile);
-      }
-
-      const nextProfiles = oneProfilePerClient([...loadedProfiles, ...createdProfiles]);
+      // Opening Profiles is read-only. Missing clients get an unsaved draft.
+      const newDrafts = clientOptions.filter((clientId) => !loadedClientIds.has(clientId)).map((clientId) => ({
+        ...createKioskUiProfileFromTemplate(clientId, testProfile), id: clientProfileDocumentId(clientId), version: 0,
+      }));
+      const nextProfiles = oneProfilePerClient([...loadedProfiles, ...newDrafts]).map((profile) => ({...profile, languages: normalizeKioskLanguages(profile.languages)}));
       setProfiles(nextProfiles);
-      const firstProfile = nextProfiles.find((profile) => profile.id === preferredProfileId)
-        || nextProfiles.find((profile) => normalizeClientId(profile.clientId) === defaultProfileClientId)
-        || nextProfiles[0]
-        || createDefaultKioskUiProfile(defaultProfileClientId);
-      setSelectedProfileId(firstProfile.id || '');
-      setDraftProfile({ ...cloneProfileValue(firstProfile), languages: normalizeKioskLanguages(firstProfile.languages) });
+      const preferredClient = initialClientId || (initialSection && allStationsData.find((kiosk) => isProfileSectionTarget(kiosk, initialSection))?.info?.client);
+      const firstProfile = nextProfiles.find((profile) => profile.id === selectedProfileId)
+        || nextProfiles.find((profile) => profile.clientId === normalizeClientId(preferredClient))
+        || nextProfiles.find((profile) => profile.clientId === defaultProfileClientId) || nextProfiles[0];
+      if (firstProfile) {
+        setSelectedProfileId(firstProfile.id);
+        setDraftProfile(cloneProfileValue(draftCache.current.get(firstProfile.id) || firstProfile));
+      }
     } catch (error) {
-      const isMissingEndpoint = error?.status === 404 && error?.functionName === 'uiProfile_list';
-      if (!isMissingEndpoint) console.error(error);
-      setSaveStatus({
-        state: 'error',
-        message: isMissingEndpoint
-          ? 'UI profile backend is not deployed yet. Deploy the Firebase UI profile functions, then refresh this page.'
-          : error?.message || 'Failed to load UI profiles.',
-      });
-      setDraftProfile(createDefaultKioskUiProfile(defaultProfileClientId));
+      if (sequence === profileLoadSequenceRef.current) setSaveStatus({state: 'error', message: error?.message || 'Failed to load profiles.'});
     } finally {
-      setLoading(false);
+      if (sequence === profileLoadSequenceRef.current) setLoading(false);
     }
-  }, [clientOptions, defaultProfileClientId]);
+  }, [clientOptions, defaultProfileClientId, profileRequest]);
 
   useEffect(() => {
-    if (!canLoadUiEditor) {
-      setLoading(false);
-      return;
-    }
+    if (!canLoadUiEditor) {setLoading(false); return;}
     if (requestedProfileLoadKeysRef.current.has(profileLoadKey)) return;
     requestedProfileLoadKeysRef.current.add(profileLoadKey);
     loadProfiles();
   }, [canLoadUiEditor, loadProfiles, profileLoadKey]);
 
   useEffect(() => {
-    const profile = visibleProfiles.find((candidate) => candidate.id === selectedProfileId);
-    if (!profile) return;
-    setDraftProfile({ ...cloneProfileValue(profile), languages: normalizeKioskLanguages(profile.languages) });
-  }, [selectedProfileId, visibleProfiles]);
+    if (previewMode || !apolloTestSession?.id || apolloTestSession.status !== 'waiting') return undefined;
+    let canceled = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const status = await profileRequest('apolloProfile_testStatus', {testId: apolloTestSession.id});
+        if (canceled) return;
+        setApolloTestSession(status);
+        if (status.status === 'complete') setSaveStatus({state: 'success', message: `Apollo screen test completed on ${status.stationid}. No payment or vend was started.`});
+        if (['error', 'expired'].includes(status.status)) setSaveStatus({state: 'error', message: status.error || `Apollo screen test ${status.status}.`});
+      } catch (error) {
+        if (!canceled) setSaveStatus({state: 'error', message: error?.message || 'Could not read the Apollo test status.'});
+      }
+    }, 2500);
+    return () => {canceled = true; window.clearTimeout(timer);};
+  }, [apolloTestSession, previewMode, profileRequest]);
 
   const updateUiColor = (key, value) => {
     setDraftProfile((previous) => {
@@ -641,110 +709,83 @@ export default function UiProfilesPage({
     },
   }));
 
-  const saveProfile = async (statusOverride = null) => {
-    if (!draftProfile) return null;
-    const configuredPins = [
-      ['User PIN', draftProfile?.admin?.userpassword],
-      ['Admin PIN', draftProfile?.admin?.adminpassword],
-    ];
-    const invalidPin = configuredPins.find(([, pin]) => pin && !/^[1-5]{5}$/.test(String(pin)));
-    if (invalidPin) {
-      setSaveStatus({ state: 'error', message: `${invalidPin[0]} must contain exactly five digits from 1 to 5.` });
-      return null;
+  const saveProfile = async () => {
+    if (!draftProfile || !canSave || !activeDevice) return null;
+    if (apolloFlowError) {setSaveStatus({state: 'error', message: apolloFlowError}); return null;}
+    if (activeDevice === 'admin') {
+      const invalid = Object.values(draftProfile.admin || {}).some((pin) => pin && !/^[1-5]{5}$/.test(String(pin)));
+      if (invalid) {setSaveStatus({state: 'error', message: 'PINs must contain exactly five digits from 1 to 5.'}); return null;}
     }
-    setSaveStatus({ state: 'sending', message: 'Saving UI profile…' });
-    const clientId = normalizeClientId(draftProfile.clientId || userClientId);
-    const nextProfile = {
-      ...draftProfile,
-      id: draftProfile.id || clientProfileDocumentId(clientId),
-      name: `${clientId} Kiosk UI`,
-      clientId,
-      status: statusOverride || draftProfile.status || 'draft',
-      languages: normalizeKioskLanguages(draftProfile.languages),
-    };
+    setSaving(true);
+    const useDefault = Boolean(targetStationId && !hasTerminalOverride(draftProfile, activeDevice, targetStationId));
     try {
-      const payload = await callFunctionWithAuth('uiProfile_upsert', { profile: nextProfile });
-      const savedProfile = payload?.profile;
-      if (!savedProfile) throw new Error('Profile save did not return a profile.');
-      setProfiles((previous) => oneProfilePerClient([
-        ...previous.filter((profile) => normalizeClientId(profile.clientId) !== normalizeClientId(savedProfile.clientId)),
-        savedProfile,
-      ]));
-      setSelectedProfileId(savedProfile.id);
-      setDraftProfile({ ...cloneProfileValue(savedProfile), languages: normalizeKioskLanguages(savedProfile.languages) });
-      setSaveStatus({ state: 'success', message: statusOverride === 'published' ? 'Profile published.' : 'Profile saved.' });
-      return savedProfile;
+      const payload = await profileRequest('uiProfile_upsert', {profile: draftProfile, section: activeDevice, stationid: targetStationId, useDefault});
+      const saved = payload?.profile;
+      if (!saved) throw new Error('Profile save did not return a profile.');
+      const normalized = {...saved, languages: normalizeKioskLanguages(saved.languages)};
+      setProfiles((previous) => oneProfilePerClient([...previous.filter(({id}) => id !== saved.id), normalized]));
+      // Retain unsaved edits in other sections and other terminal overrides.
+      setDraftProfile((previous) => ({
+        ...mergeProfileSection(previous, normalized, activeDevice, targetStationId, useDefault),
+        id: saved.id, version: saved.version, sectionVersions: saved.sectionVersions,
+      }));
+      setSaveStatus({state: 'success', message: `${deviceLabel} draft saved${previewMode ? ' in this preview' : ''}. No devices updated.`});
+      return normalized;
     } catch (error) {
-      console.error(error);
-      setSaveStatus({ state: 'error', message: error?.message || 'Failed to save UI profile.' });
+      setSaveStatus({state: 'error', message: error?.message || 'Failed to save profile.'});
       return null;
+    } finally {setSaving(false);}
+  };
+
+  const publishProfile = async (stationId = '') => {
+    if (!canPublish || busy) return;
+    const targets = stationId ? targetKiosks.filter((kiosk) => kiosk.stationid === stationId) : targetKiosks;
+    if (!targets.length) return;
+    setPublishingStationId(stationId);
+    setPublishingAll(!stationId);
+    try {
+      const saved = await saveProfile();
+      if (!saved?.id) return;
+      const payload = await profileRequest('uiProfile_apply', {profileId: saved.id, expectedVersion: saved.version, section: activeDevice, stationids: targets.map((kiosk) => kiosk.stationid)});
+      const updated = Array.isArray(payload?.kiosks) ? payload.kiosks : [];
+      if (updated.length !== targets.length || updated.some((kiosk) => !targets.some((target) => target.stationid === kiosk.stationid))) throw new Error('The server returned different targets. No device commands were sent.');
+      for (const kiosk of updated) {
+        if (!onCommand) throw new Error('Profile saved on the server, but the kiosk command connection is unavailable.');
+        await onCommand(kiosk.stationid, 'uichange', null, null, null, {kiosk, pushOnly: true, suppressCommandToast: true});
+      }
+      setPublishedAtOverrides((previous) => ({...previous, ...Object.fromEntries(updated.map((kiosk) => [`${activeDevice}:${kiosk.stationid}`, kiosk.ui?.profileSections?.[activeDevice]?.appliedAt]))}));
+      setSaveStatus({state: 'success', message: `${deviceLabel} update requested for ${updated.length} kiosk${updated.length === 1 ? '' : 's'}. Awaiting device confirmation.`});
+    } catch (error) {
+      setSaveStatus({state: 'error', message: error?.message || 'Could not publish profile.'});
+    } finally {setPublishingStationId(''); setPublishingAll(false);}
+  };
+
+  const startApolloTest = async () => {
+    if (!canTestApollo || apolloTesting) return;
+    setApolloTesting(true);
+    setApolloTestSession(null);
+    try {
+      const test = await profileRequest('apolloProfile_testStart', {
+        profileId: savedProfile.id,
+        expectedVersion: savedProfile.version,
+        stationid: selectedApolloTestStationId,
+        language: selectedLanguage,
+      });
+      setApolloTestSession(test);
+      setSaveStatus({state: 'success', message: `Saved Apollo test screen sent to ${selectedApolloTestStationId}. Waiting for a terminal response.`});
+    } catch (error) {
+      setSaveStatus({state: 'error', message: error?.message || 'Could not start the Apollo screen test.'});
+    } finally {
+      setApolloTesting(false);
     }
   };
 
-  const applySavedProfile = async (profileToApply, stationids, successMessage = '') => {
-    setSaveStatus({ state: 'sending', message: 'Applying UI profile…' });
-    const payload = await callFunctionWithAuth('uiProfile_apply', { profileId: profileToApply.id, stationids });
-    const updatedKiosks = Array.isArray(payload?.kiosks) ? payload.kiosks : [];
-    for (const kiosk of updatedKiosks) {
-      await onCommand?.(kiosk.stationid, 'uichange', null, null, null, { kiosk, pushOnly: true });
-    }
-    setPublishedAtOverrides((previous) => ({
-      ...previous,
-      ...Object.fromEntries(updatedKiosks
-        .filter((kiosk) => kiosk.stationid && kiosk.ui?.profileAppliedAt)
-        .map((kiosk) => [kiosk.stationid, kiosk.ui.profileAppliedAt])),
-    }));
-    const count = Number(payload?.updatedCount ?? updatedKiosks.length);
-    setSaveStatus({
-      state: 'success',
-      message: successMessage || `Applied to ${count} kiosk${count === 1 ? '' : 's'}.`,
+  const useClientDefault = () => {
+    setDraftProfile((previous) => {
+      const next = cloneProfileValue(previous);
+      if (next.terminalProfiles?.[activeDevice]?.overrides) delete next.terminalProfiles[activeDevice].overrides[targetStationId];
+      return next;
     });
-    return count;
-  };
-
-  const applyProfile = async () => {
-    setPublishingAll(true);
-    try {
-      const profileToApply = await saveProfile('published');
-      if (!profileToApply?.id) return;
-      const stationids = matchingKiosks.map((kiosk) => kiosk.stationid).filter(Boolean);
-      if (!stationids.length) {
-        setSaveStatus({ state: 'success', message: 'Profile published. No kiosks are assigned to this client yet.' });
-        return;
-      }
-      await applySavedProfile(profileToApply, stationids);
-      await loadProfiles(profileToApply.id);
-    } catch (error) {
-      console.error(error);
-      setSaveStatus({ state: 'error', message: error?.message || 'Failed to apply UI profile.' });
-    } finally {
-      setPublishingAll(false);
-    }
-  };
-
-  const publishToKiosk = async (kiosk) => {
-    const stationid = String(kiosk?.stationid || '').trim();
-    if (!stationid) return;
-
-    setPublishingStationId(stationid);
-    try {
-      const profileToApply = await saveProfile('published');
-      if (!profileToApply?.id) return;
-      const count = await applySavedProfile(
-        profileToApply,
-        [stationid],
-        `Published to ${stationid}.`,
-      );
-      if (count !== 1) {
-        throw new Error(`${stationid} was not updated. Check its client assignment and try again.`);
-      }
-      await loadProfiles(profileToApply.id);
-    } catch (error) {
-      console.error(error);
-      setSaveStatus({ state: 'error', message: error?.message || `Failed to publish to ${stationid}.` });
-    } finally {
-      setPublishingStationId('');
-    }
   };
 
   const selectedSectionConfig = CONTENT_SECTIONS.find((section) => section.key === selectedSection) || CONTENT_SECTIONS[0];
@@ -764,13 +805,13 @@ export default function UiProfilesPage({
     return <div className="min-h-screen bg-slate-100 p-6"><div className="mx-auto max-w-3xl rounded-2xl border border-red-200 bg-red-50 p-6 text-red-700">UI editor access is not enabled.</div></div>;
   }
 
-  if (!isDesktopViewport) {
+  if (!isDesktopViewport && !(stripeLocalProfileEnabled && (previewMode || deviceSection === 'stripe'))) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-100 p-6">
         <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
           <PaintBrushIcon className="mx-auto h-10 w-10 text-cyan-700" />
           <h1 className="mt-4 text-xl font-bold text-slate-900">Desktop required</h1>
-          <p className="mt-2 text-sm leading-6 text-slate-500">Kiosk UI Profiles are available only on desktop screens.</p>
+          <p className="mt-2 text-sm leading-6 text-slate-500">Client profiles are available on desktop screens.</p>
           <button type="button" onClick={onNavigateToDashboard} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">
             <HomeIcon className="h-5 w-5" />
             Back to dashboard
@@ -786,7 +827,7 @@ export default function UiProfilesPage({
       <header className="bg-white shadow-sm">
         <div className="mx-auto flex max-w-screen-2xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">Kiosk UI</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Client profiles</h1>
           </div>
           <div className="flex items-center gap-3">
             <button type="button" onClick={onNavigateToDashboard} className="rounded-md bg-gray-200 p-2 text-gray-700 hover:bg-gray-300" title={t('back_to_dashboard')}>
@@ -804,8 +845,15 @@ export default function UiProfilesPage({
         </div>
       </header>
 
-      <main className="mx-auto grid max-w-[1600px] gap-5 px-4 py-5 sm:px-6 lg:grid-cols-[240px_minmax(0,1fr)] lg:px-8 xl:grid-cols-[240px_minmax(0,1fr)_340px]">
+      <main className={`mx-auto grid max-w-[1600px] gap-5 px-4 py-5 sm:px-6 lg:grid-cols-[240px_minmax(0,1fr)] lg:px-8 ${activeDevice === 'kiosk' ? 'xl:grid-cols-[240px_minmax(0,1fr)_340px]' : ''}`}>
         <aside className="space-y-4">
+          {activeDevice === 'stripe' ? <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">Stripe kiosk</h2>
+            <p className="mt-3 font-bold text-slate-900">{stripeProfileHosted ? 'US8004' : 'LAB-US8004'}</p>
+            <p className="mt-1 text-sm leading-5 text-slate-500">{stripeProfileHosted ? 'Shared hosted profile for the US8004 CT8 media and payment app.' : 'Shared laptop profile for the CT8 media and payment app.'}</p>
+            <a href="?page=kiosk-control-lab" className="mt-4 flex items-center gap-2 text-sm font-semibold text-cyan-700 hover:text-cyan-900"><ComputerDesktopIcon className="h-4 w-4"/>Kiosk Control</a>
+            <a href="?page=kiosk-control-lab&amp;section=media" className="mt-3 flex items-center gap-2 text-sm font-semibold text-cyan-700 hover:text-cyan-900"><PaintBrushIcon className="h-4 w-4"/>Media and layout</a>
+          </div> : <>
           <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
             <div className="mb-2 px-1">
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">Client profiles</h2>
@@ -813,7 +861,7 @@ export default function UiProfilesPage({
             {loading ? <LoadingSpinner t={t} /> : visibleProfiles.length ? (
               <select
                 value={selectedProfileId}
-                onChange={(event) => setSelectedProfileId(event.target.value)}
+                disabled={busy} onChange={(event) => selectProfile(event.target.value)}
                 className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-semibold text-slate-800 shadow-sm outline-none transition focus:border-cyan-500 focus:ring-4 focus:ring-cyan-500/10"
                 aria-label="Client profile"
               >
@@ -825,13 +873,13 @@ export default function UiProfilesPage({
           </div>
           <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
             <div className="mb-2 flex items-center justify-between px-1">
-              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">Assigned kiosks</h2>
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">{matchingKiosks.length}</span>
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">Matching kiosks</h2>
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-600">{targetKiosks.length}</span>
             </div>
             <div className="max-h-72 space-y-1.5 overflow-y-auto">
-              {matchingKiosks.map((kiosk) => {
+              {targetKiosks.map((kiosk) => {
                 const online = isKioskOnline(kiosk, referenceTime);
-                const lastPublishedAt = publishedAtOverrides[kiosk.stationid] || kiosk.ui?.profileAppliedAt;
+                const lastPublishedAt = publishedAtOverrides[`${activeDevice}:${kiosk.stationid}`] || kiosk.ui?.profileSections?.[activeDevice]?.appliedAt || (activeDevice === 'kiosk' ? kiosk.ui?.profileAppliedAt : '');
                 const isPublishing = publishingStationId === kiosk.stationid;
                 return (
                   <div key={kiosk.stationid} className="rounded-xl border border-slate-100 px-3 py-2.5">
@@ -850,46 +898,92 @@ export default function UiProfilesPage({
                         </span>
                         <span className="block truncate text-[11px] text-slate-500">{kiosk.info?.location || kiosk.info?.place || 'No location'}</span>
                       </span>
-                      <button
+                      {activeDevice !== 'apollo' && <button
                         type="button"
-                        onClick={() => publishToKiosk(kiosk)}
-                        disabled={publishingAll || Boolean(publishingStationId)}
-                        aria-label={`Publish profile to ${kiosk.stationid}`}
+                        onClick={() => {setTerminalTargetId(supportsTerminalOverrides ? kiosk.stationid : ''); if (!supportsTerminalOverrides) publishProfile(kiosk.stationid);}}
+                        disabled={busy || (!supportsTerminalOverrides && !canPublish)}
+                        aria-label={supportsTerminalOverrides ? `Edit ${deviceLabel} for ${kiosk.stationid}` : `Publish ${deviceLabel} to ${kiosk.stationid}`}
                         className="shrink-0 rounded-lg bg-cyan-700 px-2.5 py-1.5 text-[11px] font-bold text-white shadow-sm hover:bg-cyan-800 disabled:cursor-not-allowed disabled:bg-slate-300"
                       >
-                        {isPublishing ? 'Publishing…' : 'Publish'}
-                      </button>
+                        {isPublishing ? 'Publishing…' : supportsTerminalOverrides ? 'Edit' : 'Publish'}
+                      </button>}
                     </div>
+                    <p className="mt-2 text-xs font-medium text-slate-600">{getProfileDeviceTypes(kiosk).map((type) => PROFILE_SECTIONS.find(({key}) => key === type).label).join(' · ') || 'Hardware not specified'}</p>
+                    {isTerminal && <p className="mt-1 text-xs text-cyan-800">{supportsTerminalOverrides && hasTerminalOverride(draftProfile, activeDevice, kiosk.stationid) ? 'Custom text' : 'Client default'}</p>}
+                    <p className="mt-1 text-xs text-slate-500">{profileDeviceStatus(kiosk, activeDevice, savedProfile, publishedAtOverrides[`${activeDevice}:${kiosk.stationid}`])}</p>
                     <p className="mt-2 text-[10px] font-medium text-slate-400">
                       Last published: {lastPublishedAt ? formatDateTime(lastPublishedAt) : 'Never'}
                     </p>
                   </div>
                 );
               })}
-              {!matchingKiosks.length && <p className="px-2 py-5 text-center text-sm text-slate-500">No kiosks found for this client.</p>}
+              {!targetKiosks.length && <p className="px-2 py-5 text-center text-sm text-slate-500">No matching kiosks for this section.</p>}
             </div>
           </div>
+          </>}
         </aside>
 
         <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-200 p-4 sm:p-5">
-            <div className="mb-5 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
-              <div>
-                <h2 className="text-lg font-bold text-slate-900">Profile settings</h2>
-                <p className="mt-1 text-sm text-slate-500"><span className="font-semibold text-slate-700">{profileClientId}</span> · Publishing updates all {matchingKiosks.length} kiosk{matchingKiosks.length === 1 ? '' : 's'} assigned to this client.</p>
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div><h2 className="text-lg font-bold text-slate-900">{activeDevice === 'stripe' ? (stripeProfileHosted ? 'US8004' : 'LAB-US8004') : profileClientId || 'Loading profile'} <span className="text-sm font-normal text-slate-500">· {deviceLabel}</span></h2>
+                {activeDevice === 'stripe' ? <p className="mt-1 text-sm text-slate-500">Text, pages, and colors for the Android checkout.</p> : <p className="mt-1 text-sm text-slate-500">{targetKiosks.length} matching kiosk{targetKiosks.length === 1 ? '' : 's'} · {dirty ? 'Unsaved changes' : 'No unsaved changes'}</p>}
               </div>
-              <div className="flex items-center gap-2">
-                <button type="button" onClick={() => saveProfile('draft')} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50">Save draft</button>
-                <button type="button" onClick={applyProfile} disabled={publishingAll || Boolean(publishingStationId)} className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400">{publishingAll ? 'Publishing…' : 'Publish all'}</button>
+              {activeDevice && activeDevice !== 'stripe' && <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={saveProfile} disabled={!canSave || busy || !dirty || Boolean(apolloFlowError)} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 disabled:opacity-40">{saving ? 'Saving…' : 'Save draft'}</button>
+                <button type="button" onClick={() => publishProfile(targetStationId)} disabled={!canPublish || busy} className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40">{publishingAll || publishingStationId ? 'Publishing…' : targetStationId ? `Publish to ${targetStationId}` : `Publish ${deviceLabel} (${targetKiosks.length})`}</button>
+              </div>}
+            </div>
+            {deviceSections.length > 0 && <nav className="mt-5 flex flex-wrap gap-1 rounded-xl bg-slate-100 p-1" aria-label="Profile device sections">
+              {deviceSections.map(({key, label}) => <button type="button" key={key} aria-pressed={activeDevice === key} disabled={busy} onClick={() => {setDeviceSection(key); setTerminalTargetId(''); setApolloTestStationId(''); setApolloTestSession(null); setSaveStatus(null);}} className={`rounded-lg px-4 py-2.5 text-sm font-semibold ${activeDevice === key ? 'bg-white text-cyan-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>{label}</button>)}
+            </nav>}
+            {previewMode && activeDevice !== 'stripe' && <p className="mt-4 rounded-lg bg-cyan-50 px-3 py-2 text-sm text-cyan-900">Local preview · sample kiosks. Saves stay in this preview; publishing is disabled.</p>}
+            {!loading && activeDevice && activeDevice !== 'stripe' && !canSave && <p role="status" className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{!sectionAllowed ? 'Apollo editing requires administrator access.' : 'Preview available. Saving and publishing require the updated profile service.'}</p>}
+            {activeDevice === 'apollo' && <p className="mt-3 text-sm text-slate-500">This is one client-wide flow for every matching Apollo kiosk. Publishing stays unavailable until the terminal connection is validated.</p>}
+            {activeDevice === 'apollo' && <div className="mt-4 rounded-xl border border-cyan-200 bg-cyan-50 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold text-cyan-950">Test an added screen on one terminal</h3>
+                  <p className="mt-1 max-w-3xl text-xs leading-5 text-cyan-900">This sends only the saved added-screen sequence. It does not start the established rent, payment, return, or vend flow; Continue and Start end the test session.</p>
+                </div>
+                {apolloTestSession && <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-cyan-900">{apolloTestSession.status}</span>}
               </div>
-            </div>
-            <div className="mt-5 flex gap-1 overflow-x-auto rounded-xl bg-slate-100 p-1">
-              {EDITOR_TABS.map((tab) => <button key={tab.key} type="button" onClick={() => setActiveTab(tab.key)} className={`min-w-max flex-1 rounded-lg px-4 py-2 text-sm font-semibold transition ${activeTab === tab.key ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>{tab.label}</button>)}
-            </div>
+              {capabilities.apolloTestScreens !== 1 ? <p className="mt-3 text-xs font-semibold text-amber-800">Deploy the Apollo test service before a physical terminal can be selected.</p>
+                : capabilities.apolloProfileTestsEnabled !== true ? <p className="mt-3 text-xs font-semibold text-amber-800">Physical testing is locked in the backend. Enable it only with an explicit test-kiosk allowlist.</p>
+                  : <div className="mt-3 flex flex-wrap items-end gap-3">
+                    <label className="min-w-56 flex-1 text-xs font-bold text-cyan-950">Allowlisted test kiosk
+                      <select aria-label="Apollo test kiosk" value={selectedApolloTestStationId} disabled={busy} onChange={(event) => {setApolloTestStationId(event.target.value); setApolloTestSession(null);}} className="mt-1.5 w-full rounded-xl border border-cyan-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-800">
+                        <option value="">Choose one kiosk</option>
+                        {apolloTestKiosks.map((kiosk) => <option key={kiosk.stationid} value={kiosk.stationid}>{kiosk.stationid} · {kiosk.info?.location || kiosk.info?.place || 'No location'}</option>)}
+                      </select>
+                    </label>
+                    <button type="button" onClick={startApolloTest} disabled={!canTestApollo || busy} className="rounded-xl bg-cyan-800 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-40">{apolloTesting ? 'Sending test…' : 'Send saved test'}</button>
+                  </div>}
+              {capabilities.apolloProfileTestsEnabled === true && !apolloTestKiosks.length && <p className="mt-3 text-xs font-semibold text-amber-800">No Apollo kiosk for this client is on the backend test allowlist.</p>}
+              {capabilities.apolloProfileTestsEnabled === true && dirty && <p className="mt-2 text-xs text-cyan-900">Save this Apollo draft before testing so the terminal receives the reviewed version.</p>}
+              {capabilities.apolloProfileTestsEnabled === true && !dirty && !apolloFlow?.entryScreenId && <p className="mt-2 text-xs text-cyan-900">Add a screen and select it under After Start, show before testing.</p>}
+            </div>}
+            {supportsTerminalOverrides && <div className="mt-5 flex flex-wrap items-end gap-3">
+              <label className="min-w-48 flex-1 text-sm font-semibold text-slate-700">Editing
+                <select aria-label="Terminal profile target" value={targetStationId} disabled={busy} onChange={(event) => setTerminalTargetId(event.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                  <option value="">Client default</option>
+                  {targetKiosks.map((kiosk) => <option key={kiosk.stationid} value={kiosk.stationid}>{kiosk.stationid} · {hasTerminalOverride(draftProfile, activeDevice, kiosk.stationid) ? 'Custom text' : 'Client default'}</option>)}
+                </select>
+              </label>
+              {targetStationId && hasTerminalOverride(draftProfile, activeDevice, targetStationId) && <button type="button" disabled={busy} onClick={useClientDefault} className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-600">Use client default</button>}
+            </div>}
+            {activeDevice === 'kiosk' && <div className="mt-5 flex gap-1 border-t border-slate-100 pt-3">
+              {EDITOR_TABS.map((tab) => <button key={tab.key} type="button" onClick={() => setActiveTab(tab.key)} className={`rounded-lg px-4 py-2 text-sm font-semibold ${activeTab === tab.key ? 'bg-cyan-50 text-cyan-800' : 'text-slate-500'}`}>{tab.label}</button>)}
+            </div>}
           </div>
-
-          <div className="p-4 sm:p-5">
-            {activeTab === 'Content' && <div>
+          <fieldset disabled={activeDevice !== 'stripe' && (busy || !sectionAllowed || loading)} className="min-w-0 p-4 sm:p-5">
+            {activeDevice === 'stripe' && <StripeProfileEditor />}
+            {!loading && !activeDevice && <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center">
+              <h2 className="font-bold text-slate-900">No compatible profile sections</h2>
+              <p className="mt-2 text-sm text-slate-500">This client has no kiosks that match the available kiosk, Apollo, P68, or Kiosk access rules.</p>
+            </div>}
+            {isTerminal && draftProfile && <TerminalProfileEditor profile={draftProfile} section={activeDevice} stationId={targetStationId} language={selectedLanguage} onLanguageChange={setSelectedLanguage} onChange={setDraftProfile} disabled={busy || !sectionAllowed} allowEstablishedScreenRemoval={capabilities.apolloEstablishedScreenRemoval === 1} />}
+            {activeDevice === 'kiosk' && activeTab === 'Content' && <div>
               <div className="mb-5 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
                 <div>
                   <h2 className="text-lg font-bold">Localized kiosk text</h2>
@@ -923,7 +1017,7 @@ export default function UiProfilesPage({
               </div>
             </div>}
 
-            {activeTab === 'Colors' && <div>
+            {activeDevice === 'kiosk' && activeTab === 'Colors' && <div>
               <div className="mb-5"><h2 className="flex items-center gap-2 text-lg font-bold"><PaintBrushIcon className="h-5 w-5 text-cyan-700" />Brand colors</h2><p className="mt-1 text-sm text-slate-500">These are the only visual values profiles can change. Screen positions, sizes, spacing, and layout stay locked to the kiosk flow.</p></div>
               <div className="grid gap-4 md:grid-cols-2">
                 <ColorField label="Primary action" description="Start, rent, and main action buttons." value={draftProfile?.ui?.colors?.bcolor1 || DEFAULT_KIOSK_UI.colors.bcolor1} onChange={(value) => updateUiColor('bcolor1', value)} />
@@ -932,10 +1026,10 @@ export default function UiProfilesPage({
               <div className="mt-6"><h3 className="font-bold text-slate-900">Support phone numbers</h3><p className="mt-1 text-sm text-slate-500">The kiosk chooses the number for its configured market.</p><div className="mt-4 grid gap-4 md:grid-cols-3">{[['US', 'United States'], ['CAN', 'Canada'], ['EUR', 'Europe']].map(([market, label]) => <Field key={market} label={label}><TextInput value={draftProfile?.languages?.support?.phoneByMarket?.[market] || ''} onChange={(value) => updateSupportPhone(market, value)} /></Field>)}</div></div>
             </div>}
 
-            {activeTab === 'Admin' && <div>
+            {activeDevice === 'admin' && <div>
               <div className="mb-5">
                 <h2 className="flex items-center gap-2 text-lg font-bold"><LockClosedIcon className="h-5 w-5 text-cyan-700" />Kiosk admin access</h2>
-                <p className="mt-1 text-sm text-slate-500">These five-digit PINs update on every kiosk assigned to the client when this profile is published.</p>
+                <p className="mt-1 text-sm text-slate-500">These PINs control kiosk administration. Publish Kiosk access to update them separately from screen content.</p>
               </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <Field label="User PIN" hint="Exactly five digits using only 1, 2, 3, 4, or 5.">
@@ -948,12 +1042,12 @@ export default function UiProfilesPage({
               <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800">Leave a PIN blank to preserve the current kiosk value. Once saved in the profile, the PIN remains available here as a masked value.</div>
             </div>}
 
-          </div>
+          </fieldset>
         </section>
 
-        <aside className="space-y-4 lg:col-start-2 xl:col-start-auto">
-          <div className="xl:sticky xl:top-24"><KioskPreview profile={draftProfile} language={selectedLanguage} previewScreen={previewScreen} onPreviewScreenChange={setPreviewScreen} onButtonToggle={updateUiSetting} /></div>
-        </aside>
+        {activeDevice === 'kiosk' && <aside className="space-y-4 lg:col-start-2 xl:col-start-auto">
+          <div className="xl:sticky xl:top-24"><KioskPreview profile={draftProfile} language={selectedLanguage} previewScreen={previewScreen} onPreviewScreenChange={setPreviewScreen} onButtonToggle={(path, value) => !busy && updateUiSetting(path, value)} /></div>
+        </aside>}
       </main>
     </div>
   );

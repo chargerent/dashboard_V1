@@ -257,7 +257,9 @@ export default function PayoutsPage({ onNavigateToDashboard, onNavigateToAdmin, 
                     <tr key={report.id} className="align-top">
                       <td className="px-4 py-4">
                         <p className="font-semibold text-gray-900">{getReportName(report)}</p>
-                        <p className="text-xs text-gray-500">{report.type === 'lease_partner' ? 'Lease partner payout' : 'Purchase approval'}</p>
+                        <p className="text-xs text-gray-500">{report.type === 'lease_partner'
+                          ? 'Lease partner payout'
+                          : report.model === 'chargedrops' ? 'ChargeDrops client payout' : 'Purchase approval'}</p>
                         <p className="mt-1 text-xs text-gray-400">{report.id}</p>
                       </td>
                       <td className="px-4 py-4 text-sm text-gray-700">

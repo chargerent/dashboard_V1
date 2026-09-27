@@ -1333,7 +1333,7 @@ const RentalProcessLog = ({ rental, t }) => {
     );
 };
 
-const RentalCard = ({ rental, t, onRefund, onLockClick, canLock, onNavigateToChargers, onNavigateToDashboard }) => {
+export const RentalCard = ({ rental, t, onRefund, refundDisabled = false, onMatch, matchDisabled = false, matchPending = false, isMatched = false, onLockClick, canLock, onNavigateToChargers, onNavigateToDashboard }) => {
     const [copiedTransaction, setCopiedTransaction] = useState(false);
     const displayTransactionId = resolveDisplayTransactionId(rental);
     const copyTransactionId = resolveCopyTransactionId(rental);
@@ -1541,6 +1541,16 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock, onNavigateToCha
                     </div>
                 )}
                 <div className="flex items-center gap-2">
+                    {onMatch && (
+                        <button
+                            type="button"
+                            onClick={() => onMatch(rental)}
+                            disabled={matchDisabled || isMatched}
+                            className="text-xs bg-emerald-600 hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-300 text-white font-semibold py-1 px-3 rounded-md"
+                        >
+                            {isMatched ? 'Matched' : matchPending ? 'Matching…' : 'Match rental'}
+                        </button>
+                    )}
                     {canLock && (
                         <button
                             onClick={onLockClick}
@@ -1553,7 +1563,12 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock, onNavigateToCha
                         </button>
                     )}
                     {onRefund && !hasRefundRequest(rental) && (
-                        <button onClick={() => onRefund(rental)} className="text-xs bg-blue-500 hover:bg-blue-600 text-white font-semibold py-1 px-3 rounded-md">
+                        <button
+                            type="button"
+                            onClick={() => onRefund(rental)}
+                            disabled={refundDisabled}
+                            className="text-xs bg-blue-500 hover:bg-blue-600 disabled:cursor-not-allowed disabled:bg-blue-300 text-white font-semibold py-1 px-3 rounded-md"
+                        >
                             {t('refund')}
                         </button>
                     )}
@@ -1563,7 +1578,7 @@ const RentalCard = ({ rental, t, onRefund, onLockClick, canLock, onNavigateToCha
     );
 };
 
-export default function RentalsPage({ onNavigateToDashboard, onNavigateToChargers, clientInfo, allStationsData, t, language, setLanguage, onLogout, onCommand, commandStatus, setCommandStatus, refundConfirmation, referenceTime, initialPeriod = '7days', initialStationIds = [], initialSearch = '' }) {
+export default function RentalsPage({ onNavigateToDashboard, onNavigateToChargers, clientInfo, allStationsData, t, language, setLanguage, onLogout, onCommand, commandStatus, setCommandStatus, refundConfirmation, referenceTime, initialPeriod = '7days', initialStationIds = [], initialSearch = '', initialRentals = [] }) {
     const canViewRentalDetails = Boolean(clientInfo?.isAdmin || clientInfo?.features?.rentals === true);
     const [activeFilters, setActiveFilters] = useState({ period: initialPeriod, status: 'all', returnType: 'all', version: 'all', gateway: 'all' });
     const [searchTerm, setSearchTerm] = useState(initialSearch);
@@ -1573,8 +1588,9 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
     const [rentalToRefund, setRentalToRefund] = useState(null);
     const [commandDetails, setCommandDetails] = useState(null);
     const [commandModalOpen, setCommandModalOpen] = useState(false);
-    const [loadedRentals, setLoadedRentals] = useState([]);
-    const [rentalsLoading, setRentalsLoading] = useState(true);
+    const seededRentals = useMemo(() => mergeRentalDocuments(initialRentals), [initialRentals]);
+    const [loadedRentals, setLoadedRentals] = useState(() => seededRentals);
+    const [rentalsLoading, setRentalsLoading] = useState(seededRentals.length === 0);
     const [rentalsLoadingMore, setRentalsLoadingMore] = useState(false);
     const [rentalsError, setRentalsError] = useState('');
     const [hasMoreRentals, setHasMoreRentals] = useState(false);
@@ -1919,13 +1935,21 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
             const scopedMatches = allowedStations
                 ? matches.filter(rental => allowedStations.has(String(rental.rentalStationid || '')))
                 : matches;
-            setLoadedRentals(mergeRentalDocuments(scopedMatches));
+            setLoadedRentals(mergeRentalDocuments(seededRentals, scopedMatches));
             setRentalsError('');
         } catch (error) {
             if (requestGeneration !== requestGenerationRef.current) return;
             console.error('Unable to search rentals:', error);
-            setLoadedRentals([]);
-            setRentalsError(t('rentals_search_error'));
+            if (
+                seededRentals.length > 0 &&
+                normalizeText(term) === normalizeText(initialSearch)
+            ) {
+                setLoadedRentals(seededRentals);
+                setRentalsError('');
+            } else {
+                setLoadedRentals([]);
+                setRentalsError(t('rentals_search_error'));
+            }
         } finally {
             if (requestGeneration === requestGenerationRef.current) {
                 setRentalsLoading(false);
@@ -1935,7 +1959,9 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
     }, [
         availableStationIds,
         canViewRentalDetails,
+        initialSearch,
         isGlobalAdminScope,
+        seededRentals,
         scopedStationIds,
         stationScopeChunks,
         t,
@@ -1952,12 +1978,23 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToCharger
 
     useEffect(() => {
         if (!committedSearch) return undefined;
+        if (
+            seededRentals.length > 0 &&
+            normalizeText(committedSearch) === normalizeText(initialSearch)
+        ) {
+            setLoadedRentals(seededRentals);
+            setRentalsLoading(false);
+            setRentalsLoadingMore(false);
+            setRentalsError('');
+            setHasMoreRentals(false);
+            return undefined;
+        }
         setCurrentPage(1);
         fetchSearchResults(committedSearch);
         return () => {
             requestGenerationRef.current += 1;
         };
-    }, [committedSearch, fetchSearchResults]);
+    }, [committedSearch, fetchSearchResults, initialSearch, seededRentals]);
 
     const chargerLocations = useMemo(() => {
         const map = new Map();

@@ -32,7 +32,9 @@ import {
   applyNgrokStateOverride,
   rememberNgrokStateOverride,
 } from './utils/kioskNgrokState.js';
+import { normalizeKioskScreenshotDataUrl } from './utils/kioskScreenshot.js';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
+import KioskScreenshotModal from './components/KioskScreenshotModal.jsx';
 
 // 🔥 firebase-config must export BOTH db and auth
 import { db, auth } from './firebase-config';
@@ -54,14 +56,22 @@ const MediaPage = lazy(() => import('./pages/MediaPage.jsx'));
 const UiProfilesPage = lazy(() => import('./pages/UiProfilesPage.jsx'));
 const AiBoothsPage = lazy(() => import('./pages/AiBoothsPage.jsx'));
 const PayoutsPage = lazy(() => import('./pages/PayoutsPage.jsx'));
+const AccountingPage = lazy(() => import('./pages/AccountingPage.jsx'));
 const ActivityPage = lazy(() => import('./pages/ActivityPage.jsx'));
 const PhoneControlPage = lazy(() => import('./pages/PhoneControlPage.jsx'));
+const PayterPage = lazy(() => import('./pages/PayterPage.jsx'));
+const CustomerSupportPage = lazy(() => import('./pages/CustomerSupportPage.jsx'));
+const ChargeDropsClientSetupPage = lazy(() => import('./pages/ChargeDropsClientSetupPage.jsx'));
+const ChargeDropsClientPortalPage = lazy(() => import('./pages/ChargeDropsClientPortalPage.jsx'));
 
 function readActivityNavigation() {
   if (typeof window === 'undefined') return { page: 'dashboard', stationId: '' };
   const params = new URLSearchParams(window.location.search);
+  const requestedPage = params.get('page');
   return {
-    page: params.get('page') === 'activity' ? 'activity' : 'dashboard',
+    page: import.meta.env.DEV && ['accounting-preview', 'payter-preview', 'profiles-preview', 'chargedrops-client-setup-preview', 'chargedrops-client-portal-preview'].includes(requestedPage)
+      ? requestedPage
+      : requestedPage === 'activity' ? 'activity' : 'dashboard',
     stationId: String(params.get('station') || '').trim().toUpperCase(),
   };
 }
@@ -82,6 +92,7 @@ function dashboardUrl() {
 }
 
 const OBAILIX_CONCIERGE_WORKSPACE_URL = 'https://obailix.com/concierge';
+const KIOSK_SCREENSHOT_TIMEOUT_MS = 20000;
 
 function openObailixConciergeWorkspace() {
   if (typeof window === 'undefined') return;
@@ -659,6 +670,7 @@ function buildClientInfoFromProfile(profile, uid) {
     connectivity: false,
     reboot: false,
     reload: false,
+    screenshot: false,
     audio: false,
     disable: false,
     "client edit": false
@@ -706,6 +718,7 @@ function buildClientInfoFromProfile(profile, uid) {
       connectivity: true,
       reboot: true,
       reload: true,
+      screenshot: true,
       audio: true,
       disable: true,
       "client edit": true,
@@ -728,6 +741,12 @@ function buildClientInfoFromProfile(profile, uid) {
     partner,
     commission,
     revShare: commission,
+    paymentSchedule: String(profile.paymentSchedule || 'monthly').toLowerCase(),
+    product: String(profile.product || '').toLowerCase(),
+    products: profile.products || {},
+    portalBrand: String(profile.portalBrand || '').toLowerCase(),
+    regionalPartnerId: String(profile.regionalPartnerId || '').trim().toUpperCase(),
+    chargedrops: profile.chargedrops || null,
     isAdmin,
     role,
     serverFlowVersion: getFirstVersionText(profile, ['serverFlowVersion', 'serverFversion']),
@@ -834,6 +853,22 @@ function useDesktopOnlyViewport() {
   return isDesktop;
 }
 
+function useCustomerSupportDesktopViewport() {
+  const [isDesktop, setIsDesktop] = useState(() => (
+    typeof window === 'undefined' || window.matchMedia('(min-width: 1024px)').matches
+  ));
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(min-width: 1024px)');
+    const handleChange = (event) => setIsDesktop(event.matches);
+    setIsDesktop(mediaQuery.matches);
+    mediaQuery.addEventListener('change', handleChange);
+    return () => mediaQuery.removeEventListener('change', handleChange);
+  }, []);
+
+  return isDesktop;
+}
+
 function normalizeNavigationSearch(value = '') {
   if (value == null) return '';
   if (typeof value === 'string') return value;
@@ -856,7 +891,8 @@ function App() {
     () => new Map(),
   );
   const [language, setLanguage] = useState('en');
-  const [page, setPage] = useState(() => readActivityNavigation().page); // 'dashboard', 'activity', 'admin', 'media', 'binding', 'templates', 'kiosk-editor', 'rentals', 'chargers', 'provision', 'reporting', 'analytics', 'testing'
+  const [page, setPage] = useState(() => readActivityNavigation().page); // 'dashboard', 'activity', 'admin', 'payter', 'media', 'binding', 'templates', 'kiosk-editor', 'rentals', 'chargers', 'provision', 'reporting', 'analytics', 'testing'
+  const [profileNavigation, setProfileNavigation] = useState({});
   const [activityInitialStation, setActivityInitialStation] = useState(() => readActivityNavigation().stationId);
   const [dashboardSearchTerm, setDashboardSearchTerm] = useState('');
   const [phoneControlInitialSearch, setPhoneControlInitialSearch] = useState('');
@@ -864,11 +900,22 @@ function App() {
   const [rentalsInitialPeriod, setRentalsInitialPeriod] = useState('7days');
   const [rentalsInitialStationIds, setRentalsInitialStationIds] = useState([]);
   const [rentalsInitialSearch, setRentalsInitialSearch] = useState('');
+  const [rentalsInitialData, setRentalsInitialData] = useState([]);
   const [rentalData, setRentalData] = useState([]);
+  const [rawRentalsReady, setRawRentalsReady] = useState(false);
   const [rentalRefundConfirmation, setRentalRefundConfirmation] = useState(null);
   const [rentalDashboardStatsByStationId, setRentalDashboardStatsByStationId] = useState(() => new Map());
   const [rentalDashboardMetaReady, setRentalDashboardMetaReady] = useState(false);
   const [commandStatus, setCommandStatus] = useState(null);
+  const [kioskScreenshot, setKioskScreenshot] = useState({
+    isOpen: false,
+    stationid: '',
+    requestId: '',
+    state: 'idle',
+    imageUrl: '',
+    capturedAt: null,
+    error: '',
+  });
   const [firestoreError, setFirestoreError] = useState(null);
   const [initialStatusCheck, setInitialStatusCheck] = useState(false);
 
@@ -888,6 +935,7 @@ function App() {
   const moduleChargeControlOverridesRef = useRef(new Map());
   const sshStateOverridesRef = useRef(new Map());
   const ngrokStateOverridesRef = useRef(new Map());
+  const kioskScreenshotTimeoutRef = useRef(null);
   const currentSocketSessionIdRef = useRef('');
   const startupListenerRef = useRef({ kiosksLogged: false, rentalsLogged: false });
   const adminRentalLoadHandleRef = useRef(null);
@@ -907,6 +955,7 @@ function App() {
     stationIds: [],
   });
   const isDesktopOnlyViewport = useDesktopOnlyViewport();
+  const isCustomerSupportDesktopViewport = useCustomerSupportDesktopViewport();
   const canViewRentalDetails = Boolean(
     clientInfo?.isAdmin || clientInfo?.features?.rentals === true
   );
@@ -924,6 +973,61 @@ function App() {
   useEffect(() => {
     allStationsDataRef.current = allStationsData;
   }, [allStationsData]);
+
+  const clearKioskScreenshotTimeout = useCallback(() => {
+    if (kioskScreenshotTimeoutRef.current) {
+      clearTimeout(kioskScreenshotTimeoutRef.current);
+      kioskScreenshotTimeoutRef.current = null;
+    }
+  }, []);
+
+  const showKioskScreenshotRequest = useCallback((stationid) => {
+    clearKioskScreenshotTimeout();
+    setKioskScreenshot({
+      isOpen: true,
+      stationid,
+      requestId: '',
+      state: 'requesting',
+      imageUrl: '',
+      capturedAt: null,
+      error: '',
+    });
+  }, [clearKioskScreenshotTimeout]);
+
+  const armKioskScreenshotTimeout = useCallback((stationid, requestId) => {
+    clearKioskScreenshotTimeout();
+    setKioskScreenshot((previous) => ({ ...previous, stationid, requestId }));
+    kioskScreenshotTimeoutRef.current = setTimeout(() => {
+      setKioskScreenshot((previous) => {
+        if (!previous.isOpen || previous.requestId !== requestId) return previous;
+        return {
+          ...previous,
+          state: 'error',
+          error: 'No screenshot response was received within 20 seconds.',
+        };
+      });
+      kioskScreenshotTimeoutRef.current = null;
+    }, KIOSK_SCREENSHOT_TIMEOUT_MS);
+  }, [clearKioskScreenshotTimeout]);
+
+  const failKioskScreenshot = useCallback((stationid, error) => {
+    clearKioskScreenshotTimeout();
+    setKioskScreenshot((previous) => ({
+      ...previous,
+      isOpen: true,
+      stationid: stationid || previous.stationid,
+      state: 'error',
+      imageUrl: '',
+      error,
+    }));
+  }, [clearKioskScreenshotTimeout]);
+
+  const closeKioskScreenshot = useCallback(() => {
+    clearKioskScreenshotTimeout();
+    setKioskScreenshot((previous) => ({ ...previous, isOpen: false }));
+  }, [clearKioskScreenshotTimeout]);
+
+  useEffect(() => () => clearKioskScreenshotTimeout(), [clearKioskScreenshotTimeout]);
 
   const pruneModuleChargeControlOverrides = useCallback((now = Date.now()) => {
     for (const [key, override] of moduleChargeControlOverridesRef.current.entries()) {
@@ -1071,6 +1175,7 @@ function App() {
     setPage('dashboard');
     setInitialStatusCheck(false);
     setAdminRentalsReady(false);
+    setRawRentalsReady(false);
     setRentalScope({ ready: false, scopeType: 'pending', stationIds: [] });
   }, [cancelDeferredAdminRentalLoad]);
 
@@ -1186,6 +1291,7 @@ function App() {
         setKiosksReady(false);
         cancelDeferredAdminRentalLoad();
         setAdminRentalsReady(false);
+        setRawRentalsReady(false);
         setRentalScope({ ready: false, scopeType: 'pending', stationIds: [] });
         setAuthReady(true);
         return;
@@ -1707,10 +1813,16 @@ function App() {
     if (!hasAuthToken || !auth.currentUser || !listenerClientInfo) return;
     if (!shouldLoadRawRentals) {
       setRentalData([]);
+      setRawRentalsReady(false);
       startupListenerRef.current.rentalsLogged = true;
       return undefined;
     }
-    if (!effectiveRentalScope.ready) return;
+    if (!effectiveRentalScope.ready) {
+      setRawRentalsReady(false);
+      return undefined;
+    }
+
+    setRawRentalsReady(false);
 
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -1721,6 +1833,7 @@ function App() {
 
     if (!listenerIsAdmin && effectiveRentalStationIds.length === 0) {
       setRentalData([]);
+      setRawRentalsReady(true);
       startupListenerRef.current.rentalsLogged = true;
       return undefined;
     }
@@ -1765,6 +1878,7 @@ function App() {
         );
         return isUnchanged ? prevRentals : combinedRentals;
       });
+      setRawRentalsReady(true);
     };
 
     const scheduleRentalPublish = () => {
@@ -1807,6 +1921,7 @@ function App() {
         }
       }, (error) => {
         setFirestoreError('Failed to connect to rental data. The dashboard may be out of date.');
+        setRawRentalsReady(true);
         console.error("Error fetching real-time rentals: ", error);
       })
     ));
@@ -2055,12 +2170,8 @@ function App() {
 
   const getCommandStatusVisibility = useCallback((data) => {
     const username = String(clientInfo?.username || '').trim().toLowerCase();
-    if (username === 'chargerent') {
-      return { shouldShow: true, reason: 'chargerent' };
-    }
-
     if (!data || typeof data !== 'object') {
-      return { shouldShow: false, reason: 'unscoped-message' };
+      return { shouldShow: username === 'chargerent', reason: 'unscoped-message' };
     }
 
     pruneOutgoingCommandScopes();
@@ -2077,6 +2188,9 @@ function App() {
       : getMatchingLegacyCommandScope(outgoingCommandScopesRef.current, data);
     const matchingScope = requestScope || legacyScope;
 
+    if (matchingScope?.suppressCommandToast) {
+      return {shouldShow: false, reason: 'profile-page-feedback'};
+    }
     if (matchingScope) {
       if (adminId && (requestScope || !currentSocketSessionId)) {
         currentSocketSessionIdRef.current = adminId;
@@ -2089,6 +2203,8 @@ function App() {
         matchedRequestId: matchingScope.requestId,
       };
     }
+
+    if (username === 'chargerent') return {shouldShow: true, reason: 'chargerent'};
 
     const knownSocketSessionId = currentSocketSessionIdRef.current;
     if (adminId && knownSocketSessionId && adminId === knownSocketSessionId) {
@@ -2147,14 +2263,23 @@ function App() {
   }, [token]);
 
   const onCommand = useCallback(async (stationid, action, moduleid = null, provisionid = null, uiVersion = null, details = null) => {
+    const isProfilePush = action === 'uichange' && details?.pushOnly === true && details?.suppressCommandToast === true;
+    const isScreenshotRequest = action === 'screenshot';
+    if (isScreenshotRequest) {
+      showKioskScreenshotRequest(stationid);
+    }
     let commandToken = '';
     try {
       commandToken = await getFreshCommandToken();
     } catch (error) {
+      if (isProfilePush) throw error;
       setCommandStatus({
         state: 'error',
         message: error?.message ? `${t('command_failed')} ${error.message}` : t('command_failed'),
       });
+      if (isScreenshotRequest) {
+        failKioskScreenshot(stationid, error?.message || t('connection_lost'));
+      }
       return;
     }
 
@@ -2209,15 +2334,21 @@ function App() {
         moduleid,
         provisionid,
         version: uiVersion,
+        suppressCommandToast: isProfilePush,
       });
       commandSocket.send(JSON.stringify({
         type: 'command',
         token: commandToken,
         data: commandData,
       }));
-      ignoredKiosksRef.current = { ...ignoredKiosksRef.current, [stationid]: Date.now() + 30000 };
+      if (!isProfilePush) ignoredKiosksRef.current = { ...ignoredKiosksRef.current, [stationid]: Date.now() + 30000 };
       return true;
     };
+
+    if (isProfilePush) {
+      if (!await pushUiChangeToKiosk(normalizedKioskPayload)) throw new Error(`${stationid}: ${t('connection_lost')}`);
+      return true;
+    }
 
     if (shouldUseFirebaseForLock) {
       const requestId = createCommandRequestId(action, stationid, moduleid);
@@ -2456,6 +2587,9 @@ function App() {
         version: uiVersion,
       });
       commandSocket.send(JSON.stringify(message));
+      if (isScreenshotRequest) {
+        armKioskScreenshotTimeout(stationid, requestId);
+      }
       console.log('[WS Send]', message);
       if (action.startsWith('eject') || action === 'rent' || action === 'vend') {
         debugEjectUi('Sent eject-style command', commandData);
@@ -2483,8 +2617,11 @@ function App() {
       }
     } else {
       setCommandStatus({ state: 'error', message: t('connection_lost') });
+      if (isScreenshotRequest) {
+        failKioskScreenshot(stationid, t('connection_lost'));
+      }
     }
-  }, [debugEjectUi, getFreshCommandToken, rememberOutgoingCommandScope, t]);
+  }, [armKioskScreenshotTimeout, debugEjectUi, failKioskScreenshot, getFreshCommandToken, rememberOutgoingCommandScope, showKioskScreenshotRequest, t]);
 
   // ---------------------------------------------
   // WebSocket connect (FULL HANDLER INCLUDED)
@@ -2530,7 +2667,40 @@ function App() {
             });
           }
 
-          if (flowUpdateResponse) {
+          if (data.action === 'screenshot') {
+            const imageUrl = normalizeKioskScreenshotDataUrl(
+              data.screenshot ?? data.image ?? data.imageData ?? data.data,
+            );
+            const responseFailed = Number(data.status) === 0 || data.status === 'error';
+            const statusMessage = responseFailed
+              ? (data.status_en || 'The kiosk could not capture its display.')
+              : imageUrl
+                ? 'Screenshot received. Decoding image…'
+                : 'The kiosk returned an invalid screenshot image.';
+            const shouldShowScreenshot = setScopedCommandStatus(data, {
+              state: responseFailed || !imageUrl ? 'error' : 'pending',
+              message: statusMessage,
+            });
+
+            if (shouldShowScreenshot) {
+              clearKioskScreenshotTimeout();
+              const rawCapturedAt = data.capturedAt ?? data.timeresponded ?? Date.now();
+              const numericCapturedAt = Number(rawCapturedAt);
+              const parsedCapturedAt = Number.isFinite(numericCapturedAt)
+                ? numericCapturedAt
+                : Date.parse(rawCapturedAt);
+              setKioskScreenshot((previous) => ({
+                ...previous,
+                isOpen: true,
+                stationid: String(data.stationid || data.kiosk || previous.stationid),
+                requestId: String(data.requestId || previous.requestId),
+                state: responseFailed || !imageUrl ? 'error' : 'received',
+                imageUrl: responseFailed ? '' : imageUrl,
+                capturedAt: Number.isFinite(parsedCapturedAt) ? parsedCapturedAt : Date.now(),
+                error: responseFailed || !imageUrl ? statusMessage : '',
+              }));
+            }
+          } else if (flowUpdateResponse) {
             setScopedCommandStatus(data, {
               state: flowUpdateResponse.state,
               message: flowUpdateResponse.message || t('sending_command'),
@@ -2971,7 +3141,7 @@ function App() {
         ws.current = null;
       }
     };
-  }, [token, clientInfo, t, clearEjectCommandState, debugEjectUi, flashFailedEjectSlot, rememberModuleChargeControlOverride, setScopedCommandStatus]);
+  }, [token, clientInfo, t, clearEjectCommandState, clearKioskScreenshotTimeout, debugEjectUi, flashFailedEjectSlot, rememberModuleChargeControlOverride, setScopedCommandStatus]);
 
   // Login handler (kept for LoginPage)
   const handleLogin = () => {
@@ -2997,6 +3167,7 @@ function App() {
         setRentalsInitialPeriod(['today', '7days', '30days'].includes(period) ? period : '7days');
         setRentalsInitialStationIds(stationIds);
         setRentalsInitialSearch(searchTerm);
+        setRentalsInitialData([]);
         setPage('rentals');
       }}
       onNavigateToChargers={(searchTerm = '') => {
@@ -3005,6 +3176,9 @@ function App() {
       }}
       onNavigateToActivity={onNavigateToActivity}
       onNavigateToPhoneControl={onNavigateToPhoneControl}
+      onNavigateToCustomerSupport={clientInfo?.isAdmin === true && isCustomerSupportDesktopViewport
+        ? () => setPage('customer-support')
+        : undefined}
       assignedPhoneStationIds={assignedPhoneStationIds}
       assignedPhoneDevicesByStationId={assignedPhoneDevicesByStationId}
       operationalActivityEnabled={clientInfo?.isAdmin === true}
@@ -3013,7 +3187,7 @@ function App() {
         if (isDesktopOnlyViewport) setPage('reporting');
       }}
       onNavigateToTesting={() => setPage('testing')}
-      onNavigateToUiProfiles={() => setPage('ui-profiles')}
+      onNavigateToUiProfiles={() => {setProfileNavigation({}); setPage('ui-profiles');}}
       onNavigateToAnalytics={onNavigateToAnalytics}
       onNavigateToKioskEditor={() => setPage('kiosk-editor')}
       rentalData={rentalData}
@@ -3051,6 +3225,82 @@ function App() {
   );
 
   const renderPage = () => {
+    if (import.meta.env.DEV && page === 'chargedrops-client-portal-preview') {
+      return (
+        <ChargeDropsClientPortalPage
+          previewMode
+          clientInfo={{
+            username: 'hudson',
+            clientId: 'HUDSON',
+            commission: 20,
+            paymentSchedule: 'monthly',
+            chargedrops: {
+              city: {displayName: 'Phoenix'},
+              location: {
+                venueName: 'The Hudson Eatery & Bar',
+                address: '1601 E Apache Blvd, Tempe, AZ 85281',
+                phone: '(480) 555-0123',
+                website: 'https://example.com',
+              },
+              payout: {status: 'requirements_due', mode: 'test', requirementsDue: 2},
+              onboarding: {agreementStatus: 'not_sent', payoutStatus: 'in_progress', publicMapStatus: 'published'},
+            },
+          }}
+          stations={[
+            {stationid: 'US8004', status: 'online', info: {place: 'The Hudson', address: '1601 E Apache Blvd'}},
+            {stationid: 'US8012', status: 'offline', info: {place: 'The Hudson Patio', address: '1601 E Apache Blvd'}},
+          ]}
+          rentals={[
+            {status: 'returned', totalCharged: 18},
+            {status: 'returned', totalCharged: 12},
+          ]}
+          onLogout={() => setPage('dashboard')}
+        />
+      );
+    }
+
+    if (import.meta.env.DEV && page === 'accounting-preview') {
+      return (
+        <AccountingPage
+          previewMode
+          onLogout={() => setPage('dashboard')}
+          onNavigateToDashboard={() => setPage('dashboard')}
+          onNavigateToAdmin={() => setPage('dashboard')}
+          t={t}
+        />
+      );
+    }
+
+    if (import.meta.env.DEV && page === 'chargedrops-client-setup-preview') {
+      return (
+        <ChargeDropsClientSetupPage
+          previewMode
+          onLogout={() => setPage('dashboard')}
+          onNavigateToDashboard={() => setPage('dashboard')}
+          onNavigateToAdmin={() => setPage('dashboard')}
+        />
+      );
+    }
+
+    if (import.meta.env.DEV && page === 'profiles-preview') {
+      return <UiProfilesPage previewMode currentUser={{isAdmin: true, username: 'local-preview'}}
+        onLogout={() => setPage('dashboard')} onNavigateToAdmin={() => setPage('dashboard')}
+        onNavigateToDashboard={() => setPage('dashboard')} referenceTime={latestTimestamp} t={t} />;
+    }
+
+    if (import.meta.env.DEV && page === 'payter-preview') {
+      return (
+        <PayterPage
+          previewMode
+          onLogout={() => setPage('dashboard')}
+          onNavigateToDashboard={() => setPage('dashboard')}
+          onNavigateToAdmin={() => setPage('dashboard')}
+          currentUser={{isAdmin: true, role: 'admin', username: 'local-preview'}}
+          t={t}
+        />
+      );
+    }
+
     // ✅ Don’t render authenticated routes until Firebase Auth initializes
     if (!authReady) {
       return (
@@ -3079,9 +3329,29 @@ function App() {
     const hasMediaAccess = clientInfo.isAdmin || clientInfo.features?.media === true;
     const hasUiProfilesAccess = clientInfo.isAdmin || clientInfo.features?.ui_editor === true || clientInfo.commands?.['client edit'] === true;
     const hasPhoneControlAccess = clientInfo.isAdmin || clientInfo.features?.phone_control === true;
+    const hasCustomerSupportAccess = clientInfo.isAdmin === true && isCustomerSupportDesktopViewport;
+    const hasPayterAccess = clientInfo.isAdmin === true;
+    const hasAccountingAccess = clientInfo.isAdmin === true;
+    const hasChargersAccess = canViewRentalDetails || clientInfo.features?.search === true;
     const canOpenAdminTools = clientInfo.isAdmin || clientInfo.commands?.['client edit'] === true || hasMediaAccess || hasUiProfilesAccess;
     const hasAiBoothsAccess = canOpenAdminTools;
     const isRegularReportingUser = !clientInfo.isAdmin && clientInfo.role !== 'partner';
+    const isChargeDropsClient = !clientInfo.isAdmin && (
+      clientInfo.portalBrand === 'chargedrops' ||
+      clientInfo.product === 'chargedrops' ||
+      clientInfo.products?.chargedrops === true
+    );
+
+    if (isChargeDropsClient) {
+      return (
+        <ChargeDropsClientPortalPage
+          clientInfo={clientInfo}
+          stations={dedupedStationsData}
+          rentals={rentalData}
+          onLogout={handleLogout}
+        />
+      );
+    }
 
     switch (page) {
       case 'activity':
@@ -3113,6 +3383,31 @@ function App() {
             t={t}
           />
         );
+      case 'customer-support':
+        if (!hasCustomerSupportAccess) {
+          return dashboard;
+        }
+
+        return (
+          <CustomerSupportPage
+            onLogout={handleLogout}
+            onNavigateToDashboard={(searchTerm = '') => {
+              setDashboardSearchTerm(normalizeNavigationSearch(searchTerm));
+              setPage('dashboard');
+            }}
+            onNavigateToChargers={(searchTerm = '') => {
+              setChargerSearchTerm(normalizeNavigationSearch(searchTerm));
+              setPage('chargers');
+            }}
+            currentUser={clientInfo}
+            allStationsData={dedupedStationsData}
+            t={t}
+            onCommand={onCommand}
+            commandStatus={commandStatus}
+            setCommandStatus={setCommandStatus}
+            refundConfirmation={rentalRefundConfirmation}
+          />
+        );
       case 'admin':
         if (!canOpenAdminTools) {
           return dashboard;
@@ -3127,9 +3422,43 @@ function App() {
             onNavigateToAgreement={() => setPage('agreement')}
             onNavigateToTemplates={() => setPage('templates')}
             onNavigateToMedia={() => setPage('media')}
-            onNavigateToUiProfiles={() => setPage('ui-profiles')}
+            onNavigateToUiProfiles={() => {setProfileNavigation({}); setPage('ui-profiles');}}
             onNavigateToAiBooths={openObailixConciergeWorkspace}
             onNavigateToPayouts={() => setPage('payouts')}
+            onNavigateToAccounting={() => setPage('accounting')}
+            onNavigateToPayter={() => setPage('payter')}
+            onNavigateToChargeDropsClientSetup={() => setPage('chargedrops-client-setup')}
+            currentUser={clientInfo}
+            t={t}
+          />
+        );
+      case 'chargedrops-client-setup':
+        if (!clientInfo.isAdmin) {
+          return dashboard;
+        }
+
+        return (
+          <ChargeDropsClientSetupPage
+            onLogout={handleLogout}
+            onNavigateToDashboard={() => setPage('dashboard')}
+            onNavigateToAdmin={() => setPage('admin')}
+          />
+        );
+      case 'payter':
+        if (!hasPayterAccess) {
+          return dashboard;
+        }
+
+        return (
+          <PayterPage
+            onNavigateToProfiles={(serialNumber = '') => {
+              const kiosk = serialNumber ? dedupedStationsData.find((candidate) => String(candidate.hardware?.sn || '') === serialNumber) : null;
+              setProfileNavigation({initialClientId: kiosk?.info?.client || kiosk?.info?.clientId || '', initialSection: 'apollo'});
+              setPage('ui-profiles');
+            }}
+            onLogout={handleLogout}
+            onNavigateToDashboard={() => setPage('dashboard')}
+            onNavigateToAdmin={() => setPage('admin')}
             currentUser={clientInfo}
             t={t}
           />
@@ -3148,6 +3477,19 @@ function App() {
             t={t}
           />
         );
+      case 'accounting':
+        if (!hasAccountingAccess) {
+          return dashboard;
+        }
+
+        return (
+          <AccountingPage
+            onLogout={handleLogout}
+            onNavigateToDashboard={() => setPage('dashboard')}
+            onNavigateToAdmin={() => setPage('admin')}
+            t={t}
+          />
+        );
       case 'ui-profiles':
         if (!hasUiProfilesAccess) {
           return dashboard;
@@ -3155,6 +3497,7 @@ function App() {
 
         return (
           <UiProfilesPage
+            {...profileNavigation}
             onLogout={handleLogout}
             onNavigateToDashboard={(searchTerm = '') => {
               setDashboardSearchTerm(normalizeNavigationSearch(searchTerm));
@@ -3260,16 +3603,30 @@ function App() {
             initialPeriod={rentalsInitialPeriod}
             initialStationIds={rentalsInitialStationIds}
             initialSearch={rentalsInitialSearch}
+            initialRentals={rentalsInitialData}
           />
         );
       case 'chargers':
+        if (!hasChargersAccess) return dashboard;
         return (
           <ChargersPage
             onNavigateToDashboard={(searchTerm = '') => {
               setDashboardSearchTerm(normalizeNavigationSearch(searchTerm));
               setPage('dashboard');
             }}
+            onNavigateToRentals={canViewRentalDetails ? (selection = '30days') => {
+              const period = typeof selection === 'string' ? selection : selection?.period;
+              const stationIds = Array.isArray(selection?.stationIds) ? selection.stationIds : [];
+              const searchTerm = typeof selection?.searchTerm === 'string' ? selection.searchTerm : '';
+              const initialRentals = Array.isArray(selection?.rentals) ? selection.rentals : [];
+              setRentalsInitialPeriod(['today', '7days', '30days'].includes(period) ? period : '30days');
+              setRentalsInitialStationIds(stationIds);
+              setRentalsInitialSearch(searchTerm);
+              setRentalsInitialData(initialRentals);
+              setPage('rentals');
+            } : null}
             rentalData={rentalData}
+            rentalsLoading={shouldLoadRawRentals && !rawRentalsReady}
             kioskData={dedupedStationsData}
             t={t}
             language={language}
@@ -3385,6 +3742,31 @@ function App() {
         onStay={handleStayLoggedIn}
         onLogout={handleLogout}
         countdown={sessionCountdown}
+        t={t}
+      />
+      <KioskScreenshotModal
+        screenshot={kioskScreenshot}
+        onClose={closeKioskScreenshot}
+        onRefresh={() => onCommand(kioskScreenshot.stationid, 'screenshot')}
+        onImageLoad={() => {
+          setKioskScreenshot((previous) => (
+            previous.state === 'received' ? { ...previous, state: 'ready' } : previous
+          ));
+          setCommandStatus({
+            state: 'success',
+            message: `${t('display_screenshot')} ${kioskScreenshot.stationid}`,
+          });
+        }}
+        onImageError={() => {
+          failKioskScreenshot(
+            kioskScreenshot.stationid,
+            'The returned screenshot could not be decoded.',
+          );
+          setCommandStatus({
+            state: 'error',
+            message: 'The returned screenshot could not be decoded.',
+          });
+        }}
         t={t}
       />
       <ErrorBoundary>

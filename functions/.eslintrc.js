@@ -9,6 +9,7 @@ module.exports = {
   parserOptions: {
     ecmaVersion: 2021
   },
+  overrides: [{files: ["*.mjs"], parserOptions: {sourceType: "module"}}],
   rules: {
     "no-unused-vars": ["warn", { argsIgnorePattern: "^_" }]
   }

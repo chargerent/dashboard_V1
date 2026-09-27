@@ -318,8 +318,11 @@ export default function useKioskCommandFlow({
     }
 
     if (action === 'activechange') {
-      onCommand(stationid, action, moduleid, provisionid, uiVersion, details);
-      return;
+      if (!details?.confirmationText) {
+        onCommand(stationid, action, moduleid, provisionid, uiVersion, details);
+        return;
+      }
+      confirmationText = details.confirmationText;
     }
 
     if (action === 'reboot') {

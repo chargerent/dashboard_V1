@@ -53,6 +53,19 @@ test('location summary active pill deactivates every active kiosk in the locatio
     assert.match(dashboard, /<LocationSummary[\s\S]*onCommand=\{handleGeneralCommand\}/);
 });
 
+test('kiosk card active pill requires confirmation before deactivation', async () => {
+    const [kioskPanel, commandFlow, translations] = await Promise.all([
+        readSource('../src/components/kiosk/kioskPanel.jsx'),
+        readSource('../src/hooks/useKioskCommandFlow.js'),
+        readSource('../src/utils/translations.js'),
+    ]);
+
+    assert.match(kioskPanel, /confirmationText: t\('deactivate_kiosk_confirmation'\)\.replace\('\{stationid\}', kiosk\.stationid\)/);
+    assert.match(commandFlow, /if \(action === 'activechange'\) \{[\s\S]*if \(!details\?\.confirmationText\)[\s\S]*confirmationText = details\.confirmationText;/);
+    assert.match(commandFlow, /setCommandDetails\(commandDetailsPayload\);\s*setCommandModalOpen\(true\);/);
+    assert.match(translations, /deactivate_kiosk_confirmation: "Are you sure you want to make \{stationid\} inactive\?/);
+});
+
 test('dashboard activity navigation uses a distinct purple activity control', async () => {
     const [app, dashboard, rules] = await Promise.all([
         readSource('../src/App.jsx'),

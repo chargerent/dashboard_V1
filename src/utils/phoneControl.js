@@ -139,6 +139,60 @@ export function phoneTimestampToMillis(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+export function getPhoneAndroidUpdateState(inventory = {}) {
+  const automaticRequestActive = inventory.systemUpdateWindowActive === true;
+  const updatePending = inventory.systemUpdatePending === true;
+  const policy = String(inventory.systemUpdatePolicy || '').trim().toLowerCase();
+
+  if (automaticRequestActive && updatePending) {
+    return {
+      key: 'pending-requested',
+      buttonLabel: 'Requested',
+      detail: 'Update pending · Android will install and restart automatically',
+    };
+  }
+  if (automaticRequestActive) {
+    return {
+      key: 'requested',
+      buttonLabel: 'Requested',
+      detail: 'Automatic update requested · waiting for Android',
+    };
+  }
+  if (updatePending) {
+    return {
+      key: 'available',
+      buttonLabel: 'Start',
+      detail: 'Update available · select Start to install',
+    };
+  }
+  if (policy === 'automatic') {
+    return {
+      key: 'automatic',
+      buttonLabel: 'Start',
+      detail: 'Automatic installation is enabled',
+    };
+  }
+  if (policy === 'postponed') {
+    return {
+      key: 'postponed',
+      buttonLabel: 'Start',
+      detail: 'Automatic updates paused',
+    };
+  }
+  if (policy === 'none') {
+    return {
+      key: 'manual',
+      buttonLabel: 'Start',
+      detail: 'No managed update policy is active',
+    };
+  }
+  return {
+    key: 'unknown',
+    buttonLabel: 'Start',
+    detail: 'Update status unknown',
+  };
+}
+
 export function isPhoneWebRtcActive(webRtc = {}, now = Date.now()) {
   return ACTIVE_PHONE_WEBRTC_STATES.has(String(webRtc.state || '')) &&
     phoneTimestampToMillis(webRtc.expiresAt) > now;
@@ -352,6 +406,17 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
       hotspotState: String(inventory.hotspotState || 'unknown').trim().toLowerCase(),
       hotspotLastError: String(inventory.hotspotLastError || '').trim(),
       hotspotUpdatedAt: phoneTimestampToMillis(inventory.hotspotUpdatedAt),
+      usbTetherDesired: inventory.usbTetherDesired === true,
+      usbConnected: inventory.usbConnected === true,
+      usbConfigured: inventory.usbConfigured === true,
+      usbTetherFunctionEnabled: inventory.usbTetherFunctionEnabled === true,
+      usbTetherLinkActive: inventory.usbTetherLinkActive === true,
+      usbTetherState: String(inventory.usbTetherState || 'unknown').trim().toLowerCase(),
+      usbTetherLastError: String(inventory.usbTetherLastError || '').trim(),
+      usbTetherRetryCount: optionalNumber(inventory.usbTetherRetryCount) ?? 0,
+      usbTetherUpdatedAt: phoneTimestampToMillis(inventory.usbTetherUpdatedAt),
+      usbTetherControlMode: String(inventory.usbTetherControlMode || '').trim().toLowerCase(),
+      usbTetherControlGranted: inventory.usbTetherControlGranted === true,
       bluetoothEnabled: inventory.bluetoothEnabled === true,
       locationEnabled: inventory.locationEnabled === true,
       remoteUiInputEnabled: inventory.remoteUiInputEnabled === true,

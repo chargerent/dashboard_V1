@@ -18,7 +18,7 @@ import { filterProvisionedStations, filterStationsForClient, isKioskOnline, isKi
 import GlobalRentalActivity from '../components/Dashboard/GlobalRentalActivity';
 import LocationSummary from '../components/Dashboard/LocationSummary';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
-import { CheckCircleIcon, CpuChipIcon, DevicePhoneMobileIcon, ExclamationTriangleIcon, QrCodeIcon, SparklesIcon } from '@heroicons/react/24/outline';
+import { ChatBubbleLeftRightIcon, CheckCircleIcon, CpuChipIcon, ComputerDesktopIcon, DevicePhoneMobileIcon, ExclamationTriangleIcon, QrCodeIcon, SparklesIcon } from '@heroicons/react/24/outline';
 import useKioskCommandFlow from '../hooks/useKioskCommandFlow';
 import { callFunctionWithAuth } from '../utils/callableRequest';
 import { aggregateRentalDashboardStats } from '../utils/rentalDashboardStats';
@@ -31,6 +31,7 @@ const EMPTY_STATION_IDS = new Set();
 const EMPTY_PHONE_DEVICE_MAP = new Map();
 const MOBILE_KIOSK_PREVIEW_LIMIT = 4;
 const DESKTOP_KIOSK_PREVIEW_LIMIT = 8;
+const UNRESOLVED_SUPPORT_STATUSES = Object.freeze(['new', 'in_progress', 'waiting_customer']);
 const INITIAL_STATUS_SETTLE_MS = 1500;
 const AI_BOOTH_DOCUMENT_ID_PATTERN = /^aid-/i;
 const COUNTRY_ORDER = { CA: 1, FR: 2, US: 3 };
@@ -111,9 +112,10 @@ const buildStationStatusIssues = (kiosk, referenceTime) => {
     return issues;
 };
 
-export default function DashboardPage({ _token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToAiBooths, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToActivity, onNavigateToPhoneControl, assignedPhoneStationIds = EMPTY_STATION_IDS, assignedPhoneDevicesByStationId = EMPTY_PHONE_DEVICE_MAP, onNavigateToReporting, onNavigateToTesting, rentalData, rentalDashboardStatsByStationId, useRentalDashboardSummaries = false, allStationsData, _setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, _setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, _ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, _setNgrokInfo, manageIgnoredKiosk, kiosksReady, sshConnectivityByStation = {}, ngrokConnectivityByStation = {}, initialSearch = '', sessionWarningOpen = false, sessionCountdown = 60, onStayLoggedIn, operationalActivityEnabled = false }) {
+export default function DashboardPage({ _token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToAiBooths, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToActivity, onNavigateToPhoneControl, onNavigateToCustomerSupport, assignedPhoneStationIds = EMPTY_STATION_IDS, assignedPhoneDevicesByStationId = EMPTY_PHONE_DEVICE_MAP, onNavigateToReporting, onNavigateToTesting, rentalData, rentalDashboardStatsByStationId, useRentalDashboardSummaries = false, allStationsData, _setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, _setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, _ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, _setNgrokInfo, manageIgnoredKiosk, kiosksReady, sshConnectivityByStation = {}, ngrokConnectivityByStation = {}, initialSearch = '', sessionWarningOpen = false, sessionCountdown = 60, onStayLoggedIn, operationalActivityEnabled = false }) {
     const [loading, setLoading] = useState(!kiosksReady);
     const [urgentIncidents, setUrgentIncidents] = useState([]);
+    const [unresolvedSupportCount, setUnresolvedSupportCount] = useState(0);
     const [error] = useState(null);
     const [expandedKioskId, setExpandedKioskId] = useState(null);
     const [editingKioskId, setEditingKioskId] = useState(null);
@@ -134,12 +136,15 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
     const visibleStationsData = allStationsData || [];
     const isShowingRetainedStations = !kiosksReady && visibleStationsData.length > 0;
     const isAdminUser = !!clientInfo?.isAdmin;
+    const hasRentalsAccess = clientInfo?.features?.rentals === true || isAdminUser;
+    const hasChargersAccess = hasRentalsAccess || clientInfo?.features?.search === true;
     const hasStatusAccess = clientInfo?.features?.status === true;
     const hasReportingAccess = clientInfo?.features?.reporting === true || isAdminUser;
     const hasBindingAccess = clientInfo?.username === 'chargerent' || clientInfo?.features?.binding === true || clientInfo?.commands?.binding === true;
     const hasTestingAccess = clientInfo?.username === 'chargerent' || clientInfo?.features?.testing === true;
     const canOpenAdminTools = isAdminUser || clientInfo?.commands?.['client edit'] === true || clientInfo?.features?.media === true || clientInfo?.features?.ui_editor === true;
     const hasPhoneControlAccess = isAdminUser || clientInfo?.features?.phone_control === true;
+    const canUseCustomerSupport = isAdminUser && typeof onNavigateToCustomerSupport === 'function';
     const visibleStationIds = useMemo(() => new Set(
         visibleStationsData.map((station) => String(station.stationid || '').trim()).filter(Boolean)
     ), [visibleStationsData]);
@@ -172,6 +177,23 @@ export default function DashboardPage({ _token, onLogout, clientInfo, t, languag
             console.error('Unable to load urgent kiosk incidents', snapshotError);
         });
     }, [operationalActivityEnabled]);
+
+    useEffect(() => {
+        if (!canUseCustomerSupport) {
+            setUnresolvedSupportCount(0);
+            return undefined;
+        }
+        const unresolvedQuery = query(
+            collection(db, 'supportTickets'),
+            where('status', 'in', UNRESOLVED_SUPPORT_STATUSES),
+        );
+        return onSnapshot(unresolvedQuery, (snapshot) => {
+            setUnresolvedSupportCount(snapshot.size);
+        }, (snapshotError) => {
+            console.error('Unable to load unresolved customer service count', snapshotError);
+            setUnresolvedSupportCount(0);
+        });
+    }, [canUseCustomerSupport]);
 
     const handleFirmwareUpdateRequest = useCallback((details) => {
         setFirmwareUpdateDetails(details);
@@ -776,6 +798,16 @@ return (
                             </svg>
                         </button>
                     )}
+                    {import.meta.env.DEV && (
+                        <a
+                            href="?page=kiosk-control-lab"
+                            className="rounded-md bg-emerald-100 p-2 text-emerald-700 transition-colors hover:bg-emerald-200"
+                            title="Open local Kiosk Control"
+                            aria-label="Kiosk Control"
+                        >
+                            <ComputerDesktopIcon className="h-6 w-6" />
+                        </a>
+                    )}
                     {hasPhoneControlAccess && (
                         <button
                             onClick={onNavigateToPhoneControl}
@@ -786,19 +818,33 @@ return (
                             <DevicePhoneMobileIcon className="h-6 w-6" />
                         </button>
                     )}
-                    {(clientInfo.features.rentals || isAdminUser) && (
-                        <>
-                            <button onClick={onNavigateToRentals} className="p-2 rounded-md bg-green-100 text-green-700 hover:bg-green-200" title={t('rentals_page_title')}>
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-                                </svg>
-                            </button>
-                            <button onClick={() => onNavigateToChargers()} className="p-2 rounded-md bg-yellow-100 text-yellow-700 hover:bg-yellow-200" title={t('chargers_page_title')}>
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
-                                </svg>
-                            </button>
-                        </>
+                    {canUseCustomerSupport && (
+                        <button
+                            onClick={onNavigateToCustomerSupport}
+                            className="relative hidden items-center justify-center rounded-md bg-sky-100 p-2 text-sky-700 transition-colors hover:bg-sky-200 lg:inline-flex"
+                            title={`Customer Service · ${unresolvedSupportCount} unresolved`}
+                            aria-label={`Customer Service, ${unresolvedSupportCount} unresolved cases`}
+                            data-testid="customer-service-button"
+                        >
+                            <ChatBubbleLeftRightIcon className="h-6 w-6" />
+                            <span className="absolute -right-2 -top-2 min-w-5 rounded-full bg-red-600 px-1.5 py-0.5 text-center text-[0.65rem] font-bold leading-none text-white">
+                                {unresolvedSupportCount > 99 ? '99+' : unresolvedSupportCount}
+                            </span>
+                        </button>
+                    )}
+                    {hasRentalsAccess && (
+                        <button onClick={onNavigateToRentals} className="p-2 rounded-md bg-green-100 text-green-700 hover:bg-green-200" title={t('rentals_page_title')} aria-label={t('rentals_page_title')}>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                            </svg>
+                        </button>
+                    )}
+                    {hasChargersAccess && (
+                        <button onClick={() => onNavigateToChargers()} className="p-2 rounded-md bg-yellow-100 text-yellow-700 hover:bg-yellow-200" title={t('chargers_page_title')} aria-label={t('chargers_page_title')}>
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                            </svg>
+                        </button>
                     )}
                     {hasReportingAccess && !isCompactDashboard && (
                         <button onClick={onNavigateToReporting} className="inline-flex items-center justify-center p-2 rounded-md bg-indigo-100 text-indigo-700 hover:bg-indigo-200" title={t('reporting_page_title')}>

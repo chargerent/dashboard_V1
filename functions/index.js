@@ -2,11 +2,25 @@
 const {onCall, onRequest, HttpsError} = require("firebase-functions/v2/https");
 const {onSchedule} = require("firebase-functions/v2/scheduler");
 const {onDocumentWritten} = require("firebase-functions/v2/firestore");
+const {onMessagePublished} = require("firebase-functions/v2/pubsub");
 const {defineSecret} = require("firebase-functions/params");
 const crypto = require("node:crypto");
 const admin = require("firebase-admin");
 const Stripe = require("stripe");
 const mqtt = require("mqtt");
+const {createGmailApiSender} = require("./gmailApiSender");
+const {DEFAULT_TOPIC: SUPPORT_GMAIL_TOPIC, createGmailSupportInbox} = require("./gmailSupportInbox");
+const {createWorkspaceProvisioning} = require("./workspaceProvisioning");
+const {createWorkspaceNotification, isValidWorkspaceContactEmail} = require("./workspaceNotification");
+const {createSupportTicketService, secretsMatch} = require("./supportTickets");
+const {createAccountingService} = require("./accounting");
+const {preparePartnerKit} = require("./partnerKit");
+const {createChargeDropsAgreementService} = require("./chargeDropsAgreements");
+const {createChargeDropsStripeConnect} = require("./chargeDropsStripeConnect");
+const {
+  createChargeDropsPartnerNotifications,
+  NOTIFICATIONS_COLLECTION: CHARGEDROPS_PARTNER_NOTIFICATIONS_COLLECTION,
+} = require("./chargeDropsPartnerNotifications");
 const {rbcOpenApi} = require("./rbcOpenRouting/api");
 const {preserveProvisionedUiMode} = require("./uiProfileSnapshot");
 const {
@@ -58,14 +72,31 @@ const {
 
 admin.initializeApp();
 const db = admin.firestore();
+const gmailApiSender = createGmailApiSender({admin});
+const workspaceProvisioning = createWorkspaceProvisioning({admin, db});
+const workspaceNotification = createWorkspaceNotification({db, sendEmail: sendLoginInviteEmail});
+const supportTickets = createSupportTicketService({db, admin, sendEmail: sendSupportReplyEmail});
+const gmailSupportInbox = createGmailSupportInbox({admin, db, ticketService: supportTickets});
+const accounting = createAccountingService({db, admin});
 const ELEVENLABS_API_KEY = defineSecret("ELEVENLABS_API_KEY");
 const EVENT_INTAKE_SECRET = defineSecret("EVENT_INTAKE_SECRET");
 const SLASH_GOLF_RAPIDAPI_KEY = defineSecret("SLASH_GOLF_RAPIDAPI_KEY");
 const GMAIL_APP_PASSWORD = defineSecret("GMAIL_APP_PASSWORD");
+const CONTACT_FORM_WEBHOOK_TOKEN = defineSecret("CONTACT_FORM_WEBHOOK_TOKEN");
+const SUPPORT_COMMUNICATIONS_WEBHOOK_TOKEN = defineSecret("SUPPORT_COMMUNICATIONS_WEBHOOK_TOKEN");
+const CHATBOT_SUPPORT_WEBHOOK_TOKEN = defineSecret("CHATBOT_SUPPORT_WEBHOOK_TOKEN");
 const PHONE_CONTROL_SIGNING_PRIVATE_KEY = defineSecret("PHONE_CONTROL_SIGNING_PRIVATE_KEY");
 const TURN_SHARED_SECRET = defineSecret("TURN_SHARED_SECRET");
 const STRIPE_TEST_SECRET_KEY = defineSecret("STRIPE_TEST_SECRET_KEY");
+const STRIPE_CONNECT_SECRET_KEY = defineSecret("STRIPE_CONNECT_SECRET_KEY");
+const STRIPE_CONNECT_WEBHOOK_SECRET = defineSecret(
+    "STRIPE_CONNECT_WEBHOOK_SECRET",
+);
+const CHARGEDROPS_AGREEMENT_OTP_SECRET = defineSecret(
+    "CHARGEDROPS_AGREEMENT_OTP_SECRET",
+);
 const BESITER_MQTT_CREDENTIALS = defineSecret("BESITER_MQTT_CREDENTIALS");
+const PAYTER_CPS_API_KEY = defineSecret("PAYTER_CPS_API_KEY");
 const STORAGE_BUCKET = "node-red-alerts.firebasestorage.app";
 const STORAGE_BUCKET_CANDIDATES = Array.from(new Set([
   STORAGE_BUCKET,
@@ -74,9 +105,39 @@ const STORAGE_BUCKET_CANDIDATES = Array.from(new Set([
 ]));
 
 const AUTH_MAPPING_DOMAIN = "auth.charge.rent";
+const CHARGEDROPS_PROJECT_ID = "chargedrops-dev";
+const CHARGEDROPS_APP_NAME = "chargedrops-client-onboarding";
 const DEFAULT_DASHBOARD_LOGIN_URL = "https://chargerentstations.com/portal/";
 const LOGIN_INVITE_FROM_EMAIL = "solutions@charge.rent";
 const LOGIN_INVITE_FROM_NAME = "Chargerent";
+const SUPPORT_FROM_EMAIL = "support@charge.rent";
+const SUPPORT_FROM_NAME = "Chargerent Customer Support";
+const chargeDropsPartnerNotifications = createChargeDropsPartnerNotifications({
+  db,
+  admin,
+  sendEmail: sendLoginInviteEmail,
+  dashboardBaseUrl: DEFAULT_DASHBOARD_LOGIN_URL,
+});
+const chargeDropsStripeConnect = createChargeDropsStripeConnect({
+  db,
+  admin,
+  getStripeClient: getStripeConnectClient,
+  dashboardBaseUrl: DEFAULT_DASHBOARD_LOGIN_URL,
+  notifyPartner: (notification) =>
+    chargeDropsPartnerNotifications.notify(notification),
+});
+const chargeDropsAgreements = createChargeDropsAgreementService({
+  db,
+  admin,
+  bucket: getStorageBucket(),
+  getOtpSecret: () => CHARGEDROPS_AGREEMENT_OTP_SECRET.value(),
+  sendEmail: sendLoginInviteEmail,
+  dashboardBaseUrl: DEFAULT_DASHBOARD_LOGIN_URL,
+  adminCopyEmail: (profile, contactEmail) =>
+    getLoginInviteCcEmail(profile, contactEmail),
+  notifyPartner: (notification) =>
+    chargeDropsPartnerNotifications.notify(notification),
+});
 const LOGIN_INVITE_CC_ADMINS = {
   arthur: "arthur@charge.rent",
   george: "george@charge.rent",
@@ -557,6 +618,7 @@ const functions = {
 };
 
 const stripeTestClients = new Map();
+const stripeConnectClients = new Map();
 let besiterTerminalGateway = null;
 
 function getStripeTestClient(options = {}) {
@@ -581,6 +643,27 @@ function getStripeTestClient(options = {}) {
   });
   stripeTestClients.set(cacheKey, client);
   return client;
+}
+
+function getStripeConnectClient() {
+  const secretKey = String(STRIPE_CONNECT_SECRET_KEY.value() || "").trim();
+  const mode = secretKey.startsWith("sk_live_") ? "live" :
+    secretKey.startsWith("sk_test_") ? "test" : "";
+  if (!mode) {
+    throw new Error(
+        "STRIPE_CONNECT_SECRET_KEY must contain a Stripe secret key.",
+    );
+  }
+  if (!stripeConnectClients.has(mode)) {
+    stripeConnectClients.set(mode, new Stripe(secretKey, {
+      appInfo: {
+        name: "ChargeDrops Client Payout Onboarding",
+        version: "0.1.0",
+      },
+      maxNetworkRetries: 2,
+    }));
+  }
+  return {stripe: stripeConnectClients.get(mode), mode};
 }
 
 function getBesiterTerminalGateway() {
@@ -2097,7 +2180,15 @@ function cleanProfile(input) {
   delete clean.Email;
   delete clean.email;
   delete clean.token;
+  // Mailbox state is maintained by the provisioning service, never profile input.
+  delete clean.workspaceMailbox;
   return clean;
+}
+
+function isChargeDropsClientProfile(profile) {
+  return profile?.product === "chargedrops" ||
+    profile?.portalBrand === "chargedrops" ||
+    profile?.products?.chargedrops === true;
 }
 
 function normalizeUsername(u) {
@@ -2787,6 +2878,521 @@ function normalizeKioskInfoForSchema(info, useAddressField = false) {
 
 function getGoogleMapsApiKey() {
   return String(process.env.GOOGLE_MAPS_API_KEY || "").trim();
+}
+
+function requireGoogleMapsApiKey() {
+  const apiKey = getGoogleMapsApiKey();
+  if (!apiKey) {
+    throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Google Places is not configured for the dashboard.",
+    );
+  }
+  return apiKey;
+}
+
+function googleAddressPart(components, type, short = false) {
+  const component = (Array.isArray(components) ? components : [])
+      .find((entry) => Array.isArray(entry?.types) && entry.types.includes(type));
+  return String((short ? component?.short_name : component?.long_name) || "").trim();
+}
+
+async function fetchGooglePlacesJson(url, options = undefined) {
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    throw new functions.https.HttpsError(
+        "unavailable",
+        "Google Places is temporarily unavailable.",
+    );
+  }
+  const payload = await response.json();
+  if (!["OK", "ZERO_RESULTS"].includes(String(payload?.status || ""))) {
+    console.error("Google Places request failed", {
+      status: payload?.status || "UNKNOWN",
+    });
+    throw new functions.https.HttpsError(
+        "unavailable",
+        "Google Places could not complete the request.",
+    );
+  }
+  return payload;
+}
+
+async function searchChargeDropsPlacesImpl(data) {
+  const queryText = String(data?.query || "").trim().slice(0, 160);
+  const city = String(data?.city || "").trim().slice(0, 120);
+  const countryCode = String(data?.countryCode || "").trim().toLowerCase();
+  if (queryText.length < 2 || !city) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "A venue search and ChargeDrops city are required.",
+    );
+  }
+
+  const apiKey = requireGoogleMapsApiKey();
+  const input = `${queryText}, ${city}`;
+  const params = new URLSearchParams({
+    input,
+    types: "establishment",
+    key: apiKey,
+  });
+  if (/^[a-z]{2}$/.test(countryCode)) {
+    params.set("components", `country:${countryCode}`);
+  }
+  const payload = await fetchGooglePlacesJson(
+      `https://maps.googleapis.com/maps/api/place/autocomplete/json?${params.toString()}`,
+  );
+  const places = (payload.predictions || []).slice(0, 8).map((prediction) => ({
+    placeId: String(prediction.place_id || ""),
+    name: String(prediction.structured_formatting?.main_text || prediction.description || ""),
+    formattedAddress: String(
+        prediction.structured_formatting?.secondary_text || prediction.description || "",
+    ),
+  })).filter((place) => place.placeId && place.name);
+  return {ok: true, places};
+}
+
+async function getChargeDropsPlaceImpl(data) {
+  const placeId = String(data?.placeId || "").trim();
+  if (!placeId || placeId.length > 300) {
+    throw new functions.https.HttpsError("invalid-argument", "A valid Google Place ID is required.");
+  }
+  const apiKey = requireGoogleMapsApiKey();
+  const params = new URLSearchParams({
+    place_id: placeId,
+    fields: [
+      "place_id",
+      "name",
+      "formatted_address",
+      "formatted_phone_number",
+      "website",
+      "url",
+      "geometry",
+      "opening_hours",
+      "address_components",
+    ].join(","),
+    key: apiKey,
+  });
+  const payload = await fetchGooglePlacesJson(
+      `https://maps.googleapis.com/maps/api/place/details/json?${params.toString()}`,
+  );
+  const result = payload.result || {};
+  const location = result.geometry?.location || {};
+  const components = result.address_components || [];
+  const place = {
+    placeId: String(result.place_id || placeId),
+    venueName: String(result.name || "").trim(),
+    address: String(result.formatted_address || "").trim(),
+    phone: String(result.formatted_phone_number || "").trim(),
+    website: String(result.website || "").trim(),
+    googleMapsUrl: String(result.url || "").trim(),
+    openingHours: Array.isArray(result.opening_hours?.weekday_text) ?
+      result.opening_hours.weekday_text.map((value) => String(value)) : [],
+    lat: Number.isFinite(Number(location.lat)) ? Number(location.lat) : null,
+    lng: Number.isFinite(Number(location.lng)) ? Number(location.lng) : null,
+    city: googleAddressPart(components, "locality") ||
+      googleAddressPart(components, "postal_town") ||
+      googleAddressPart(components, "administrative_area_level_2"),
+    state: googleAddressPart(components, "administrative_area_level_1", true),
+    postalCode: googleAddressPart(components, "postal_code"),
+    country: googleAddressPart(components, "country"),
+    countryCode: googleAddressPart(components, "country", true),
+  };
+  if (!place.venueName || !place.address || place.lat === null || place.lng === null) {
+    throw new functions.https.HttpsError(
+        "not-found",
+        "Google did not return a complete venue location.",
+    );
+  }
+  return {ok: true, place};
+}
+
+function getChargeDropsFirestore() {
+  let chargeDropsApp = admin.apps.find((app) => app.name === CHARGEDROPS_APP_NAME);
+  if (!chargeDropsApp) {
+    chargeDropsApp = admin.initializeApp({projectId: CHARGEDROPS_PROJECT_ID}, CHARGEDROPS_APP_NAME);
+  }
+  return chargeDropsApp.firestore();
+}
+
+function assertChargeDropsLocationProfile(profile) {
+  const city = profile?.chargedrops?.city || {};
+  const location = profile?.chargedrops?.location || {};
+  const placeId = String(location.placeId || "").trim();
+  const venueName = String(location.venueName || "").trim();
+  const address = String(location.address || "").trim();
+  const citySlug = String(city.slug || "").trim().toLowerCase();
+  const lat = Number(location.lat);
+  const lng = Number(location.lng);
+  if (!placeId || !venueName || !address || !citySlug || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+    throw new functions.https.HttpsError(
+        "failed-precondition",
+        "The ChargeDrops client profile is missing a verified venue or city.",
+    );
+  }
+  return {city, location, placeId, venueName, address, citySlug, lat, lng};
+}
+
+async function syncChargeDropsVenueImpl(data, authState) {
+  const uid = String(data?.uid || "").trim();
+  if (!uid) {
+    throw new functions.https.HttpsError("invalid-argument", "A ChargeDrops client is required.");
+  }
+
+  const profileRef = db.collection("users").doc(uid);
+  const profileSnap = await profileRef.get();
+  if (!profileSnap.exists) {
+    throw new functions.https.HttpsError("not-found", "The ChargeDrops client account was not found.");
+  }
+  const profile = profileSnap.data() || {};
+  if (!isChargeDropsClientProfile(profile)) {
+    throw new functions.https.HttpsError("failed-precondition", "This account is not a ChargeDrops client.");
+  }
+
+  const {location, placeId, venueName, address, citySlug, lat, lng} =
+    assertChargeDropsLocationProfile(profile);
+  const chargeDropsDb = getChargeDropsFirestore();
+
+  try {
+    const existingSnap = await chargeDropsDb.collection("venues")
+        .where("place_id", "==", placeId)
+        .limit(1)
+        .get();
+    const existingDoc = existingSnap.docs[0] || null;
+    const venueId = existingDoc?.id || crypto.createHash("sha256")
+        .update(placeId)
+        .digest("hex")
+        .slice(0, 28);
+    const venueRef = chargeDropsDb.collection("venues").doc(venueId);
+    const timestamp = admin.firestore.FieldValue.serverTimestamp();
+    const venueData = {
+      venueName,
+      place_id: placeId,
+      address,
+      citySlug,
+      phone: String(location.phone || "").trim(),
+      website: String(location.website || "").trim(),
+      googleMapsUrl: String(location.googleMapsUrl || "").trim(),
+      opening_hours_text: Array.isArray(location.openingHours) ?
+        location.openingHours.map((value) => String(value)) : [],
+      lat,
+      lng,
+      active: true,
+      clientId: String(profile.clientId || "").trim().toUpperCase(),
+      regionalPartnerId: String(profile.regionalPartnerId || "").trim().toUpperCase(),
+      onboardingSource: "chargerent-client-dashboard",
+      onboardingUserUid: uid,
+      updatedAt: timestamp,
+      updatedBy: normalizeUsername(authState.profile?.username),
+    };
+    if (!existingDoc) {
+      Object.assign(venueData, {
+        comingSoon: true,
+        status: "coming_soon",
+        sortOrder: 100,
+        stationDetails: [],
+        stationIds: [],
+        totalChargersAvailable: 0,
+        totalSlotsFree: 0,
+        createdAt: timestamp,
+      });
+    }
+
+    await venueRef.set(venueData, {merge: true});
+    await profileRef.update({
+      "chargedrops.publicVenueId": venueId,
+      "chargedrops.onboarding.publicMapStatus": "published",
+      "chargedrops.onboarding.publicMapSyncedAt": timestamp,
+      updatedAt: timestamp,
+    });
+    const notificationProfile = {
+      ...profile,
+      chargedrops: {
+        ...(profile.chargedrops || {}),
+        publicVenueId: venueId,
+        onboarding: {
+          ...(profile.chargedrops?.onboarding || {}),
+          publicMapStatus: "published",
+        },
+      },
+    };
+    let partnerNotification = {status: "unknown"};
+    try {
+      partnerNotification = await chargeDropsPartnerNotifications.notify({
+        clientUid: uid,
+        clientProfile: notificationProfile,
+        eventType: "coming_soon_published",
+        eventKey: venueId,
+        actorUid: authState.uid,
+      });
+    } catch (notificationError) {
+      console.error("ChargeDrops map partner notification failed", {
+        uid,
+        venueId,
+        code: notificationError?.code || "unknown",
+      });
+    }
+
+    return {
+      ok: true,
+      venueId,
+      created: !existingDoc,
+      comingSoon: existingDoc ? existingDoc.data()?.comingSoon === true : true,
+      partnerNotification,
+    };
+  } catch (error) {
+    console.error("ChargeDrops venue sync failed", {
+      code: error?.code || "unknown",
+      uid,
+      projectId: CHARGEDROPS_PROJECT_ID,
+    });
+    if (error instanceof functions.https.HttpsError) throw error;
+    throw new functions.https.HttpsError(
+        "failed-precondition",
+        "The client account was created, but ChargeDrops map publishing is not authorized yet.",
+    );
+  }
+}
+
+async function validateChargeDropsPartner(profile) {
+  const requestedUid = String(profile?.regionalPartnerUid || "").trim();
+  const requestedClientId = String(
+      profile?.regionalPartnerId || "",
+  ).trim().toUpperCase();
+  let partnerDoc = null;
+  if (requestedUid) {
+    const snapshot = await db.collection("users").doc(requestedUid).get();
+    if (snapshot.exists) partnerDoc = snapshot;
+  }
+  if (!partnerDoc && requestedClientId) {
+    const snapshot = await db.collection("users")
+        .where("clientId", "==", requestedClientId)
+        .limit(5)
+        .get();
+    partnerDoc = snapshot.docs.find((doc) => {
+      const candidate = doc.data() || {};
+      return candidate.active !== false &&
+        (candidate.role === "partner" || candidate.partner === true);
+    }) || null;
+  }
+  const partner = partnerDoc?.data() || {};
+  const partnerClientId = String(partner.clientId || "").trim().toUpperCase();
+  const partnerEmail = String(partner?.contact?.email || "").trim();
+  const validPartner = partnerDoc && partner.active !== false &&
+    (partner.role === "partner" || partner.partner === true) &&
+    partnerClientId && isValidEmail(partnerEmail);
+  if (!validPartner ||
+      (requestedClientId && requestedClientId !== partnerClientId)) {
+    throw new functions.https.HttpsError(
+        "failed-precondition",
+        "Choose an active regional partner with a valid contact email.",
+    );
+  }
+  return {uid: partnerDoc.id, clientId: partnerClientId};
+}
+
+async function notifyChargeDropsPartnerSafely(notification) {
+  try {
+    return await chargeDropsPartnerNotifications.notify(notification);
+  } catch (error) {
+    console.error("ChargeDrops partner notification failed", {
+      clientUid: String(notification?.clientUid || ""),
+      eventType: String(notification?.eventType || ""),
+      code: error?.code || "unknown",
+    });
+    return {status: "unknown"};
+  }
+}
+
+async function createChargeDropsClientImpl(data, authState) {
+  const inputProfile = cleanProfile(data?.profile || {});
+  if (!isChargeDropsClientProfile(inputProfile)) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "A ChargeDrops client profile is required.",
+    );
+  }
+  assertChargeDropsLocationProfile(inputProfile);
+  const partner = await validateChargeDropsPartner(inputProfile);
+  const profile = {
+    ...inputProfile,
+    regionalPartnerUid: partner.uid,
+    regionalPartnerId: partner.clientId,
+  };
+  const creation = await createAuthUserAndProfileImpl({
+    ...data,
+    profile,
+    sendCredentials: true,
+    includePartnerKit: false,
+  }, authState);
+  const clientUid = creation.uid;
+  const partnerNotifications = [];
+  partnerNotifications.push(await notifyChargeDropsPartnerSafely({
+    clientUid,
+    clientProfile: profile,
+    eventType: "onboarding_started",
+    eventKey: clientUid,
+    actorUid: authState.uid,
+  }));
+  if (creation.credentialsEmailSent) {
+    partnerNotifications.push(await notifyChargeDropsPartnerSafely({
+      clientUid,
+      clientProfile: profile,
+      eventType: "client_invitation_sent",
+      eventKey: clientUid,
+      actorUid: authState.uid,
+    }));
+  }
+
+  let venueSync = null;
+  let venueSyncError = "";
+  try {
+    venueSync = await syncChargeDropsVenueImpl({uid: clientUid}, authState);
+    if (venueSync?.partnerNotification) {
+      partnerNotifications.push(venueSync.partnerNotification);
+    }
+  } catch (error) {
+    venueSyncError = error?.message ||
+      "The Coming Soon location could not be published.";
+  }
+
+  return {
+    ...creation,
+    regionalPartnerUid: partner.uid,
+    regionalPartnerId: partner.clientId,
+    venueSync,
+    venueSyncError,
+    partnerNotifications,
+  };
+}
+
+async function listChargeDropsPartnerNotificationsImpl() {
+  const snapshot = await db.collection(
+      CHARGEDROPS_PARTNER_NOTIFICATIONS_COLLECTION,
+  ).orderBy("updatedAt", "desc").limit(500).get();
+  return {
+    notifications: snapshot.docs.map((docSnapshot) => {
+      const notification = docSnapshot.data() || {};
+      return {
+        id: docSnapshot.id,
+        clientUid: String(notification.clientUid || ""),
+        clientId: String(notification.clientId || ""),
+        eventType: String(notification.eventType || ""),
+        stage: String(notification.stage || ""),
+        status: String(notification.status || "unknown"),
+        reason: String(notification.reason || ""),
+        attempts: Number(notification.attempts || 0),
+        updatedAt: serializeFirestoreTimestamp(notification.updatedAt),
+        sentAt: serializeFirestoreTimestamp(notification.sentAt),
+      };
+    }),
+  };
+}
+
+async function updateChargeDropsOnboardingMilestoneImpl(data, authState) {
+  const uid = String(data?.uid || "").trim();
+  const milestone = String(data?.milestone || "").trim();
+  const supportedMilestones = new Set([
+    "installation_scheduled",
+    "kiosk_installed",
+    "location_live",
+  ]);
+  if (!uid || !supportedMilestones.has(milestone)) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Choose a valid ChargeDrops onboarding milestone.",
+    );
+  }
+
+  const profileRef = db.collection("users").doc(uid);
+  const profileSnapshot = await profileRef.get();
+  if (!profileSnapshot.exists) {
+    throw new functions.https.HttpsError(
+        "not-found",
+        "The ChargeDrops client account was not found.",
+    );
+  }
+  const profile = profileSnapshot.data() || {};
+  if (!isChargeDropsClientProfile(profile)) {
+    throw new functions.https.HttpsError(
+        "failed-precondition",
+        "This account is not a ChargeDrops client.",
+    );
+  }
+
+  let scheduledAt = "";
+  if (milestone === "installation_scheduled") {
+    const parsed = new Date(String(data?.scheduledAt || ""));
+    if (Number.isNaN(parsed.getTime())) {
+      throw new functions.https.HttpsError(
+          "invalid-argument",
+          "Choose the scheduled installation date and time.",
+      );
+    }
+    scheduledAt = parsed.toISOString();
+  }
+
+  const timestamp = admin.firestore.FieldValue.serverTimestamp();
+  if (milestone === "location_live") {
+    const venueId = String(profile?.chargedrops?.publicVenueId || "").trim();
+    if (!venueId) {
+      throw new functions.https.HttpsError(
+          "failed-precondition",
+          "Publish the Coming Soon location before marking it live.",
+      );
+    }
+    await getChargeDropsFirestore().collection("venues").doc(venueId).set({
+      comingSoon: false,
+      status: "live",
+      updatedAt: timestamp,
+      updatedBy: normalizeUsername(authState.profile?.username),
+    }, {merge: true});
+  }
+
+  const installationStatus = milestone === "installation_scheduled" ?
+    "scheduled" : milestone === "kiosk_installed" ? "installed" : "live";
+  const updates = {
+    "chargedrops.onboarding.status": milestone,
+    "chargedrops.onboarding.installationStatus": installationStatus,
+    "chargedrops.onboarding.installationUpdatedAt": timestamp,
+    updatedAt: timestamp,
+  };
+  if (scheduledAt) {
+    updates["chargedrops.onboarding.installationScheduledFor"] = scheduledAt;
+  }
+  if (milestone === "location_live") {
+    updates["chargedrops.onboarding.publicMapStatus"] = "live";
+  }
+  await profileRef.update(updates);
+
+  const updatedProfile = {
+    ...profile,
+    chargedrops: {
+      ...(profile.chargedrops || {}),
+      onboarding: {
+        ...(profile.chargedrops?.onboarding || {}),
+        status: milestone,
+        installationStatus,
+        ...(scheduledAt ? {installationScheduledFor: scheduledAt} : {}),
+        ...(milestone === "location_live" ? {publicMapStatus: "live"} : {}),
+      },
+    },
+  };
+  const partnerNotification = await notifyChargeDropsPartnerSafely({
+    clientUid: uid,
+    clientProfile: updatedProfile,
+    eventType: milestone,
+    eventKey: scheduledAt || milestone,
+    actorUid: authState.uid,
+    details: {scheduledAt},
+  });
+  return {
+    ok: true,
+    milestone,
+    installationStatus,
+    scheduledAt,
+    partnerNotification,
+  };
 }
 
 async function geocodeKioskAddress(info) {
@@ -7775,6 +8381,8 @@ function serializeUiProfileDoc(docSnap) {
     },
     ui: clonePlain(data.ui) || {},
     languages: clonePlain(data.languages) || {},
+    terminalProfiles: clonePlain(data.terminalProfiles) || {},
+    sectionVersions: clonePlain(data.sectionVersions) || {},
     createdAt: serializeFirestoreTimestamp(data.createdAt),
     updatedAt: serializeFirestoreTimestamp(data.updatedAt),
     updatedByUid: String(data.updatedByUid || ""),
@@ -7838,10 +8446,143 @@ async function uiProfileListImpl(authState) {
     if (!current || profileRecency > currentRecency) profilesByClient.set(clientId, profile);
   });
 
-  return {profiles: [...profilesByClient.values()]};
+  const isApolloAdmin = authState.isAdmin || normalizeUsername(authState.profile?.username) === "chargerent";
+  const runtimeSnap = isApolloAdmin ? await db.collection("payterRuntime").doc("current").get() : null;
+  const runtime = runtimeSnap?.exists ? runtimeSnap.data() || {} : {};
+  const apolloTestStationIds = Array.from(new Set(
+      (Array.isArray(runtime.apolloTestStationIds) ? runtime.apolloTestStationIds : [])
+          .map(normalizeStationId)
+          .filter(Boolean),
+  ));
+
+  return {
+    profiles: [...profilesByClient.values()],
+    capabilities: {
+      scopedProfiles: 1,
+      apolloScreens: 1,
+      apolloEstablishedScreenRemoval: 1,
+      apolloPublishing: false,
+      apolloTestScreens: 1,
+      apolloProfileTestsEnabled: runtime.apolloProfileTestsEnabled === true,
+      apolloTestStationIds,
+    },
+  };
+}
+
+async function uiProfileUpsertSectionImpl(data, authState) {
+  const {mergeProfileSection, isProfileSectionTarget} = await import('./uiProfileSections.mjs');
+  const source = clonePlain(data.profile) || {};
+  const clientId = String(source.clientId || '').trim().toUpperCase();
+  const section = data.section;
+  const stationid = normalizeStationId(data.stationid || '');
+  if (!clientId || !canManageUiProfileClient(authState, clientId)) {
+    throw new functions.https.HttpsError('permission-denied', 'Not allowed to edit this client profile.');
+  }
+  if (section === 'apollo' && !authState.isAdmin && normalizeUsername(authState.profile?.username) !== 'chargerent') {
+    throw new functions.https.HttpsError('permission-denied', 'Apollo profiles require administrator access.');
+  }
+  const collection = db.collection(UI_PROFILES_COLLECTION);
+  const candidates = await collection.where('clientId', '==', clientId).get();
+  const canonical = selectCanonicalUiProfileDoc(candidates.docs);
+  const ref = canonical?.ref || collection.doc(normalizeUiProfileId(clientId));
+  await db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(ref);
+    const existing = snap.exists ? snap.data() : {};
+    if (snap.exists && String(existing.clientId || '').trim().toUpperCase() !== clientId) {
+      throw new functions.https.HttpsError('permission-denied', 'The profile identifier belongs to another client.');
+    }
+    if (snap.exists && Number(source.version) !== Number(existing.version)) {
+      throw new functions.https.HttpsError('aborted', 'This profile changed. Reload it before saving.');
+    }
+    if (stationid) {
+      if (section !== 'p68') throw new functions.https.HttpsError('invalid-argument', 'Only P68 profiles support kiosk overrides.');
+      const kiosks = await transaction.get(db.collection('kiosks').where('stationid', '==', stationid));
+      if (kiosks.size !== 1 || kiosks.docs.some((doc) => {
+        const kiosk = doc.data();
+        return String(kiosk.info?.client || kiosk.info?.clientId || '').trim().toUpperCase() !== clientId
+          || !canManageUiProfileForKiosk(authState, kiosk) || !isProfileSectionTarget(kiosk, section);
+      })) throw new functions.https.HttpsError('permission-denied', 'The kiosk does not belong to this client and terminal type.');
+    }
+    let next;
+    try {
+      next = mergeProfileSection(existing, source, section, stationid, data.useDefault === true);
+    } catch (error) {
+      throw new functions.https.HttpsError('invalid-argument', error.message);
+    }
+    if (section === 'admin') {
+      next.admin = {
+        userpassword: normalizeUiProfilePin(next.admin?.userpassword, 'User PIN'),
+        adminpassword: normalizeUiProfilePin(next.admin?.adminpassword, 'Admin PIN'),
+      };
+    }
+    transaction.set(ref, {
+      ...next, name: `${clientId} Kiosk UI`, clientId, status: 'draft',
+      version: Number(existing.version || 0) + 1,
+      sectionVersions: {...existing.sectionVersions, [section]: Number(existing.sectionVersions?.[section] || 0) + 1},
+      createdAt: existing.createdAt || admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedByUid: authState.uid || '', updatedByUsername: normalizeUsername(authState.profile?.username),
+    });
+  });
+  return {ok: true, profile: serializeUiProfileDoc(await ref.get())};
+}
+
+async function uiProfileApplySectionImpl(data, authState) {
+  const {buildSectionUiSnapshot, isProfileSectionTarget, PROFILE_SECTIONS} = await import('./uiProfileSections.mjs');
+  const section = data.section;
+  if (!PROFILE_SECTIONS.some(({key}) => key === section)) throw new functions.https.HttpsError('invalid-argument', 'Unknown profile section.');
+  // A profile save must never turn on the unfinished Apollo adapter.
+  if (section === 'apollo') throw new functions.https.HttpsError('failed-precondition', 'Apollo publishing is not enabled.');
+  const profileId = normalizeUiProfileId(data.profileId);
+  const stationids = [...new Set((Array.isArray(data.stationids) ? data.stationids : []).map(normalizeStationId).filter(Boolean))];
+  if (!profileId || !stationids.length || stationids.length > 400) throw new functions.https.HttpsError('invalid-argument', 'Choose between 1 and 400 kiosks.');
+  return db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(db.collection(UI_PROFILES_COLLECTION).doc(profileId));
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Profile not found.');
+    const profile = serializeUiProfileDoc(snap);
+    if (!canManageUiProfileClient(authState, profile.clientId)) throw new functions.https.HttpsError('permission-denied', 'Not allowed to publish this profile.');
+    if (Number(data.expectedVersion) !== profile.version) throw new functions.https.HttpsError('aborted', 'The profile changed. Reload it before publishing.');
+    const kioskDocs = [];
+    for (const chunk of chunkArray(stationids, 30)) {
+      const kiosks = await transaction.get(db.collection('kiosks').where('stationid', 'in', chunk));
+      kioskDocs.push(...kiosks.docs);
+    }
+    if (kioskDocs.length !== stationids.length || new Set(kioskDocs.map((doc) => normalizeStationId(doc.data().stationid))).size !== stationids.length) {
+      throw new functions.https.HttpsError('failed-precondition', 'Kiosk assignments changed or are duplicated. Reload before publishing.');
+    }
+    for (const doc of kioskDocs) {
+      const kiosk = doc.data();
+      if (!canManageUiProfileForKiosk(authState, kiosk)
+        || String(kiosk.info?.client || kiosk.info?.clientId || '').trim().toUpperCase() !== profile.clientId
+        || !isProfileSectionTarget(kiosk, section)) {
+        throw new functions.https.HttpsError('failed-precondition', 'A kiosk no longer matches this client and device type. Reload before publishing.');
+      }
+    }
+    const appliedAt = new Date().toISOString();
+    const updatedKiosks = kioskDocs.map((doc) => {
+      const kiosk = doc.data();
+      const kioskSnapshot = preserveProvisionedUiMode(buildUiProfileSnapshot(profile), kiosk.ui);
+      const ui = buildSectionUiSnapshot(kiosk, profile, section, kioskSnapshot, appliedAt);
+      const update = {ui, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: normalizeUsername(authState.profile?.username)};
+      if (section === 'kiosk') update.uiProfileId = profileId;
+      const next = {...clonePlain(kiosk), ui};
+      if (section === 'kiosk') next.uiProfileId = profileId;
+      if (section === 'admin') {
+        next.admin = {...kiosk.admin};
+        for (const key of ['userpassword', 'adminpassword']) {
+          const pin = normalizeUiProfilePin(profile.admin?.[key], key);
+          if (pin) {update[`admin.${key}`] = pin; next.admin[key] = pin;}
+        }
+      }
+      transaction.update(doc.ref, update);
+      return next;
+    });
+    return {ok: true, section, profile, updatedCount: updatedKiosks.length, kiosks: updatedKiosks};
+  });
 }
 
 async function uiProfileUpsertImpl(data, authState) {
+  if (data?.section) return uiProfileUpsertSectionImpl(data, authState);
   const source = clonePlain(data?.profile) || {};
   const clientId = String(source.clientId || getAuthClientId(authState)).trim().toUpperCase();
 
@@ -7926,6 +8667,7 @@ async function uiProfileDeleteImpl(data, authState) {
 }
 
 async function uiProfileApplyImpl(data, authState) {
+  if (data?.section) return uiProfileApplySectionImpl(data, authState);
   const profileId = normalizeUiProfileId(data?.profileId);
   const stationIds = Array.isArray(data?.stationids) ? data.stationids.map(normalizeStationId).filter(Boolean) : [];
 
@@ -8054,9 +8796,18 @@ async function createAuthUserAndProfileImpl(data, authState = null) {
   const password = String(data?.password || "");
   const clientId = String(data?.clientId || "").trim().toUpperCase();
   const profileIn = data?.profile || {};
+  const role = String(profileIn.role || "user").trim().toLowerCase();
+  const contactEmail = String(profileIn.contact?.email || "").trim().toLowerCase();
 
-  if (!username || !password || !clientId) {
-    throw new functions.https.HttpsError("invalid-argument", "username, password, clientId required");
+  if (!isValidWorkspaceContactEmail(contactEmail)) {
+    throw new functions.https.HttpsError("invalid-argument", "A valid contact email is required.");
+  }
+
+  if (!username || !password || (role !== "admin" && !clientId)) {
+    throw new functions.https.HttpsError("invalid-argument", "Username and password are required; partners and clients also need a Client ID.");
+  }
+  if (!["admin", "partner", "user"].includes(role)) {
+    throw new functions.https.HttpsError("invalid-argument", "Invalid account role.");
   }
   if (!isValidUsername(username)) {
     throw new functions.https.HttpsError("invalid-argument", "invalid username");
@@ -8066,6 +8817,35 @@ async function createAuthUserAndProfileImpl(data, authState = null) {
         "invalid-argument",
         "Password must be at least 12 characters.",
     );
+  }
+
+  // Check the fixed attachment before creating either dashboard or Google accounts.
+  const includePartnerKit = data?.includePartnerKit === true;
+  let preparedPartnerKit = null;
+  if (includePartnerKit) {
+    try {
+      preparedPartnerKit = await preparePartnerKit({includePartnerKit, role});
+    } catch (error) {
+      throw new functions.https.HttpsError(error.code || "failed-precondition", error.message);
+    }
+  }
+
+  // Validate mailbox settings and availability before creating a dashboard user.
+  let mailboxRequest = null;
+  if (data?.workspaceMailbox) {
+    assertWorkspaceProvisioner(authState);
+    try {
+      mailboxRequest = workspaceProvisioning.validateRequest(data.workspaceMailbox, {role});
+      if (contactEmail === mailboxRequest.email) {
+        throw new functions.https.HttpsError("invalid-argument", "Use an existing contact email, different from the new company email, so the partner can receive their new address.");
+      }
+      const availability = await workspaceProvisioning.checkAvailability(mailboxRequest.localPart, {actorUid: authState.uid});
+      if (!availability.available) {
+        throw new functions.https.HttpsError("already-exists", "That company email address is already in use. Choose another address.");
+      }
+    } catch (error) {
+      throw workspaceHttpsError(error);
+    }
   }
 
   const email = `${username}@${AUTH_MAPPING_DOMAIN}`;
@@ -8112,14 +8892,47 @@ async function createAuthUserAndProfileImpl(data, authState = null) {
   // Create/merge Firestore profile at users/{uid}
   const clean = cleanProfile(profileIn);
   clean.username = username;
-  clean.clientId = clientId;
+  clean.role = role;
+  clean.contact = {...clean.contact, email: contactEmail};
+  clean.clientId = role === "admin" ? "" : clientId;
   clean.authEmail = email;
   clean.updatedAt = admin.firestore.FieldValue.serverTimestamp();
   clean.createdAt = admin.firestore.FieldValue.serverTimestamp();
 
   try {
-    await db.collection("users").doc(uid).set(clean, { merge: true });
+    // Claims need only the Auth user. Complete them before saving either
+    // document so a claims failure cannot leave an orphan mailbox request.
     await syncCustomClaimsForProfile(uid, clean);
+    const profileRef = db.collection("users").doc(uid);
+    if (mailboxRequest) {
+      // Save the request with the dashboard profile before the first Google
+      // attempt. Even a failed provisioning claim can then be retried safely.
+      const batch = db.batch();
+      const now = Date.now();
+      batch.set(profileRef, {
+        ...clean,
+        workspaceMailbox: {
+          status: "provisioning",
+          email: mailboxRequest.email,
+          message: "Company email is queued for creation.",
+        },
+      }, {merge: true});
+      batch.set(db.collection("workspaceProvisioning").doc(uid), {
+        uid,
+        email: mailboxRequest.email,
+        request: mailboxRequest,
+        contactEmail,
+        status: "queued",
+        attempts: 0,
+        leaseExpiresAt: 0,
+        actorUid: authState.uid,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await batch.commit();
+    } else {
+      await profileRef.set(clean, {merge: true});
+    }
   } catch (e) {
     console.error("createAuthUserAndProfileImpl profile write failed", {
       uid,
@@ -8141,13 +8954,167 @@ async function createAuthUserAndProfileImpl(data, authState = null) {
     );
   }
 
+  // These outcomes remain separate once the dashboard account exists. A mail
+  // failure must not report the entire creation as failed and invite duplicates.
+  let workspaceMailbox = null;
+  if (mailboxRequest) {
+    workspaceMailbox = await provisionMailboxSafely(uid, mailboxRequest, authState);
+    if (["pending", "ready"].includes(workspaceMailbox?.status) && workspaceMailbox.googleUserId) {
+      workspaceMailbox = await notifyWorkspaceMailboxSafely(uid, workspaceMailbox, authState);
+    }
+  }
   let credentialsEmailSent = false;
-  if (data?.sendCredentials === true) {
-    await sendLoginInviteImpl({uid, password}, authState);
-    credentialsEmailSent = true;
+  let credentialsEmailError = "";
+  let credentialsPartnerKitIncluded = false;
+  if (data?.sendCredentials === true || includePartnerKit) {
+    try {
+      const inviteResult = await sendLoginInviteImpl({uid, password, includePartnerKit}, authState, preparedPartnerKit);
+      credentialsEmailSent = true;
+      credentialsPartnerKitIncluded = inviteResult?.partnerKitIncluded === true;
+    } catch (error) {
+      credentialsEmailError = error?.loginEmailUnconfirmed === true
+        ? `Dashboard account created. ${error.message}`
+        : includePartnerKit
+          ? "Dashboard account created, but the login email with the partner launch kit could not be sent. Use Send login credentials to retry."
+          : "Dashboard account created, but the login email could not be sent. Use Send login credentials to retry.";
+    }
   }
 
-  return { ok: true, uid, email, credentialsEmailSent };
+  return { ok: true, uid, email, credentialsEmailSent, credentialsEmailError, credentialsPartnerKitIncluded, workspaceMailbox };
+}
+
+function workspaceHttpsError(error) {
+  const codes = new Set(["invalid-argument", "permission-denied", "failed-precondition", "already-exists", "unavailable", "not-found"]);
+  const code = codes.has(error?.code) ? error.code : "unavailable";
+  return new functions.https.HttpsError(code,
+      codes.has(error?.code) ? error.message : "Company email is temporarily unavailable. Try again.");
+}
+
+function chargeDropsStripeHttpsError(error) {
+  const codes = new Set([
+    "unauthenticated",
+    "invalid-argument",
+    "permission-denied",
+    "failed-precondition",
+    "not-found",
+    "unavailable",
+  ]);
+  const code = codes.has(error?.code) ? error.code : "unavailable";
+  const message = error?.safe === true ? error.message :
+    "Stripe payout setup is temporarily unavailable. Try again shortly.";
+  return new functions.https.HttpsError(code, message);
+}
+
+function accountingHttpsError(error) {
+  const code = error?.code === "invalid-argument" ? "invalid-argument" : "internal";
+  const message = error?.safe === true ? error.message : "Accounting is temporarily unavailable.";
+  return new functions.https.HttpsError(code, message);
+}
+
+function chargeDropsAgreementHttpsError(error) {
+  const codes = new Set([
+    "unauthenticated",
+    "invalid-argument",
+    "permission-denied",
+    "failed-precondition",
+    "not-found",
+    "resource-exhausted",
+    "unavailable",
+  ]);
+  const code = codes.has(error?.code) ? error.code : "unavailable";
+  const message = error?.safe === true ? error.message :
+    "ChargeDrops agreement service is temporarily unavailable.";
+  return new functions.https.HttpsError(code, message);
+}
+
+function chargeDropsAgreementRequestEvidence(req) {
+  const forwarded = String(req?.headers?.["x-forwarded-for"] || "")
+      .split(",")[0]
+      .trim();
+  return {
+    ipAddress: forwarded || String(req?.ip || req?.socket?.remoteAddress || "").trim(),
+    userAgent: String(req?.headers?.["user-agent"] || "").trim(),
+  };
+}
+
+function assertWorkspaceProvisioner(authState) {
+  if (!workspaceProvisioning.canProvision(authState?.uid)) {
+    throw new functions.https.HttpsError("permission-denied", "Company email creation is not enabled for your dashboard account.");
+  }
+}
+
+function workspaceStatusImpl(authState) {
+  const status = workspaceProvisioning.getStatus();
+  if (status.enabled && !workspaceProvisioning.canProvision(authState?.uid)) {
+    return {configured: false, domain: status.domain, message: "Company email creation is not enabled for your dashboard account."};
+  }
+  return {...status, configured: status.enabled && status.configured,
+    message: status.enabled ? "" : "Company email creation is not connected yet. You can still create a dashboard account."};
+}
+
+async function workspaceCheckEmailImpl(data, authState) {
+  assertWorkspaceProvisioner(authState);
+  try {
+    return await workspaceProvisioning.checkAvailability(data?.localPart, {actorUid: authState.uid});
+  } catch (error) {
+    throw workspaceHttpsError(error);
+  }
+}
+
+async function provisionMailboxSafely(uid, request, authState) {
+  try {
+    return await workspaceProvisioning.provision({uid, request, actorUid: authState.uid});
+  } catch {
+    // The dashboard user already exists. Never include provider responses or
+    // credentials in logs/errors, or turn a partial result into a create retry.
+    return {status: "error", email: request.email, message: "Dashboard account created. Company email needs a retry.", passwordAvailable: false};
+  }
+}
+
+async function retryWorkspaceMailboxImpl(data, authState) {
+  assertWorkspaceProvisioner(authState);
+  const uid = String(data?.uid || "").trim();
+  if (!uid || uid.includes("/")) throw new functions.https.HttpsError("invalid-argument", "A valid user ID is required.");
+  const profileSnap = await db.collection("users").doc(uid).get();
+  const requestSnap = await db.collection("workspaceProvisioning").doc(uid).get();
+  if (!profileSnap.exists || !requestSnap.exists) {
+    throw new functions.https.HttpsError("not-found", "No company email request was found for this account.");
+  }
+  const profile = profileSnap.data();
+  let request;
+  try {
+    request = workspaceProvisioning.validateRequest(requestSnap.data().request, {role: profile.role});
+  } catch (error) {
+    throw workspaceHttpsError(error);
+  }
+  let workspaceMailbox = await provisionMailboxSafely(uid, request, authState);
+  if (["pending", "ready"].includes(workspaceMailbox?.status) && workspaceMailbox.googleUserId) {
+    workspaceMailbox = await notifyWorkspaceMailboxSafely(uid, workspaceMailbox, authState);
+  }
+  return {ok: true, uid, workspaceMailbox};
+}
+
+async function resendWorkspaceNotificationImpl(data, authState) {
+  assertWorkspaceProvisioner(authState);
+  const uid = String(data?.uid || "").trim();
+  if (!uid || uid.includes("/")) throw new functions.https.HttpsError("invalid-argument", "A valid user ID is required.");
+  const [profileSnap, recordSnap] = await Promise.all([
+    db.collection("users").doc(uid).get(),
+    db.collection("workspaceProvisioning").doc(uid).get(),
+  ]);
+  if (!profileSnap.exists || !recordSnap.exists) {
+    throw new functions.https.HttpsError("not-found", "Company email request not found.");
+  }
+  if (profileSnap.data().role !== "partner") {
+    throw new functions.https.HttpsError("permission-denied", "Company email notifications are only available for partners.");
+  }
+  const saved = recordSnap.data();
+  if (!["pending", "ready"].includes(saved.status) || !saved.googleUserId) {
+    throw new functions.https.HttpsError("failed-precondition", "Check the company mailbox status before sending its notification.");
+  }
+  const mailbox = {status: saved.status, email: saved.email, googleUserId: saved.googleUserId,
+    message: saved.message || ""};
+  return {ok: true, uid, workspaceMailbox: await notifyWorkspaceMailboxSafely(uid, mailbox, authState, data?.resendUnknown === true)};
 }
 
 async function setUserPasswordImpl(data) {
@@ -8160,6 +9127,19 @@ async function setUserPasswordImpl(data) {
 
   await admin.auth().updateUser(uid, { password });
   return { ok: true };
+}
+
+async function notifyWorkspaceMailboxSafely(uid, mailbox, authState, resendUnknown = false) {
+  if (!["pending", "ready"].includes(mailbox?.status) || !mailbox.googleUserId) return mailbox;
+  try {
+    const notification = await workspaceNotification.notify({uid, mailbox, actorUid: authState.uid, resendUnknown});
+    return {...mailbox, ...notification};
+  } catch {
+    // A notification failure does not undo either account. Do not expose SMTP
+    // responses, and do not automatically repeat a potentially accepted send.
+    return {...mailbox, notificationStatus: "unknown",
+      notificationMessage: "The company address email could not be confirmed. Check before sending it again."};
+  }
 }
 
 function escapeHtml(value) {
@@ -8181,9 +9161,63 @@ function generateLoginPassword() {
   return `Cr-${password}`;
 }
 
-function buildLoginInviteMessage({contactName, username, dashboardUrl, loginPassword}) {
+function buildLoginInviteMessage({
+  contactName,
+  username,
+  dashboardUrl,
+  loginPassword,
+  partnerKitIncluded = false,
+  brand = "chargerent",
+  venueName = "",
+}) {
+  if (brand === "chargedrops") {
+    const greeting = contactName ? `Hi ${contactName},` : "Hi,";
+    const venueLine = venueName ? ` for ${venueName}` : "";
+    const subject = "Your ChargeDrops Client Portal login";
+    const body = [
+      greeting,
+      "",
+      `Your ChargeDrops Client Portal account${venueLine} is ready.`,
+      "",
+      `Username: ${username}`,
+      `Temporary password: ${loginPassword}`,
+      `Client Portal: ${dashboardUrl}`,
+      "",
+      "Sign in to review your location, complete the client agreement, and " +
+        "set up commission payouts.",
+      "Please keep this email secure.",
+      "",
+      "ChargeDrops",
+    ].join("\n");
+    const displayName = contactName || "there";
+    const html = [
+      "<!doctype html>",
+      "<html><body style=\"margin:0;background:#eef2f7;\">",
+      "<div style=\"font-family:Inter,Arial,sans-serif;background:#eef2f7;padding:32px;\">",
+      "<div style=\"max-width:600px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #dbe3ef;\">",
+      "<div style=\"background:#312e81;padding:28px 32px;color:#fff;\">",
+      "<div style=\"font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#c7d2fe;\">ChargeDrops</div>",
+      "<h1 style=\"margin:8px 0 0;font-size:24px;\">Welcome to your Client Portal</h1>",
+      "</div><div style=\"padding:32px;\">",
+      `<p style="color:#334155;font-size:15px;line-height:1.6;">Hi ${escapeHtml(displayName)},</p>`,
+      `<p style="color:#334155;font-size:15px;line-height:1.6;">Your ChargeDrops Client Portal account${escapeHtml(venueLine)} is ready.</p>`,
+      "<div style=\"background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin:24px 0;\">",
+      "<p style=\"margin:0 0 8px;color:#64748b;font-size:13px;\">Username</p>",
+      `<p style="margin:0;color:#0f172a;font-size:16px;font-weight:700;">${escapeHtml(username)}</p>`,
+      "<div style=\"height:14px;\"></div>",
+      "<p style=\"margin:0 0 8px;color:#64748b;font-size:13px;\">Temporary password</p>",
+      `<p style="margin:0;color:#0f172a;font-size:16px;font-weight:700;">${escapeHtml(loginPassword)}</p>`,
+      "</div>",
+      `<a href="${escapeHtml(dashboardUrl)}" style="background:#4f46e5;color:#fff;text-decoration:none;padding:14px 20px;border-radius:9px;font-weight:700;display:inline-block;">Open Client Portal</a>`,
+      "<p style=\"margin-top:24px;color:#64748b;font-size:13px;line-height:1.5;\">Sign in to review your location, complete the agreement, and set up commission payouts.</p>",
+      "<p style=\"margin-top:18px;color:#94a3b8;font-size:12px;line-height:1.5;\">Please keep this email secure.</p>",
+      "</div></div></div></body></html>",
+    ].join("");
+    return {subject, body, html};
+  }
+
   const greeting = contactName ? `Hi ${contactName},` : "Hi,";
-  const subject = "Your Chargerent dashboard login";
+  const subject = partnerKitIncluded ? "Your Chargerent dashboard login and partner launch kit" : "Your Chargerent dashboard login";
   const body = [
     greeting,
     "",
@@ -8193,6 +9227,7 @@ function buildLoginInviteMessage({contactName, username, dashboardUrl, loginPass
     `Password: ${loginPassword}`,
     `Dashboard: ${dashboardUrl}`,
     "",
+    ...(partnerKitIncluded ? ["Your Chargerent Regional Partner Launch Kit is attached to this email.", ""] : []),
     "Use these credentials to sign in. Please keep this email secure.",
     "",
     "Chargerent",
@@ -8223,6 +9258,7 @@ function buildLoginInviteMessage({contactName, username, dashboardUrl, loginPass
     "If the button does not work, paste this link into your browser:<br>",
     `<a href="${escapeHtml(dashboardUrl)}" style="color:#2563eb;word-break:break-all;">${escapeHtml(dashboardUrl)}</a>`,
     "</p>",
+    ...(partnerKitIncluded ? ["<p style=\"color:#334155;font-size:15px;line-height:1.6;\">Your Chargerent Regional Partner Launch Kit is attached to this email.</p>"] : []),
     "<p style=\"margin-top:24px;color:#94a3b8;font-size:12px;line-height:1.5;\">Please keep this email secure. Your Chargerent contact can issue a new password if needed.</p>",
     "</div>",
     "</div>",
@@ -8245,7 +9281,15 @@ function getLoginInviteCcEmail(profile, contactEmail) {
   return ccEmail;
 }
 
-async function sendLoginInviteEmail({to, cc, subject, body, html}) {
+async function sendLoginInviteEmail({
+  to,
+  cc,
+  subject,
+  body,
+  html,
+  attachments,
+  fromName = LOGIN_INVITE_FROM_NAME,
+}) {
   const password = String(process.env.GMAIL_APP_PASSWORD || "").trim();
   if (!password) {
     throw new functions.https.HttpsError(
@@ -8261,13 +9305,18 @@ async function sendLoginInviteEmail({to, cc, subject, body, html}) {
     console.error("Unable to load nodemailer", {
       message: error?.message || "unknown error",
     });
-    throw new functions.https.HttpsError("internal", "Email sender is not installed");
+    const senderError = new functions.https.HttpsError("internal", "Email sender is not installed");
+    senderError.notificationBeforeSend = true;
+    throw senderError;
   }
 
   const transporter = nodemailer.createTransport({
     host: "smtp.gmail.com",
     port: 465,
     secure: true,
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 30000,
     auth: {
       user: LOGIN_INVITE_FROM_EMAIL,
       pass: password,
@@ -8275,12 +9324,70 @@ async function sendLoginInviteEmail({to, cc, subject, body, html}) {
   });
 
   return transporter.sendMail({
-    from: `${LOGIN_INVITE_FROM_NAME} <${LOGIN_INVITE_FROM_EMAIL}>`,
+    from: `${fromName} <${LOGIN_INVITE_FROM_EMAIL}>`,
     to,
     cc: cc || undefined,
     subject,
     text: body,
     html,
+    ...(Array.isArray(attachments) && attachments.length ? {attachments} : {}),
+  });
+}
+
+async function sendSupportReplyEmail({
+  to,
+  subject,
+  body,
+  ticketId,
+  sender,
+  gmailThreadId,
+  inReplyTo,
+  references,
+}) {
+  const mailboxes = {
+    support: {
+      name: SUPPORT_FROM_NAME,
+      email: SUPPORT_FROM_EMAIL,
+    },
+    george: {
+      name: "George at Charge.rent",
+      email: "george@charge.rent",
+    },
+    arthur: {
+      name: "Arthur at Charge.rent",
+      email: "arthur@charge.rent",
+    },
+  };
+  const mailbox = mailboxes[sender?.key];
+  if (!mailbox || mailbox.email !== sender?.email) {
+    throw new functions.https.HttpsError("invalid-argument", "The selected reply sender is not supported.");
+  }
+
+  const safeBody = escapeHtml(body).replace(/\r?\n/g, "<br>");
+  const safeTicketId = escapeHtml(ticketId);
+  const html = [
+    "<!doctype html>",
+    "<html><body style=\"margin:0;background:#f1f5f9;\">",
+    "<div style=\"font-family:Inter,Arial,sans-serif;background:#f1f5f9;padding:24px;\">",
+    "<div style=\"max-width:640px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;\">",
+    "<div style=\"height:6px;background:#2563eb;\"></div>",
+    `<div style="padding:28px;color:#1e293b;font-size:15px;line-height:1.65;">${safeBody}</div>`,
+    `<div style="border-top:1px solid #e2e8f0;padding:16px 28px;color:#64748b;font-size:12px;">Reference ${safeTicketId}</div>`,
+    "</div></div></body></html>",
+  ].join("");
+
+  return gmailApiSender.sendMessage({
+    fromName: mailbox.name,
+    fromEmail: mailbox.email,
+    replyTo: SUPPORT_FROM_EMAIL,
+    to,
+    subject,
+    textBody: body,
+    htmlBody: html,
+    gmailThreadId: mailbox.email === SUPPORT_FROM_EMAIL ? gmailThreadId : "",
+    inReplyTo,
+    references,
+    ticketId,
   });
 }
 
@@ -8314,7 +9421,7 @@ async function appendClientCredentialEmailLog({username, contactEmail, ccEmail, 
   }, {merge: true});
 }
 
-async function sendLoginInviteImpl(data, authState) {
+async function sendLoginInviteImpl(data, authState, preparedPartnerKit = null) {
   const uid = String(data?.uid || "").trim();
   if (!uid) {
     throw new functions.https.HttpsError("invalid-argument", "uid required");
@@ -8326,6 +9433,21 @@ async function sendLoginInviteImpl(data, authState) {
   }
 
   const profile = profileSnap.data() || {};
+  const includePartnerKit = data?.includePartnerKit === true;
+  const role = String(profile.role || "user").trim().toLowerCase();
+  if (includePartnerKit && role !== "partner") {
+    throw new functions.https.HttpsError("permission-denied", "The partner launch kit can only be sent to partner accounts.");
+  }
+  let partnerKit = null;
+  if (includePartnerKit) {
+    try {
+      // A newly created account can reuse the PDF verified before Auth creation.
+      // Existing-account invites load it before changing the dashboard password.
+      partnerKit = preparedPartnerKit || await preparePartnerKit({includePartnerKit, role});
+    } catch (error) {
+      throw new functions.https.HttpsError(error.code || "failed-precondition", error.message);
+    }
+  }
   const username = normalizeUsername(profile.username);
   if (!username || !isValidUsername(username)) {
     throw new functions.https.HttpsError("failed-precondition", "User profile is missing a valid username");
@@ -8338,7 +9460,9 @@ async function sendLoginInviteImpl(data, authState) {
   }
 
   const authEmail = String(profile.authEmail || `${username}@${AUTH_MAPPING_DOMAIN}`).trim().toLowerCase();
-  const ccEmail = getLoginInviteCcEmail(profile, contactEmail);
+  const isChargeDropsClient = isChargeDropsClientProfile(profile);
+  const ccEmail = isChargeDropsClient ? "" :
+    getLoginInviteCcEmail(profile, contactEmail);
   const dashboardUrl = getDashboardLoginUrl();
   const requestedPassword = String(data?.password || "").trim();
   const loginPassword = requestedPassword || generateLoginPassword();
@@ -8355,6 +9479,9 @@ async function sendLoginInviteImpl(data, authState) {
     username,
     dashboardUrl,
     loginPassword,
+    partnerKitIncluded: Boolean(partnerKit),
+    brand: isChargeDropsClient ? "chargedrops" : "chargerent",
+    venueName: String(profile?.chargedrops?.location?.venueName || "").trim(),
   });
   const emailResult = await sendLoginInviteEmail({
     to: contactEmail,
@@ -8362,20 +9489,42 @@ async function sendLoginInviteImpl(data, authState) {
     subject: message.subject,
     body: message.body,
     html: message.html,
+    fromName: isChargeDropsClient ? "ChargeDrops" : LOGIN_INVITE_FROM_NAME,
+    ...(partnerKit ? {attachments: [partnerKit.attachment]} : {}),
   });
 
-  await db.collection("loginInvites").add({
-    uid,
-    username,
-    authEmail,
-    contactEmail,
-    ccEmail,
-    sentByUid: authState?.uid || "",
-    sentByUsername: normalizeUsername(authState?.profile?.username),
-    delivery: "gmail",
-    messageId: String(emailResult?.messageId || ""),
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
+  // SMTP can accept the CC while rejecting the actual partner. Only confirm
+  // this invite when the contact itself was accepted and was not rejected.
+  const matchesContact = (address) => String(typeof address === "object" ? address?.address || "" : address || "").trim().toLowerCase() === contactEmail.toLowerCase();
+  const contactAccepted = Array.isArray(emailResult?.accepted) && emailResult.accepted.some(matchesContact);
+  const contactRejected = Array.isArray(emailResult?.rejected) && emailResult.rejected.some(matchesContact);
+  if (!contactAccepted || contactRejected) {
+    const deliveryError = new functions.https.HttpsError("unavailable", contactRejected
+      ? "The contact email address was rejected. Verify it before sending the login email again."
+      : "The login email could not be confirmed for the contact email. Check its status before sending again.");
+    deliveryError.loginEmailUnconfirmed = true;
+    throw deliveryError;
+  }
+
+  try {
+    await db.collection("loginInvites").add({
+      uid,
+      username,
+      authEmail,
+      contactEmail,
+      ccEmail,
+      sentByUid: authState?.uid || "",
+      sentByUsername: normalizeUsername(authState?.profile?.username),
+      delivery: "gmail",
+      messageId: String(emailResult?.messageId || ""),
+      partnerKitIncluded: Boolean(partnerKit),
+      ...(partnerKit ? {partnerKit: partnerKit.metadata} : {}),
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch {
+    // SMTP acceptance already happened. A log failure must not invite a duplicate send.
+    console.error("Failed to write login invite audit log", {uid});
+  }
 
   try {
     await appendClientCredentialEmailLog({
@@ -8385,12 +9534,8 @@ async function sendLoginInviteImpl(data, authState) {
       authState,
       messageId: emailResult?.messageId,
     });
-  } catch (error) {
-    console.error("Failed to write login credential email client log", {
-      uid,
-      username,
-      message: error?.message || "unknown error",
-    });
+  } catch {
+    console.error("Failed to write login credential email client log", {uid});
   }
 
   return {
@@ -8401,6 +9546,7 @@ async function sendLoginInviteImpl(data, authState) {
     ccEmail,
     dashboardUrl,
     delivery: "gmail",
+    partnerKitIncluded: Boolean(partnerKit),
     messageId: String(emailResult?.messageId || ""),
     email: {
       to: contactEmail,
@@ -8758,7 +9904,7 @@ async function createPurchaseApprovalReports({users, kiosks, referenceDate, incl
     profile.role !== "admin" &&
     profile.role !== "partner" &&
     profile.partner !== true &&
-    String(profile.revShareModel || "").toLowerCase() === "purchase"
+    ["purchase", "chargedrops"].includes(String(profile.revShareModel || "").toLowerCase())
   )).forEach((client) => {
     const schedule = normalizePayoutSchedule(client.paymentSchedule);
     if (!includeAllSchedules && !shouldRunPayoutSchedule(schedule, referenceDate)) return;
@@ -8779,6 +9925,7 @@ async function createPurchaseApprovalReports({users, kiosks, referenceDate, incl
     const seed = {
       client,
       clientId,
+      model: String(client.revShareModel || "purchase").toLowerCase(),
       schedule,
       period,
       purchaseKiosks,
@@ -8851,9 +9998,9 @@ async function createPurchaseApprovalReports({users, kiosks, referenceDate, incl
       const clientEmail = getPayoutContactEmail(seed.client);
       const adminEmail = getPayoutAdminEmail(seed.client.paymentAdmin);
       reports.push({
-        id: `purchase-client-${seed.period.key}-${seed.clientId}`.toLowerCase(),
+        id: `${seed.model}-client-${seed.period.key}-${seed.clientId}`.toLowerCase(),
         type: "purchase_approval",
-        model: "purchase",
+        model: seed.model,
         status: "pending_approval",
         period: seed.period,
         paymentSchedule: seed.schedule,
@@ -9861,6 +11008,72 @@ async function stationBindingMoveModuleImpl(data, authState) {
   };
 }
 
+function supportBearerToken(req) {
+  const authorization = String(req.headers.authorization || "").trim();
+  return authorization.replace(/^Bearer\s+/i, "").trim();
+}
+
+function supportSecretValue(secret) {
+  try {
+    return String(secret.value() || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function gmailNotificationPayload(event) {
+  const message = event?.data?.message || event?.message || {};
+  if (message.json && typeof message.json === "object") return message.json;
+  const encoded = String(message.data || "").trim();
+  if (!encoded) return {};
+  try {
+    return JSON.parse(Buffer.from(encoded, "base64").toString("utf8"));
+  } catch {
+    return {};
+  }
+}
+
+async function runSupportAdminAction(action) {
+  try {
+    return await action();
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError || error?.code?.startsWith?.("functions/")) {
+      throw error;
+    }
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        String(error?.message || "The support request could not be completed."),
+    );
+  }
+}
+
+async function handleSupportWebhook(req, res, {secret, action}) {
+  res.set("Cache-Control", "no-store");
+  if (req.method !== "POST") {
+    res.set("Allow", "POST");
+    res.status(405).json({ok: false, error: "method-not-allowed"});
+    return;
+  }
+  const expected = supportSecretValue(secret);
+  if (!expected) {
+    res.status(503).json({ok: false, error: "webhook-not-configured"});
+    return;
+  }
+  if (!secretsMatch(supportBearerToken(req), expected)) {
+    res.status(401).json({ok: false, error: "unauthorized"});
+    return;
+  }
+  try {
+    const result = await action(getRequestData(req));
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Support webhook rejected a request", {
+      message: error?.message || "unknown error",
+    });
+    res.status(400).json({ok: false, error: "invalid-request"});
+  }
+}
+
 exports.admin_listUsers = functions.https.onCall(async (data, context) => {
   await assertAdminFromContext(context);
   return listUsersImpl();
@@ -9876,9 +11089,215 @@ exports.admin_upsertUserProfile = functions.https.onCall(async (data, context) =
   return upsertUserProfileImpl(data);
 });
 
-exports.admin_createAuthUserAndProfile = functions.https.onCall(async (data, context) => {
+exports.accounting_getOverview = functions.https.onCall(async (_data, context) => {
+  const authState = await assertAdminFromContext(context);
+  return accounting.getOverview({authState});
+});
+
+exports.accounting_createDraftInvoice = functions.https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  try {
+    return await accounting.createDraftInvoice(data, authState);
+  } catch (error) {
+    throw accountingHttpsError(error);
+  }
+});
+
+exports.admin_createAuthUserAndProfile = functions.runWith({
+  secrets: [GMAIL_APP_PASSWORD],
+  timeoutSeconds: 180,
+}).https.onCall(async (data, context) => {
   const authState = await assertAdminFromContext(context);
   return createAuthUserAndProfileImpl(data, authState);
+});
+
+exports.admin_createChargeDropsClient = functions.runWith({
+  secrets: [GMAIL_APP_PASSWORD],
+  timeoutSeconds: 180,
+}).https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  return createChargeDropsClientImpl(data, authState);
+});
+
+exports.admin_listChargeDropsPartnerNotifications = functions.https.onCall(
+    async (data, context) => {
+      await assertAdminFromContext(context);
+      return listChargeDropsPartnerNotificationsImpl();
+    },
+);
+
+exports.admin_retryChargeDropsPartnerNotification = functions.runWith({
+  secrets: [GMAIL_APP_PASSWORD],
+}).https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  return chargeDropsPartnerNotifications.retry({
+    notificationId: data?.notificationId,
+    actorUid: authState.uid,
+  });
+});
+
+exports.admin_updateChargeDropsOnboardingMilestone = functions.runWith({
+  secrets: [GMAIL_APP_PASSWORD],
+}).https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  return updateChargeDropsOnboardingMilestoneImpl(data, authState);
+});
+
+exports.admin_searchChargeDropsPlaces = functions.runWith({
+  secrets: [GOOGLE_MAPS_SECRET],
+}).https.onCall(async (data, context) => {
+  await assertAdminFromContext(context);
+  return searchChargeDropsPlacesImpl(data);
+});
+
+exports.admin_getChargeDropsPlace = functions.runWith({
+  secrets: [GOOGLE_MAPS_SECRET],
+}).https.onCall(async (data, context) => {
+  await assertAdminFromContext(context);
+  return getChargeDropsPlaceImpl(data);
+});
+
+exports.admin_syncChargeDropsVenue = functions.https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  return syncChargeDropsVenueImpl(data, authState);
+});
+
+exports.admin_prepareChargeDropsAgreement = functions.runWith({
+  secrets: [GMAIL_APP_PASSWORD],
+  timeoutSeconds: 120,
+  memory: "512MiB",
+}).https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  try {
+    return await chargeDropsAgreements.prepareAgreement({
+      authState,
+      uid: data?.uid,
+      input: data,
+    });
+  } catch (error) {
+    throw chargeDropsAgreementHttpsError(error);
+  }
+});
+
+exports.chargedrops_agreementStatus = functions.https.onCall(async (data, context) => {
+  const authState = await getAuthorizedProfileFromContext(context);
+  try {
+    return await chargeDropsAgreements.getStatus({
+      authState,
+      uid: data?.uid,
+    });
+  } catch (error) {
+    throw chargeDropsAgreementHttpsError(error);
+  }
+});
+
+exports.chargedrops_requestAgreementCode = functions.runWith({
+  secrets: [GMAIL_APP_PASSWORD, CHARGEDROPS_AGREEMENT_OTP_SECRET],
+}).https.onCall(async (data, context) => {
+  const authState = await getAuthorizedProfileFromContext(context);
+  try {
+    return await chargeDropsAgreements.requestCode({authState});
+  } catch (error) {
+    throw chargeDropsAgreementHttpsError(error);
+  }
+});
+
+exports.chargedrops_signAgreement = functions.runWith({
+  secrets: [GMAIL_APP_PASSWORD, CHARGEDROPS_AGREEMENT_OTP_SECRET],
+  timeoutSeconds: 120,
+  memory: "512MiB",
+}).https.onCall(async (data, context) => {
+  const authState = await getAuthorizedProfileFromContext(context);
+  try {
+    return await chargeDropsAgreements.signAgreement({
+      authState,
+      input: data,
+      evidence: chargeDropsAgreementRequestEvidence(context?.rawRequest),
+    });
+  } catch (error) {
+    throw chargeDropsAgreementHttpsError(error);
+  }
+});
+
+exports.chargedrops_stripeStatus = functions.runWith({
+  secrets: [STRIPE_CONNECT_SECRET_KEY, GMAIL_APP_PASSWORD],
+}).https.onCall(async (data, context) => {
+  const authState = await getAuthorizedProfileFromContext(context);
+  try {
+    return await chargeDropsStripeConnect.getStatus({
+      authState,
+      uid: data?.uid,
+    });
+  } catch (error) {
+    throw chargeDropsStripeHttpsError(error);
+  }
+});
+
+exports.chargedrops_stripeOnboardingLink = functions.runWith({
+  secrets: [STRIPE_CONNECT_SECRET_KEY, GMAIL_APP_PASSWORD],
+}).https.onCall(async (data, context) => {
+  const authState = await getAuthorizedProfileFromContext(context);
+  try {
+    return await chargeDropsStripeConnect.createOnboardingLink({
+      authState,
+      uid: data?.uid,
+    });
+  } catch (error) {
+    throw chargeDropsStripeHttpsError(error);
+  }
+});
+
+exports.chargedrops_stripeWebhook = functions.runWith({
+  secrets: [
+    STRIPE_CONNECT_SECRET_KEY,
+    STRIPE_CONNECT_WEBHOOK_SECRET,
+    GMAIL_APP_PASSWORD,
+  ],
+  timeoutSeconds: 120,
+}).https.onRequest(async (req, res) => {
+  if (req.method !== "POST") {
+    res.status(405).send("Method not allowed");
+    return;
+  }
+  const signature = String(req.headers["stripe-signature"] || "").trim();
+  const webhookSecret = String(
+      STRIPE_CONNECT_WEBHOOK_SECRET.value() || "",
+  ).trim();
+  if (!signature || !webhookSecret.startsWith("whsec_")) {
+    res.status(503).send("Webhook is not configured");
+    return;
+  }
+  try {
+    const {stripe} = getStripeConnectClient();
+    const event = stripe.parseEventNotification(
+        req.rawBody,
+        signature,
+        webhookSecret,
+    );
+    await chargeDropsStripeConnect.syncEventNotification(event);
+    res.status(200).json({received: true});
+  } catch (error) {
+    console.error("ChargeDrops Stripe webhook rejected", {
+      code: error?.code || error?.type || "invalid-signature-or-payload",
+    });
+    res.status(400).send("Invalid webhook");
+  }
+});
+
+exports.admin_workspaceStatus = functions.https.onCall(async (data, context) => {
+  return workspaceStatusImpl(await assertAdminFromContext(context));
+});
+
+exports.admin_workspaceCheckEmail = functions.https.onCall(async (data, context) => {
+  return workspaceCheckEmailImpl(data, await assertAdminFromContext(context));
+});
+
+exports.admin_retryWorkspaceMailbox = functions.runWith({secrets: [GMAIL_APP_PASSWORD], timeoutSeconds: 180}).https.onCall(async (data, context) => {
+  return retryWorkspaceMailboxImpl(data, await assertAdminFromContext(context));
+});
+
+exports.admin_resendWorkspaceNotification = functions.runWith({secrets: [GMAIL_APP_PASSWORD], timeoutSeconds: 120}).https.onCall(async (data, context) => {
+  return resendWorkspaceNotificationImpl(data, await assertAdminFromContext(context));
 });
 
 exports.admin_setUserPassword = functions.https.onCall(async (data, context) => {
@@ -9891,6 +11310,83 @@ exports.admin_sendLoginInvite = functions.runWith({
 }).https.onCall(async (data, context) => {
   const authState = await assertAdminFromContext(context);
   return sendLoginInviteImpl(data, authState);
+});
+
+exports.support_publicIntake = functions.runWith({
+  secrets: [CONTACT_FORM_WEBHOOK_TOKEN],
+  timeoutSeconds: 30,
+}).https.onRequest(async (req, res) => handleSupportWebhook(req, res, {
+  secret: CONTACT_FORM_WEBHOOK_TOKEN,
+  action: (data) => supportTickets.createPublicTicket(data),
+}));
+
+exports.support_publicMessageEvent = functions.runWith({
+  secrets: [SUPPORT_COMMUNICATIONS_WEBHOOK_TOKEN],
+  timeoutSeconds: 30,
+}).https.onRequest(async (req, res) => handleSupportWebhook(req, res, {
+  secret: SUPPORT_COMMUNICATIONS_WEBHOOK_TOKEN,
+  action: (data) => supportTickets.importMessage(data),
+}));
+
+exports.support_chatbotEvent = functions.runWith({
+  secrets: [CHATBOT_SUPPORT_WEBHOOK_TOKEN],
+  timeoutSeconds: 30,
+}).https.onRequest(async (req, res) => handleSupportWebhook(req, res, {
+  secret: CHATBOT_SUPPORT_WEBHOOK_TOKEN,
+  action: (data) => supportTickets.importChatbotEvent(data),
+}));
+
+exports.support_updateTicket = functions.https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  return runSupportAdminAction(() => supportTickets.updateTicket(data, authState));
+});
+
+exports.support_addNote = functions.https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  return runSupportAdminAction(() => supportTickets.addNote(data, authState));
+});
+
+exports.support_saveDraft = functions.https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  return runSupportAdminAction(() => supportTickets.saveDraft(data, authState));
+});
+
+exports.support_sendReply = functions.runWith({timeoutSeconds: 120}).https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  return runSupportAdminAction(() => supportTickets.sendReply(data, authState));
+});
+
+exports.support_gmailInboxChanged = onMessagePublished({
+  topic: SUPPORT_GMAIL_TOPIC,
+  region: "us-central1",
+  timeoutSeconds: 540,
+  retry: true,
+}, async (event) => gmailSupportInbox.handleNotification(gmailNotificationPayload(event)));
+
+exports.support_gmailWatchRenewal = onSchedule({
+  schedule: "every day 00:15",
+  timeZone: "UTC",
+  region: "us-central1",
+  timeoutSeconds: 540,
+  retryCount: 3,
+}, async () => gmailSupportInbox.renewWatch());
+
+exports.support_gmailInboxReconcile = onSchedule({
+  schedule: "every 15 minutes",
+  timeZone: "UTC",
+  region: "us-central1",
+  timeoutSeconds: 540,
+  retryCount: 3,
+}, async () => gmailSupportInbox.syncMailbox());
+
+exports.support_syncGmailInbox = functions.runWith({timeoutSeconds: 540}).https.onCall(async (_data, context) => {
+  await assertAdminFromContext(context);
+  return runSupportAdminAction(() => gmailSupportInbox.syncMailbox());
+});
+
+exports.support_renewGmailWatch = functions.runWith({timeoutSeconds: 540}).https.onCall(async (_data, context) => {
+  await assertAdminFromContext(context);
+  return runSupportAdminAction(() => gmailSupportInbox.renewWatch());
 });
 
 exports.phoneControl_createEnrollment = functions.runWith({
@@ -10226,6 +11722,27 @@ exports.kiosks_recordOperationalEvents = onDocumentWritten(
     },
 );
 
+exports.kiosks_seedApolloClientProfile = onDocumentWritten(
+    "kiosks/{provisionId}",
+    async (event) => {
+      const {seedApolloClientProfileOnProvision} = await import("./apolloProfileProvisioning.mjs");
+      const result = await seedApolloClientProfileOnProvision({
+        before: event.data.before.exists ? event.data.before.data() : null,
+        after: event.data.after.exists ? event.data.after.data() : null,
+        db,
+        serverTimestamp: () => admin.firestore.FieldValue.serverTimestamp(),
+      });
+      if (result.created || result.updated) {
+        console.log("Seeded YYZ Apollo client profile", {
+          clientId: result.clientId,
+          profileId: result.profileId,
+          created: result.created,
+          updated: result.updated,
+        });
+      }
+    },
+);
+
 exports.kiosks_operationalWatchdog = onSchedule({
   schedule: "every 2 minutes",
   timeZone: "UTC",
@@ -10282,6 +11799,82 @@ exports.uiProfile_httpDelete = handleHttpFunction(async (data, req) => {
 exports.uiProfile_httpApply = handleHttpFunction(async (data, req) => {
   const authState = await assertCanManageUiProfiles(req, data);
   return uiProfileApplyImpl(data, authState);
+});
+
+function isApolloProfileAdmin(authState) {
+  return authState?.isAdmin === true || normalizeUsername(authState?.profile?.username) === "chargerent";
+}
+
+function apolloProfileTestCallbackUrl() {
+  const configured = String(process.env.APOLLO_PROFILE_TEST_CALLBACK_URL || "").trim();
+  if (configured) return configured;
+  const projectId = String(process.env.GCLOUD_PROJECT || process.env.GCP_PROJECT || "node-red-alerts").trim();
+  return `https://us-central1-${projectId}.cloudfunctions.net/apolloProfile_testCallback`;
+}
+
+async function startApolloProfileTestImpl(data, authState) {
+  const {startApolloProfileTest} = await import("./apolloProfileTest.mjs");
+  return startApolloProfileTest(data, authState, {
+    HttpsError: functions.https.HttpsError,
+    apiKey: PAYTER_CPS_API_KEY.value(),
+    callbackUrl: apolloProfileTestCallbackUrl(),
+    db,
+    isApolloAdmin: isApolloProfileAdmin,
+    loadScreenHelpers: () => import("./apolloScreens.mjs"),
+  });
+}
+
+async function readApolloProfileTestImpl(data, authState) {
+  const {readApolloProfileTest} = await import("./apolloProfileTest.mjs");
+  return readApolloProfileTest(data, authState, {
+    HttpsError: functions.https.HttpsError,
+    db,
+    isApolloAdmin: isApolloProfileAdmin,
+  });
+}
+
+exports.apolloProfile_testStart = functions.runWith({
+  secrets: [PAYTER_CPS_API_KEY],
+}).https.onCall(async (data, context) => {
+  const authState = await assertCanManageUiProfilesFromContext(context);
+  return startApolloProfileTestImpl(data, authState);
+});
+
+exports.apolloProfile_testStatus = functions.https.onCall(async (data, context) => {
+  const authState = await assertCanManageUiProfilesFromContext(context);
+  return readApolloProfileTestImpl(data, authState);
+});
+
+exports.apolloProfile_httpTestStart = handleHttpFunction(async (data, req) => {
+  const authState = await assertCanManageUiProfiles(req, data);
+  return startApolloProfileTestImpl(data, authState);
+}, {secrets: [PAYTER_CPS_API_KEY]});
+
+exports.apolloProfile_httpTestStatus = handleHttpFunction(async (data, req) => {
+  const authState = await assertCanManageUiProfiles(req, data);
+  return readApolloProfileTestImpl(data, authState);
+});
+
+exports.apolloProfile_testCallback = functions.runWith({
+  secrets: [PAYTER_CPS_API_KEY],
+}).https.onRequest(async (req, res) => {
+  if (req.method !== "POST") {
+    res.status(405).json({error: {status: "method-not-allowed", message: "Method not allowed"}});
+    return;
+  }
+  try {
+    const {handleApolloProfileTestCallback} = await import("./apolloProfileTest.mjs");
+    const result = await handleApolloProfileTestCallback(req.query, req.body, {
+      HttpsError: functions.https.HttpsError,
+      apiKey: PAYTER_CPS_API_KEY.value(),
+      callbackUrl: apolloProfileTestCallbackUrl(),
+      db,
+      loadScreenHelpers: () => import("./apolloScreens.mjs"),
+    });
+    res.status(200).json(result);
+  } catch (error) {
+    sendFunctionError(res, error);
+  }
 });
 
 exports.media_listAssets = functions.https.onCall(async (data, context) => {
@@ -10617,10 +12210,40 @@ exports.admin_httpUpsertUserProfile = handleHttpFunction(async (data, req) => {
   return upsertUserProfileImpl(data);
 });
 
+exports.accounting_httpGetOverview = handleHttpFunction(async (data, req) => {
+  const authState = await assertAdmin(req, data);
+  return accounting.getOverview({authState});
+});
+
+exports.accounting_httpCreateDraftInvoice = handleHttpFunction(async (data, req) => {
+  const authState = await assertAdmin(req, data);
+  try {
+    return await accounting.createDraftInvoice(data, authState);
+  } catch (error) {
+    throw accountingHttpsError(error);
+  }
+});
+
 exports.admin_httpCreateAuthUserAndProfile = handleHttpFunction(async (data, req) => {
   const authState = await assertAdmin(req, data);
   return createAuthUserAndProfileImpl(data, authState);
+}, {secrets: [GMAIL_APP_PASSWORD], timeoutSeconds: 180});
+
+exports.admin_httpWorkspaceStatus = handleHttpFunction(async (data, req) => {
+  return workspaceStatusImpl(await assertAdmin(req, data));
 });
+
+exports.admin_httpWorkspaceCheckEmail = handleHttpFunction(async (data, req) => {
+  return workspaceCheckEmailImpl(data, await assertAdmin(req, data));
+});
+
+exports.admin_httpRetryWorkspaceMailbox = handleHttpFunction(async (data, req) => {
+  return retryWorkspaceMailboxImpl(data, await assertAdmin(req, data));
+}, {secrets: [GMAIL_APP_PASSWORD], timeoutSeconds: 180});
+
+exports.admin_httpResendWorkspaceNotification = handleHttpFunction(async (data, req) => {
+  return resendWorkspaceNotificationImpl(data, await assertAdmin(req, data));
+}, {secrets: [GMAIL_APP_PASSWORD], timeoutSeconds: 120});
 
 exports.admin_httpSetUserPassword = handleHttpFunction(async (data, req) => {
   await assertAdmin(req, data);
@@ -10634,6 +12257,26 @@ exports.admin_httpSendLoginInvite = handleHttpFunction(
     },
     {secrets: [GMAIL_APP_PASSWORD]},
 );
+
+exports.support_httpUpdateTicket = handleHttpFunction(async (data, req) => {
+  const authState = await assertAdmin(req, data);
+  return runSupportAdminAction(() => supportTickets.updateTicket(data, authState));
+});
+
+exports.support_httpAddNote = handleHttpFunction(async (data, req) => {
+  const authState = await assertAdmin(req, data);
+  return runSupportAdminAction(() => supportTickets.addNote(data, authState));
+});
+
+exports.support_httpSaveDraft = handleHttpFunction(async (data, req) => {
+  const authState = await assertAdmin(req, data);
+  return runSupportAdminAction(() => supportTickets.saveDraft(data, authState));
+});
+
+exports.support_httpSendReply = handleHttpFunction(async (data, req) => {
+  const authState = await assertAdmin(req, data);
+  return runSupportAdminAction(() => supportTickets.sendReply(data, authState));
+}, {timeoutSeconds: 120});
 
 exports.payouts_httpGenerateMonthlyReports = handleHttpFunction(
     async (data, req) => {

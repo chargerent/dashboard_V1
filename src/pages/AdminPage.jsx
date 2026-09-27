@@ -1,10 +1,11 @@
 // src/pages/AdminPage.jsx
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { BanknotesIcon, PaintBrushIcon, SparklesIcon } from '@heroicons/react/24/outline';
+import { BanknotesIcon, CalculatorIcon, CreditCardIcon, PaintBrushIcon, SparklesIcon } from '@heroicons/react/24/outline';
 import ConfirmationModal from '../components/UI/ConfirmationModal.jsx';
 import LoadingSpinner from '../components/UI/LoadingSpinner.jsx';
 import ClientAdminCard from './ClientAdminCard.jsx';
 import CreateClientForm from './CreateClientForm.jsx';
+import WorkspaceMailboxPanel from '../components/WorkspaceMailboxPanel.jsx';
 import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
 import { callFunctionWithAuth } from '../utils/callableRequest.js';
 
@@ -38,6 +39,9 @@ function AdminPage({
   onNavigateToUiProfiles,
   onNavigateToAiBooths,
   onNavigateToPayouts,
+  onNavigateToAccounting,
+  onNavigateToPayter,
+  onNavigateToChargeDropsClientSetup,
   currentUser,
 }) {
   const [clients, setClients] = useState([]);
@@ -48,6 +52,11 @@ function AdminPage({
   const [saveStatus, setSaveStatus] = useState(null);
 
   const [showCreateClientForm, setShowCreateClientForm] = useState(false);
+  const [creatingClient, setCreatingClient] = useState(false);
+  const [workspaceStatus, setWorkspaceStatus] = useState({loading: true, configured: false, domain: 'charge.rent'});
+  const [workspaceResult, setWorkspaceResult] = useState(null);
+  const [workspaceBusyUid, setWorkspaceBusyUid] = useState(null);
+  const [notificationBusyUid, setNotificationBusyUid] = useState(null);
 
   const [editingClientUid, setEditingClientUid] = useState(null);
   const [editedClientData, setEditedClientData] = useState(null);
@@ -58,6 +67,7 @@ function AdminPage({
   const [inviteBusyUid, setInviteBusyUid] = useState(null);
   const [credentialsClient, setCredentialsClient] = useState(null);
   const [credentialsPassword, setCredentialsPassword] = useState('');
+  const [credentialsIncludePartnerKit, setCredentialsIncludePartnerKit] = useState(false);
   const [credentialsError, setCredentialsError] = useState('');
 
   const isAdmin = currentUser?.role === 'admin' || currentUser?.username === 'chargerent';
@@ -138,6 +148,20 @@ function AdminPage({
     fetchClients();
   }, [canManageClients, fetchClients, firebaseUser]);
 
+  useEffect(() => {
+    if (!isAdmin || !firebaseUser) {
+      setWorkspaceStatus({configured: false, domain: 'charge.rent', message: 'Company email creation is available to authorized administrators.'});
+      return;
+    }
+    let canceled = false;
+    callFunctionWithAuth('admin_workspaceStatus', {}, {timeoutMs: 15000})
+      .then(result => { if (!canceled) setWorkspaceStatus({...result, loading: false}); })
+      .catch(() => {
+        if (!canceled) setWorkspaceStatus({loading: false, configured: false, domain: 'charge.rent', message: 'Company email creation is not connected yet. You can still create a dashboard account.'});
+      });
+    return () => { canceled = true; };
+  }, [isAdmin, firebaseUser]);
+
   const hasChanges = useMemo(() => JSON.stringify(clients) !== JSON.stringify(originalClients), [clients, originalClients]);
 
   // ---- edit mode ----
@@ -217,18 +241,19 @@ function AdminPage({
   };
 
   // ---- create ----
-  const handleCreateClient = async ({ username, password, clientId, profile, sendCredentials }) => {
-    if (!canManageClients) return;
+  const handleCreateClient = async ({ username, password, clientId, profile, sendCredentials, includePartnerKit, workspaceMailbox }) => {
+    if (!canManageClients || creatingClient) return {ok: false, message: 'Account creation is unavailable.'};
     setSaveStatus(null);
 
     // avoid dup username in current list
     const uname = (profile?.username || '').toLowerCase();
     if (clients.some(c => (c.username || '').toLowerCase() === uname)) {
       setSaveStatus({ state: 'error', message: t('username_already_exists') });
-      return;
+      return {ok: false, message: t('username_already_exists')};
     }
 
     setSaveStatus({ state: 'sending', message: 'Creating client...' });
+    setCreatingClient(true);
     try {
       await ensureSignedIn();
       const result = await callFunctionWithAuth('admin_createAuthUserAndProfile', {
@@ -237,17 +262,65 @@ function AdminPage({
         clientId,
         profile: stripUnsafeFields(profile),
         sendCredentials: sendCredentials === true,
-      });
+        includePartnerKit: profile?.role === 'partner' && includePartnerKit === true,
+        ...(workspaceMailbox ? {workspaceMailbox} : {}),
+      }, {timeoutMs: 190000});
       setShowCreateClientForm(false);
-      if (result?.credentialsEmailSent) {
-        setSaveStatus({ state: 'success', message: 'Client created and login credentials sent.' });
+      if (result?.workspaceMailbox) {
+        setWorkspaceResult({uid: result.uid, mailbox: result.workspaceMailbox});
+      }
+      if (result?.credentialsEmailError) {
+        setSaveStatus({state: 'error', message: result.credentialsEmailError});
+      } else if (result?.credentialsEmailSent) {
+        setSaveStatus({ state: 'success', message: result?.credentialsPartnerKitIncluded
+          ? 'Client created; dashboard login details and partner kit sent.'
+          : 'Client created and login credentials sent.' });
       } else {
         setSaveStatus({ state: 'success', message: t('create_success') });
       }
       await fetchClients();
+      return {ok: true};
     } catch (e) {
-      console.error(e);
       setSaveStatus({ state: 'error', message: e?.message || t('update_failed') });
+      return {ok: false, message: e?.message || t('update_failed')};
+    } finally {
+      setCreatingClient(false);
+    }
+  };
+
+  const handleCheckWorkspaceEmail = (localPart) => callFunctionWithAuth('admin_workspaceCheckEmail', {localPart}, {timeoutMs: 60000});
+
+  const handleRetryWorkspaceMailbox = async (uid) => {
+    if (workspaceBusyUid || notificationBusyUid || !workspaceStatus.configured) return;
+    setWorkspaceBusyUid(uid);
+    try {
+      const result = await callFunctionWithAuth('admin_retryWorkspaceMailbox', {uid}, {timeoutMs: 190000});
+      setWorkspaceResult(previous => ({uid, mailbox: {
+        ...result.workspaceMailbox,
+        ...(previous?.uid === uid && previous.mailbox?.temporaryPassword ? {temporaryPassword: previous.mailbox.temporaryPassword} : {}),
+      }}));
+      await fetchClients();
+    } catch (e) {
+      setSaveStatus({state: 'error', message: e?.message || 'Could not check company email.'});
+    } finally {
+      setWorkspaceBusyUid(null);
+    }
+  };
+
+  const handleRetryWorkspaceNotification = async (uid, {resendUnknown = false} = {}) => {
+    if (workspaceBusyUid || notificationBusyUid || !workspaceStatus.configured) return;
+    setNotificationBusyUid(uid);
+    try {
+      const result = await callFunctionWithAuth('admin_resendWorkspaceNotification', {uid, resendUnknown}, {timeoutMs: 130000});
+      setWorkspaceResult(previous => ({uid, mailbox: {
+        ...result.workspaceMailbox,
+        ...(previous?.uid === uid && previous.mailbox?.temporaryPassword ? {temporaryPassword: previous.mailbox.temporaryPassword} : {}),
+      }}));
+      await fetchClients();
+    } catch (e) {
+      setSaveStatus({state: 'error', message: e?.message || 'Could not check the partner notification.'});
+    } finally {
+      setNotificationBusyUid(null);
     }
   };
 
@@ -341,17 +414,19 @@ function AdminPage({
     if (!client?.uid || !canManageClients) return;
     setCredentialsClient(client);
     setCredentialsPassword('');
+    setCredentialsIncludePartnerKit(false);
     setCredentialsError('');
   };
 
   const closeCredentialsModal = () => {
     setCredentialsClient(null);
     setCredentialsPassword('');
+    setCredentialsIncludePartnerKit(false);
     setCredentialsError('');
   };
 
   const handleSendLoginInvite = async () => {
-    if (!credentialsClient?.uid || !canManageClients) return;
+    if (!credentialsClient?.uid || !canManageClients || inviteBusyUid) return;
 
     const nextPassword = credentialsPassword.trim();
     if (nextPassword.length < 12) {
@@ -359,14 +434,18 @@ function AdminPage({
       return;
     }
 
+    const includePartnerKit = credentialsClient.role === 'partner' && credentialsIncludePartnerKit;
     setInviteBusyUid(credentialsClient.uid);
-    setSaveStatus({ state: 'sending', message: 'Setting password and sending credentials...' });
+    setSaveStatus({ state: 'sending', message: includePartnerKit
+      ? 'Setting password and sending login details with the partner kit...'
+      : 'Setting password and sending credentials...' });
 
     try {
       await ensureSignedIn();
       const result = await callFunctionWithAuth('admin_sendLoginInvite', {
         uid: credentialsClient.uid,
         password: nextPassword,
+        includePartnerKit,
       });
       if (result?.delivery === 'mailto' && result?.email?.to) {
         openInviteDraft(result.email);
@@ -374,7 +453,9 @@ function AdminPage({
       closeCredentialsModal();
       setSaveStatus({
         state: 'success',
-        message: result?.delivery === 'mailto' ? 'Login credentials email draft opened.' : 'Password set and sent from solutions@charge.rent.',
+        message: result?.delivery === 'mailto' ? 'Login credentials email draft opened.' : (result?.partnerKitIncluded
+          ? 'Password set; dashboard login details and partner kit sent from solutions@charge.rent.'
+          : 'Password set and sent from solutions@charge.rent.'),
       });
       await fetchClients();
     } catch (e) {
@@ -423,6 +504,21 @@ function AdminPage({
               value={credentialsPassword}
             />
             <p className="mt-1 text-xs text-gray-500">Minimum 12 characters.</p>
+            {credentialsClient.role === 'partner' && (
+              <div className="mt-4 rounded-md border border-gray-200 bg-gray-50 px-3 py-2">
+                <label className="flex items-center gap-3 text-sm font-medium text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={credentialsIncludePartnerKit}
+                    disabled={inviteBusyUid === credentialsClient.uid}
+                    onChange={(event) => setCredentialsIncludePartnerKit(event.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  Include partner kit with login details
+                </label>
+                <p className="mt-1 pl-7 text-xs text-gray-500">Attach the partner launch kit PDF to the same email as their dashboard login details.</p>
+              </div>
+            )}
             {credentialsError && <p className="mt-2 text-sm text-red-600">{credentialsError}</p>}
             <div className="mt-6 flex justify-end gap-2">
               <button
@@ -475,8 +571,31 @@ function AdminPage({
             )}
 
             {isAdmin && (
+              <button
+                onClick={onNavigateToChargeDropsClientSetup}
+                className="flex h-10 w-10 items-center justify-center rounded-xl border border-indigo-200 bg-white shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50"
+                title="ChargeDrops client setup"
+                type="button"
+              >
+                <img src="/chargedrops-drop.svg" alt="ChargeDrops client setup" className="h-7 w-5" />
+              </button>
+            )}
+
+            {isAdmin && (
               <button onClick={onNavigateToPayouts} className="p-2 rounded-md bg-emerald-100 text-emerald-700 hover:bg-emerald-200" title="Payouts">
                 <BanknotesIcon className="h-6 w-6" />
+              </button>
+            )}
+
+            {isAdmin && (
+              <button onClick={onNavigateToAccounting} className="p-2 rounded-md bg-violet-100 text-violet-700 hover:bg-violet-200" title="Accounting">
+                <CalculatorIcon className="h-6 w-6" />
+              </button>
+            )}
+
+            {isAdmin && (
+              <button onClick={onNavigateToPayter} className="p-2 rounded-md bg-cyan-100 text-cyan-800 hover:bg-cyan-200" title="Payter terminals">
+                <CreditCardIcon className="h-6 w-6" />
               </button>
             )}
 
@@ -497,7 +616,7 @@ function AdminPage({
             )}
 
             {canAccessUiProfiles && (
-              <button onClick={onNavigateToUiProfiles} className="hidden rounded-md bg-sky-100 p-2 text-sky-700 hover:bg-sky-200 lg:inline-flex" title="Kiosk UI Profiles">
+              <button onClick={onNavigateToUiProfiles} className="hidden rounded-md bg-sky-100 p-2 text-sky-700 hover:bg-sky-200 lg:inline-flex" title="Client profiles">
                 <PaintBrushIcon className="h-6 w-6" />
               </button>
             )}
@@ -518,6 +637,15 @@ function AdminPage({
       </header>
 
       <main className="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
+        {workspaceResult && (
+          <div className="mb-6">
+            <WorkspaceMailboxPanel mailbox={workspaceResult.mailbox}
+              onRetry={workspaceStatus.configured ? () => handleRetryWorkspaceMailbox(workspaceResult.uid) : undefined}
+              onRetryNotification={workspaceStatus.configured ? options => handleRetryWorkspaceNotification(workspaceResult.uid, options) : undefined}
+              notificationBusy={notificationBusyUid === workspaceResult.uid}
+              busy={workspaceBusyUid === workspaceResult.uid} onDismiss={() => setWorkspaceResult(null)} />
+          </div>
+        )}
         {loading ? (
           <div className="flex justify-center items-center h-64">
             <LoadingSpinner t={t} />
@@ -533,7 +661,10 @@ function AdminPage({
                     <CreateClientForm
                       clients={clients}
                       onCreate={handleCreateClient}
-                      onCancel={() => setShowCreateClientForm(false)}
+                      onCancel={() => { if (!creatingClient) setShowCreateClientForm(false); }}
+                      creating={creatingClient}
+                      workspaceStatus={workspaceStatus}
+                      onCheckWorkspaceEmail={handleCheckWorkspaceEmail}
                       t={t}
                       featuresList={featuresList}
                       commandsList={commandsList}
@@ -564,6 +695,13 @@ function AdminPage({
                           onUnlock={() => handleUnlockUser(client.username)}
                           onSendLoginInvite={() => openCredentialsModal(client)}
                           inviteBusy={inviteBusyUid === client.uid}
+                          workspaceStatusContent={client.workspaceMailbox && (
+                            <WorkspaceMailboxPanel mailbox={client.workspaceMailbox}
+                              onRetry={workspaceStatus.configured ? () => handleRetryWorkspaceMailbox(client.uid) : undefined}
+                              onRetryNotification={workspaceStatus.configured ? options => handleRetryWorkspaceNotification(client.uid, options) : undefined}
+                              notificationBusy={notificationBusyUid === client.uid}
+                              busy={workspaceBusyUid === client.uid} />
+                          )}
                           t={t}
                         />
                         );
@@ -643,6 +781,7 @@ function stripUnsafeFields(client) {
   delete c.Email;
   delete c.email;
   delete c.token;
+  delete c.workspaceMailbox;
   delete c.serverFlowVersion;
   delete c.serverUiVersion;
   return c;
