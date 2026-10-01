@@ -13,6 +13,7 @@ import {
   getPhonePowerState,
   isPhoneWebRtcActive,
   isPhoneAgentUpdateAvailable,
+  isIntegratedKiosk,
   isPhoneRemoteInputAvailable,
   phoneLocationMapUrls,
   phoneKioskPlaceLabel,
@@ -24,6 +25,7 @@ import {
   normalizePhoneDevice,
   normalizeAgentRelease,
   normalizePaymentAppRelease,
+  phoneDeviceTypeLabel,
   phoneMatchesSearch,
   phoneTimestampToMillis,
   summarizePhoneLines,
@@ -39,6 +41,67 @@ const phoneControlSource = readFileSync(
   new URL('../src/pages/PhoneControlPage.jsx', import.meta.url),
   'utf8',
 );
+const mediaPageSource = readFileSync(
+  new URL('../src/pages/MediaPage.jsx', import.meta.url),
+  'utf8',
+);
+const chargerentMediaPageSource = readFileSync(
+  new URL('../src/pages/ChargerentMediaPage.jsx', import.meta.url),
+  'utf8',
+);
+const uiProfilesPageSource = readFileSync(
+  new URL('../src/pages/UiProfilesPage.jsx', import.meta.url),
+  'utf8',
+);
+const integratedMediaStudioSource = readFileSync(
+  new URL('../src/integrated-media/MediaStudio.jsx', import.meta.url),
+  'utf8',
+);
+const integratedKioskAppsSource = readFileSync(
+  new URL('../src/components/media/IntegratedKioskApps.jsx', import.meta.url),
+  'utf8',
+);
+
+test('separates Chargerent app enrollment from Besiter media management', () => {
+  assert.doesNotMatch(mediaPageSource, /IntegratedKioskApps/);
+  assert.match(mediaPageSource, />Besiter Media</);
+  assert.match(mediaPageSource, /isNewSchemaKiosk\(kiosk\).*V2_MEDIA_CONFIGURABLE_KIOSK_TYPES\.has/s);
+  assert.match(chargerentMediaPageSource, /Legacy media player/);
+  assert.match(chargerentMediaPageSource, /Campaign manager/);
+  assert.match(chargerentMediaPageSource, /<MediaPage[\s\S]*?embedded/);
+  assert.doesNotMatch(chargerentMediaPageSource, /IntegratedKioskApps|Apps & enrollment/);
+  assert.match(chargerentMediaPageSource, /<MediaCampaignWizard/);
+  assert.doesNotMatch(chargerentMediaPageSource, /<StripeProfileEditor/);
+  assert.match(chargerentMediaPageSource, /Open Client Profiles → Chargerent app/);
+  assert.match(uiProfilesPageSource, /<StripeProfileEditor/);
+  assert.match(chargerentMediaPageSource, /data-chargerent-media-page="true"/);
+  assert.doesNotMatch(chargerentMediaPageSource, /media-lab|kiosk-control-lab|ui-profiles-lab/);
+  assert.doesNotMatch(integratedMediaStudioSource, /Open payment scenarios|>Device lab|Local simulation|Lab activity|\/lab\//);
+  assert.match(integratedMediaStudioSource, /presentation-only preview/);
+  assert.match(integratedKioskAppsSource, /phoneControl_listDevices/);
+  assert.match(integratedKioskAppsSource, /filter\(isIntegratedKiosk\)/);
+  assert.match(integratedKioskAppsSource, /deviceKind: 'integrated_kiosk'/);
+  assert.match(integratedKioskAppsSource, /phoneControl_assignDevice/);
+  assert.match(integratedKioskAppsSource, /Live — real charges/);
+  assert.match(integratedKioskAppsSource, /stripeMode,/);
+  assert.match(integratedKioskAppsSource, /will use the French live Stripe account and real cards can be charged/);
+  assert.match(phoneControlSource, /<IntegratedKioskApps/);
+  assert.match(phoneControlSource, />\s*App\s*</);
+  assert.match(phoneControlSource, />\s*Phone\s*</);
+  assert.match(phoneControlSource, /filter\(\(device\) => !isIntegratedKiosk\(device\)\)/);
+  assert.match(phoneControlSource, /deviceKind: 'managed_phone'/);
+  assert.doesNotMatch(phoneControlSource, /PHONE_DEVICE_KINDS\.map/);
+  assert.doesNotMatch(appSource, /case 'chargerent-media'/);
+});
+
+test('empty device selection and malformed inventory records do not crash the page', () => {
+  assert.equal(isIntegratedKiosk(null), false);
+  assert.equal(phoneDeviceTypeLabel(null), 'Managed phone');
+  const emptyDevice = normalizePhoneDevice(null);
+  assert.equal(emptyDevice.id, '');
+  assert.equal(emptyDevice.deviceKind, 'managed_phone');
+  assert.deepEqual(emptyDevice.raw, {});
+});
 
 test('routes assigned phone Station IDs to an exact dashboard filter', () => {
   assert.match(appSource, /const onNavigateFromPhoneToDashboard = useCallback/);
@@ -262,6 +325,35 @@ test('normalizes kiosk assignment and Android inventory', () => {
   assert.equal(phoneHotspotControlLabel(device.inventory), 'Compatibility control');
   assert.equal(device.location.latitude, 45.5019);
   assert.equal(device.location.capturedAtMs, 1234);
+});
+
+test('normalizes an integrated kiosk and its public regional reader readiness without a token', () => {
+  const device = normalizePhoneDevice({
+    deviceKind: 'integrated_kiosk',
+    packageName: 'com.chargerent.media.lab',
+    stationId: 'FR8011',
+    inventory: {
+      deviceKind: 'media_kiosk',
+      packageName: 'com.chargerent.media.lab',
+      stripeTerminal: {
+        configured: true,
+        stationId: 'FR8011',
+        moduleId: 'module-fr',
+        stripeMode: 'test',
+        stripeAccountCountry: 'FR',
+        readerType: 'bbpos_wisepad3',
+        readerName: 'BBPOS WisePad 3',
+        connectedReaderSerial: 'WPC322001234',
+      },
+    },
+  }, 'kiosk-1');
+  assert.equal(isIntegratedKiosk(device), true);
+  assert.equal(phoneDeviceTypeLabel(device), 'Integrated kiosk');
+  assert.equal(device.inventory.m2Terminal.stationId, 'FR8011');
+  assert.equal(device.inventory.m2Terminal.readerType, 'bbpos_wisepad3');
+  assert.equal(device.inventory.m2Terminal.readerName, 'BBPOS WisePad 3');
+  assert.equal(device.inventory.m2Terminal.connectedReaderSerial, 'WPC322001234');
+  assert.equal('installationToken' in device.inventory.m2Terminal, false);
 });
 
 test('presents Android update requests as an Android-managed lifecycle', () => {

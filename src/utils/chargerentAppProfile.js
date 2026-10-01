@@ -1,4 +1,4 @@
-import {defaultStripeUi, validateStripeUi} from '../media-lab/stripeUi.js';
+import {defaultStripeUi, validateStripeUi} from '../integrated-media/stripeUi.js';
 
 export const CHARGERENT_APP_PROFILE_KEY = 'chargerentMedia';
 export const CHARGERENT_APP_SECTION_KEY = 'chargerentApp';

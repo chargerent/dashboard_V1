@@ -12,6 +12,7 @@ import { db } from '../firebase-config';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { isNewSchemaKiosk } from '../utils/helpers';
 import { isRentalIncludedInReport } from '../utils/reportingRentalEligibility';
+import DashboardPageActions from '../components/UI/DashboardPageActions.jsx';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, PointElement, LineElement, Title, Tooltip, Legend, ArcElement, ChartDataLabels);
 
@@ -63,7 +64,7 @@ function adjustChartValue(dataArray, index, delta) {
     return newData;
 }
 
-const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout, t, rentalData, allStationsData, clientInfo, userMode = false }) => {
+const ReportingPage = ({ onNavigateToDashboard, onNavigateToAdmin, onNavigateToAnalytics, onLogout, t, rentalData, allStationsData, clientInfo, userMode = false }) => {
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
@@ -661,17 +662,17 @@ const ReportingPage = ({ onNavigateToDashboard, onNavigateToAnalytics, onLogout,
                         {/* Language buttons are now on the left */}
                     </div>
                     <div className="flex items-center gap-4">
-                        <button onClick={onNavigateToDashboard} className="p-2 rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300" title={t('back_to_dashboard')}>
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
-                        </button>
                         {!userMode && (
                             <button onClick={() => reportReady && onNavigateToAnalytics(filteredRentals)} disabled={!reportReady} className="hidden sm:inline-flex items-center justify-center p-2 rounded-md bg-indigo-100 text-indigo-700 hover:bg-indigo-200 disabled:bg-gray-100 disabled:text-gray-400 disabled:cursor-not-allowed" title={t('station_analytics')}>
                                 <ChartBarIcon className="h-6 w-6" />
                             </button>
                         )}
-                        <button onClick={onLogout} className="p-2 rounded-md bg-red-500 text-white hover:bg-red-600" title={t('logout')}>
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-                        </button>
+                        <DashboardPageActions
+                            onNavigateToDashboard={onNavigateToDashboard}
+                            onNavigateToAdmin={onNavigateToAdmin}
+                            onLogout={onLogout}
+                            t={t}
+                        />
                     </div>
                 </div>
             </header>

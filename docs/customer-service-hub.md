@@ -28,6 +28,7 @@ Nothing in this workflow initiates a refund. A refund remains a separate payment
 
 - `supportTickets/{ticketId}` stores contact information, category, status, source, sanitized form details, assignment, and a compact linked-rental snapshot.
 - `supportTickets/{ticketId}/messages/{messageId}` stores the original form message, internal notes, saved drafts, sent replies, imported customer replies, and system activity.
+- `supportCallLogs/{callId}` stores the canonical inbound and outbound call summary, outcome, duration, staff identity, linked ticket, and callback request state.
 - Firestore client rules allow administrators to read this data. All writes go through authenticated Cloud Functions or a secret-protected intake endpoint.
 
 The website quote ID is reused as the ticket ID, making repeat delivery idempotent.
@@ -39,7 +40,7 @@ Create these Firebase secrets in the `node-red-alerts` project:
 - `CONTACT_FORM_WEBHOOK_TOKEN`: a long random token shared only with the website server.
 - `SUPPORT_COMMUNICATIONS_WEBHOOK_TOKEN`: a separate token for an email, SMS, or Quo event bridge.
 
-Support email uses keyless Gmail API domain-wide delegation. No support mailbox password or Gmail app password is stored. The delegated mailer has `gmail.send` for reviewed outbound replies and `gmail.readonly` for the dedicated `support@charge.rent` inbox only.
+Support email uses keyless Gmail API domain-wide delegation. No mailbox password or Gmail app password is stored. The delegated mailer has `gmail.send` for reviewed outbound replies and `gmail.readonly` for inbound synchronization. It reads the dedicated `support@charge.rent` inbox and checks George's inbox metadata for messages addressed to `sales@charge.rent`; non-sales message bodies in George's inbox are not fetched or stored.
 
 Configure the charge.rent server with:
 
@@ -58,7 +59,9 @@ The current implementation sends only after a dashboard administrator confirms t
 
 Inbound replies arrive through Gmail push notifications and a periodic reconciliation. Matching priority is ticket token, Gmail thread ID, then one unambiguous open case for the sender. Messages that still look like replies but cannot be matched safely become visible email tickets marked `Needs case match`; they are never silently attached to a guessed case.
 
-## Inbound email, SMS, and Quo bridge
+Free-form messages addressed to `sales@charge.rent` are imported from George's mailbox as Sales cases. The sender, subject, and plain-text email body become the contact, case subject, and first activity. Newsletter/list mail, automated replies, drafts, sent mail, Spam, Trash, and legacy website-form notification emails are excluded. The importer uses recipient headers as a deterministic routing rule; it does not require a form or an AI classification step.
+
+## Inbound email and normalized channel bridge
 
 `support_publicMessageEvent` is the normalized inbound endpoint. A trusted bridge can POST an event with the bearer token from `SUPPORT_COMMUNICATIONS_WEBHOOK_TOKEN`:
 
@@ -75,14 +78,41 @@ Inbound replies arrive through Gmail push notifications and a periodic reconcili
 }
 ```
 
-Allowed sources are `email`, `sms`, `phone`, `quo`, `website`, and `manual`. Provider message IDs are deduplicated. A future Quo replacement should reuse this ticket and message model rather than creating a second customer database. Call recordings, consent, number porting, and telephony routing are intentionally outside this first release.
+Allowed sources are `email`, `sms`, `phone`, `quo`, `website`, and `manual`. Provider message IDs are deduplicated. The Twilio integration below reuses this ticket and message model rather than creating a second customer database.
+
+## Twilio voice and SMS
+
+The test support number is `+1 917 993 9355`. Its signed Twilio webhooks terminate at:
+
+- `support_twilioSms` for inbound text messages and outbound delivery callbacks.
+- `support_twilioVoice` for incoming calls, call screening, hunt-group routing, and voicemail callbacks.
+
+Inbound calls and texts create or reopen one customer-support conversation per customer phone number. Administrators can answer by SMS from the same dashboard reply editor; sending still requires the review dialog.
+
+Call routing is stored in `supportTelephonyStaff`. Administrators manage it from **Customer Service → Call routing** without changing code. Enabled members in the primary group ring simultaneously, followed by the backup group. App routing includes only enabled identities whose staff member has marked themselves available. Staff can be moved between groups, reordered, or disabled; routing records are not deleted so changes remain auditable.
+
+Every inbound call and staff-app outbound call is written to `supportCallLogs` and linked to the customer's phone conversation. **Customer Service → Call log** shows the latest 100 calls, including direction, outcome, duration, answering staff member, and callback state. Opening a row selects the linked case. Authenticated staff assigned to app calling can also read a sanitized recent-call list from the iPhone app; the shared backend remains canonical.
+
+If neither routing group answers, Twilio asks the caller to press 1 for a callback at the number they called from or press 2 to leave voicemail. Pressing 1 reopens the phone conversation as an unread, high-priority callback case and records the choice in the call log. No new phone number is collected by voice. Voicemail remains the fallback when the caller presses 2 or makes no selection.
+
+Administrators can replace the spoken call prompts from **Customer Service → Call routing → MP3 voice prompts**. The supported slots are staff screening, connecting, callback offer, callback confirmation, voicemail greeting, and voicemail confirmation. Each upload must be an MP3 no larger than 8 MB. The audio is stored privately and exposed to Twilio through the prompt-specific media endpoint; if metadata, storage, or playback is unavailable, the call flow automatically uses its built-in spoken text instead.
+
+Create these Firebase secrets before deploying the telephony functions:
+
+- `TWILIO_ACCOUNT_SID`
+- `TWILIO_AUTH_TOKEN`
+- `TWILIO_SUPPORT_NUMBER` set to the E.164 support number
+
+After deploying the functions and Firestore rules, add the first primary routing member in the dashboard, then change the Twilio number's incoming-message and incoming-call POST webhooks to the two endpoints above. Do not replace a working legacy webhook until both new endpoints are deployed and the initial routing member is visible.
+
+For the first live test, add George at `+1 818 996 0996` to the primary group. Send a text to the support number and confirm the new case and SMS reply. Then call the support number and separately test an answered call, callback request, voicemail, and no-input timeout. A successful webhook or Twilio call status proves provider delivery only; verify the dashboard case, call-log entry, callback phone, and actual handset result as separate checks.
 
 ## Local verification
 
 ```bash
 npm run test:customer-support
 npm run build
-cd functions && npx eslint supportTickets.js supportTickets.test.js
+cd functions && npx eslint supportTickets.js supportTickets.test.js supportTelephony.js supportTelephony.test.js supportVoicePrompts.js supportVoicePrompts.test.js
 ```
 
 The charge.rent project should also pass `npm run lint` and `npm run build` after the intake environment variables are configured.

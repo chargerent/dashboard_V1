@@ -7,7 +7,6 @@ import {
   ClockIcon,
   EnvelopeIcon,
   ExclamationTriangleIcon,
-  HomeIcon,
   MagnifyingGlassIcon,
   PaperAirplaneIcon,
   PhoneIcon,
@@ -23,7 +22,10 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase-config.js';
 import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
+import DashboardPageActions from '../components/UI/DashboardPageActions.jsx';
 import RefundModal from '../components/UI/RefundModal.jsx';
+import TelephonyRoutingModal from '../components/Support/TelephonyRoutingModal.jsx';
+import CallLogModal from '../components/Support/CallLogModal.jsx';
 import { RentalCard } from './RentalsPage.jsx';
 import { callFunctionWithAuth } from '../utils/callableRequest.js';
 import {
@@ -117,6 +119,16 @@ function messageLabel(message) {
   if (message.type === 'internal_note') return 'Internal note';
   if (message.type === 'draft') return 'Saved draft';
   if (message.type === 'system') return 'Activity';
+  if (message.type === 'voicemail') return 'Voicemail';
+  if (message.type === 'call' && message.disposition === 'callback_requested') return 'Callback requested';
+  if (message.type === 'call' && message.disposition === 'answered') return 'Answered call';
+  if (message.type === 'call' && message.direction === 'outbound') return 'Outbound call';
+  if (message.type === 'call' && message.disposition === 'unanswered') return 'Unanswered call';
+  if (message.type === 'call') return 'Incoming call';
+  if (message.channel === 'sms' && message.direction === 'outbound' && message.deliveryStatus === 'sending') return 'Sending SMS';
+  if (message.channel === 'sms' && message.direction === 'outbound' && message.deliveryStatus === 'failed') return 'SMS failed';
+  if (message.channel === 'sms' && message.direction === 'outbound') return 'SMS sent';
+  if (message.channel === 'sms') return 'Customer SMS';
   if (message.direction === 'outbound' && message.deliveryStatus === 'sending') return 'Sending reply';
   if (message.direction === 'outbound' && message.deliveryStatus === 'failed') return 'Reply failed';
   if (message.direction === 'outbound') return 'Reply sent';
@@ -233,6 +245,9 @@ function TicketCard({ ticket, selected, onClick }) {
             {ticket.needsCaseMatch && (
               <span className={`${pill} border-amber-300 bg-amber-50 text-amber-800`}>Needs case match</span>
             )}
+            {ticket.callback?.status === 'requested' && (
+              <span className={`${pill} border-rose-300 bg-rose-50 text-rose-800`}>Callback requested</span>
+            )}
           </div>
           <p className="mt-2 truncate font-semibold text-gray-900">{ticket.subject || 'Website inquiry'}</p>
           <p className="mt-1 truncate text-sm text-gray-600">
@@ -252,7 +267,8 @@ function TicketCard({ ticket, selected, onClick }) {
   );
 }
 
-function SendConfirmation({ from, to, subject, onCancel, onConfirm, busy }) {
+function SendConfirmation({ channel, from, to, subject, onCancel, onConfirm, busy }) {
+  const isSms = channel === 'sms';
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/55 p-4">
       <div role="dialog" aria-modal="true" aria-labelledby="send-confirmation-title" className="w-full max-w-lg rounded-xl bg-white p-6 shadow-2xl">
@@ -260,20 +276,22 @@ function SendConfirmation({ from, to, subject, onCancel, onConfirm, busy }) {
           <div className="rounded-full bg-blue-100 p-2 text-blue-700"><PaperAirplaneIcon className="h-5 w-5" /></div>
           <div>
             <h2 id="send-confirmation-title" className="text-lg font-bold text-gray-900">Send this reply?</h2>
-            <p className="mt-1 text-sm text-gray-600">This sends an external email from {from?.email}.</p>
+            <p className="mt-1 text-sm text-gray-600">
+              {isSms ? `This sends an external text message from ${from}.` : `This sends an external email from ${from?.email}.`}
+            </p>
           </div>
         </div>
         <dl className="mt-5 rounded-lg border border-gray-200 bg-gray-50 px-4">
-          <DetailRow label="From" value={from ? `${from.label} <${from.email}>` : ''} />
+          <DetailRow label="From" value={isSms ? from : (from ? `${from.label} <${from.email}>` : '')} />
           <DetailRow label="To" value={to} />
-          <DetailRow label="Subject" value={subject} />
+          {!isSms && <DetailRow label="Subject" value={subject} />}
         </dl>
-        <p className="mt-3 text-sm text-gray-600">After Gmail confirms the send, the reply will be recorded in activity and the case will be marked Pending.</p>
+        <p className="mt-3 text-sm text-gray-600">After {isSms ? 'Twilio' : 'Gmail'} accepts the send, the reply will be recorded in activity and the case will be marked Pending.</p>
         <div className="mt-5 flex justify-end gap-2">
           <button type="button" onClick={onCancel} disabled={busy} className={secondaryButton}>Cancel</button>
           <button type="button" onClick={onConfirm} disabled={busy} className={primaryButton}>
             <PaperAirplaneIcon className="h-4 w-4" />
-            {busy ? 'Sending…' : 'Send email'}
+            {busy ? 'Sending…' : isSms ? 'Send SMS' : 'Send email'}
           </button>
         </div>
       </div>
@@ -283,6 +301,7 @@ function SendConfirmation({ from, to, subject, onCancel, onConfirm, busy }) {
 
 export default function CustomerSupportPage({
   onNavigateToDashboard,
+  onNavigateToAdmin,
   onNavigateToChargers,
   onLogout,
   currentUser,
@@ -313,6 +332,7 @@ export default function CustomerSupportPage({
   const [matchingRentalKey, setMatchingRentalKey] = useState('');
   const [replySubject, setReplySubject] = useState('');
   const [replyBody, setReplyBody] = useState('');
+  const [replyChannel, setReplyChannel] = useState('email');
   const [replyTemplate, setReplyTemplate] = useState('suggested');
   const [replyLanguage, setReplyLanguage] = useState('en');
   const [replySenderKey, setReplySenderKey] = useState('support');
@@ -321,6 +341,8 @@ export default function CustomerSupportPage({
   const [toast, setToast] = useState(null);
   const [confirmSend, setConfirmSend] = useState(false);
   const [showRefundModal, setShowRefundModal] = useState(false);
+  const [showTelephonyRouting, setShowTelephonyRouting] = useState(false);
+  const [showCallLog, setShowCallLog] = useState(false);
   const [rentalToRefund, setRentalToRefund] = useState(null);
   const suggestionKeyRef = useRef('');
 
@@ -485,6 +507,12 @@ export default function CustomerSupportPage({
   }, [selectedTicket?.category, selectedTicket?.id]);
 
   useEffect(() => {
+    const hasPhone = Boolean(selectedTicket?.customer?.phoneE164 || selectedTicket?.customer?.phone);
+    const prefersSms = selectedTicket?.replyChannel === 'sms' || ['sms', 'phone'].includes(selectedTicket?.source);
+    setReplyChannel(hasPhone && prefersSms ? 'sms' : 'email');
+  }, [selectedTicket?.id, selectedTicket?.replyChannel, selectedTicket?.source, selectedTicket?.customer?.phone, selectedTicket?.customer?.phoneE164]);
+
+  useEffect(() => {
     if (!selectedTicket) {
       suggestionKeyRef.current = '';
       setReplySubject('');
@@ -639,14 +667,23 @@ export default function CustomerSupportPage({
 
   const handleSend = useCallback(() => {
     if (!selectedTicket?.id) return;
-    return runAction('send', () => callSupportFunction('support_sendReply', {
-      ticketId: selectedTicket.id,
-      subject: replySubject,
-      body: replyBody,
-      senderKey: replySender.value,
-    }, { timeoutMs: 45000, timeoutMessage: 'Sending the support reply took too long.' }), `Reply sent from ${replySender.email}, recorded in activity, and marked pending.`)
+    const sendAction = replyChannel === 'sms'
+      ? () => callSupportFunction('support_sendSmsReply', {
+        ticketId: selectedTicket.id,
+        body: replyBody,
+      }, { timeoutMs: 45000, timeoutMessage: 'Sending the support text took too long.' })
+      : () => callSupportFunction('support_sendReply', {
+        ticketId: selectedTicket.id,
+        subject: replySubject,
+        body: replyBody,
+        senderKey: replySender.value,
+      }, { timeoutMs: 45000, timeoutMessage: 'Sending the support reply took too long.' });
+    const successMessage = replyChannel === 'sms'
+      ? 'SMS accepted by Twilio, recorded in activity, and marked pending.'
+      : `Reply sent from ${replySender.email}, recorded in activity, and marked pending.`;
+    return runAction('send', sendAction, successMessage)
       .finally(() => setConfirmSend(false));
-  }, [callSupportFunction, replyBody, replySender.email, replySender.value, replySubject, runAction, selectedTicket?.id]);
+  }, [callSupportFunction, replyBody, replyChannel, replySender.email, replySender.value, replySubject, runAction, selectedTicket?.id]);
 
   const handleAddNote = useCallback(() => {
     if (!selectedTicket?.id || !note.trim()) return;
@@ -702,6 +739,25 @@ export default function CustomerSupportPage({
         rental={rentalToRefund}
         t={t}
       />
+      {showTelephonyRouting && (
+        <TelephonyRoutingModal
+          onClose={() => setShowTelephonyRouting(false)}
+          callSupportFunction={callSupportFunction}
+          readOnly={readOnlyMode}
+        />
+      )}
+      {showCallLog && (
+        <CallLogModal
+          onClose={() => setShowCallLog(false)}
+          onOpenCase={(ticketId) => {
+            setCategoryFilter('');
+            setStatusFilter('');
+            setSourceFilter('');
+            setSelectedId(ticketId);
+            setShowCallLog(false);
+          }}
+        />
+      )}
       <header className="bg-white shadow-sm">
         <div className="mx-auto flex max-w-screen-2xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
           <div className="flex min-w-0 items-center gap-3">
@@ -711,11 +767,19 @@ export default function CustomerSupportPage({
               <p className="truncate text-sm text-gray-500">Website inquiries, sales leads, and partnerships</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={() => onNavigateToDashboard()} className="rounded-md bg-gray-200 p-2 text-gray-700 hover:bg-gray-300" title="Back to dashboard"><HomeIcon className="h-6 w-6" /></button>
-            <button type="button" onClick={onLogout} className="rounded-md bg-red-500 p-2 text-white hover:bg-red-600" title="Log out">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+          <div className="flex shrink-0 items-center gap-2">
+            <button type="button" onClick={() => setShowCallLog(true)} className={secondaryButton}>
+              <ClockIcon className="h-4 w-4" />Call log
             </button>
+            <button type="button" onClick={() => setShowTelephonyRouting(true)} className={secondaryButton}>
+              <PhoneIcon className="h-4 w-4" />Call routing
+            </button>
+            <DashboardPageActions
+              onNavigateToDashboard={onNavigateToDashboard}
+              onNavigateToAdmin={onNavigateToAdmin}
+              onLogout={onLogout}
+              t={t}
+            />
           </div>
         </div>
       </header>
@@ -848,6 +912,18 @@ export default function CustomerSupportPage({
                     </div>
                   )}
 
+                  {selectedTicket.callback?.status === 'requested' && (
+                    <div className="mt-4 flex flex-col gap-3 rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-950 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="font-bold">Customer requested a callback</p>
+                        <p className="mt-1">Call {selectedTicket.callback.phone || customer.phoneE164 || customer.phone} at the number they called from.</p>
+                      </div>
+                      <a href={`tel:${selectedTicket.callback.phone || customer.phoneE164 || customer.phone}`} className={primaryButton}>
+                        <PhoneIcon className="h-4 w-4" />Call back
+                      </a>
+                    </div>
+                  )}
+
                   <div className="mt-5 grid gap-5 lg:grid-cols-2">
                     <div className="rounded-lg border border-gray-200 p-4">
                       <h3 className="font-semibold text-gray-900">Contact</h3>
@@ -956,10 +1032,27 @@ export default function CustomerSupportPage({
                   <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <h3 className="text-lg font-bold text-gray-900">Email reply</h3>
-                        <p className="mt-1 text-sm text-gray-500">Suggested text is editable. Saving a draft does not send email.</p>
+                        <h3 className="text-lg font-bold text-gray-900">Customer reply</h3>
+                        <p className="mt-1 text-sm text-gray-500">Reply by email or SMS using the same case history.</p>
                       </div>
                       <div className="flex items-center gap-3">
+                        <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1" role="group" aria-label="Reply channel">
+                          {[
+                            { value: 'email', label: 'Email', disabled: !customer.email },
+                            { value: 'sms', label: 'SMS', disabled: !(customer.phoneE164 || customer.phone) },
+                          ].map((channel) => (
+                            <button
+                              type="button"
+                              key={channel.value}
+                              onClick={() => setReplyChannel(channel.value)}
+                              disabled={channel.disabled}
+                              aria-pressed={replyChannel === channel.value}
+                              className={`rounded-md px-3 py-1.5 text-xs font-bold transition disabled:cursor-not-allowed disabled:text-gray-300 ${replyChannel === channel.value ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-600 hover:bg-white hover:text-blue-700'}`}
+                            >
+                              {channel.label}
+                            </button>
+                          ))}
+                        </div>
                         <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1" role="group" aria-label="Reply language">
                           {[
                             { value: 'en', label: 'EN', title: 'Write reply in English' },
@@ -977,10 +1070,10 @@ export default function CustomerSupportPage({
                             </button>
                           ))}
                         </div>
-                        <EnvelopeIcon className="h-6 w-6 text-blue-600" />
+                        {replyChannel === 'sms' ? <PhoneIcon className="h-6 w-6 text-blue-600" /> : <EnvelopeIcon className="h-6 w-6 text-blue-600" />}
                       </div>
                     </div>
-                    <label className="mt-4 block text-sm font-semibold text-gray-700">From
+                    {replyChannel === 'email' && <label className="mt-4 block text-sm font-semibold text-gray-700">From
                       <select
                         value={replySender.value}
                         onChange={handleReplySenderChange}
@@ -992,7 +1085,7 @@ export default function CustomerSupportPage({
                           <option key={sender.value} value={sender.value}>{sender.label} — {sender.email}</option>
                         ))}
                       </select>
-                    </label>
+                    </label>}
                     <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
                       <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Choose a reply template</p>
                       <div className="mt-2 flex flex-wrap gap-2">
@@ -1015,24 +1108,25 @@ export default function CustomerSupportPage({
                         </p>
                       )}
                     </div>
-                    <label className="mt-4 block text-sm font-semibold text-gray-700">Subject
+                    {replyChannel === 'email' && <label className="mt-4 block text-sm font-semibold text-gray-700">Subject
                       <input value={replySubject} onChange={(event) => setReplySubject(event.target.value)} maxLength={300} className={`${inputClass} mt-1`} />
-                    </label>
+                    </label>}
                     <label className="mt-4 block text-sm font-semibold text-gray-700">Message
-                      <textarea value={replyBody} onChange={(event) => setReplyBody(event.target.value)} rows={13} maxLength={12000} className={`${inputClass} mt-1 resize-y font-sans leading-6`} />
+                      <textarea value={replyBody} onChange={(event) => setReplyBody(event.target.value)} rows={13} maxLength={replyChannel === 'sms' ? 1600 : 12000} className={`${inputClass} mt-1 resize-y font-sans leading-6`} />
                     </label>
+                    {replyChannel === 'sms' && <p className="mt-1 text-right text-xs text-gray-500">{replyBody.length}/1600 characters · to {customer.phoneE164 || customer.phone}</p>}
                     <div className="mt-4 flex flex-wrap justify-end gap-2">
                       <button type="button" onClick={() => {
                         applyReplyTemplate('suggested');
                       }} className={secondaryButton}>Reset suggestion</button>
-                      <button type="button" onClick={handleSaveDraft} disabled={readOnlyMode || busyAction === 'draft' || !replyBody.trim()} className={secondaryButton}>
+                      {replyChannel === 'email' && <button type="button" onClick={handleSaveDraft} disabled={readOnlyMode || busyAction === 'draft' || !replyBody.trim()} className={secondaryButton}>
                         <ClockIcon className="h-4 w-4" />
                         {busyAction === 'draft' ? 'Saving…' : 'Save draft'}
-                      </button>
+                      </button>}
                       <button
                         type="button"
                         onClick={() => setConfirmSend(true)}
-                        disabled={readOnlyMode || !replyBody.trim() || !customer.email}
+                        disabled={readOnlyMode || !replyBody.trim() || (replyChannel === 'sms' ? !(customer.phoneE164 || customer.phone) : !customer.email)}
                         title="Review and send this reply"
                         className={primaryButton}
                       >
@@ -1068,6 +1162,24 @@ export default function CustomerSupportPage({
                           </p>
                         )}
                         <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-gray-700">{message.body || message.summary}</p>
+                        {message.channel === 'phone' && (
+                          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+                            {message.disposition && <span>Outcome: {message.disposition.replaceAll('_', ' ')}</span>}
+                            {(message.dialCallDuration || message.recordingDuration) && <span>Duration: {message.dialCallDuration || message.recordingDuration}s</span>}
+                            {(message.acceptedByName || message.staffName) && <span>Staff: {message.acceptedByName || message.staffName}</span>}
+                            {message.callbackPhone && <span>Callback: {message.callbackPhone}</span>}
+                            {(message.recordingSid || message.recordingStatus) && <span>Recording: {message.recordingStatus === 'completed' ? 'saved' : (message.recordingStatus || 'available')}</span>}
+                            {message.transcriptStatus && <span>Transcript: {message.transcriptStatus.replaceAll('_', ' ')}</span>}
+                            {message.sensitiveContentExpiresAtIso && <span>Recording and transcript delete: {supportDateLabel(message.sensitiveContentExpiresAtIso)}</span>}
+                          </div>
+                        )}
+                        {message.channel === 'phone' && message.transcriptText && (
+                          <details className="mt-3 rounded-md border border-gray-200 bg-white px-3 py-2">
+                            <summary className="cursor-pointer text-sm font-semibold text-gray-800">Call transcript</summary>
+                            <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-gray-700">{message.transcriptText}</p>
+                            <p className="mt-3 text-xs text-gray-500">{message.transcriptDisclaimer || 'Machine-generated transcript. Verify important details against the recording.'}</p>
+                          </details>
+                        )}
                         {message.authorName && <p className="mt-2 text-xs text-gray-500">{message.authorName}</p>}
                       </div>
                     ))}
@@ -1082,8 +1194,9 @@ export default function CustomerSupportPage({
 
       {confirmSend && selectedTicket && (
         <SendConfirmation
-          from={replySender}
-          to={customer.email}
+          channel={replyChannel}
+          from={replyChannel === 'sms' ? '+1 917 993 9355' : replySender}
+          to={replyChannel === 'sms' ? (customer.phoneE164 || customer.phone) : customer.email}
           subject={replySubject}
           onCancel={() => setConfirmSend(false)}
           onConfirm={handleSend}

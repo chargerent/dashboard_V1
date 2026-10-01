@@ -5,10 +5,23 @@ const GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const GMAIL_API_ROOT = "https://gmail.googleapis.com/gmail/v1";
 const DEFAULT_MAILBOX = "support@charge.rent";
+const DEFAULT_SALES_MAILBOX = "george@charge.rent";
+const DEFAULT_SALES_RECIPIENT = "sales@charge.rent";
 const DEFAULT_TOPIC = "chargerent-support-gmail";
 const SYNC_COLLECTION = "supportMailboxSync";
 const SYNC_DOCUMENT = "support-at-charge-rent";
+const SALES_SYNC_DOCUMENT = "sales-at-charge-rent";
+const RECIPIENT_HEADERS = Object.freeze([
+  "To",
+  "Cc",
+  "Delivered-To",
+  "X-Original-To",
+  "Envelope-To",
+  "Original-Recipient",
+  "Resent-To",
+]);
 const SERVICE_ACCOUNT_RE = /^[a-z0-9-]+@[a-z0-9-]+\.iam\.gserviceaccount\.com$/;
+const EMAIL_RE = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 
 function text(value, maxLength = 12000) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
@@ -30,6 +43,26 @@ function headerMap(payload) {
     }
     return result;
   }, {});
+}
+
+function headerValues(payload, names) {
+  const accepted = new Set(names.map((name) => String(name).toLowerCase()));
+  return (Array.isArray(payload?.headers) ? payload.headers : [])
+      .filter((header) => accepted.has(text(header?.name, 100).toLowerCase()))
+      .map((header) => text(header?.value, 4000))
+      .filter(Boolean);
+}
+
+function parseAddresses(value) {
+  return [...new Set(
+      (String(value || "").match(EMAIL_RE) || []).map((email) => email.toLowerCase()),
+  )];
+}
+
+function recipientAddresses(payload, mailbox = "") {
+  const recipients = headerValues(payload, RECIPIENT_HEADERS).flatMap(parseAddresses);
+  const fallback = text(mailbox, 254).toLowerCase();
+  return [...new Set(recipients.length ? recipients : (fallback ? [fallback] : []))];
 }
 
 function decodeEntities(value) {
@@ -100,13 +133,31 @@ function isAutomatedMessage(headers, fromEmail) {
   const precedence = text(headers.precedence, 100).toLowerCase();
   return (autoSubmitted && autoSubmitted !== "no") ||
     ["bulk", "junk", "list"].includes(precedence) ||
+    Boolean(headers["list-id"] || headers["list-unsubscribe"] || headers["x-mailing-list"]) ||
     Boolean(headers["x-autoreply"] || headers["x-autorespond"]) ||
-    /^(?:mailer-daemon|postmaster)@/i.test(fromEmail);
+    /^(?:mailer-daemon|postmaster|no-?reply|notifications?)@/i.test(fromEmail);
+}
+
+function isSalesGroupRelay(headers, recipients, fromEmail, replyToEmail) {
+  return recipients.includes(DEFAULT_SALES_RECIPIENT) &&
+    fromEmail === "admin@charge.rent" &&
+    Boolean(replyToEmail) &&
+    !replyToEmail.endsWith("@charge.rent") &&
+    Boolean(headers["list-id"] || headers["x-mailing-list"]);
 }
 
 function parseGmailMessage(message, mailbox = DEFAULT_MAILBOX) {
   const headers = headerMap(message?.payload);
-  const from = parseAddress(headers.from);
+  const headerFrom = parseAddress(headers.from);
+  const replyTo = parseAddress(headers["reply-to"]);
+  const recipients = recipientAddresses(message?.payload, mailbox);
+  const salesGroupRelay = isSalesGroupRelay(
+      headers,
+      recipients,
+      headerFrom.email,
+      replyTo.email,
+  );
+  const from = salesGroupRelay ? replyTo : headerFrom;
   const to = parseAddress(headers.to || headers["delivered-to"]);
   const bodies = collectBodies(message?.payload);
   const rawBody = bodies.plain.find((value) => text(value)) || htmlToText(bodies.html.join("\n"));
@@ -121,13 +172,38 @@ function parseGmailMessage(message, mailbox = DEFAULT_MAILBOX) {
     ticketId: text(headers["x-chargerent-ticket"], 120),
     from: from.email,
     fromName: from.name,
-    to: to.email || mailbox,
+    to: to.email || recipients[0] || mailbox,
+    recipientAddresses: recipients,
     subject: text(headers.subject, 300) || "Email inquiry",
     body: trimQuotedReply(rawBody),
     receivedAt,
-    automated: isAutomatedMessage(headers, from.email),
+    automated: salesGroupRelay ? false : isAutomatedMessage(headers, headerFrom.email),
     labelIds: Array.isArray(message?.labelIds) ? message.labelIds : [],
   };
+}
+
+function routeGmailMessage(parsed, {
+  mailbox = DEFAULT_MAILBOX,
+  recipientFilter = "",
+  defaultCategory = "",
+} = {}) {
+  const requiredRecipient = text(recipientFilter, 254).toLowerCase();
+  const recipients = Array.isArray(parsed?.recipientAddresses) ? parsed.recipientAddresses : [];
+  if (requiredRecipient && !recipients.includes(requiredRecipient)) return null;
+  return {
+    ...parsed,
+    ...(defaultCategory ? {category: defaultCategory} : {}),
+    inboundMailbox: text(mailbox, 254).toLowerCase(),
+    originalRecipient: requiredRecipient || text(parsed?.to, 254).toLowerCase(),
+  };
+}
+
+function isWebsiteFormNotification(parsed) {
+  const subject = text(parsed?.subject, 300);
+  const body = text(parsed?.body, 12000);
+  return /^Chargerent website request\s+Q-/i.test(body) ||
+    (/^(?:Event|Venue|Customer service|Partnership) request\s+[—-]/i.test(subject) &&
+      /\bSubmitted:\s*\d{4}-\d{2}-\d{2}T/i.test(body));
 }
 
 function failure(code, message, status = 0) {
@@ -154,15 +230,21 @@ function createGmailSupportInbox({
   fetchImpl = global.fetch,
   env = process.env,
   clock = () => Date.now(),
+  mailboxAddress = "",
+  recipientFilter = "",
+  defaultCategory = "",
+  syncDocument = "",
 } = {}) {
   const projectId = text(admin?.app?.().options?.projectId || env.GCLOUD_PROJECT || env.GOOGLE_CLOUD_PROJECT, 200);
-  const mailbox = text(env.SUPPORT_GMAIL_INBOX || DEFAULT_MAILBOX, 254).toLowerCase();
+  const mailbox = text(mailboxAddress || env.SUPPORT_GMAIL_INBOX || DEFAULT_MAILBOX, 254).toLowerCase();
+  const requiredRecipient = text(recipientFilter, 254).toLowerCase();
   const topicName = text(env.SUPPORT_GMAIL_TOPIC || DEFAULT_TOPIC, 200);
   const defaultServiceAccount = projectId ?
     `chargerent-dashboard-mailer@${projectId}.iam.gserviceaccount.com` : "";
   const serviceAccount = text(env.GMAIL_MAILER_SERVICE_ACCOUNT_EMAIL || defaultServiceAccount, 254).toLowerCase();
   const topicPath = `projects/${projectId}/topics/${topicName}`;
-  const stateRef = db?.collection?.(SYNC_COLLECTION).doc(SYNC_DOCUMENT);
+  const stateDocument = text(syncDocument || SYNC_DOCUMENT, 200);
+  const stateRef = db?.collection?.(SYNC_COLLECTION).doc(stateDocument);
   const configured = Boolean(
       admin && db && ticketService && typeof ticketService.importInboundEmail === "function" &&
       typeof fetchImpl === "function" && projectId && topicName &&
@@ -257,8 +339,9 @@ function createGmailSupportInbox({
     return gmailRequest(`/users/${encodeURIComponent(mailbox)}/profile`, {}, "profile");
   }
 
-  async function getMessage(messageId) {
-    const query = new URLSearchParams({format: "full"});
+  async function getMessage(messageId, {format = "full", metadataHeaders = []} = {}) {
+    const query = new URLSearchParams({format});
+    metadataHeaders.forEach((header) => query.append("metadataHeaders", header));
     return gmailRequest(
         `/users/${encodeURIComponent(mailbox)}/messages/${encodeURIComponent(messageId)}?${query}`,
         {},
@@ -267,7 +350,21 @@ function createGmailSupportInbox({
   }
 
   async function processMessageId(messageId) {
-    const parsed = parseGmailMessage(await getMessage(messageId), mailbox);
+    if (requiredRecipient) {
+      const metadata = parseGmailMessage(await getMessage(messageId, {
+        format: "metadata",
+        metadataHeaders: RECIPIENT_HEADERS,
+      }), mailbox);
+      if (!routeGmailMessage(metadata, {mailbox, recipientFilter: requiredRecipient})) {
+        return {messageId, skipped: true, reason: "different-recipient"};
+      }
+    }
+    const parsed = routeGmailMessage(parseGmailMessage(await getMessage(messageId), mailbox), {
+      mailbox,
+      recipientFilter: requiredRecipient,
+      defaultCategory,
+    });
+    if (!parsed) return {messageId, skipped: true, reason: "different-recipient"};
     const excludedLabels = new Set(["SENT", "DRAFT", "SPAM", "TRASH"]);
     if (!parsed.messageId || !parsed.from || !parsed.body || parsed.automated) {
       return {messageId, skipped: true, reason: "not-customer-mail"};
@@ -275,8 +372,8 @@ function createGmailSupportInbox({
     if (parsed.labelIds.some((label) => excludedLabels.has(label))) {
       return {messageId, skipped: true, reason: "excluded-label"};
     }
-    if (parsed.from.endsWith("@charge.rent")) {
-      return {messageId, skipped: true, reason: "company-sender"};
+    if (isWebsiteFormNotification(parsed)) {
+      return {messageId, skipped: true, reason: "website-form-notification"};
     }
     return ticketService.importInboundEmail(parsed);
   }
@@ -291,7 +388,10 @@ function createGmailSupportInbox({
     let pageToken = "";
     let pages = 0;
     do {
-      const query = new URLSearchParams({q: "in:inbox newer_than:14d", maxResults: "100"});
+      const mailboxQuery = requiredRecipient ?
+        `in:inbox to:${requiredRecipient} newer_than:14d` :
+        "in:inbox newer_than:14d";
+      const query = new URLSearchParams({q: mailboxQuery, maxResults: "100"});
       if (pageToken) query.set("pageToken", pageToken);
       const response = await gmailRequest(
           `/users/${encodeURIComponent(mailbox)}/messages?${query}`,
@@ -438,7 +538,17 @@ function createGmailSupportInbox({
   }
 
   return {
-    getStatus: () => ({configured, mailbox, projectId, serviceAccount, topicPath, scope: GMAIL_READ_SCOPE}),
+    getStatus: () => ({
+      configured,
+      mailbox,
+      recipientFilter: requiredRecipient,
+      defaultCategory,
+      stateDocument,
+      projectId,
+      serviceAccount,
+      topicPath,
+      scope: GMAIL_READ_SCOPE,
+    }),
     handleNotification,
     renewWatch,
     syncMailbox,
@@ -447,11 +557,18 @@ function createGmailSupportInbox({
 
 module.exports = {
   DEFAULT_MAILBOX,
+  DEFAULT_SALES_MAILBOX,
+  DEFAULT_SALES_RECIPIENT,
   DEFAULT_TOPIC,
   GMAIL_READ_SCOPE,
+  SALES_SYNC_DOCUMENT,
   createGmailSupportInbox,
   htmlToText,
+  isWebsiteFormNotification,
   parseAddress,
+  parseAddresses,
   parseGmailMessage,
+  recipientAddresses,
+  routeGmailMessage,
   trimQuotedReply,
 };

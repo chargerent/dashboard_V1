@@ -1,7 +1,21 @@
 /* eslint-env node */
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
+const forge = require("node-forge");
 const test = require("node:test");
+
+function decryptCommandSecret(privateKey, encrypted) {
+  const pem = privateKey.export({type: "pkcs8", format: "pem"});
+  const plaintext = forge.pki.privateKeyFromPem(pem).decrypt(
+      Buffer.from(encrypted.ciphertext, "base64").toString("binary"),
+      "RSA-OAEP",
+      {
+        md: forge.md.sha256.create(),
+        mgf1: {md: forge.md.sha1.create()},
+      },
+  );
+  return JSON.parse(Buffer.from(plaintext, "binary").toString("utf8"));
+}
 
 const {
   ALLOWED_OPERATIONS,
@@ -24,9 +38,11 @@ const {
   enrollDevice,
   enrollmentHash,
   hasPhoneControlAccess,
+  hasCampaignManagerAccess,
   normalizeArguments,
   normalizeAppUpdateArguments,
   normalizeConnectWifiArguments,
+  normalizeDeviceKind,
   normalizeHotspotArguments,
   normalizeSystemUpdateArguments,
   normalizeUpdatePolicyArguments,
@@ -45,6 +61,9 @@ const {
   setManualPhoneNumber,
   terminalCommandArguments,
   terminalConfigForKiosk,
+  terminalPackageForDevice,
+  terminalCommandResultMatches,
+  terminalReaderType,
   terminalStateAfterAppRestrictions,
 } = require("./phoneControl");
 
@@ -120,6 +139,31 @@ test("normalizes the supported staging markets", () => {
   assert.throws(() => normalizePhoneMarket("GB"), /Canada, France, or US/);
 });
 
+test("keeps managed phones and integrated kiosks as distinct enrollment types", () => {
+  assert.equal(normalizeDeviceKind("managed_phone"), "managed_phone");
+  assert.equal(normalizeDeviceKind("integrated_kiosk"), "integrated_kiosk");
+  assert.equal(normalizeDeviceKind("", {allowLegacy: true}), "managed_phone");
+  assert.throws(() => normalizeDeviceKind("tablet"), /managed phone or an integrated kiosk/);
+  assert.equal(terminalPackageForDevice({deviceKind: "integrated_kiosk"}), "com.chargerent.media.lab");
+  assert.equal(
+      terminalPackageForDevice(
+          {deviceKind: "integrated_kiosk"},
+          "test",
+          "com.chargerent.kiosk.test.debug",
+      ),
+      "com.chargerent.media.lab",
+  );
+  assert.equal(terminalPackageForDevice({deviceKind: "managed_phone"}, "test"), "com.chargerent.kiosk.test.debug");
+  assert.equal(
+      terminalPackageForDevice(
+          {deviceKind: "managed_phone"},
+          "test",
+          "com.chargerent.kiosk.partner.test",
+      ),
+      "com.chargerent.kiosk.partner.test",
+  );
+});
+
 test("lists only available kiosk IDs for the selected country", () => {
   const document = (id, data) => ({id, data: () => data});
   const kiosks = [
@@ -150,6 +194,14 @@ test("allows administrators to control staged phones without enabling kiosk feat
   assert.equal(canControlUnassignedPhone("SET_TERMINAL_LOCKDOWN", admin), false);
   assert.equal(canControlUnassignedPhone("LAUNCH_PAYMENT_APP", admin), false);
   assert.equal(canControlUnassignedPhone("GET_INVENTORY", partner), false);
+});
+
+test("campaign inventory access is limited to admins and explicitly permitted partners", () => {
+  assert.equal(hasCampaignManagerAccess({isAdmin: true, profile: {}}), true);
+  assert.equal(hasCampaignManagerAccess({profile: {role: "partner", features: {campaign_manager: true}}}), true);
+  assert.equal(hasCampaignManagerAccess({profile: {partner: true, features: {campaign_manager: true}}}), true);
+  assert.equal(hasCampaignManagerAccess({profile: {role: "partner", features: {}}}), false);
+  assert.equal(hasCampaignManagerAccess({profile: {role: "user", features: {campaign_manager: true}}}), false);
 });
 
 test("creates and consumes a one-time enrollment without a kiosk assignment", async () => {
@@ -235,6 +287,50 @@ test("creates and consumes a one-time enrollment without a kiosk assignment", as
       [...documents.keys()].some((path) => path.startsWith("phoneKioskAssignments/")),
       false,
   );
+
+  const kioskEnrollment = await createEnrollment(
+      {market: "FR", deviceKind: "integrated_kiosk"},
+      {uid: "admin-1", isAdmin: true, profile: {}},
+      dependencies,
+  );
+  const kioskPublicKey = crypto.generateKeyPairSync("ec", {namedCurve: "prime256v1"})
+      .publicKey.export({type: "spki", format: "der"}).toString("base64");
+  const enrolledKiosk = await enrollDevice({
+    enrollmentCode: kioskEnrollment.enrollmentCode,
+    publicKey: kioskPublicKey,
+    inventory: {
+      model: "Kiosk tablet",
+      deviceKind: "media_kiosk",
+      packageName: "com.chargerent.media.lab",
+    },
+  }, dependencies);
+  assert.equal(enrolledKiosk.deviceKind, "integrated_kiosk");
+  assert.match(enrolledKiosk.mediaToken, /^[A-Za-z0-9_-]{43}$/);
+  const kioskDevice = documents.get(`phoneDevices/${enrolledKiosk.deviceId}`);
+  assert.equal(kioskDevice.deviceKind, "integrated_kiosk");
+  assert.equal(kioskDevice.packageName, "com.chargerent.media.lab");
+  assert.equal(kioskDevice.mediaAccess.enabled, true);
+  assert.equal(
+      kioskDevice.mediaAccess.tokenHash,
+      crypto.createHash("sha256").update(enrolledKiosk.mediaToken).digest("hex"),
+  );
+  assert.equal(Object.hasOwn(enrolled, "mediaToken"), false);
+
+  const phoneOnlyEnrollment = await createEnrollment(
+      {market: "FR", deviceKind: "managed_phone"},
+      {uid: "admin-1", isAdmin: true, profile: {}},
+      dependencies,
+  );
+  const anotherKioskKey = crypto.generateKeyPairSync("ec", {namedCurve: "prime256v1"})
+      .publicKey.export({type: "spki", format: "der"}).toString("base64");
+  await assert.rejects(() => enrollDevice({
+    enrollmentCode: phoneOnlyEnrollment.enrollmentCode,
+    publicKey: anotherKioskKey,
+    inventory: {
+      deviceKind: "media_kiosk",
+      packageName: "com.chargerent.media.lab",
+    },
+  }, dependencies), /code is for a managed phone/);
 });
 
 test("allows an enrolled unassigned phone to claim an available kiosk in its market", async () => {
@@ -479,6 +575,72 @@ test("does not downgrade a confirmed terminal when provisioning completes", () =
   assert.equal(waiting.lockdownState, "locked");
 });
 
+test("accepts only an exact integrated-app terminal provisioning result", () => {
+  const terminal = {
+    stationId: "FR8011",
+    provisionId: "id-9987807842",
+    moduleId: "864253060991866",
+    stripeLocationId: "tml_fr_live",
+    packageName: "com.chargerent.media.lab",
+  };
+  const command = {
+    stationId: "FR8011",
+    arguments: {
+      restrictions: {
+        provision_id: "id-9987807842",
+        module_id: "864253060991866",
+        slot_count: 12,
+        currency: "eur",
+        stripe_mode: "live",
+        stripe_account_country: "FR",
+        stripe_reader_type: "bbpos_wisepad3",
+        stripe_location_id: "tml_fr_live",
+      },
+    },
+  };
+  const result = {
+    applied: true,
+    packageName: "com.chargerent.media.lab",
+    terminal: {
+      configured: true,
+      stationId: "FR8011",
+      provisionId: "id-9987807842",
+      moduleId: "864253060991866",
+      slotCount: 12,
+      currency: "eur",
+      stripeMode: "live",
+      stripeAccountCountry: "FR",
+      readerType: "bbpos_wisepad3",
+      stripeLocationId: "tml_fr_live",
+    },
+  };
+  assert.equal(terminalCommandResultMatches(terminal, command, result), true);
+  assert.equal(terminalCommandResultMatches(terminal, command, {
+    ...result,
+    terminal: {...result.terminal, stripeMode: "test"},
+  }), false);
+});
+
+test("marks integrated kiosk provisioning ready without Device Owner lockdown", () => {
+  const updatedAt = {serverTimestamp: true};
+  const ready = terminalStateAfterAppRestrictions({
+    stationId: "FR8011",
+    packageName: "com.chargerent.media.lab",
+    state: "provisioning",
+  }, {
+    status: "completed",
+    requestedEnabled: true,
+    lockdownActive: false,
+    applicationConfirmed: true,
+    errorMessage: "",
+    updatedAt,
+  });
+  assert.equal(ready.state, "ready");
+  assert.equal(ready.lockdownEnabled, false);
+  assert.equal(ready.lockdownState, "not_required");
+  assert.equal(ready.message, "Integrated app confirmed FR8011 configuration.");
+});
+
 test("encrypts Wi-Fi credentials for only the enrolled phone", () => {
   const {privateKey, publicKey} = crypto.generateKeyPairSync("rsa", {modulusLength: 2048});
   const publicKeyBase64 = publicKey.export({type: "spki", format: "der"}).toString("base64");
@@ -492,12 +654,10 @@ test("encrypts Wi-Fi credentials for only the enrolled phone", () => {
   assert.equal(normalized.security, "wpa3");
   assert.equal(Object.hasOwn(normalized, "passphrase"), false);
   assert.equal(JSON.stringify(normalized).includes("private-password"), false);
-  const plaintext = crypto.privateDecrypt({
-    key: privateKey,
-    padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-    oaepHash: "sha256",
-  }, Buffer.from(normalized.encryptedCredentials.ciphertext, "base64"));
-  assert.deepEqual(JSON.parse(plaintext.toString("utf8")), {passphrase: "private-password"});
+  assert.equal(normalized.encryptedCredentials.algorithm, "RSA-OAEP-256-MGF1-SHA1");
+  assert.deepEqual(decryptCommandSecret(privateKey, normalized.encryptedCredentials), {
+    passphrase: "private-password",
+  });
 
   assert.deepEqual(normalizeConnectWifiArguments({
     ssid: "Guest Wi-Fi",
@@ -544,6 +704,7 @@ test("builds encrypted CA8019 terminal provisioning without persisting the token
   });
   assert.equal(config.packageName, "com.chargerent.kiosk.test.debug");
   assert.equal(config.stripeAccountCountry, "US");
+  assert.equal(config.stripeReaderType, "stripe_m2");
   assert.equal(config.stripeLocationId, "");
   assert.deepEqual(config.stripeLocationAddress, {
     line1: "4514 Conchita Way",
@@ -565,13 +726,13 @@ test("builds encrypted CA8019 terminal provisioning without persisting the token
   assert.equal(arguments_.restrictions.terminal_enabled, true);
   assert.equal(arguments_.restrictions.provision_id, "id-9987807816");
   assert.equal(arguments_.restrictions.stripe_account_country, "US");
+  assert.equal(arguments_.restrictions.stripe_mode, "test");
+  assert.equal(arguments_.restrictions.stripe_reader_type, "stripe_m2");
   assert.equal(arguments_.restrictions.stripe_location_id, "tml_us_test");
-  const plaintext = crypto.privateDecrypt({
-    key: privateKey,
-    padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-    oaepHash: "sha256",
-  }, Buffer.from(arguments_.encryptedSecrets.ciphertext, "base64"));
-  assert.deepEqual(JSON.parse(plaintext.toString("utf8")), {installationToken});
+  assert.equal(arguments_.encryptedSecrets.algorithm, "RSA-OAEP-256-MGF1-SHA1");
+  assert.deepEqual(decryptCommandSecret(privateKey, arguments_.encryptedSecrets), {
+    installationToken,
+  });
 });
 
 test("creates and reuses a Stripe Terminal location from the kiosk address", async () => {
@@ -662,6 +823,66 @@ test("creates and reuses a Stripe Terminal location from the kiosk address", asy
   );
 });
 
+test("requires the French live account to be verified and charge-enabled", async () => {
+  const kiosk = {
+    id: "id-fr-terminal",
+    data: () => ({
+      info: {
+        address: "1 Rue de Rivoli",
+        city: "Paris",
+        zip: "75001",
+        country: "FR",
+        location: "Paris Pilot",
+      },
+      hardware: {gateway: "STRIPE", gatewayoptions: "FULLPRICE"},
+      pricing: {
+        text: "LEASE - SIMPLE DAILY",
+        currency: "FR",
+        kioskmode: "PURCHASE",
+        initialperiod: 24,
+        authamount: 2,
+        dailyprice: 3,
+        buyprice: 30,
+        overdue: 30,
+      },
+      modules: [{moduleid: "module-fr", slots: [{position: 1}]}],
+    }),
+  };
+  const stripeClient = (account) => ({
+    accounts: {retrieve: async () => account},
+    terminal: {
+      locations: {
+        create: async () => ({id: "tml_fr_live"}),
+      },
+    },
+  });
+
+  await assert.rejects(
+      provisionTerminalConfigForKiosk("FR8011", kiosk, {
+        stripeMode: "live",
+        packageName: "com.chargerent.media.lab",
+        getStripeClient: () => stripeClient({
+          country: "FR",
+          details_submitted: false,
+          charges_enabled: false,
+        }),
+      }),
+      /finish verification and enable live charges/,
+  );
+
+  const ready = await provisionTerminalConfigForKiosk("FR8011", kiosk, {
+    stripeMode: "live",
+    packageName: "com.chargerent.media.lab",
+    getStripeClient: () => stripeClient({
+      country: "FR",
+      details_submitted: true,
+      charges_enabled: true,
+    }),
+  });
+  assert.equal(ready.stripeMode, "live");
+  assert.equal(ready.stripeLocationId, "tml_fr_live");
+});
+
 test("uses only the address country and rejects unsupported or incomplete addresses", () => {
   const kiosk = (country, address = "1 Main Street") => ({
     id: "id-terminal",
@@ -687,8 +908,8 @@ test("uses only the address country and rejects unsupported or incomplete addres
   assert.throws(() => terminalConfigForKiosk("FR8009", kiosk("FR", "")), /complete physical address/);
 });
 
-test("provisions French test terminals in USD while using the shared account", () => {
-  const config = terminalConfigForKiosk("FR8011", {
+test("keeps French test terminals in the configured EUR currency", () => {
+  const kiosk = {
     id: "id-fr-terminal",
     data: () => ({
       info: {
@@ -712,12 +933,60 @@ test("provisions French test terminals in USD while using the shared account", (
       },
       modules: [{moduleid: "module-fr", slots: [{position: 1}]}],
     }),
-  });
+  };
+  const config = terminalConfigForKiosk("FR8011", kiosk);
 
   assert.equal(config.stripeAccountCountry, "FR");
   assert.equal(config.stripeMode, "test");
-  assert.equal(config.currency, "usd");
+  assert.equal(config.stripeReaderType, "bbpos_wisepad3");
+  assert.equal(config.currency, "eur");
   assert.equal(config.amountCents, 3000);
+
+  const live = terminalConfigForKiosk("FR8011", kiosk, {stripeMode: "live"});
+  assert.equal(live.stripeMode, "live");
+  assert.equal(live.stripeAccountCountry, "FR");
+  assert.equal(live.stripeReaderType, "bbpos_wisepad3");
+  assert.equal(live.currency, "eur");
+  assert.equal(live.amountCents, 3000);
+});
+
+test("selects only region-supported mobile Stripe readers", () => {
+  assert.equal(terminalReaderType("US"), "stripe_m2");
+  assert.equal(terminalReaderType("FR"), "bbpos_wisepad3");
+  assert.equal(terminalReaderType("CA"), "bbpos_wisepad3");
+  assert.throws(() => terminalReaderType("FR", "stripe_m2"), /not supported.*FR/);
+  assert.throws(() => terminalReaderType("US", "bbpos_wisepad3"), /not supported.*US/);
+});
+
+test("rejects live Stripe mode outside the approved French WisePad path", () => {
+  const usKiosk = {
+    id: "id-us-live-rejected",
+    data: () => ({
+      info: {
+        address: "1 Main Street",
+        city: "Los Angeles",
+        state: "CA",
+        zip: "90001",
+        country: "US",
+      },
+      hardware: {gatewayoptions: "FULLPRICE"},
+      pricing: {
+        text: "PURCHASE - SIMPLE DAILY",
+        currency: "US",
+        kioskmode: "PURCHASE",
+        initialperiod: 24,
+        authamount: 2,
+        dailyprice: 4,
+        buyprice: 30,
+        overdue: 30,
+      },
+      modules: [{moduleid: "module-us", slots: [{position: 1}]}],
+    }),
+  };
+  assert.throws(
+      () => terminalConfigForKiosk("US8004", usKiosk, {stripeMode: "live"}),
+      /limited to French integrated kiosks using WisePad 3/,
+  );
 });
 
 test("requires a boolean always-on hotspot setting", () => {
@@ -788,6 +1057,29 @@ test("allows only versioned Chargerent Agent update packages", () => {
     ...update,
     sha256: "not-a-checksum",
   }), /valid Agent package SHA-256/);
+
+  const kioskUpdate = normalizeAppUpdateArguments({
+    httpsUrl: "https://chargerentstations.com/media-kiosk/remote/releases/chargerent-media-lab-v0.8.0-hosted.apk",
+    sha256: "B".repeat(64),
+    versionCode: 29,
+    versionName: "0.8.0-hosted",
+  }, {
+    deviceKind: "integrated_kiosk",
+    packageName: "com.chargerent.media.lab",
+  });
+  assert.equal(kioskUpdate.versionName, "0.8.0-hosted");
+  assert.equal(kioskUpdate.sha256, "b".repeat(64));
+  assert.throws(() => normalizeAppUpdateArguments({
+    ...kioskUpdate,
+    httpsUrl: "https://chargerentstations.com/portal/mdm/remote-agent-v0.8.0.apk",
+  }, {
+    deviceKind: "integrated_kiosk",
+    packageName: "com.chargerent.media.lab",
+  }), /Only official Chargerent Agent releases/);
+  assert.throws(() => normalizeAppUpdateArguments({
+    ...kioskUpdate,
+    httpsUrl: "https://chargerentstations.com/media-kiosk/remote/releases/chargerent-media-lab-v0.8.0-hosted.apk",
+  }), /Only official Chargerent Agent releases/);
 });
 
 test("signs a command with an Android-compatible P-256 public key", () => {
@@ -817,22 +1109,26 @@ test("signs a command with an Android-compatible P-256 public key", () => {
 });
 
 test("enrollment codes are stored as deterministic hashes", () => {
-  assert.equal(enrollmentHash("ABCD-EFGH"), enrollmentHash("ABCDEFGH"));
-  assert.equal(enrollmentHash("ABCDEFGH").length, 64);
+  assert.equal(enrollmentHash("123-456"), enrollmentHash("123456"));
+  assert.equal(enrollmentHash("123456").length, 64);
 });
 
-test("creates short, unambiguous enrollment codes", () => {
+test("creates six-digit numeric enrollment codes", () => {
   for (let index = 0; index < 100; index += 1) {
-    assert.match(createEnrollmentCode(), /^[A-HJ-NP-Z2-9]{3}-[A-HJ-NP-Z2-9]{3}$/);
+    assert.match(createEnrollmentCode(), /^\d{6}$/);
   }
 });
 
-test("accepts new short codes and pending legacy codes", () => {
-  assert.equal(normalizeEnrollmentCode(" abc-def "), "ABCDEF");
-  assert.equal(normalizeEnrollmentCode("ABCD-EFGH"), "ABCDEFGH");
+test("accepts only six numeric enrollment digits", () => {
+  assert.equal(normalizeEnrollmentCode(" 123456 "), "123456");
+  assert.equal(normalizeEnrollmentCode("123-456"), "123456");
   assert.throws(
-      () => normalizeEnrollmentCode("AB-CD"),
-      /Enter the 6-character enrollment code/,
+      () => normalizeEnrollmentCode("ABC-123"),
+      /Enter the 6-digit enrollment code/,
+  );
+  assert.throws(
+      () => normalizeEnrollmentCode("12345"),
+      /Enter the 6-digit enrollment code/,
   );
 });
 

@@ -31,7 +31,7 @@ After a case is created, send later customer messages from the same conversation
 
 ### Disney chatbot form submitted by Arthur's server
 
-Arthur's current snake_case submission can be posted directly to the same endpoint. Chargerent converts it into a Customer Support case, uses `session_id` as the stable conversation identifier, stores the transcript as the inbound customer message, and deduplicates retries of the same session.
+Arthur's current snake_case submission can be posted directly to the same endpoint. Chargerent converts it into a Customer Support case, uses `session_id` as the stable conversation identifier, stores `reason_detail` as the inbound customer message, and deduplicates retries of the same session. If `reason_detail` is empty, the readable reason label becomes the message.
 
 | Field | Type | Rule |
 |---|---|---|
@@ -45,7 +45,6 @@ Arthur's current snake_case submission can be posted directly to the same endpoi
 | `language` | string | `en`, `fr`, `es`, `de`, `it`, `pt`, `nl`, `ru`, `zh`, `ja`, `ar`, or `pl` |
 | `session_id` | string | Stable for the submission; reuse it when retrying |
 | `submitted_at` | string | ISO-8601 timestamp in UTC |
-| `chat_transcript` | string | Full conversation, up to 12,000 characters |
 | `rental_date` | string | Optional `YYYY-MM-DD`; when omitted, Chargerent uses the UTC date from `submitted_at` for rental matching |
 
 Accepted station IDs are `S01`, `S02`, `S03`, `S04`, `S05`, `S06`, `S07`, `S08`, `S10`, `S20`, `S21`, `S22`, `S23`, `S24`, `S25`, `S26`, `S27`, `S30`, and `unknown`. The receiver maps these IDs to their agreed Disney location names for display.
@@ -64,8 +63,7 @@ Example:
   "language": "fr",
   "session_id": "sess_1727385600000_x4k2p9a",
   "submitted_at": "2026-09-27T14:32:00.000Z",
-  "rental_date": "2026-09-26",
-  "chat_transcript": "Guest: I need a refund\nCharlie: ..."
+  "rental_date": "2026-09-26"
 }
 ```
 

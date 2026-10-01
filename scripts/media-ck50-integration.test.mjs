@@ -18,6 +18,7 @@ const mediaPageSource = fs.readFileSync(new URL('../src/pages/MediaPage.jsx', im
 const functionsSource = fs.readFileSync(new URL('../functions/index.js', import.meta.url), 'utf8');
 const detailPanelSource = fs.readFileSync(new URL('../src/components/kiosk/KioskDetailPanel.jsx', import.meta.url), 'utf8');
 const appSource = fs.readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8');
+const mediaControlPageSource = fs.readFileSync(new URL('../src/pages/ChargerentMediaPage.jsx', import.meta.url), 'utf8');
 
 function createKioskMediaFixture(prefix) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -63,6 +64,13 @@ test('Media Library enables only CK50 from the V1 hardware family', () => {
   assert.doesNotMatch(mediaPageSource, /V1_MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set\([^\n]*(?:CT10|CK30|CK40)/);
 });
 
+test('Besiter Media keeps Chargerent integrated CT12 apps out of its assignments', () => {
+  assert.match(mediaPageSource, /V2_MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set\(\['CT8', 'CK24', 'CK48'\]\)/);
+  assert.match(functionsSource, /V2_MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set\(\["CT8", "CK24", "CK48"\]\)/);
+  assert.doesNotMatch(mediaPageSource, /V2_MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set\([^\n]*CT12/);
+  assert.doesNotMatch(functionsSource, /V2_MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set\([^\n]*CT12/);
+});
+
 test('backend accepts CK50 assignments without broadening V1 media eligibility', () => {
   assert.match(functionsSource, /V1_MEDIA_CONFIGURABLE_KIOSK_TYPES = new Set\(\["CK50"\]\)/);
   assert.match(functionsSource, /isV1MediaKiosk\(kiosk\) \|\| \(/);
@@ -103,7 +111,8 @@ test('Media target stations show an Online pill using the dashboard status clock
   assert.match(mediaPageSource, /isKioskOnline\(kiosk, referenceTime\)/);
   assert.match(mediaPageSource, /data-media-kiosk-online="true"/);
   assert.match(mediaPageSource, />\s*Online\s*<\/span>/);
-  assert.match(appSource, /<MediaPage[\s\S]*?referenceTime=\{latestTimestamp\}/);
+  assert.match(appSource, /<ChargerentMediaPage[\s\S]*?referenceTime=\{latestTimestamp\}/);
+  assert.match(mediaControlPageSource, /<MediaPage[\s\S]*?referenceTime=\{referenceTime\}/);
 });
 
 test('CK50 media status requires a current kiosk report before showing Playing', () => {

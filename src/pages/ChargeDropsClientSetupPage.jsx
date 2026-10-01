@@ -1,10 +1,18 @@
 import {useEffect, useMemo, useState} from 'react';
 import {CheckCircleIcon, MagnifyingGlassIcon} from '@heroicons/react/24/outline';
-import {ArrowRightOnRectangleIcon, HomeIcon} from '@heroicons/react/24/solid';
 import {callFunctionWithAuth} from '../utils/callableRequest.js';
+import DashboardPageActions from '../components/UI/DashboardPageActions.jsx';
 
 const CHARGEDROPS_CITIES_URL =
   'https://firestore.googleapis.com/v1/projects/chargedrops-dev/databases/(default)/documents/cities?pageSize=100';
+const HOUSE_REGIONAL_PARTNER_ID = 'OCHARGELLC';
+const COMPANY_MANAGED_PARTNER_TYPE = 'company_managed';
+const HOUSE_PARTNER_OPTION = {
+  uid: '',
+  clientId: HOUSE_REGIONAL_PARTNER_ID,
+  regionalPartnerType: COMPANY_MANAGED_PARTNER_TYPE,
+  contact: {name: 'Ocharge LLC'},
+};
 
 const PAYMENT_SCHEDULES = [
   {value: 'monthly', label: 'Monthly'},
@@ -84,6 +92,17 @@ function isChargeDropsClient(profile) {
     profile?.products?.chargedrops === true;
 }
 
+function isCompanyManagedClient(profile) {
+  return profile?.regionalPartnerType === COMPANY_MANAGED_PARTNER_TYPE ||
+    String(profile?.regionalPartnerId || '').trim().toUpperCase() === HOUSE_REGIONAL_PARTNER_ID;
+}
+
+function companyRetainedPercent(clientPercent) {
+  const parsed = Number(clientPercent);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) return null;
+  return Math.round((100 - parsed) * 100) / 100;
+}
+
 function agreementStatusLabel(status) {
   if (status === 'signed') return 'Client signed';
   if (status === 'awaiting_signature') return 'Awaiting client signature';
@@ -91,7 +110,8 @@ function agreementStatusLabel(status) {
   return 'Not prepared';
 }
 
-function partnerNotificationStatusLabel(status) {
+function partnerNotificationStatusLabel(status, reason) {
+  if (reason === 'company-managed-location') return 'Not applicable · Company managed';
   if (status === 'sent') return 'Sent';
   if (status === 'failed') return 'Failed before sending';
   if (status === 'unknown') return 'Delivery uncertain';
@@ -155,6 +175,8 @@ export default function ChargeDropsClientSetupPage({
     () => partners.find((partner) => partner.clientId === form.partnerClientId) || null,
     [form.partnerClientId, partners],
   );
+  const companyManagedSelection = form.partnerClientId === HOUSE_REGIONAL_PARTNER_ID;
+  const retainedByCompany = companyRetainedPercent(form.revenueShare);
   const latestPartnerNotificationByClient = useMemo(() => {
     const latest = {};
     for (const notification of partnerNotifications) {
@@ -175,6 +197,7 @@ export default function ChargeDropsClientSetupPage({
           {id: 'atlanta', displayName: 'Atlanta', slug: 'atlanta', countryCode: 'US'},
         ]);
         setPartners([
+          HOUSE_PARTNER_OPTION,
           {uid: 'preview-phoenix', clientId: 'PHOENIX', contact: {name: 'Phoenix Regional Partner'}},
           {uid: 'preview-atlanta', clientId: 'ATLANTA', contact: {name: 'Atlanta Regional Partner'}},
         ]);
@@ -201,9 +224,11 @@ export default function ChargeDropsClientSetupPage({
 
         if (canceled) return;
         setCities(cityOptions);
-        setPartners(users
-          .filter((profile) => profile?.role === 'partner' || profile?.partner === true)
-          .sort((left, right) => String(left.clientId || '').localeCompare(String(right.clientId || ''))));
+        const regionalPartners = users
+          .filter((profile) => (profile?.role === 'partner' || profile?.partner === true) &&
+            String(profile?.clientId || '').trim().toUpperCase() !== HOUSE_REGIONAL_PARTNER_ID)
+          .sort((left, right) => String(left.clientId || '').localeCompare(String(right.clientId || '')));
+        setPartners([HOUSE_PARTNER_OPTION, ...regionalPartners]);
         setExistingClients(users.filter(isChargeDropsClient));
         setPartnerNotifications(Array.isArray(notificationsResult?.notifications)
           ? notificationsResult.notifications
@@ -332,6 +357,7 @@ export default function ChargeDropsClientSetupPage({
     const clientId = form.clientId.trim().toUpperCase();
     const username = form.username.trim().toLowerCase();
     const now = new Date().toISOString();
+    const companyManaged = form.partnerClientId === HOUSE_REGIONAL_PARTNER_ID;
     const profile = {
       username,
       clientId,
@@ -348,6 +374,8 @@ export default function ChargeDropsClientSetupPage({
       portalBrand: 'chargedrops',
       regionalPartnerId: form.partnerClientId,
       regionalPartnerUid: selectedPartner?.uid || '',
+      regionalPartnerType: companyManaged ? COMPANY_MANAGED_PARTNER_TYPE : 'regional_partner',
+      ...(companyManaged ? {partnerRevenueShare: '0'} : {}),
       commission: String(revenueShare),
       revShareModel: 'chargedrops',
       paymentSchedule: form.paymentSchedule,
@@ -374,6 +402,13 @@ export default function ChargeDropsClientSetupPage({
       },
       commands: {},
       chargedrops: {
+        ...(companyManaged ? {
+          revenueAllocation: {
+            clientPercent: revenueShare,
+            partnerPercent: 0,
+            companyPercent: companyRetainedPercent(revenueShare),
+          },
+        } : {}),
         city: {
           id: selectedCity.id,
           displayName: selectedCity.displayName,
@@ -410,6 +445,7 @@ export default function ChargeDropsClientSetupPage({
         uid: result?.uid || '',
         ...profile,
         regionalPartnerUid: result?.regionalPartnerUid || profile.regionalPartnerUid,
+        regionalPartnerType: result?.regionalPartnerType || profile.regionalPartnerType,
         chargedrops: {
           ...profile.chargedrops,
           publicVenueId: syncResult?.venueId || '',
@@ -436,7 +472,9 @@ export default function ChargeDropsClientSetupPage({
         text: `${place.venueName}'s client account was created. ${deliveryWarnings.join(' ')}`,
       } : {
         type: 'success',
-        text: `${place.venueName} was created, invited, published as Coming soon, and the regional partner was notified.`,
+        text: companyManaged
+          ? `${place.venueName} was created, invited, and published as Coming soon. Ocharge LLC manages the location; no regional-partner notification is required.`
+          : `${place.venueName} was created, invited, published as Coming soon, and the regional partner was notified.`,
       });
     } catch (error) {
       setMessage({type: 'error', text: error?.message || 'The ChargeDrops client could not be created.'});
@@ -565,6 +603,8 @@ export default function ChargeDropsClientSetupPage({
     }
     setUpdatingMilestone(milestone);
     setMessage(null);
+    const milestoneClient = existingClients.find((client) => client.uid === milestoneClientUid);
+    const companyManaged = isCompanyManagedClient(milestoneClient);
     try {
       const result = await callFunctionWithAuth('admin_updateChargeDropsOnboardingMilestone', {
         uid: milestoneClientUid,
@@ -590,10 +630,12 @@ export default function ChargeDropsClientSetupPage({
       )));
       await refreshPartnerNotifications();
       setMessage({
-        type: result?.partnerNotification?.status === 'sent' ? 'success' : 'warning',
-        text: result?.partnerNotification?.status === 'sent'
-          ? 'The onboarding milestone was saved and the regional partner was notified.'
-          : 'The onboarding milestone was saved, but the regional partner email was not confirmed.',
+        type: companyManaged || result?.partnerNotification?.status === 'sent' ? 'success' : 'warning',
+        text: companyManaged
+          ? 'The onboarding milestone was saved. This location is company-managed, so no regional-partner email is required.'
+          : result?.partnerNotification?.status === 'sent'
+            ? 'The onboarding milestone was saved and the regional partner was notified.'
+            : 'The onboarding milestone was saved, but the regional partner email was not confirmed.',
       });
       if (milestone === 'location_live') {
         setMilestoneClientUid('');
@@ -613,25 +655,17 @@ export default function ChargeDropsClientSetupPage({
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3">
-            <img src="/chargedrops-drop.svg" alt="" className="h-10 w-7" />
+            <img src={`${import.meta.env.BASE_URL}chargedrops-drop.svg`} alt="" className="h-10 w-7" />
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.22em] text-indigo-600">ChargeDrops</p>
               <h1 className="text-xl font-bold text-slate-900">Client Setup</h1>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={onNavigateToDashboard} className="rounded-md bg-gray-200 p-2 text-gray-700 hover:bg-gray-300" title="Back to dashboard" aria-label="Home">
-              <HomeIcon className="h-6 w-6" />
-            </button>
-            <button type="button" onClick={onNavigateToAdmin} className="rounded-md bg-orange-100 p-2 text-orange-700 hover:bg-orange-200" title="Admin tools" aria-label="Admin tools">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-              </svg>
-            </button>
-            <button type="button" onClick={onLogout} className="rounded-md bg-red-500 p-2 text-white hover:bg-red-600" title="Log out" aria-label="Log out">
-              <ArrowRightOnRectangleIcon className="h-6 w-6" />
-            </button>
-          </div>
+          <DashboardPageActions
+            onNavigateToDashboard={onNavigateToDashboard}
+            onNavigateToAdmin={onNavigateToAdmin}
+            onLogout={onLogout}
+          />
         </div>
       </header>
 
@@ -664,12 +698,20 @@ export default function ChargeDropsClientSetupPage({
                   {cities.map((city) => <option key={city.id} value={city.id}>{city.displayName}</option>)}
                 </select>
               </FormField>
-              <FormField label="Regional partner" required hint="Controls the kiosk relationship through info.rep.">
+              <FormField
+                label="Regional partner"
+                required
+                hint={companyManagedSelection
+                  ? 'Company-managed location. Ocharge LLC receives the remainder after the client share; regional-partner share is 0%.'
+                  : 'Controls the kiosk relationship through info.rep.'}
+              >
                 <select value={form.partnerClientId} onChange={(event) => updateForm('partnerClientId', event.target.value)} disabled={loading} className={inputClass} required>
                   <option value="">{loading ? 'Loading partners…' : 'Choose a partner'}</option>
                   {partners.map((partner) => (
                     <option key={partner.uid || partner.clientId} value={partner.clientId}>
-                      {partner.clientId} · {partner.contact?.name || partner.username || 'Regional partner'}
+                      {partner.clientId === HOUSE_REGIONAL_PARTNER_ID
+                        ? 'Ocharge LLC · No regional partner'
+                        : `${partner.clientId} · ${partner.contact?.name || partner.username || 'Regional partner'}`}
                     </option>
                   ))}
                 </select>
@@ -745,7 +787,13 @@ export default function ChargeDropsClientSetupPage({
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-indigo-600">4 · Revenue</p>
             <h2 className="mt-1 text-lg font-bold">Client revenue share</h2>
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              <FormField label="Revenue share percentage" required>
+              <FormField
+                label="Client revenue share percentage"
+                required
+                hint={companyManagedSelection && retainedByCompany !== null
+                  ? `Client receives ${form.revenueShare || 0}%. Regional partner receives 0%. Ocharge LLC retains ${retainedByCompany}%.`
+                  : 'Percentage of eligible rental revenue paid to the venue client.'}
+              >
                 <div className="relative">
                   <input type="number" min="0" max="100" step="0.1" value={form.revenueShare} onChange={(event) => updateForm('revenueShare', event.target.value)} className={`${inputClass} pr-10`} required />
                   <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-sm font-semibold text-slate-500">%</span>
@@ -767,7 +815,7 @@ export default function ChargeDropsClientSetupPage({
         <aside className="space-y-4 lg:sticky lg:top-6 lg:self-start">
           <section className="rounded-2xl bg-slate-900 p-5 text-white shadow-sm">
             <div className="flex items-center gap-3">
-              <img src="/chargedrops-drop.svg" alt="" className="h-12 w-8 rounded bg-white p-1" />
+              <img src={`${import.meta.env.BASE_URL}chargedrops-drop.svg`} alt="" className="h-12 w-8 rounded bg-white p-1" />
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.18em] text-indigo-300">Client journey</p>
                 <p className="font-bold">Branded portal only</p>
@@ -796,7 +844,11 @@ export default function ChargeDropsClientSetupPage({
                 return (
                 <div key={client.uid || client.clientId} className="rounded-xl border border-slate-200 p-3">
                   <p className="text-sm font-bold text-slate-900">{client.chargedrops?.location?.venueName || client.contact?.name || client.clientId}</p>
-                  <p className="mt-1 text-xs text-slate-500">{client.clientId} · {client.regionalPartnerId || 'No partner'}</p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {client.clientId} · {isCompanyManagedClient(client)
+                      ? 'Ocharge LLC · Company managed'
+                      : client.regionalPartnerId || 'No partner'}
+                  </p>
                   <p className="mt-1 text-xs font-medium text-indigo-700">{client.commission || 0}% · {client.paymentSchedule || 'monthly'}</p>
                   <p className={`mt-2 text-xs font-semibold ${client.chargedrops?.onboarding?.agreementStatus === 'signed' ? 'text-emerald-700' : 'text-amber-700'}`}>
                     Agreement · {agreementStatusLabel(client.chargedrops?.onboarding?.agreementStatus)}
@@ -805,7 +857,7 @@ export default function ChargeDropsClientSetupPage({
                     Installation · {String(client.chargedrops?.onboarding?.installationStatus || 'not scheduled').replaceAll('_', ' ')}
                   </p>
                   <p className={`mt-2 text-xs font-semibold ${partnerNotificationStatusClass(partnerNotification?.status)}`}>
-                    Partner email · {partnerNotificationStatusLabel(partnerNotification?.status)}
+                    Partner email · {partnerNotificationStatusLabel(partnerNotification?.status, partnerNotification?.reason)}
                   </p>
                   {partnerNotification?.stage && (
                     <p className="mt-0.5 text-xs text-slate-500">{partnerNotification.stage}</p>

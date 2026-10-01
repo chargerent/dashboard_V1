@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../firebase-config';
 import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
+import DashboardPageActions from '../components/UI/DashboardPageActions.jsx';
 import { callFunctionWithAuth } from '../utils/callableRequest.js';
 import { buildStationQrUrl, normalizeStationId, parseStationQrInput } from '../utils/stationQr.js';
 
@@ -209,6 +210,7 @@ export default function BindingPage({
   t,
   onLogout,
   onNavigateToDashboard,
+  onNavigateToAdmin,
   currentUser,
   allStationsData,
 }) {
@@ -851,14 +853,13 @@ export default function BindingPage({
         <div className="mx-auto max-w-3xl rounded-lg bg-white p-8 shadow-md">
           <h1 className="text-2xl font-bold text-gray-900">{t('module_binding')}</h1>
           <p className="mt-3 text-sm text-gray-600">{t('no_binding_access')}</p>
-          <div className="mt-6 flex gap-3">
-            <button
-              onClick={onLogout}
-              className="rounded-md bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600"
-            >
-              {t('logout')}
-            </button>
-          </div>
+          <DashboardPageActions
+            className="mt-6 justify-start"
+            onNavigateToDashboard={onNavigateToDashboard}
+            onNavigateToAdmin={onNavigateToAdmin}
+            onLogout={onLogout}
+            t={t}
+          />
         </div>
       </div>
     );
@@ -870,23 +871,13 @@ export default function BindingPage({
 
       <header className="bg-white shadow-sm">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-          <button
-            onClick={onNavigateToDashboard}
-            className="rounded-md bg-gray-200 p-2 text-gray-700 hover:bg-gray-300"
-            title={t('back_to_dashboard')}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-            </svg>
-          </button>
-          <div className="flex items-center gap-3">
-            <button
-              onClick={onLogout}
-              className="rounded-md bg-red-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-600"
-            >
-              {t('logout')}
-            </button>
-          </div>
+          <h1 className="text-xl font-bold text-gray-900">{t('module_binding')}</h1>
+          <DashboardPageActions
+            onNavigateToDashboard={onNavigateToDashboard}
+            onNavigateToAdmin={onNavigateToAdmin}
+            onLogout={onLogout}
+            t={t}
+          />
         </div>
       </header>
 

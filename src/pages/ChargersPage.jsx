@@ -3,6 +3,7 @@
 import { useMemo, useState, useEffect } from 'react';
 import ConfirmationModal from '../components/UI/ConfirmationModal';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
+import DashboardPageActions, { DashboardLanguageToggle } from '../components/UI/DashboardPageActions.jsx';
 import { formatDateTime, formatDuration } from '../utils/dateFormatter';
 import { formatRentalChargeAmount, isReturnedRentalStatus, normalizeRefundStatus } from '../utils/rentals.js';
 import { normalizeText, textEquals, toText } from '../utils/text';
@@ -403,7 +404,7 @@ const ChargerCard = ({ charger, t, onCommand, onNavigateToRentals, onNavigateToD
     );
 };
 
-export default function ChargersPage({ onNavigateToDashboard, onNavigateToRentals, rentalData, rentalsLoading = false, kioskData, t, language, setLanguage, onLogout, onCommand, commandStatus, setCommandStatus, clientInfo, initialSearch = '' }) {
+export default function ChargersPage({ onNavigateToDashboard, onNavigateToAdmin, onNavigateToRentals, rentalData, rentalsLoading = false, kioskData, t, language, setLanguage, onLogout, onCommand, commandStatus, setCommandStatus, clientInfo, initialSearch = '' }) {
     const [searchTerm, setSearchTerm] = useState(initialSearch);
     const [activeFilter, setActiveFilter] = useState('all');
 
@@ -648,18 +649,13 @@ export default function ChargersPage({ onNavigateToDashboard, onNavigateToRental
             <header className="bg-white shadow-sm">
                 <div className="max-w-screen-xl mx-auto py-4 px-4 sm:px-4 lg:px-6 flex justify-between items-center">
                     {/* Language buttons on the left */}
-                    <div className="flex items-center gap-2">
-                        <button onClick={() => setLanguage('en')} className={`px-2 py-1 text-sm font-bold rounded-md ${language === 'en' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}>EN</button>
-                        <button onClick={() => setLanguage('fr')} className={`px-2 py-1 text-sm font-bold rounded-md ${language === 'fr' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}>FR</button>
-                    </div>
-                    <div className="flex items-center gap-4">
-                        <button onClick={() => onNavigateToDashboard()} className="p-2 rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300" title={t('back_to_dashboard')}>
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
-                        </button>
-                        <button onClick={onLogout} className="p-2 rounded-md bg-red-500 text-white hover:bg-red-600" title={t('logout')}>
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2"><path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-                        </button>
-                    </div>
+                    <DashboardLanguageToggle language={language} setLanguage={setLanguage} />
+                    <DashboardPageActions
+                        onNavigateToDashboard={onNavigateToDashboard}
+                        onNavigateToAdmin={onNavigateToAdmin}
+                        onLogout={onLogout}
+                        t={t}
+                    />
                 </div>
             </header>
             <main className="max-w-screen-xl mx-auto py-6 sm:px-4 lg:px-6">

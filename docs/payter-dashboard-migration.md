@@ -94,12 +94,12 @@ The existing Client profiles page owns kiosk-screen, Apollo, and P68 content. Th
 - Kiosk-screen content remains in `ui` and `languages`, retaining existing profile IDs.
 - P68 default messages remain in `languages.locales.{en,fr,es}.terminals.PAYTERP68`. The five existing fields are start, wait, takeCharger, returned, and soldOut. They are distinct from the kiosk payment-instruction screen.
 - Apollo default copy is stored in `terminalProfiles.apollo.translations`.
-- Every Apollo kiosk assigned to a client uses the same client-wide Apollo flow. Apollo does not support per-kiosk overrides. P68 text overrides live in `terminalProfiles.p68.overrides.{stationid}`; removing one restores the client default.
+- Every kiosk assigned to a client uses the same client-wide terminal profile for its gateway. Apollo and P68 do not support per-kiosk content overrides; selecting kiosks changes only the publish targets.
 - `sectionVersions` records saved revisions. This is not immutable version history or runtime rollback support.
 
 `uiProfile_list` advertises `capabilities.scopedProfiles: 1`. Until that contract is deployed, the new page permits local editing/preview but disables server save and publish. Simply opening the page no longer creates profiles in Firestore; missing clients get an unsaved template.
 
-Scoped saves use the existing callable/HTTP upsert with `section`, optional `stationid`, and `useDefault`. Only the requested section/override changes. The server verifies client ownership, terminal compatibility, administrator access for Apollo, and the reviewed profile version. Scoped apply requires `section`, `profileId`, `expectedVersion`, and explicit `stationids`; it checks every target before an atomic update. P68 applies preserve the target's touchscreen, UI mode/version/created fields, access PINs, hardware, and legacy language representation. Kiosk-screen applies preserve P68 text. PINs change only through Kiosk access.
+Scoped saves use the existing callable/HTTP upsert with `section`. Only the requested client-wide section changes. The server rejects station-specific terminal content, verifies client ownership, administrator access for Apollo, and the reviewed profile version. Scoped apply requires `section`, `profileId`, `expectedVersion`, and explicit `stationids`; it checks every target before an atomic update. P68 applies preserve the target's touchscreen, UI mode/version/created fields, access PINs, hardware, and legacy language representation. Kiosk-screen applies preserve P68 text. PINs change only through Kiosk access.
 
 Publishing uses the existing kiosk `uichange` path for kiosk-screen/P68/access sections. A successful database write or command send is not device adoption. `ui.profileSections.{section}` stores the requested version; confirmation requires matching `reportedUiProfile.sections.{section}` telemetry. Existing runtimes do not yet necessarily report this telemetry. Profile command feedback stays on the profile page; connection failures must not be reported as a successful send.
 
@@ -107,7 +107,7 @@ Apollo publishing is rejected by the server regardless of UI flags. The editor l
 
 Before enabling production publishing, deploy the scoped list/upsert/apply functions and their HTTP equivalents as a coordinated release. Verify a test kiosk's actual P68 message adoption and `uichange` behavior during a transaction before expanding rollout. This page refactor does not establish interruption-free runtime activation and does not require a Node-RED restart.
 
-Development verification: `/portal/?page=profiles-preview` uses sample Apollo-only, P68-only, and mixed clients. Its saves use an in-memory document store and publishing is always disabled. It must remain gated by `import.meta.env.DEV`. Tests cover section isolation, legacy P68 copy, inheritance, server permissions, stale versions, atomic target validation, and adoption reporting.
+Development verification: `/portal/?page=profiles-preview` uses sample Apollo-only, P68-only, and mixed clients. Its saves use an in-memory document store and publishing is always disabled. It must remain gated by `import.meta.env.DEV`. Tests cover section isolation, client-wide P68 copy, legacy-override cleanup, server permissions, stale versions, atomic target validation, and adoption reporting.
 
 ## Added Apollo screens (local implementation)
 

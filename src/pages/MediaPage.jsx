@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArchiveBoxIcon, ComputerDesktopIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { ArchiveBoxIcon, TrashIcon } from '@heroicons/react/24/outline';
 import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
+import DashboardPageActions from '../components/UI/DashboardPageActions.jsx';
 import ConfirmationModal from '../components/UI/ConfirmationModal.jsx';
 import LoadingSpinner from '../components/UI/LoadingSpinner.jsx';
 import { callFunctionWithAuth } from '../utils/callableRequest.js';
@@ -490,6 +491,7 @@ export default function MediaPage({
   allStationsData,
   referenceTime,
   t,
+  embedded = false,
 }) {
   const [assets, setAssets] = useState([]);
   const [v1Assignments, setV1Assignments] = useState([]);
@@ -1223,8 +1225,10 @@ export default function MediaPage({
     }
   };
 
+  const ContentContainer = embedded ? 'div' : 'main';
+
   return (
-    <div className="min-h-screen bg-gray-100">
+    <div className={embedded ? '' : 'min-h-screen bg-gray-100'} data-legacy-media-player="true">
       <UploadMetadataModal
         isOpen={pendingUploadFiles.length > 0}
         files={pendingUploadFiles}
@@ -1250,62 +1254,31 @@ export default function MediaPage({
       />
       <CommandStatusToast status={status} onDismiss={() => setStatus(null)} />
 
-      <header className="bg-white shadow-sm">
-        <div className="mx-auto flex max-w-screen-2xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Media Library</h1>
-          </div>
+      {!embedded && (
+        <header className="bg-white shadow-sm">
+          <div className="mx-auto flex max-w-screen-2xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
+            <div>
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">Besiter Media</h1>
+                <p className="mt-1 text-sm text-gray-500">Playlists for kiosks running the default Besiter application.</p>
+              </div>
+            </div>
 
-          <div className="flex items-center gap-3">
-            {import.meta.env.DEV && (
-              <a href="?page=kiosk-control-lab" className="rounded-md bg-emerald-100 p-2 text-emerald-700 hover:bg-emerald-200" title="Open local Kiosk Control" aria-label="Kiosk Control">
-                <ComputerDesktopIcon className="h-6 w-6" />
-              </a>
-            )}
-            {import.meta.env.DEV && (
-              <a
-                href="?page=media-lab"
-                className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
-                title="Open local media studio"
-              >
-                Android media lab
-              </a>
-            )}
-            <button
-              type="button"
-              onClick={onNavigateToDashboard}
-              className="rounded-md bg-gray-200 p-2 text-gray-700 hover:bg-gray-300"
-              title={t('back_to_dashboard')}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              onClick={onNavigateToAdmin}
-              className="rounded-md bg-orange-100 p-2 text-orange-700 hover:bg-orange-200"
-              title={t('admin_tools')}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              onClick={onLogout}
-              className="rounded-md bg-red-500 p-2 text-white hover:bg-red-600"
-              title={t('logout')}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-            </button>
+            <div className="flex items-center gap-3">
+              <DashboardPageActions
+                onNavigateToDashboard={onNavigateToDashboard}
+                onNavigateToAdmin={onNavigateToAdmin}
+                onLogout={onLogout}
+                t={t}
+              />
+            </div>
           </div>
-        </div>
-      </header>
+        </header>
+      )}
 
-      <main className="mx-auto grid max-w-screen-2xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[1.3fr_1fr] lg:px-8">
+      <ContentContainer className={embedded
+        ? 'grid gap-6 lg:grid-cols-[1.3fr_1fr]'
+        : 'mx-auto grid max-w-screen-2xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[1.3fr_1fr] lg:px-8'}>
         <section className="space-y-6">
           <div className="rounded-xl bg-white p-6 shadow-md">
             <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -1594,7 +1567,7 @@ export default function MediaPage({
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Target Stations</h2>
                 <p className="mt-1 text-sm text-gray-600">
-                  Select stations to assign assets to. Offline CT8, CK24, CK48, and V1 CK50 kiosks will load their assigned media when they come back online.
+                  Select Besiter stations to assign assets to. Offline CT8, CK24, CK48, and V1 CK50 kiosks will load their assigned media when they come back online.
                 </p>
               </div>
               <div className="text-right text-xs text-gray-500">
@@ -1622,7 +1595,7 @@ export default function MediaPage({
 
             {eligibleKiosks.length === 0 ? (
               <div className="mt-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-6 text-sm text-gray-500">
-                No CT8, CK24, CK48, or V1 CK50 stations were found for this account.
+                No CT8, CK24, CK48, or V1 CK50 Besiter stations were found for this account.
               </div>
             ) : (
               <div className="mt-4 max-h-[32rem] space-y-3 overflow-y-auto pr-1">
@@ -1730,7 +1703,7 @@ export default function MediaPage({
             </div>
           </div>
         </section>
-      </main>
+      </ContentContainer>
     </div>
   );
 }

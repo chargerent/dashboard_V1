@@ -6,6 +6,7 @@ import {
   ArrowUturnLeftIcon,
   Battery100Icon,
   BoltIcon,
+  ComputerDesktopIcon,
   CreditCardIcon,
   DevicePhoneMobileIcon,
   ExclamationTriangleIcon,
@@ -25,8 +26,10 @@ import {
 
 import ConfirmationModal from '../components/UI/ConfirmationModal.jsx';
 import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
+import DashboardPageActions from '../components/UI/DashboardPageActions.jsx';
 import LoadingSpinner from '../components/UI/LoadingSpinner.jsx';
 import ModalPortal from '../components/UI/ModalPortal.jsx';
+import IntegratedKioskApps from '../components/media/IntegratedKioskApps.jsx';
 import { callFunctionWithAuth } from '../utils/callableRequest.js';
 import { filterStationsForClient } from '../utils/helpers.js';
 import {
@@ -40,12 +43,14 @@ import {
   getPhoneStationCountryCode,
   getPhoneConnectionState,
   isPhoneAgentUpdateAvailable,
+  isIntegratedKiosk,
   isPhoneWebRtcActive,
   isPhoneRemoteInputAvailable,
   normalizeAgentRelease,
   normalizePaymentAppRelease,
   normalizePhoneDevice,
   phoneLocationMapUrls,
+  phoneDeviceTypeLabel,
   phoneKioskPlaceLabel,
   phoneHotspotLabel,
   phoneMatchesSearch,
@@ -170,6 +175,16 @@ const PHONE_COMMAND_LABELS = {
 
 function stationIdOf(kiosk) {
   return String(kiosk?.stationid || kiosk?.stationId || '').trim().toUpperCase();
+}
+
+function integratedStripeReaderLabel(device) {
+  const reported = device?.inventory?.m2Terminal || {};
+  const readerType = reported.readerType || device?.terminal?.stripeReaderType || '';
+  if (reported.readerName) return reported.readerName;
+  if (readerType === 'bbpos_wisepad3' || /^(FR|CA)/.test(String(device?.stationId || ''))) {
+    return 'WisePad 3';
+  }
+  return 'Stripe M2';
 }
 
 function commandTimestamp(command) {
@@ -341,7 +356,7 @@ function AddPhoneCard({ onClick }) {
     >
       <p className="text-xs font-bold uppercase tracking-wide text-blue-600">Add a phone</p>
       <PlusIcon className="mt-1 h-8 w-8 stroke-2 text-blue-600 transition group-hover:scale-105" />
-      <p className="mt-1 text-xs text-blue-700/75">Provision or enroll a kiosk phone</p>
+      <p className="mt-1 text-xs text-blue-700/75">Enroll a managed Android phone</p>
     </button>
   );
 }
@@ -372,7 +387,7 @@ function PhoneListCard({ device, kiosk, now, selected, onSelect, onNavigateToDas
   const unassigned = !device.stationId;
   const deviceSuffix = String(device.id || '').slice(-6);
   const subtitle = unassigned
-    ? [device.inventory.model || device.displayName || 'Android phone', deviceSuffix ? `Device …${deviceSuffix}` : '']
+    ? [device.inventory.model || device.displayName || phoneDeviceTypeLabel(device), deviceSuffix ? `Device …${deviceSuffix}` : '']
       .filter(Boolean).join(' · ')
     : phoneKioskPlaceLabel(kiosk) || device.displayName || device.id;
 
@@ -383,7 +398,7 @@ function PhoneListCard({ device, kiosk, now, selected, onSelect, onNavigateToDas
       <button
         type="button"
         onClick={onSelect}
-        aria-label={`Manage ${device.stationId || device.displayName || 'unassigned phone'}`}
+        aria-label={`Manage ${device.stationId || device.displayName || 'unassigned Android device'}`}
         aria-pressed={selected}
         className="absolute inset-0 z-0 rounded-xl focus:outline-none focus-visible:ring-4 focus-visible:ring-blue-500/20"
       />
@@ -392,7 +407,7 @@ function PhoneListCard({ device, kiosk, now, selected, onSelect, onNavigateToDas
           <div className="flex items-center gap-2">
             <span className={`h-2.5 w-2.5 rounded-full ${style.dot}`} />
             {unassigned ? (
-              <p className="truncate text-base font-black text-slate-900">Unassigned phone</p>
+              <p className="truncate text-base font-black text-slate-900">Unassigned {isIntegratedKiosk(device) ? 'kiosk' : 'phone'}</p>
             ) : (
               <StationDashboardLink
                 stationId={device.stationId}
@@ -405,6 +420,7 @@ function PhoneListCard({ device, kiosk, now, selected, onSelect, onNavigateToDas
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${style.badge}`}>{style.label}</span>
+          <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600">{phoneDeviceTypeLabel(device)}</span>
           {unassigned ? (
             <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-800">Unassigned</span>
           ) : device.terminal.enabled && (
@@ -544,8 +560,8 @@ function PhoneEnrollmentModal({
         >
           <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-5 py-4 sm:px-6">
             <div>
-              <h2 id="phone-enrollment-modal-title" className="text-xl font-black text-slate-900">Add a phone</h2>
-              <p className="mt-1 text-xs leading-5 text-slate-500">Provision a factory-reset Android phone, then enroll it securely into managed inventory.</p>
+              <h2 id="phone-enrollment-modal-title" className="text-xl font-black text-slate-900">Add a managed phone</h2>
+              <p className="mt-1 text-xs leading-5 text-slate-500">Integrated kiosk apps are enrolled and assigned from the Media page.</p>
             </div>
             <button
               type="button"
@@ -565,10 +581,10 @@ function PhoneEnrollmentModal({
               <h3 className="text-sm font-black text-slate-900">Enroll a managed phone</h3>
               <p className="mt-1 text-xs leading-5 text-slate-500">
                 {enrollmentMode === 'unassigned'
-                  ? 'Prepare the phone now and assign it to a kiosk when deployment is ready.'
-                  : 'Create a one-time code that assigns the phone to a kiosk during enrollment.'}
+                  ? 'Prepare the phone now and assign it to a station when deployment is ready.'
+                  : 'Create a one-time code that assigns the phone to a station during enrollment.'}
               </p>
-              <div className="mt-3 grid grid-cols-2 rounded-lg bg-slate-100 p-1" role="group" aria-label="Phone enrollment mode">
+              <div className="mt-3 grid grid-cols-2 rounded-lg bg-slate-100 p-1" role="group" aria-label="Android enrollment mode">
                 <button
                   type="button"
                   onClick={() => onEnrollmentModeChange('unassigned')}
@@ -589,7 +605,7 @@ function PhoneEnrollmentModal({
               <p className="mt-3 text-[10px] font-black uppercase tracking-wider text-slate-400">
                 {enrollmentMode === 'unassigned' ? 'Inventory market' : 'Kiosk country'}
               </p>
-              <div className="mt-1 grid grid-cols-3 rounded-lg bg-slate-100 p-1" role="group" aria-label="Enrollment phone country">
+              <div className="mt-1 grid grid-cols-3 rounded-lg bg-slate-100 p-1" role="group" aria-label="Android enrollment country">
                 {PHONE_KIOSK_COUNTRIES.map((country) => (
                   <button
                     key={country.code}
@@ -632,7 +648,7 @@ function PhoneEnrollmentModal({
               </div>
               {enrollmentCode && (
                 <div className="mt-3 rounded-lg border border-blue-200 bg-blue-50 p-3 text-center">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-blue-600">One-time enrollment code</p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-blue-600">One-time six-digit enrollment code</p>
                   <p className="mt-1 font-mono text-2xl font-black tracking-[0.22em] text-blue-900">{enrollmentCode}</p>
                 </div>
               )}
@@ -921,13 +937,14 @@ function Metric({ icon: Icon, label, value, detail = '', detailTone = 'slate', a
 
 function AgentMetric({
   inventory,
+  integrated = false,
   release,
   releaseLoading,
   updateChecking,
   canControl,
   onUpdate,
 }) {
-  const updateAvailable = isPhoneAgentUpdateAvailable(inventory, release);
+  const updateAvailable = !integrated && isPhoneAgentUpdateAvailable(inventory, release);
   const version = inventory.agentVersion ? `v${inventory.agentVersion}` : 'Unknown';
   const buttonEnabled = updateAvailable && canControl && !releaseLoading && !updateChecking;
   const buttonTitle = releaseLoading
@@ -944,11 +961,11 @@ function AgentMetric({
     <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
       <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
         <BoltIcon className="h-4 w-4 text-slate-500" />
-        Agent
+        {integrated ? 'Integrated app' : 'Agent'}
       </div>
       <div className="mt-1 flex min-w-0 items-center justify-between gap-2">
         <p className={`min-w-0 truncate text-sm font-bold ${updateAvailable ? 'text-red-600' : 'text-slate-800'}`}>{version}</p>
-        <button
+        {!integrated && <button
           type="button"
           onClick={onUpdate}
           disabled={!buttonEnabled}
@@ -957,8 +974,9 @@ function AgentMetric({
         >
           <ArrowPathIcon className={`h-3.5 w-3.5 ${releaseLoading || updateChecking ? 'animate-spin' : ''}`} />
           {releaseLoading || updateChecking ? 'Checking…' : 'Update'}
-        </button>
+        </button>}
       </div>
+      {integrated && <p className="mt-1 text-[10px] font-semibold text-slate-400">Signed kiosk release channel</p>}
     </div>
   );
 }
@@ -1067,6 +1085,8 @@ function TerminalControlPanel({
   const stripeCountry = terminal.stripeAccountCountry || 'Not configured';
   const stripeMode = terminal.stripeMode ? terminal.stripeMode.toUpperCase() : 'UNKNOWN';
   const controlsDisabled = !canControl || !agentReady;
+  const integrated = isIntegratedKiosk(device);
+  const integratedReader = integratedStripeReaderLabel(device);
 
   return (
     <section className="overflow-hidden rounded-xl border border-blue-200 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 text-white shadow-lg">
@@ -1078,7 +1098,7 @@ function TerminalControlPanel({
               <h3 className="text-xl font-black">Payment terminal</h3>
             </div>
             <p className="mt-2 max-w-xl text-sm leading-6 text-slate-300">
-              Dedicated terminal controls replace live screen and Android navigation for this phone.
+              {integrated ? `${integratedReader} runs through the media kiosk app.` : 'Dedicated terminal controls replace live screen and Android navigation for this phone.'}
             </p>
           </div>
           <span className={`rounded-full px-3 py-1.5 text-xs font-black ${terminalStyle.badge}`}>
@@ -1138,11 +1158,11 @@ function TerminalControlPanel({
         <ActionButton
           icon={BoltIcon}
           onClick={onUpdatePaymentApp}
-          disabled={controlsDisabled || paymentUpdateChecking}
+          disabled={integrated || controlsDisabled || paymentUpdateChecking}
           tone="blue"
           className="min-h-14 !text-sm"
         >
-          {paymentUpdateChecking ? 'Checking update…' : 'Update payment app'}
+          {integrated ? 'Use kiosk app release' : paymentUpdateChecking ? 'Checking update…' : 'Update payment app'}
         </ActionButton>
       </div>
     </section>
@@ -1974,6 +1994,7 @@ function RemoteScreen({
 
 export default function PhoneControlPage({
   onNavigateToDashboard,
+  onNavigateToAdmin,
   onLogout,
   currentUser,
   allStationsData = [],
@@ -1985,6 +2006,7 @@ export default function PhoneControlPage({
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const normalizedInitialSearch = String(initialSearch || '').trim();
+  const [deviceTab, setDeviceTab] = useState(normalizedInitialSearch ? 'phones' : 'apps');
   const [search, setSearch] = useState(normalizedInitialSearch);
   const [phoneCardFilter, setPhoneCardFilter] = useState('all');
   const [selectedDeviceId, setSelectedDeviceId] = useState('');
@@ -2054,7 +2076,9 @@ export default function PhoneControlPage({
     try {
       const response = await callFunctionWithAuth('phoneControl_listDevices');
       const nextDevices = (Array.isArray(response?.devices) ? response.devices : [])
-        .map((device) => normalizePhoneDevice(device, device.id || device.deviceId))
+        .map((device) => normalizePhoneDevice(device, device?.id || device?.deviceId))
+        .filter((device) => device.id)
+        .filter((device) => !isIntegratedKiosk(device))
         .sort((left, right) => (
           (left.stationId || 'ZZZZ').localeCompare(right.stationId || 'ZZZZ') || left.id.localeCompare(right.id)
         ));
@@ -2238,8 +2262,8 @@ export default function PhoneControlPage({
   const selectedConnection = getPhoneConnectionState(selectedDevice, now);
   const selectedTerminalStyle = TERMINAL_STYLES[selectedDevice?.terminal?.state] ||
     (selectedDevice?.terminal?.enabled ? TERMINAL_STYLES.pending : TERMINAL_STYLES.disabled);
-  const selectedTerminalAgentReady = Number(selectedDevice?.inventory?.agentVersionCode || 0) >=
-    TERMINAL_AGENT_MIN_VERSION_CODE;
+  const selectedTerminalAgentReady = isIntegratedKiosk(selectedDevice) ||
+    Number(selectedDevice?.inventory?.agentVersionCode || 0) >= TERMINAL_AGENT_MIN_VERSION_CODE;
   const selectedTerminalLocked = selectedDevice?.inventory?.terminalLockdownActive === true ||
     selectedDevice?.terminal?.lockdownEnabled === true;
   const assignmentUnchanged = assignmentStationId === selectedDevice?.stationId &&
@@ -2493,6 +2517,7 @@ export default function PhoneControlPage({
     try {
       const result = await callFunctionWithAuth('phoneControl_createEnrollment', {
         market: enrollmentCountry,
+        deviceKind: 'managed_phone',
         stationId: enrollmentMode === 'assigned' ? enrollmentStationId : '',
       });
       setEnrollmentCode(String(result?.enrollmentCode || ''));
@@ -2522,7 +2547,10 @@ export default function PhoneControlPage({
   const onlineCount = devices.filter((device) => getPhoneConnectionState(device, now) === 'online').length;
   const unassignedCount = devices.filter((device) => !device.stationId).length;
   const attentionCount = devices.filter((device) => phoneNeedsAttention(device, now)).length;
-  const phoneLineSummary = useMemo(() => summarizePhoneLines(devices, now), [devices, now]);
+  const phoneLineSummary = useMemo(
+    () => summarizePhoneLines(devices.filter((device) => !isIntegratedKiosk(device)), now),
+    [devices, now],
+  );
 
   if (!hasPhoneControlAccess) {
     return <div className="min-h-screen bg-gray-100 p-6"><div className="mx-auto max-w-3xl rounded-lg border border-red-200 bg-red-50 p-6 text-red-700">Mobile Device Management is not enabled for this account.</div></div>;
@@ -2539,7 +2567,7 @@ export default function PhoneControlPage({
       <PhoneLinesModal
         isOpen={phoneLinesOpen}
         onClose={closePhoneLines}
-        devices={devices}
+        devices={devices.filter((device) => !isIntegratedKiosk(device))}
         kioskByStationId={kioskByStationId}
         now={now}
         isAdmin={isAdmin}
@@ -2565,7 +2593,7 @@ export default function PhoneControlPage({
       />
       {isAdmin && (
         <PhoneEnrollmentModal
-          isOpen={addPhoneOpen}
+          isOpen={deviceTab === 'phones' && addPhoneOpen}
           onClose={closeAddPhone}
           enrollmentMode={enrollmentMode}
           onEnrollmentModeChange={changeEnrollmentMode}
@@ -2582,21 +2610,64 @@ export default function PhoneControlPage({
 
       <header className="w-full max-w-full overflow-x-hidden bg-white shadow-sm">
         <div className="mx-auto flex min-w-0 max-w-screen-2xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-          <h1 className="min-w-0 flex-1 truncate text-xl font-black text-slate-900">Mobile Device Management</h1>
-          <div className="flex shrink-0 items-center gap-3">
-            <button type="button" onClick={() => onNavigateToDashboard()} className="rounded-md bg-gray-200 p-2 text-gray-700 hover:bg-gray-300" title="Back to dashboard" aria-label="Back to dashboard">
-              <HomeIcon className="h-6 w-6" />
-            </button>
-            <button type="button" onClick={onLogout} className="rounded-md bg-red-500 p-2 text-white hover:bg-red-600" title={t('logout')} aria-label={t('logout')}>
-              <PowerIcon className="h-6 w-6" />
-            </button>
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-xl font-black text-slate-900">Device Management</h1>
+            <p className="mt-1 truncate text-sm text-slate-500">Enroll Chargerent kiosk apps and managed phones in one place.</p>
           </div>
+          <DashboardPageActions
+            onNavigateToDashboard={onNavigateToDashboard}
+            onNavigateToAdmin={onNavigateToAdmin}
+            onLogout={onLogout}
+            t={t}
+          />
         </div>
       </header>
 
       <main className="mx-auto w-full min-w-0 max-w-screen-2xl space-y-5 overflow-x-hidden px-4 py-6 sm:px-6 lg:px-8">
+        <nav
+          className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm"
+          aria-label="Device enrollment types"
+          role="tablist"
+        >
+          <button
+            type="button"
+            role="tab"
+            id="device-tab-apps"
+            aria-controls="device-panel-apps"
+            aria-selected={deviceTab === 'apps'}
+            onClick={() => setDeviceTab('apps')}
+            className={`inline-flex min-h-12 items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-black transition ${deviceTab === 'apps' ? 'bg-violet-600 text-white shadow-sm' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
+          >
+            <ComputerDesktopIcon className="h-5 w-5" />
+            App
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="device-tab-phones"
+            aria-controls="device-panel-phones"
+            aria-selected={deviceTab === 'phones'}
+            onClick={() => setDeviceTab('phones')}
+            className={`inline-flex min-h-12 items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-black transition ${deviceTab === 'phones' ? 'bg-blue-600 text-white shadow-sm' : 'bg-slate-50 text-slate-700 hover:bg-slate-100'}`}
+          >
+            <DevicePhoneMobileIcon className="h-5 w-5" />
+            Phone
+          </button>
+        </nav>
+
+        {deviceTab === 'apps' ? (
+          <section id="device-panel-apps" role="tabpanel" aria-labelledby="device-tab-apps">
+            <IntegratedKioskApps
+              currentUser={currentUser}
+              kiosks={accessibleKiosks}
+              referenceTime={now}
+              onStatus={setCommandStatus}
+            />
+          </section>
+        ) : (
+          <div id="device-panel-phones" role="tabpanel" aria-labelledby="device-tab-phones" className="space-y-5">
         <section className={`grid grid-cols-2 gap-3 ${isAdmin ? 'lg:grid-cols-3 xl:grid-cols-6' : 'lg:grid-cols-4'}`}>
-          <SummaryCard label="Managed phones" value={devices.length} detail="Assigned and staged inventory" />
+          <SummaryCard label="Managed phones" value={devices.length} detail="Assigned and staged phone inventory" />
           <SummaryCard label="Online" value={onlineCount} detail="Heartbeat within 90 seconds" tone="green" />
           <SummaryCard
             label="Phone lines"
@@ -2685,7 +2756,7 @@ export default function PhoneControlPage({
                     <div className="space-y-2">
                       {isAdmin && filteredUnassignedDevices.length > 0 && (
                         <div className="flex items-center justify-between px-1">
-                          <h3 className="text-[10px] font-black uppercase tracking-wider text-slate-500">Assigned kiosk phones</h3>
+                          <h3 className="text-[10px] font-black uppercase tracking-wider text-slate-500">Assigned phones</h3>
                           <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-black text-slate-600">{filteredAssignedDevices.length}</span>
                         </div>
                       )}
@@ -2725,8 +2796,9 @@ export default function PhoneControlPage({
                               className="text-2xl font-black"
                             />
                           ) : (
-                            <h2 className="text-2xl font-black text-slate-900">Unassigned phone</h2>
+                          <h2 className="text-2xl font-black text-slate-900">Unassigned {isIntegratedKiosk(selectedDevice) ? 'kiosk' : 'phone'}</h2>
                           )}
+                          <span className="rounded-full bg-violet-100 px-2 py-1 text-[10px] font-bold text-violet-800">{phoneDeviceTypeLabel(selectedDevice)}</span>
                           <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${STATE_STYLES[selectedConnection].badge}`}>{STATE_STYLES[selectedConnection].label}</span>
                           <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${selectedDevice.inventory.isDeviceOwner ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}`}>{selectedDevice.inventory.isDeviceOwner ? 'Device Owner' : 'Owner missing'}</span>
                           <span className={`rounded-full px-2 py-1 text-[10px] font-bold ${selectedTerminalStyle.badge}`}>{selectedTerminalStyle.label}</span>
@@ -2739,7 +2811,15 @@ export default function PhoneControlPage({
                         <p className="mt-1 font-mono text-[11px] text-slate-400">{selectedDevice.id}</p>
                         {!selectedDevice.stationId && (
                           <div className="mt-3 max-w-xl rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
-                            This phone is enrolled and can be prepared remotely. Assign it to a kiosk to enable partner access and kiosk-specific terminal controls.
+                            This {isIntegratedKiosk(selectedDevice) ? 'integrated kiosk' : 'phone'} is enrolled and can be prepared remotely. Assign it to a station to enable station-specific terminal controls.
+                          </div>
+                        )}
+                        {isIntegratedKiosk(selectedDevice) && (
+                          <div className={`mt-3 max-w-xl rounded-lg border px-3 py-2 text-xs leading-5 ${selectedDevice.inventory.m2Terminal.configured && selectedDevice.inventory.m2Terminal.stationId === selectedDevice.stationId ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-violet-200 bg-violet-50 text-violet-900'}`}>
+                            <span className="font-black">Integrated app:</span>{' '}
+                            {selectedDevice.inventory.m2Terminal.configured
+                              ? `${integratedStripeReaderLabel(selectedDevice)} configuration reports ${selectedDevice.inventory.m2Terminal.stationId || 'no station'}${selectedDevice.inventory.m2Terminal.connectedReaderSerial ? ` · reader ${selectedDevice.inventory.m2Terminal.connectedReaderSerial}` : ' · reader not connected'}.`
+                              : `Media app is enrolled; ${integratedStripeReaderLabel(selectedDevice)} has not been provisioned yet.`}
                           </div>
                         )}
                       </div>
@@ -2773,7 +2853,7 @@ export default function PhoneControlPage({
                             className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600"
                           />
                           <span className="min-w-0">
-                            <span className="flex items-center gap-1.5 text-xs font-black text-slate-800"><CreditCardIcon className="h-4 w-4 text-blue-600" />Run Stripe terminal on this phone</span>
+                            <span className="flex items-center gap-1.5 text-xs font-black text-slate-800"><CreditCardIcon className="h-4 w-4 text-blue-600" />Run Stripe terminal on this {isIntegratedKiosk(selectedDevice) ? 'integrated kiosk' : 'phone'}</span>
                             <span className="mt-0.5 block text-[10px] leading-4 text-slate-500">
                               {selectedDevice.inventory.commandEncryptionReady && selectedTerminalAgentReady
                                 ? 'Provision this phone with the selected kiosk’s payment and V2 module configuration.'
@@ -2820,6 +2900,7 @@ export default function PhoneControlPage({
                       />
                       <AgentMetric
                         inventory={selectedDevice.inventory}
+                        integrated={isIntegratedKiosk(selectedDevice)}
                         release={agentRelease}
                         releaseLoading={agentReleaseLoading}
                         updateChecking={agentUpdateChecking}
@@ -2920,6 +3001,8 @@ export default function PhoneControlPage({
                 </div>
               )}
             </section>
+          </div>
+        )}
           </div>
         )}
       </main>

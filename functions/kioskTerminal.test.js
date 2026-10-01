@@ -8,6 +8,7 @@ const {
   resolveKioskOffer,
   settleStripeReturn,
   tokenHash,
+  validateInstallation,
 } = require("./kioskTerminal");
 
 const INSTALL_TOKEN = "test-installation-token-with-at-least-32-characters";
@@ -352,7 +353,7 @@ test("config derives pricing and availability from the kiosk and Besiter", async
   assert.equal(besiter.calls.availability.length, 1);
 });
 
-test("French shared-account test terminals use USD consistently", () => {
+test("French test terminals retain the configured EUR currency", () => {
   const offer = resolveKioskOffer({
     stationId: "FR8011",
     stripeMode: "test",
@@ -372,16 +373,16 @@ test("French shared-account test terminals use USD consistently", () => {
     },
   });
 
-  assert.equal(offer.currency, "usd");
-  assert.equal(offer.kioskCurrency, "US");
+  assert.equal(offer.currency, "eur");
+  assert.equal(offer.kioskCurrency, "FR");
   assert.equal(offer.configuredCurrency, "eur");
   assert.equal(offer.configuredKioskCurrency, "FR");
-  assert.equal(offer.testCurrencyOverride, true);
-  assert.equal(offer.symbol, "$");
-  assert.equal(offer.paymentAmount, "$30.00");
+  assert.equal(offer.testCurrencyOverride, false);
+  assert.equal(offer.symbol, "€");
+  assert.equal(offer.paymentAmount, "€30.00");
   assert.deepEqual(offer.pricingLines, [
-    "$4.00 per 24-hour period",
-    "$30.00 if not returned after 30 days",
+    "€4.00 per 24-hour period",
+    "€30.00 if not returned after 30 days",
   ]);
 });
 
@@ -436,6 +437,32 @@ test("French live terminals retain the configured EUR currency", () => {
   assert.equal(offer.kioskCurrency, "FR");
   assert.equal(offer.testCurrencyOverride, false);
   assert.equal(offer.symbol, "€");
+});
+
+test("accepts only the approved French WisePad integrated app in live mode", () => {
+  const installation = validateInstallation({
+    ...INSTALLATION,
+    stationId: "FR8011",
+    stripeMode: "live",
+    stripeAccountCountry: "FR",
+    stripeReaderType: "bbpos_wisepad3",
+    packageName: "com.chargerent.media.lab",
+  });
+  assert.equal(installation.stripeMode, "live");
+  assert.equal(installation.stripeAccountCountry, "FR");
+
+  assert.throws(() => validateInstallation({
+    ...installation,
+    stripeAccountCountry: "US",
+  }), /approved only for the French integrated kiosk app with WisePad 3/);
+  assert.throws(() => validateInstallation({
+    ...installation,
+    stripeReaderType: "stripe_m2",
+  }), /approved only for the French integrated kiosk app with WisePad 3/);
+  assert.throws(() => validateInstallation({
+    ...installation,
+    packageName: "com.chargerent.kiosk",
+  }), /approved only for the French integrated kiosk app with WisePad 3/);
 });
 
 test("rental creates a kiosk-priced manual-capture card-present payment", async () => {
@@ -576,6 +603,7 @@ test("return completes only after the Besiter return writer records the charger"
   status = await service.getReturnSession(request({method: "GET"}), returnSessionId);
 
   assert.equal(status.body.outcome, "received");
+  assert.equal(status.body.returnSlot, 1);
   assert.equal(store.returnSessions.get(returnSessionId).state, "besiter_return_confirmed");
   assert.equal(store.returnSessions.get(returnSessionId).chargerSn, 41807109);
 });

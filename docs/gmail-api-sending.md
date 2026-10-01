@@ -16,7 +16,12 @@ Customer Support replies use the Gmail API with keyless Google Workspace domain-
 
 The signing role is granted on the mailer service account, not at project level. No service-account key is downloaded. The function obtains its normal Cloud access token, calls IAM `signJwt`, exchanges the signed assertion for a one-hour delegated Gmail token, and calls `users.messages.send` as the selected mailbox.
 
-Inbox access is hard-coded to `support@charge.rent`. Gmail publishes inbox changes to the `chargerent-support-gmail` Pub/Sub topic. The backend reads changes using Gmail history, imports customer messages into the matching ticket, and keeps a Firestore history cursor in `supportMailboxSync/support-at-charge-rent`. A 15-minute scheduled reconciliation covers delayed or dropped notifications, and a daily job renews the Gmail watch.
+Inbox synchronization has two sources:
+
+- `support@charge.rent` imports support messages and keeps its cursor in `supportMailboxSync/support-at-charge-rent`.
+- `george@charge.rent` imports only messages whose recipient headers include `sales@charge.rent`, forces the Sales category, and keeps its cursor in `supportMailboxSync/sales-at-charge-rent`. The source mailbox and recipient can be overridden with `SALES_GMAIL_SOURCE_INBOX` and `SALES_GMAIL_RECIPIENT`.
+
+Both Gmail watches publish changes to the `chargerent-support-gmail` Pub/Sub topic. The backend routes each notification by its Gmail `emailAddress`, reads changes using Gmail history, imports matching messages into tickets, and ignores unrelated George-inbox messages after a metadata-only recipient check. A 15-minute scheduled reconciliation covers delayed or dropped notifications, and a daily job renews both Gmail watches.
 
 ## Sender boundary
 
@@ -53,5 +58,6 @@ The send functions do not bind `SUPPORT_GMAIL_APP_PASSWORD`, `GEORGE_GMAIL_APP_P
 4. Confirm the ticket activity changes from `sending` to `sent` and the ticket becomes `waiting_customer`.
 5. Remove the exact temporary test ticket after verification.
 6. Reply to the test message and confirm the inbound reply appears once in the same ticket activity.
+7. Send a free-form internal test to `sales@charge.rent` and confirm it creates exactly one `SL-` case with source `email`, category `sales`, and original recipient `sales@charge.rent`.
 
 Do not use a customer ticket for delivery testing and do not automatically retry an uncertain send.

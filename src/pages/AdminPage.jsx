@@ -1,12 +1,13 @@
 // src/pages/AdminPage.jsx
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { BanknotesIcon, CalculatorIcon, CreditCardIcon, PaintBrushIcon, SparklesIcon } from '@heroicons/react/24/outline';
+import { BanknotesIcon, CalculatorIcon, CreditCardIcon, PaintBrushIcon, PhotoIcon, SparklesIcon } from '@heroicons/react/24/outline';
 import ConfirmationModal from '../components/UI/ConfirmationModal.jsx';
 import LoadingSpinner from '../components/UI/LoadingSpinner.jsx';
 import ClientAdminCard from './ClientAdminCard.jsx';
 import CreateClientForm from './CreateClientForm.jsx';
 import WorkspaceMailboxPanel from '../components/WorkspaceMailboxPanel.jsx';
 import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
+import DashboardPageActions, { DashboardLanguageToggle } from '../components/UI/DashboardPageActions.jsx';
 import { callFunctionWithAuth } from '../utils/callableRequest.js';
 
 import { auth, db } from '../firebase-config';
@@ -14,7 +15,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { collection, getDocs } from 'firebase/firestore';
 
 // permission keys
-const featuresList = ['rentals', 'details', 'stationid', 'address', 'status', 'reporting', 'lease_revenue', 'rental_counts', 'rental_revenue', 'client_commission', 'rep_commission', 'search', 'media', 'ui_editor', 'phone_control', 'binding', 'testing'];
+const featuresList = ['rentals', 'details', 'stationid', 'address', 'status', 'reporting', 'lease_revenue', 'rental_counts', 'rental_revenue', 'client_commission', 'rep_commission', 'search', 'media', 'campaign_manager', 'ui_editor', 'phone_control', 'binding', 'testing'];
 const commandsList = ['edit', 'lock', 'eject', 'eject_0e', 'eject_multiple', 'updates', 'connectivity', 'reboot', 'reload', 'audio', 'disable', 'client edit'];
 const paymentAdminEmails = {
   arthur: 'arthur@charge.rent',
@@ -43,6 +44,8 @@ function AdminPage({
   onNavigateToPayter,
   onNavigateToChargeDropsClientSetup,
   currentUser,
+  language,
+  setLanguage,
 }) {
   const [clients, setClients] = useState([]);
   const [originalClients, setOriginalClients] = useState([]);
@@ -73,6 +76,9 @@ function AdminPage({
   const isAdmin = currentUser?.role === 'admin' || currentUser?.username === 'chargerent';
   const canManageClients = isAdmin || currentUser?.commands?.['client edit'] === true;
   const canAccessMedia = isAdmin || currentUser?.features?.media === true;
+  const isPartner = currentUser?.partner === true || currentUser?.role === 'partner';
+  const canAccessCampaignManager = isAdmin || (isPartner && currentUser?.features?.campaign_manager === true);
+  const canAccessMediaControl = canAccessMedia || canAccessCampaignManager;
   const canAccessUiProfiles = isAdmin || currentUser?.features?.ui_editor === true || currentUser?.commands?.['client edit'] === true;
   const canUseAiBooths = canManageClients || canAccessMedia;
   const canUseProvisionTools = isAdmin || currentUser?.commands?.edit === true || canManageClients;
@@ -543,17 +549,9 @@ function AdminPage({
 
       <header className="bg-white shadow-sm">
         <div className="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
-          <div className="flex items-center gap-2">
-            <button onClick={() => {}} className={`px-2 py-1 text-sm font-bold rounded-md bg-blue-600 text-white`}>EN</button>
-            <button onClick={() => {}} className={`px-2 py-1 text-sm font-bold rounded-md bg-gray-200 text-gray-700`}>FR</button>
-          </div>
+          <DashboardLanguageToggle language={language} setLanguage={setLanguage} />
 
-          <div className="flex items-center gap-4">
-            <button onClick={onNavigateToDashboard} className="p-2 rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300" title={t('back_to_dashboard')}>
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-              </svg>
-            </button>
+          <div className="flex items-center gap-2">
             {canUseProvisionTools && (
               <button onClick={onNavigateToProvisionPage} className="p-2 rounded-md bg-blue-100 text-blue-700 hover:bg-blue-200" title={t('provision_kiosk')}>
                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -577,7 +575,7 @@ function AdminPage({
                 title="ChargeDrops client setup"
                 type="button"
               >
-                <img src="/chargedrops-drop.svg" alt="ChargeDrops client setup" className="h-7 w-5" />
+                <img src={`${import.meta.env.BASE_URL}chargedrops-drop.svg`} alt="ChargeDrops client setup" className="h-7 w-5" />
               </button>
             )}
 
@@ -607,11 +605,14 @@ function AdminPage({
               </button>
             )}
 
-            {canAccessMedia && (
-              <button onClick={onNavigateToMedia} className="p-2 rounded-md bg-emerald-100 text-emerald-700 hover:bg-emerald-200" title="Media Library">
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14m-9 4h8a2 2 0 002-2V8a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
+            {canAccessMediaControl && (
+              <button
+                type="button"
+                onClick={onNavigateToMedia}
+                className="rounded-md bg-violet-100 p-2 text-violet-700 hover:bg-violet-200"
+                title="Media Control"
+              >
+                <PhotoIcon className="h-6 w-6" />
               </button>
             )}
 
@@ -627,11 +628,11 @@ function AdminPage({
               </button>
             )}
 
-            <button onClick={onLogout} className="p-2 rounded-md bg-red-500 text-white hover:bg-red-600" title={t('logout')}>
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-              </svg>
-            </button>
+            <DashboardPageActions
+              onNavigateToDashboard={onNavigateToDashboard}
+              onLogout={onLogout}
+              t={t}
+            />
           </div>
         </div>
       </header>
@@ -735,25 +736,25 @@ function AdminPage({
               </>
             )}
 
-            {!canManageClients && canAccessMedia && (
+            {!canManageClients && canAccessMediaControl && (
               <div className="mx-auto max-w-2xl rounded-xl bg-white p-8 shadow-md">
                 <h2 className="text-xl font-semibold text-gray-900">Media tools are enabled for this account.</h2>
                 <p className="mt-2 text-sm text-gray-600">
-                  Open the Media Library from the header to upload content and assign playlists to eligible CT8, CK24, and CK48 stations.
+                  Open Media Control to use the media tools granted to this account.
                 </p>
                 <div className="mt-6">
                   <button
                     type="button"
                     onClick={onNavigateToMedia}
-                    className="rounded-lg bg-emerald-600 px-5 py-3 font-semibold text-white hover:bg-emerald-700"
+                    className="rounded-lg bg-violet-600 px-5 py-3 font-semibold text-white hover:bg-violet-700"
                   >
-                    Open Media Library
+                    Open Media Control
                   </button>
                 </div>
               </div>
             )}
 
-            {!canManageClients && !canAccessMedia && canAccessUiProfiles && (
+            {!canManageClients && !canAccessMediaControl && canAccessUiProfiles && (
               <div className="mx-auto hidden max-w-2xl rounded-xl bg-white p-8 shadow-md lg:block">
                 <h2 className="text-xl font-semibold text-gray-900">Kiosk UI profiles are enabled for this account.</h2>
                 <div className="mt-6">

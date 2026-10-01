@@ -6,9 +6,9 @@ import {
   BuildingStorefrontIcon,
   DocumentCheckIcon,
   MapPinIcon,
-  PowerIcon,
 } from '@heroicons/react/24/outline';
 import {callFunctionWithAuth} from '../utils/callableRequest.js';
+import DashboardPageActions from '../components/UI/DashboardPageActions.jsx';
 
 const EXCLUDED_RENTAL_STATUSES = new Set(['purchased', 'purchase-pending', 'purchased-pending']);
 
@@ -256,16 +256,14 @@ export default function ChargeDropsClientPortalPage({clientInfo, stations = [], 
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3">
             <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white">
-              <img src="/chargedrops-drop.svg" alt="ChargeDrops" className="h-9 w-6" />
+              <img src={`${import.meta.env.BASE_URL}chargedrops-drop.svg`} alt="ChargeDrops" className="h-9 w-6" />
             </span>
             <div>
               <p className="text-xs font-bold uppercase tracking-[0.22em] text-indigo-300">ChargeDrops</p>
               <h1 className="text-lg font-bold">Client Portal</h1>
             </div>
           </div>
-          <button type="button" onClick={onLogout} className="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-3 py-2 text-sm font-semibold text-slate-200 hover:bg-slate-800">
-            <PowerIcon className="h-4 w-4" /> Log out
-          </button>
+          <DashboardPageActions onLogout={onLogout} />
         </div>
       </header>
 

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import KioskDetailPanel from '../components/kiosk/KioskDetailPanel.jsx';
+import DashboardPageActions from '../components/UI/DashboardPageActions.jsx';
 
 const previewClientInfo = {
   role: 'admin',
@@ -267,7 +268,7 @@ const templateOptions = [
   { id: 'CK50', label: 'CK50' },
 ];
 
-export default function TemplatesPage({ t, onLogout, onNavigateToAdmin, currentUser }) {
+export default function TemplatesPage({ t, onLogout, onNavigateToDashboard, onNavigateToAdmin, currentUser }) {
   const canViewTemplates = currentUser?.username === 'chargerent';
   const [selectedTemplate, setSelectedTemplate] = useState('CT3');
 
@@ -285,14 +286,12 @@ export default function TemplatesPage({ t, onLogout, onNavigateToAdmin, currentU
             <div>
               <h1 className="text-2xl font-bold text-gray-900">{t('templates_page_title')}</h1>
             </div>
-            <div className="flex items-center gap-3">
-              <button onClick={onNavigateToAdmin} className="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-300">
-                {t('back_to_admin')}
-              </button>
-              <button onClick={onLogout} className="rounded-md bg-red-500 px-4 py-2 text-sm font-medium text-white hover:bg-red-600">
-                {t('logout')}
-              </button>
-            </div>
+            <DashboardPageActions
+              onNavigateToDashboard={onNavigateToDashboard}
+              onNavigateToAdmin={onNavigateToAdmin}
+              onLogout={onLogout}
+              t={t}
+            />
           </div>
         </header>
         <main className="mx-auto max-w-4xl px-4 py-8 sm:px-6 lg:px-8">
@@ -312,14 +311,12 @@ export default function TemplatesPage({ t, onLogout, onNavigateToAdmin, currentU
             <h1 className="text-2xl font-bold text-gray-900">{t('templates_page_title')}</h1>
             <p className="mt-1 text-sm text-gray-500">{t('templates_page_subtitle')}</p>
           </div>
-          <div className="flex items-center gap-3">
-            <button onClick={onNavigateToAdmin} className="rounded-md bg-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-300">
-              {t('back_to_admin')}
-            </button>
-            <button onClick={onLogout} className="rounded-md bg-red-500 px-4 py-2 text-sm font-medium text-white hover:bg-red-600">
-              {t('logout')}
-            </button>
-          </div>
+          <DashboardPageActions
+            onNavigateToDashboard={onNavigateToDashboard}
+            onNavigateToAdmin={onNavigateToAdmin}
+            onLogout={onLogout}
+            t={t}
+          />
         </div>
       </header>
 

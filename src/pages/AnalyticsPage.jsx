@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, memo } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../firebase-config';
-import { HomeIcon, ArrowRightOnRectangleIcon } from '@heroicons/react/24/solid';
+import DashboardPageActions from '../components/UI/DashboardPageActions.jsx';
 
 const COLORS = {
   rentals: '#3b82f6', // Blue
@@ -10,6 +10,22 @@ const COLORS = {
   total: '#000000',   // Black
   disconnected: '#ef4444', // Red
   returns: '#f97316' // Orange
+};
+
+const buildChartDisplayData = (data) => {
+  let lastKnownCount = null;
+  let cumulativeRentals = 0;
+
+  return data.map((entry) => {
+    if (entry.count !== undefined) lastKnownCount = entry.count;
+    if (entry.rentals) cumulativeRentals += 1;
+    return {
+      ...entry,
+      rentalMarker: entry.rentals ? (entry.count ?? lastKnownCount) : null,
+      returnMarker: entry.returns ? (entry.count ?? lastKnownCount) : null,
+      cumulativeRentals: entry.rentals ? cumulativeRentals : undefined,
+    };
+  });
 };
 
 const LINE_LABELS = {
@@ -129,7 +145,7 @@ function msSinceMidnightInZone(date, timeZone) {
 }
 
 // ---------- COMPONENT ----------
-const AnalyticsPage = ({ allStationsData, rentalData, onNavigateToDashboard, onLogout, t }) => {
+const AnalyticsPage = ({ allStationsData, rentalData, onNavigateToDashboard, onNavigateToAdmin, onLogout, t }) => {
   const [totalRentals, setTotalRentals] = useState(0);
   const [selectedStation, setSelectedStation] = useState('');
   const [selectedCountry, setSelectedCountry] = useState('CA');
@@ -282,41 +298,18 @@ const AnalyticsPage = ({ allStationsData, rentalData, onNavigateToDashboard, onL
   const chartKey = `${selectedStation}-${timeRange}-${timezone}`;
 
   // ensure rental dots always have a y
-  const chartDisplayData = useMemo(() => {
-    let lastKnownCount = null;
-    let cumulativeRentals = 0;
-    return memoData.map(d => {
-      if (d.count !== undefined) lastKnownCount = d.count;
-      if (d.rentals) cumulativeRentals += 1;
-      return {
-        ...d,
-        rentalMarker: d.rentals ? (d.count ?? lastKnownCount) : null,
-        returnMarker: d.returns ? (d.count ?? lastKnownCount) : null,
-        cumulativeRentals: d.rentals ? cumulativeRentals : undefined,
-      };
-    });
-  }, [memoData]);
+  const chartDisplayData = useMemo(() => buildChartDisplayData(memoData), [memoData]);
 
   return (
     <div className="min-h-screen bg-gray-100">
       <header className="bg-white shadow-sm">
         <div className="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8 flex justify-end items-center">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={onNavigateToDashboard}
-              className="p-2 rounded-md bg-gray-200 text-gray-700 hover:bg-gray-300"
-              title={t('home')}
-            >
-              <HomeIcon className="h-6 w-6" />
-            </button>
-            <button
-              onClick={onLogout}
-              className="p-2 rounded-md bg-red-500 text-white hover:bg-red-600"
-              title={t('logout')}
-            >
-              <ArrowRightOnRectangleIcon className="h-6 w-6" />
-            </button>
-          </div>
+          <DashboardPageActions
+            onNavigateToDashboard={onNavigateToDashboard}
+            onNavigateToAdmin={onNavigateToAdmin}
+            onLogout={onLogout}
+            t={t}
+          />
         </div>
       </header>
 

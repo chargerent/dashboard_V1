@@ -1,22 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ArrowPathIcon,
-  ArrowRightOnRectangleIcon,
   ArrowUturnLeftIcon,
   BoltIcon,
   CloudArrowUpIcon,
   ComputerDesktopIcon,
   CreditCardIcon,
   EyeIcon,
-  HomeIcon,
   MagnifyingGlassIcon,
   PaintBrushIcon,
   SignalIcon,
-  UserCircleIcon,
 } from '@heroicons/react/24/outline';
 import { collection, doc, onSnapshot } from 'firebase/firestore';
 
 import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
+import DashboardPageActions from '../components/UI/DashboardPageActions.jsx';
 import { db } from '../firebase-config.js';
 import { callFunctionWithAuth } from '../utils/callableRequest.js';
 import {
@@ -357,11 +355,12 @@ export default function PayterPage({
               <p>Terminal monitoring and interface management</p>
             </div>
           </div>
-          <div className="payter-header-actions">
-            <button type="button" className="payter-header-button home" onClick={onNavigateToDashboard} aria-label="Back to dashboard" title="Back to dashboard"><HomeIcon /></button>
-            <button type="button" className="payter-header-button admin" onClick={onNavigateToAdmin} aria-label="Back to admin tools" title="Back to admin tools"><UserCircleIcon /></button>
-            <button type="button" className="payter-header-button logout" onClick={onLogout} aria-label={t('logout')} title={t('logout')}><ArrowRightOnRectangleIcon /></button>
-          </div>
+          <DashboardPageActions
+            onNavigateToDashboard={onNavigateToDashboard}
+            onNavigateToAdmin={onNavigateToAdmin}
+            onLogout={onLogout}
+            t={t}
+          />
         </div>
       </header>
 

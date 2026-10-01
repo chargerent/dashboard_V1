@@ -1,5 +1,6 @@
 /* eslint-env node */
 const crypto = require("node:crypto");
+const forge = require("node-forge");
 const {HttpsError} = require("firebase-functions/v2/https");
 const {resolveKioskOffer} = require("./kioskTerminal");
 
@@ -11,16 +12,24 @@ const KIOSK_INSTALLATIONS_COLLECTION = "kioskInstallations";
 
 const TERMINAL_PACKAGE_NAME = "com.chargerent.kiosk";
 const TERMINAL_TEST_PACKAGE_NAME = "com.chargerent.kiosk.test.debug";
+const INTEGRATED_KIOSK_PACKAGE_NAME = "com.chargerent.media.lab";
+const DEVICE_KIND_PHONE = "managed_phone";
+const DEVICE_KIND_KIOSK = "integrated_kiosk";
 const TERMINAL_AGENT_MIN_VERSION_CODE = 29;
 const TERMINAL_STRIPE_MODE = "test";
 const TERMINAL_ACCOUNT_COUNTRIES = new Set(["US", "CA", "FR"]);
+const TERMINAL_READER_TYPES = new Set(["stripe_m2", "bbpos_wisepad3"]);
+const DEFAULT_TERMINAL_READER_BY_COUNTRY = Object.freeze({
+  US: "stripe_m2",
+  CA: "bbpos_wisepad3",
+  FR: "bbpos_wisepad3",
+});
 const PHONE_MARKETS = new Set(["US", "CA", "FR"]);
 
 const COMMAND_TTL_MS = 2 * 60 * 1000;
 const ENROLLMENT_TTL_MS = 15 * 60 * 1000;
-const ENROLLMENT_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+const ENROLLMENT_ALPHABET = "0123456789";
 const ENROLLMENT_CODE_LENGTH = 6;
-const LEGACY_ENROLLMENT_CODE_LENGTH = 8;
 const AGENT_RELEASE_HOST = "chargerentstations.com";
 const DEVICE_REQUEST_CLOCK_SKEW_MS = 2 * 60 * 1000;
 const TURN_CREDENTIAL_TTL_SECONDS = 10 * 60;
@@ -113,6 +122,13 @@ function hasPhoneControlAccess(authState) {
   return isPhoneControlAdmin(authState) || authState?.profile?.features?.phone_control === true;
 }
 
+function hasCampaignManagerAccess(authState) {
+  const role = String(authState?.profile?.role || "").trim().toLowerCase();
+  const isPartner = authState?.profile?.partner === true || role === "partner";
+  return isPhoneControlAdmin(authState) ||
+    (isPartner && authState?.profile?.features?.campaign_manager === true);
+}
+
 function assertPhoneControlAccess(authState) {
   if (!hasPhoneControlAccess(authState)) {
     throw new HttpsError("permission-denied", "Phone Control is not enabled for this account.");
@@ -134,6 +150,13 @@ function canAccessKiosk(authState, kioskData) {
   const isPartner = authState?.profile?.partner === true || role === "partner";
   const kioskOwner = isPartner ? kioskData?.info?.rep : kioskData?.info?.client;
   return normalizeAccountId(kioskOwner) === clientId;
+}
+
+function canAccessCampaignKiosk(authState, kioskData) {
+  if (isPhoneControlAdmin(authState)) return true;
+  if (!hasCampaignManagerAccess(authState)) return false;
+  const clientId = normalizeAccountId(authState?.profile?.clientId);
+  return Boolean(clientId) && normalizeAccountId(kioskData?.info?.rep) === clientId;
 }
 
 function invalidArgument(message) {
@@ -193,6 +216,36 @@ function normalizePhoneMarket(value, {allowEmpty = false} = {}) {
     invalidArgument("Choose Canada, France, or US for this phone.");
   }
   return market;
+}
+
+function normalizeDeviceKind(value, {allowLegacy = false} = {}) {
+  const kind = String(value || "").trim().toLowerCase();
+  if (!kind && allowLegacy) return DEVICE_KIND_PHONE;
+  if (![DEVICE_KIND_PHONE, DEVICE_KIND_KIOSK].includes(kind)) {
+    invalidArgument("Choose a managed phone or an integrated kiosk.");
+  }
+  return kind;
+}
+
+function reportedDeviceKind(inventory = {}) {
+  return String(inventory.deviceKind || "").trim().toLowerCase() === "media_kiosk" ?
+    DEVICE_KIND_KIOSK : DEVICE_KIND_PHONE;
+}
+
+function terminalPackageForDevice(
+    device = {},
+    stripeMode = TERMINAL_STRIPE_MODE,
+    packageOverride = "",
+) {
+  const kind = normalizeDeviceKind(
+      device.deviceKind || reportedDeviceKind(device.inventory),
+      {allowLegacy: true},
+  );
+  if (kind === DEVICE_KIND_KIOSK) return INTEGRATED_KIOSK_PACKAGE_NAME;
+  const override = String(packageOverride || "").trim();
+  if (override) return override;
+  return String(stripeMode).trim().toLowerCase() === "test" ?
+    TERMINAL_TEST_PACKAGE_NAME : TERMINAL_PACKAGE_NAME;
 }
 
 function availableKioskIdsForMarket(kioskSnapshots, assignmentSnapshots, market, deviceId) {
@@ -288,18 +341,25 @@ function normalizeWebRtcStartArguments(value) {
   return {...input, iceServers};
 }
 
-function normalizeAppUpdateArguments(value) {
+function normalizeAppUpdateArguments(value, device = null) {
   const input = normalizeArguments(value);
+  const deviceKind = normalizeDeviceKind(
+      device?.deviceKind || reportedDeviceKind(device?.inventory),
+      {allowLegacy: true},
+  );
+  const integratedKiosk = deviceKind === DEVICE_KIND_KIOSK;
   let packageUrl;
   try {
     packageUrl = new URL(String(input.httpsUrl || "").trim());
   } catch {
     invalidArgument("A valid Agent update URL is required.");
   }
+  const allowedPath = integratedKiosk ?
+    /^\/media-kiosk\/remote\/releases\/chargerent-media-lab-v\d+\.\d+\.\d+-hosted\.apk$/ :
+    /^\/portal\/mdm\/remote-agent-v\d+\.\d+\.\d+\.apk$/;
   if (packageUrl.protocol !== "https:" || packageUrl.hostname !== AGENT_RELEASE_HOST ||
       packageUrl.port || packageUrl.username || packageUrl.password || packageUrl.search ||
-      packageUrl.hash ||
-      !/^\/portal\/mdm\/remote-agent-v\d+\.\d+\.\d+\.apk$/.test(packageUrl.pathname)) {
+      packageUrl.hash || !allowedPath.test(packageUrl.pathname)) {
     invalidArgument("Only official Chargerent Agent releases can be installed.");
   }
 
@@ -310,7 +370,7 @@ function normalizeAppUpdateArguments(value) {
   const versionCode = Number(input.versionCode);
   const versionName = String(input.versionName || "").trim();
   if (!Number.isSafeInteger(versionCode) || versionCode < 1 ||
-      !/^\d+\.\d+\.\d+$/.test(versionName)) {
+      !(integratedKiosk ? /^\d+\.\d+\.\d+-hosted$/ : /^\d+\.\d+\.\d+$/).test(versionName)) {
     invalidArgument("A valid Agent release version is required.");
   }
   return {
@@ -433,20 +493,27 @@ function parseCommandEncryptionPublicKey(publicKeyBase64) {
     if (error instanceof HttpsError) throw error;
     throw new HttpsError(
         "failed-precondition",
-        "Update Agent on this phone before joining Wi-Fi remotely.",
+        "Update the app before receiving encrypted remote configuration.",
     );
   }
 }
 
 function encryptCommandSecret(secret, publicKeyBase64) {
-  const encrypted = crypto.publicEncrypt({
-    key: parseCommandEncryptionPublicKey(publicKeyBase64),
-    padding: crypto.constants.RSA_PKCS1_OAEP_PADDING,
-    oaepHash: "sha256",
-  }, Buffer.from(JSON.stringify(secret), "utf8"));
+  const publicKey = parseCommandEncryptionPublicKey(publicKeyBase64);
+  const pem = publicKey.export({type: "spki", format: "pem"});
+  const encrypted = forge.pki.publicKeyFromPem(pem).encrypt(
+      JSON.stringify(secret),
+      "RSA-OAEP",
+      {
+        md: forge.md.sha256.create(),
+        // Android Keystore before API 35 authorizes SHA-1 for OAEP's MGF1
+        // even when the OAEP message digest itself is SHA-256.
+        mgf1: {md: forge.md.sha1.create()},
+      },
+  );
   return {
-    algorithm: "RSA-OAEP-256",
-    ciphertext: encrypted.toString("base64"),
+    algorithm: "RSA-OAEP-256-MGF1-SHA1",
+    ciphertext: Buffer.from(encrypted, "binary").toString("base64"),
   };
 }
 
@@ -500,6 +567,24 @@ function terminalAccountCountry(stationId, kiosk) {
     );
   }
   return addressCountry;
+}
+
+function terminalReaderType(accountCountry, value = "") {
+  const country = normalizeTerminalCountry(accountCountry);
+  const requested = String(value || DEFAULT_TERMINAL_READER_BY_COUNTRY[country] || "")
+      .trim().toLowerCase();
+  if (!TERMINAL_READER_TYPES.has(requested)) {
+    throw new HttpsError("failed-precondition", "Choose a supported Stripe Terminal reader.");
+  }
+  const supported = requested === "stripe_m2" ? country === "US" : new Set(["CA", "FR"]).has(country);
+  if (!supported) {
+    const name = requested === "stripe_m2" ? "Stripe M2" : "BBPOS WisePad 3";
+    throw new HttpsError(
+        "failed-precondition",
+        `${name} is not supported for Stripe Terminal in ${country}.`,
+    );
+  }
+  return requested;
 }
 
 function terminalAddressForKiosk(stationId, kiosk) {
@@ -566,6 +651,14 @@ async function assertStripeAccountCountry(config, stripe) {
         "failed-precondition",
         `${config.stationId} has a ${config.stripeAccountCountry} address, but the configured ` +
         `Stripe ${config.stripeMode} account is ${actualCountry || "missing its country"}.`,
+    );
+  }
+  if (config.stripeMode === "live" &&
+      (account?.details_submitted !== true || account?.charges_enabled !== true)) {
+    throw new HttpsError(
+        "failed-precondition",
+        "The French Stripe account must finish verification and enable live charges before " +
+        `${config.stationId} can use live payments.`,
     );
   }
 }
@@ -664,12 +757,24 @@ function terminalConfigForKiosk(stationId, kioskSnapshot, options = {}) {
     throw new HttpsError("failed-precondition", "A valid Stripe terminal mode is required.");
   }
   const stripeAccountCountry = terminalAccountCountry(stationId, kiosk);
+  const stripeReaderType = terminalReaderType(
+      stripeAccountCountry,
+      options.readerType || kiosk?.paymentTerminal?.readerType,
+  );
+  if (stripeMode === "live" &&
+      (stripeAccountCountry !== "FR" || stripeReaderType !== "bbpos_wisepad3")) {
+    throw new HttpsError(
+        "failed-precondition",
+        "Live Stripe Terminal is currently limited to French integrated kiosks using WisePad 3.",
+    );
+  }
   const offer = resolveKioskOffer({
     stationId,
     provisionId: kioskSnapshot.id,
     moduleId,
     stripeMode,
     stripeAccountCountry,
+    stripeReaderType,
   }, kiosk);
   const stripeLocationAddress = terminalAddressForKiosk(stationId, kiosk);
   const stripeLocationAddressHash = terminalAddressHash(stripeLocationAddress);
@@ -685,6 +790,7 @@ function terminalConfigForKiosk(stationId, kioskSnapshot, options = {}) {
     slotNumbers: [...new Set(slotNumbers)].sort((left, right) => left - right),
     stripeMode,
     stripeAccountCountry,
+    stripeReaderType,
     stripeLocationId: "",
     stripeLocationAddress,
     stripeLocationAddressHash,
@@ -724,6 +830,8 @@ function terminalCommandArguments(config, encryptedSecrets) {
     currency: config.currency,
     test_amount_cents: config.amountCents,
     stripe_account_country: config.stripeAccountCountry,
+    stripe_mode: config.stripeMode,
+    stripe_reader_type: config.stripeReaderType,
     stripe_location_id: config.stripeLocationId,
   };
   return {
@@ -802,13 +910,13 @@ function createEnrollmentCode() {
   for (let index = 0; index < ENROLLMENT_CODE_LENGTH; index += 1) {
     code += ENROLLMENT_ALPHABET[crypto.randomInt(ENROLLMENT_ALPHABET.length)];
   }
-  return `${code.slice(0, 3)}-${code.slice(3)}`;
+  return code;
 }
 
 function normalizeEnrollmentCode(value) {
-  const normalizedCode = String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
-  if (![ENROLLMENT_CODE_LENGTH, LEGACY_ENROLLMENT_CODE_LENGTH].includes(normalizedCode.length)) {
-    invalidArgument("Enter the 6-character enrollment code shown in the dashboard.");
+  const normalizedCode = String(value || "").trim().replace(/[\s-]/g, "");
+  if (!/^\d{6}$/.test(normalizedCode)) {
+    invalidArgument("Enter the 6-digit enrollment code shown in the dashboard.");
   }
   return normalizedCode;
 }
@@ -1024,10 +1132,13 @@ function completedCommandScreenUpdate(operation, result, currentScreen = {}) {
 
 function terminalStateAfterAppRestrictions(
     currentTerminal,
-    {status, requestedEnabled, lockdownActive, errorMessage, updatedAt},
+    {status, requestedEnabled, lockdownActive, applicationConfirmed = false,
+      errorMessage, updatedAt},
 ) {
   const appAlreadyConfirmed = status === "completed" && requestedEnabled &&
-    currentTerminal?.state === "ready" && Boolean(currentTerminal?.confirmedAt);
+    (applicationConfirmed ||
+      (currentTerminal?.state === "ready" && Boolean(currentTerminal?.confirmedAt)));
+  const integratedKiosk = currentTerminal?.packageName === INTEGRATED_KIOSK_PACKAGE_NAME;
   return {
     ...currentTerminal,
     enabled: requestedEnabled,
@@ -1035,17 +1146,45 @@ function terminalStateAfterAppRestrictions(
       (requestedEnabled ?
         (appAlreadyConfirmed ? "ready" : "awaiting_app_confirmation") : "disabled") :
       "error",
-    lockdownEnabled: status === "completed" && requestedEnabled,
+    lockdownEnabled: status === "completed" && requestedEnabled && !integratedKiosk,
     lockdownState: status === "completed" ?
-      (requestedEnabled ? (lockdownActive ? "locked" : "locking") : "unlocked") : "error",
+      (requestedEnabled ?
+        (integratedKiosk ? "not_required" : (lockdownActive ? "locked" : "locking")) :
+        "unlocked") : "error",
     message: status === "completed" ?
       (requestedEnabled ?
-        (appAlreadyConfirmed ? currentTerminal.message :
+        (applicationConfirmed ?
+          `Integrated app confirmed ${currentTerminal.stationId} configuration.` :
+          appAlreadyConfirmed ? currentTerminal.message :
           "Waiting for the payment app to confirm its kiosk configuration.") :
         "Payment terminal removed from the phone.") :
       (errorMessage || "The phone could not apply terminal configuration."),
     updatedAt,
   };
+}
+
+function terminalCommandResultMatches(currentTerminal, commandData, result) {
+  const expected = commandData?.arguments?.restrictions;
+  const reported = result?.terminal;
+  if (!expected || !reported || result?.applied !== true || reported.configured !== true) {
+    return false;
+  }
+  const same = (left, right) => String(left || "").trim() === String(right || "").trim();
+  return same(result.packageName, currentTerminal?.packageName) &&
+    same(reported.stationId, currentTerminal?.stationId) &&
+    same(reported.stationId, commandData?.stationId) &&
+    same(reported.provisionId, currentTerminal?.provisionId) &&
+    same(reported.provisionId, expected.provision_id) &&
+    same(reported.moduleId, currentTerminal?.moduleId) &&
+    same(reported.moduleId, expected.module_id) &&
+    Number(reported.slotCount) === Number(expected.slot_count) &&
+    same(String(reported.currency).toLowerCase(), String(expected.currency).toLowerCase()) &&
+    same(String(reported.stripeMode).toLowerCase(), String(expected.stripe_mode).toLowerCase()) &&
+    same(String(reported.stripeAccountCountry).toUpperCase(),
+        String(expected.stripe_account_country).toUpperCase()) &&
+    same(reported.readerType, expected.stripe_reader_type) &&
+    same(reported.stripeLocationId, currentTerminal?.stripeLocationId) &&
+    same(reported.stripeLocationId, expected.stripe_location_id);
 }
 
 async function findKiosk(db, stationId) {
@@ -1068,6 +1207,11 @@ function timestampToMillis(value) {
 
 function safeDeviceData(snapshot) {
   const data = snapshot.data() || {};
+  const inventory = data.inventory && typeof data.inventory === "object" ? data.inventory : {};
+  const deviceKind = normalizeDeviceKind(
+      data.deviceKind || reportedDeviceKind(inventory),
+      {allowLegacy: true},
+  );
   const terminal = data.terminal && typeof data.terminal === "object" ? data.terminal : {};
   const stationId = String(data.stationId || "").trim().toUpperCase();
   return {
@@ -1077,12 +1221,14 @@ function safeDeviceData(snapshot) {
     assignmentState: stationId ? "assigned" : "unassigned",
     market: String(data.market || stationId.slice(0, 2) || "").trim().toUpperCase(),
     displayName: String(data.displayName || "").trim(),
+    deviceKind,
+    packageName: String(data.packageName || inventory.packageName || "").trim(),
     enrollmentState: String(data.enrollmentState || "pending"),
     reportedPhoneNumber: String(data.reportedPhoneNumber || "").trim(),
     reportedPhoneNumberAt: timestampToMillis(data.reportedPhoneNumberAt),
     manualPhoneNumber: String(data.manualPhoneNumber || "").trim(),
     manualPhoneNumberUpdatedAt: timestampToMillis(data.manualPhoneNumberUpdatedAt),
-    inventory: data.inventory && typeof data.inventory === "object" ? data.inventory : {},
+    inventory,
     location: data.location && typeof data.location === "object" ? data.location : {},
     screen: data.screen && typeof data.screen === "object" ? data.screen : {},
     terminal: {
@@ -1094,6 +1240,7 @@ function safeDeviceData(snapshot) {
       stripeLocationId: String(terminal.stripeLocationId || ""),
       stripeAccountCountry: String(terminal.stripeAccountCountry || ""),
       stripeMode: String(terminal.stripeMode || ""),
+      stripeReaderType: String(terminal.stripeReaderType || ""),
       packageName: String(terminal.packageName || ""),
       lockdownEnabled: terminal.lockdownEnabled === true,
       lockdownState: String(terminal.lockdownState ||
@@ -1145,13 +1292,21 @@ function safeCommandData(snapshot) {
   };
 }
 
-async function accessibleStationIds(db, authState) {
-  assertPhoneControlAccess(authState);
+async function accessibleStationIds(db, authState, {campaignOnly = false} = {}) {
+  if (campaignOnly) {
+    if (!hasCampaignManagerAccess(authState)) {
+      throw new HttpsError("permission-denied", "Campaign Manager is not enabled for this account.");
+    }
+  } else {
+    assertPhoneControlAccess(authState);
+  }
   if (isPhoneControlAdmin(authState)) return null;
 
   const kioskSnapshot = await db.collection("kiosks").get();
   return new Set(kioskSnapshot.docs
-      .filter((snapshot) => canAccessKiosk(authState, snapshot.data() || {}))
+      .filter((snapshot) => campaignOnly ?
+        canAccessCampaignKiosk(authState, snapshot.data() || {}) :
+        canAccessKiosk(authState, snapshot.data() || {}))
       .map((snapshot) => String(
           snapshot.data()?.stationid || snapshot.data()?.stationId || snapshot.id,
       ).trim().toUpperCase())
@@ -1174,13 +1329,20 @@ async function assertDeviceAccess(db, authState, deviceId) {
   return deviceSnapshot;
 }
 
-async function listDevices(_data, authState, dependencies) {
+async function listDevices(data, authState, dependencies) {
   const {db} = dependencies;
-  const stationIds = await accessibleStationIds(db, authState);
+  const requestedKind = String(data?.deviceKind || "").trim();
+  const campaignOnly = requestedKind === "integrated_kiosk" &&
+    !hasPhoneControlAccess(authState) && hasCampaignManagerAccess(authState);
+  if (!hasPhoneControlAccess(authState) && !campaignOnly) {
+    throw new HttpsError("permission-denied", "Phone Control is not enabled for this account.");
+  }
+  const stationIds = await accessibleStationIds(db, authState, {campaignOnly});
   const snapshot = await db.collection(DEVICES_COLLECTION).get();
   const devices = snapshot.docs
       .map(safeDeviceData)
       .filter((device) => stationIds === null || stationIds.has(device.stationId))
+      .filter((device) => !requestedKind || device.deviceKind === requestedKind)
       .sort((left, right) => left.stationId.localeCompare(right.stationId));
   return {ok: true, devices};
 }
@@ -1307,6 +1469,7 @@ async function createEnrollment(data, authState, dependencies) {
   const requestedStationId = String(data?.stationId || "").trim();
   const stationId = requestedStationId ? normalizeStationId(requestedStationId) : "";
   const market = normalizePhoneMarket(data?.market || stationId.slice(0, 2));
+  const deviceKind = normalizeDeviceKind(data?.deviceKind, {allowLegacy: true});
   if (stationId) {
     await findKiosk(db, stationId);
 
@@ -1315,7 +1478,7 @@ async function createEnrollment(data, authState, dependencies) {
     if (assignment.exists && assignment.data()?.deviceId) {
       throw new HttpsError(
           "already-exists",
-          `${stationId} already has a managed phone. Unassign it before enrolling another.`,
+          `${stationId} already has a managed Android device. Unassign it before enrolling another.`,
       );
     }
   }
@@ -1328,6 +1491,7 @@ async function createEnrollment(data, authState, dependencies) {
     purpose: stationId ? "kiosk_assignment" : "staging",
     stationId: stationId || null,
     market,
+    deviceKind,
     codeLength: normalizedCode.length,
     state: "pending",
     expiresAt,
@@ -1340,12 +1504,13 @@ async function createEnrollment(data, authState, dependencies) {
     stationId,
     assignmentState: stationId ? "assigned" : "unassigned",
     market,
+    deviceKind,
     enrollmentCode: code,
     expiresAt,
     controllerPublicKey: controllerPublicKeyBase64(privateKeyPem),
     message: stationId ?
       `Enrollment code created for ${stationId}. It expires in 15 minutes.` :
-      `Enrollment code created for ${market} phone inventory. It expires in 15 minutes.`,
+      `Enrollment code created for ${market} ${deviceKind === DEVICE_KIND_KIOSK ? "kiosk" : "phone"} inventory. It expires in 15 minutes.`,
   };
 }
 
@@ -1358,6 +1523,11 @@ async function assignDevice(data, authState, dependencies) {
   }
   const terminalEnabled = data.terminalEnabled;
   const kioskSnapshot = await findKiosk(db, stationId);
+  const kioskData = kioskSnapshot.data() || {};
+  const stripeMode = String(
+      data?.stripeMode || kioskData?.paymentTerminal?.stripeMode ||
+      dependencies.stripeMode || TERMINAL_STRIPE_MODE,
+  ).trim().toLowerCase();
 
   const deviceRef = db.collection(DEVICES_COLLECTION).doc(deviceId);
   const targetRef = db.collection(ASSIGNMENTS_COLLECTION).doc(stationId);
@@ -1366,6 +1536,10 @@ async function assignDevice(data, authState, dependencies) {
     throw new HttpsError("not-found", "Managed phone was not found.");
   }
   const initialDevice = initialDeviceSnapshot.data() || {};
+  const deviceKind = normalizeDeviceKind(
+      initialDevice.deviceKind || reportedDeviceKind(initialDevice.inventory),
+      {allowLegacy: true},
+  );
   const previousStationId = String(initialDevice.stationId || "").trim().toUpperCase();
   const currentTerminal = initialDevice.terminal && typeof initialDevice.terminal === "object" ?
     initialDevice.terminal : {};
@@ -1377,16 +1551,26 @@ async function assignDevice(data, authState, dependencies) {
   let command = null;
   if (terminalEnabled) {
     const installedAgentVersionCode = Number(initialDevice.inventory?.agentVersionCode || 0);
-    if (installedAgentVersionCode < TERMINAL_AGENT_MIN_VERSION_CODE) {
+    if (deviceKind === DEVICE_KIND_PHONE && installedAgentVersionCode < TERMINAL_AGENT_MIN_VERSION_CODE) {
       throw new HttpsError(
           "failed-precondition",
           "Update this phone to Chargerent Agent 1.2.14 before enabling the payment terminal.",
       );
     }
+    if (stripeMode === "live" && deviceKind !== DEVICE_KIND_KIOSK) {
+      throw new HttpsError(
+          "failed-precondition",
+          "French live payments require the integrated Chargerent kiosk app.",
+      );
+    }
     terminalConfig = await provisionTerminalConfigForKiosk(stationId, kioskSnapshot, {
       getStripeClient,
-      stripeMode: dependencies.stripeMode,
-      packageName: dependencies.packageName,
+      stripeMode,
+      packageName: terminalPackageForDevice(
+          initialDevice,
+          stripeMode,
+          dependencies.packageName,
+      ),
     });
     const encryptionPublicKey = initialDevice.inventory?.commandEncryptionPublicKey;
     const installationToken = crypto.randomBytes(32).toString("base64url");
@@ -1513,9 +1697,10 @@ async function assignDevice(data, authState, dependencies) {
       stripeLocationId: terminalConfig.stripeLocationId,
       stripeAccountCountry: terminalConfig.stripeAccountCountry,
       stripeMode: terminalConfig.stripeMode,
+      stripeReaderType: terminalConfig.stripeReaderType,
       packageName: terminalConfig.packageName,
-      lockdownEnabled: true,
-      lockdownState: "provisioning",
+      lockdownEnabled: deviceKind !== DEVICE_KIND_KIOSK,
+      lockdownState: deviceKind === DEVICE_KIND_KIOSK ? "not_required" : "provisioning",
       installationId,
       commandId: command.id,
       message: "Terminal configuration queued for the phone.",
@@ -1562,6 +1747,7 @@ async function assignDevice(data, authState, dependencies) {
           ...paymentTerminal,
           accountCountry: terminalConfig.stripeAccountCountry,
           stripeMode: terminalConfig.stripeMode,
+          readerType: terminalConfig.stripeReaderType,
           stripeLocations: {
             ...stripeLocations,
             [terminalConfig.stripeLocationCacheKey]: {
@@ -1584,6 +1770,7 @@ async function assignDevice(data, authState, dependencies) {
         slotNumbers: terminalConfig.slotNumbers,
         stripeMode: terminalConfig.stripeMode,
         stripeAccountCountry: terminalConfig.stripeAccountCountry,
+        stripeReaderType: terminalConfig.stripeReaderType,
         stripeLocationId: terminalConfig.stripeLocationId,
         amountCents: terminalConfig.amountCents,
         currency: terminalConfig.currency,
@@ -1757,7 +1944,10 @@ async function sendCommand(data, authState, dependencies) {
   const maxArgumentBytes = operation === "START_WEBRTC_SCREEN" ? 128 * 1024 : 16 * 1024;
   let commandArguments;
   if (operation === "INSTALL_APP_UPDATE") {
-    commandArguments = normalizeAppUpdateArguments(data?.arguments);
+    commandArguments = normalizeAppUpdateArguments(
+        data?.arguments,
+        authorizedDeviceSnapshot.data(),
+    );
   } else if (operation === "INSTALL_SYSTEM_UPDATE") {
     commandArguments = normalizeSystemUpdateArguments(data?.arguments);
   } else if (operation === "SET_UPDATE_POLICY") {
@@ -1882,9 +2072,15 @@ async function enrollDevice(data, dependencies) {
   const deviceId = deviceIdFromPublicKey(publicKeyBase64);
   const inventory = cleanDevicePayload(data?.inventory || {});
   const enrollmentRef = db.collection(ENROLLMENTS_COLLECTION).doc(enrollmentHash(normalizedCode));
+  // Integrated kiosks use this independent credential only for the hosted
+  // media service. Store its hash in Firestore and return the secret once in
+  // the TLS-protected enrollment response; it never belongs in the APK.
+  const mediaToken = crypto.randomBytes(32).toString("base64url");
+  const mediaTokenHash = crypto.createHash("sha256").update(mediaToken).digest("hex");
 
   let enrolledStationId = "";
   let enrolledMarket = "";
+  let enrolledDeviceKind = DEVICE_KIND_PHONE;
   await db.runTransaction(async (transaction) => {
     const enrollmentSnapshot = await transaction.get(enrollmentRef);
     if (!enrollmentSnapshot.exists) {
@@ -1896,6 +2092,23 @@ async function enrollDevice(data, dependencies) {
     enrolledMarket = normalizePhoneMarket(
         enrollment.market || enrolledStationId.slice(0, 2),
     );
+    enrolledDeviceKind = normalizeDeviceKind(enrollment.deviceKind, {allowLegacy: true});
+    const actualDeviceKind = reportedDeviceKind(inventory);
+    if (actualDeviceKind !== enrolledDeviceKind) {
+      throw new HttpsError(
+          "failed-precondition",
+          enrolledDeviceKind === DEVICE_KIND_KIOSK ?
+            "This code is for the integrated kiosk app, but a managed phone Agent requested it." :
+            "This code is for a managed phone, but the integrated kiosk app requested it.",
+      );
+    }
+    if (enrolledDeviceKind === DEVICE_KIND_KIOSK &&
+        String(inventory.packageName || "").trim() !== INTEGRATED_KIOSK_PACKAGE_NAME) {
+      throw new HttpsError(
+          "failed-precondition",
+          "Install the approved integrated Chargerent kiosk APK before enrolling this device.",
+      );
+    }
     const isResume = canResumeEnrollment(enrollment, deviceId);
     if (!isResume &&
         (enrollment.state !== "pending" || Number(enrollment.expiresAt || 0) < Date.now())) {
@@ -1919,7 +2132,26 @@ async function enrollDevice(data, dependencies) {
             enrolledStationId) {
         throw new HttpsError("failed-precondition", "The original phone enrollment is incomplete.");
       }
+      if (enrolledDeviceKind === DEVICE_KIND_KIOSK) {
+        transaction.set(deviceRef, {
+          mediaAccess: {
+            tokenHash: mediaTokenHash,
+            enabled: true,
+            issuedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, {merge: true});
+      }
       return;
+    }
+    if (deviceSnapshot.exists && normalizeDeviceKind(
+        deviceSnapshot.data()?.deviceKind || reportedDeviceKind(deviceSnapshot.data()?.inventory),
+        {allowLegacy: true},
+    ) !== enrolledDeviceKind) {
+      throw new HttpsError(
+          "failed-precondition",
+          "This Android device is already enrolled under a different device type.",
+      );
     }
     const previousStationId = String(deviceSnapshot.data()?.stationId || "").trim().toUpperCase();
     if (previousStationId && previousStationId !== enrolledStationId) {
@@ -1934,8 +2166,17 @@ async function enrollDevice(data, dependencies) {
       stationId: enrolledStationId || null,
       assignmentState: enrolledStationId ? "assigned" : "unassigned",
       market: enrolledMarket,
+      deviceKind: enrolledDeviceKind,
+      packageName: String(inventory.packageName || "").trim(),
       publicKey: publicKeyBase64,
       inventory,
+      ...(enrolledDeviceKind === DEVICE_KIND_KIOSK ? {
+        mediaAccess: {
+          tokenHash: mediaTokenHash,
+          enabled: true,
+          issuedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+      } : {}),
       enrollmentState: "enrolled",
       enrolledAt: admin.firestore.FieldValue.serverTimestamp(),
       lastSeenAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -1962,6 +2203,8 @@ async function enrollDevice(data, dependencies) {
     stationId: enrolledStationId,
     assignmentState: enrolledStationId ? "assigned" : "unassigned",
     market: enrolledMarket,
+    deviceKind: enrolledDeviceKind,
+    ...(enrolledDeviceKind === DEVICE_KIND_KIOSK ? {mediaToken} : {}),
     controllerPublicKey: controllerPublicKeyBase64(privateKeyPem),
   };
 }
@@ -2163,13 +2406,18 @@ async function recordCommandResult(data, req, dependencies) {
       if (currentTerminal?.commandId === commandId) {
         const requestedEnabled = commandData.arguments?.restrictions?.terminal_enabled === true;
         const lockdownActive = result?.lockdown?.active === true;
+        const applicationConfirmed = status === "completed" && requestedEnabled &&
+          terminalCommandResultMatches(currentTerminal, commandData, result);
+        const terminalUpdatedAt = admin.firestore.FieldValue.serverTimestamp();
         deviceUpdate.terminal = terminalStateAfterAppRestrictions(currentTerminal, {
           status,
           requestedEnabled,
           lockdownActive,
+          applicationConfirmed,
           errorMessage,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: terminalUpdatedAt,
         });
+        if (applicationConfirmed) deviceUpdate.terminal.confirmedAt = terminalUpdatedAt;
         const assignmentRef = db.collection(ASSIGNMENTS_COLLECTION)
             .doc(String(commandData.stationId || "").trim().toUpperCase());
         transaction.set(assignmentRef, {
@@ -2177,6 +2425,30 @@ async function recordCommandResult(data, req, dependencies) {
           terminal: deviceUpdate.terminal,
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         }, {merge: true});
+        if (applicationConfirmed && currentTerminal.installationId) {
+          transaction.set(
+              db.collection(KIOSK_INSTALLATIONS_COLLECTION).doc(currentTerminal.installationId),
+              {
+                confirmationState: "confirmed",
+                confirmedAt: terminalUpdatedAt,
+                lastSeenAt: terminalUpdatedAt,
+                deviceReportedConfig: {
+                  stationId: result.terminal.stationId,
+                  provisionId: result.terminal.provisionId,
+                  moduleId: result.terminal.moduleId,
+                  slotCount: result.terminal.slotCount,
+                  currency: result.terminal.currency,
+                  stripeMode: result.terminal.stripeMode,
+                  stripeAccountCountry: result.terminal.stripeAccountCountry,
+                  readerType: result.terminal.readerType,
+                  stripeLocationId: result.terminal.stripeLocationId,
+                  appVersion: result?.lockdown?.versionName || "",
+                },
+                updatedAt: terminalUpdatedAt,
+              },
+              {merge: true},
+          );
+        }
         if (status !== "completed" && currentTerminal.installationId) {
           transaction.set(
               db.collection(KIOSK_INSTALLATIONS_COLLECTION).doc(currentTerminal.installationId),
@@ -2299,9 +2571,11 @@ module.exports = {
   getScreen,
   getIceServers,
   hasPhoneControlAccess,
+  hasCampaignManagerAccess,
   authenticateDeviceRequest,
   normalizeArguments,
   normalizeAppUpdateArguments,
+  normalizeDeviceKind,
   normalizePaymentAppArguments,
   normalizeConnectWifiArguments,
   normalizeHotspotArguments,
@@ -2332,5 +2606,8 @@ module.exports = {
   terminalAddressForKiosk,
   terminalCommandArguments,
   terminalConfigForKiosk,
+  terminalPackageForDevice,
+  terminalCommandResultMatches,
+  terminalReaderType,
   terminalStateAfterAppRestrictions,
 };

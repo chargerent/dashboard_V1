@@ -9,9 +9,9 @@ import {STRIPE_UI_LANGUAGES as STRIPE_LANGUAGES, STRIPE_UI_FIELDS, STRIPE_UI_COL
 
 const SECTION_META = [
   {key:'start',label:'Start'}, {key:'ready',label:'Rent / Return'}, {key:'information',label:'How it works'},
-  {key:'returning',label:'Return instructions'}, {key:'review',label:'Rental review'}, {key:'waiting_for_card',label:'Payment'},
-  {key:'wait',label:'Please wait',previewStage:'authorizing'}, {key:'succeeded',label:'Rental complete'}, {key:'returned',label:'Return complete'},
-  {key:'terms',label:'Terms'}, {key:'map',label:'Map'}, {key:'receipt',label:'Receipt'},
+  {key:'returning',label:'Return'}, {key:'review',label:'Rental review'}, {key:'waiting_for_card',label:'Payment'},
+  {key:'wait',label:'Please wait',previewStage:'authorizing'}, {key:'succeeded',label:'Rental complete'},
+  {key:'terms',label:'Terms'}, {key:'map',label:'Map'},
   {key:'failed',label:'Transaction error'}, {key:'declined',label:'Card declined'}, {key:'out_of_order',label:'Out of order'},
   {key:'popups',label:'Confirmation messages',previewStage:'succeeded'}, {key:'shared',label:'Shared buttons',previewStage:'start'},
 ];
@@ -20,21 +20,22 @@ const COMMON_SECTIONS = {
   rent:'ready',return:'ready',availability:'ready',availabilityUnavailable:'ready',unavailable:'out_of_order',returnPending:'returning',continue:'review',consent:'review',terms:'terms',termsButton:'terms',
   readerReady:'waiting_for_card',readerUnavailable:'waiting_for_card',cancel:'waiting_for_card',
   connecting:'wait',connectionLost:'wait',starting:'wait',waitingSlot:'wait',
-  settlementRefunded:'returned',returnConfirmed:'returned',receiptScan:'returned',receiptPending:'returned','popup.return':'returned',settlementVoided:'failed',settlementCaptured:'succeeded',settlementAuthorized:'wait',
-  errorGeneric:'failed',offerChanged:'review',receipt:'receipt',map:'map',retry:'failed',done:'succeeded',back:'shared',openLink:'shared',linkUnavailable:'shared',
+  settlementRefunded:'returning',returnConfirmed:'returning',returnSlot:'returning',receiptScan:'returning',receiptPending:'returning',settlementVoided:'failed',settlementCaptured:'succeeded',settlementAuthorized:'wait',
+  errorGeneric:'failed',offerChanged:'review',map:'map',retry:'failed',done:'succeeded',back:'shared',openLink:'shared',linkUnavailable:'shared',
 };
 const WAIT_STAGES = new Set(['loading','authorizing','dispensing','recovering']);
-const STRIPE_FIELDS = STRIPE_UI_FIELDS.filter(field => !['tap','insert','start.title','start.body'].includes(field.key)).map(field => {
+const STRIPE_FIELDS = STRIPE_UI_FIELDS.filter(field => !['brand','support','receipt','receipt.title','receipt.body','tap','insert','start.title','start.body','settlementRefunded','returnConfirmed'].includes(field.key)).map(field => {
   const prefix = field.key.split('.')[0];
-  const group = COMMON_SECTIONS[field.key] || (prefix === 'popup' ? 'popups' : WAIT_STAGES.has(prefix) ? 'wait' : prefix === 'cancelled' ? 'failed' : SECTION_META.some(section => section.key === prefix) ? prefix : 'shared');
-  const label = WAIT_STAGES.has(prefix) || prefix === 'cancelled' ? `${prefix.charAt(0).toUpperCase()+prefix.slice(1)} · ${field.label}` : field.label;
+  const group = COMMON_SECTIONS[field.key] || (prefix === 'popup' ? 'popups' : prefix === 'returning' || prefix === 'returned' ? 'returning' : WAIT_STAGES.has(prefix) ? 'wait' : prefix === 'cancelled' ? 'failed' : SECTION_META.some(section => section.key === prefix) ? prefix : 'shared');
+  const labelPrefix = prefix === 'returning' ? 'Instructions' : prefix === 'returned' ? 'Completed' : WAIT_STAGES.has(prefix) || prefix === 'cancelled' ? prefix.charAt(0).toUpperCase()+prefix.slice(1) : '';
+  const label = labelPrefix ? `${labelPrefix} · ${field.label}` : field.label;
   return {...field,group,label};
 });
 const sectionLabel = key => SECTION_META.find(section => section.key === key)?.label || key;
 const previewStageFor = key => SECTION_META.find(section => section.key === key)?.previewStage || key;
 const OPTIONAL_PAGES = [
   {key:'language',label:'Language selector',section:'start'}, {key:'information',label:'How it works',section:'information'},
-  {key:'terms',label:'Terms',section:'terms'}, {key:'map',label:'Map',section:'map'}, {key:'receipt',label:'Receipt',section:'receipt'},
+  {key:'terms',label:'Terms',section:'terms'}, {key:'map',label:'Map',section:'map'},
 ];
 
 const inputClass = 'mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-normal text-slate-900 outline-none focus:border-cyan-500 focus:ring-4 focus:ring-cyan-500/10';
@@ -74,7 +75,7 @@ function previewGeometry(manifest) {
   return {screenWidth,screenHeight,fraction,paymentHeight,idleWidth,idleHeight,margin,expandedWidth,detailHeight:Math.max(paymentHeight,idleHeight)+2*margin};
 }
 
-function ScaledDevicePreview({profile, language, selectedPage, group, manifest, paymentOnly=false, previewStageChange, previewLanguageChange}) {
+function ScaledDevicePreview({profile, language, selectedPage, group, manifest, previewStage, paymentOnly=false, previewStageChange, previewLanguageChange}) {
   const box = useRef(null), [displayWidth,setDisplayWidth] = useState(0);
   useEffect(() => {
     if (!box.current) return;
@@ -86,7 +87,7 @@ function ScaledDevicePreview({profile, language, selectedPage, group, manifest, 
   const scale = displayWidth / screenWidth;
   const assets = Object.fromEntries((manifest.assets || []).map(asset => [asset.id,asset]));
   const previewProfile = {...profile,enabledLanguages:[...new Set([...profile.enabledLanguages,language])]};
-  const stage = selectedPage ? 'page' : previewStageFor(group);
+  const stage = selectedPage ? 'page' : previewStage || previewStageFor(group);
   const previewCheckout = {offer:PREVIEW_OFFER, connected:true, recovering:false, interaction:{slot:7,currency:'usd',amountCents:500}};
   return <div ref={box} style={{position:'relative',width:'100%',height:displayWidth?canvasHeight*scale:undefined,aspectRatio:`${screenWidth} / ${canvasHeight || 1}`,overflow:'hidden',background:manifest.background || '#000'}} data-testid={paymentOnly?'stripe-payment-detail':'stripe-device-preview'} data-screen-width={screenWidth} data-screen-height={screenHeight} data-payment-fraction={fraction}>
     {displayWidth > 0 && <div data-kiosk-viewport style={{position:'absolute',top:0,left:0,width:screenWidth,height:canvasHeight,transform:`scale(${scale})`,transformOrigin:'top left','--ms-preview-pixel':'1px',fontFamily:'Roboto,Arial,sans-serif',boxSizing:'border-box'}}>
@@ -99,12 +100,12 @@ function ScaledDevicePreview({profile, language, selectedPage, group, manifest, 
   </div>;
 }
 
-function DraftPreview({profile, language, selectedPage, group, manifest, previewStageChange, previewLanguageChange}) {
+function DraftPreview({profile, language, selectedPage, group, manifest, previewStage, previewStageChange, previewLanguageChange}) {
   const [zoom,setZoom] = useState(false);
   const {screenWidth:width,screenHeight:height,fraction,paymentHeight,idleWidth,idleHeight,expandedWidth,margin,detailHeight} = previewGeometry(manifest);
-  const idle = !selectedPage && previewStageFor(group) === 'start';
+  const idle = !selectedPage && (previewStage || previewStageFor(group)) === 'start';
   const cardSize = `${idle?idleWidth:expandedWidth} × ${idle?idleHeight:paymentHeight}`;
-  const previewProps = {profile,language,selectedPage,group,manifest,previewStageChange,previewLanguageChange};
+  const previewProps = {profile,language,selectedPage,group,manifest,previewStage,previewStageChange,previewLanguageChange};
   return <aside className="rounded-2xl border border-slate-200 bg-slate-50 p-4 xl:sticky xl:top-4" aria-label="Stripe preview">
     <div className="flex items-center justify-between gap-2"><h3 className="font-bold text-slate-900">Screen preview</h3></div>
     <p className="mb-3 mt-1 text-xs text-slate-500">{STRIPE_LANGUAGES.find(item => item.key === language)?.label} · {selectedPage?.name || sectionLabel(group)}</p>
@@ -121,7 +122,10 @@ function DraftPreview({profile, language, selectedPage, group, manifest, preview
 }
 
 export default function StripeProfileEditor({value, checkout, onChange, disabled = false, manifest: providedManifest}) {
-  const draft = value || createStripeUi();
+  const draft = useMemo(() => {
+    try { return normalizeStripeUi(value || createStripeUi()); }
+    catch { return value || createStripeUi(); }
+  }, [value]);
   const manifest = useMemo(() => providedManifest || ({
     revision: 0,
     orientation: 'portrait',
@@ -133,6 +137,7 @@ export default function StripeProfileEditor({value, checkout, onChange, disabled
   const [tab, setTab] = useState('Text');
   const [language, setLanguage] = useState('en');
   const [group, setGroup] = useState('start');
+  const [returnPreviewStage, setReturnPreviewStage] = useState('returning');
   const [selectedPageId, setSelectedPageId] = useState('');
   const [query, setQuery] = useState('');
   const [confirmRemove, setConfirmRemove] = useState('');
@@ -149,8 +154,9 @@ export default function StripeProfileEditor({value, checkout, onChange, disabled
     if (nextStage === 'page' && draft.pages.some(item => item.id === nextPageId)) {
       setSelectedPageId(nextPageId); setTab('Pages'); setQuery(''); return;
     }
-    const nextGroup = WAIT_STAGES.has(nextStage) ? 'wait' : nextStage === 'cancelled' ? 'failed' : nextStage;
+    const nextGroup = nextStage === 'returning' || nextStage === 'returned' ? 'returning' : WAIT_STAGES.has(nextStage) ? 'wait' : nextStage === 'cancelled' ? 'failed' : nextStage;
     if (!SECTION_META.some(section => section.key === nextGroup)) return;
+    if (nextGroup === 'returning') setReturnPreviewStage(nextStage === 'returned' ? 'returned' : 'returning');
     setGroup(nextGroup); setTab('Text'); setQuery('');
   }
   function addPage() {
@@ -183,8 +189,10 @@ export default function StripeProfileEditor({value, checkout, onChange, disabled
             <label className="block text-sm font-semibold text-slate-700 md:hidden">Text section<select aria-label="Stripe text section" value={group} onChange={event => {setGroup(event.target.value); setQuery('');}} className={inputClass}>{groups.map(name => <option key={name} value={name}>{sectionLabel(name)}</option>)}</select></label>
             <nav aria-label="Stripe text sections" className="hidden space-y-1 md:block">{groups.map(name => <button key={name} type="button" aria-pressed={group === name} onClick={() => {setGroup(name); setQuery('');}} className={`w-full rounded-lg px-3 py-2 text-left text-sm font-medium ${group === name ? 'bg-cyan-50 text-cyan-800' : 'text-slate-600 hover:bg-slate-50'}`}>{sectionLabel(name)}</button>)}</nav>
             <div className="min-w-0"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h3 className="font-bold text-slate-900">{sectionLabel(group)}</h3><input type="search" aria-label="Find Stripe text" placeholder="Find text" value={query} onChange={event => setQuery(event.target.value)} className="w-40 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-cyan-500"/></div><div className="space-y-4">
+              {group === 'returning' && <div className="rounded-xl border border-cyan-100 bg-cyan-50 p-3"><div role="tablist" aria-label="Return preview state" className="flex gap-1 rounded-lg bg-white p-1">{[['returning','Instructions'],['returned','Return complete']].map(([stage,label]) => <button type="button" role="tab" aria-selected={returnPreviewStage === stage} key={stage} onClick={() => setReturnPreviewStage(stage)} className={`flex-1 rounded-md px-3 py-2 text-sm font-semibold ${returnPreviewStage === stage ? 'bg-cyan-100 text-cyan-900' : 'text-slate-500'}`}>{label}</button>)}</div><p className="mt-2 text-xs leading-5 text-cyan-900">Instructions stay on screen while the kiosk waits. A confirmed return, whether or not the customer opened this page first, uses the same completion screen with the returned slot and receipt QR.</p></div>}
+              {group === 'returning' && <Field label="Return receipt URL" hint="The Return Complete screen uses this address for its receipt QR. Leave it blank to show the receipt-pending placeholder."><input aria-label="Stripe Return receipt URL" type="url" maxLength={1000} placeholder="https://" value={draft.links?.receipt || ''} onChange={event => update({links:{...draft.links,receipt:event.target.value}})} className={inputClass}/></Field>}
               {OPTIONAL_PAGES.filter(item => item.section === group).map(item => <label key={item.key} className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-semibold text-slate-700"><span>Show {item.label.toLowerCase()}</span><input type="checkbox" aria-label={`Show Stripe ${item.label}`} checked={draft.navigation?.[item.key] !== false} onChange={event => update({navigation:{...draft.navigation,[item.key]:event.target.checked}})} className="h-4 w-4 accent-cyan-700"/></label>)}
-              {['terms','map','receipt'].includes(group) && <Field label={group === 'receipt' ? 'Receipt lookup URL' : `${sectionLabel(group)} URL`} hint={group === 'receipt' ? 'Use your receipt lookup page. Leave blank to show an unavailable message until a real destination is configured.' : 'Use an HTTPS page. Leave blank to show an unavailable message until a real destination is configured.'}><input aria-label={`Stripe ${sectionLabel(group)} URL`} type="url" maxLength={1000} placeholder="https://" value={draft.links?.[group] || ''} onChange={event => update({links:{...draft.links,[group]:event.target.value}})} className={inputClass}/></Field>}
+              {['terms','map'].includes(group) && <Field label={`${sectionLabel(group)} URL`} hint="Use an HTTPS page. Leave blank to show an unavailable message until a real destination is configured."><input aria-label={`Stripe ${sectionLabel(group)} URL`} type="url" maxLength={1000} placeholder="https://" value={draft.links?.[group] || ''} onChange={event => update({links:{...draft.links,[group]:event.target.value}})} className={inputClass}/></Field>}
               {visibleFields.map(field => <Field key={field.key} label={field.label} hint={field.hint}><textarea aria-label={`Stripe ${field.label}`} value={draft.locales[language]?.[field.key] || ''}  maxLength={2000} rows={/body|terms|pricing|message/i.test(field.key) ? 3 : 2} onChange={event => updateText(field.key, event.target.value)} className={`${inputClass} resize-y leading-6`}/></Field>)}{!visibleFields.length && <p className="py-6 text-center text-sm text-slate-500">No matching text.</p>}</div></div>
           </div>
         </>}
@@ -204,7 +212,7 @@ export default function StripeProfileEditor({value, checkout, onChange, disabled
         </>}
         {tab === 'Colors' && <><h3 className="font-bold text-slate-900">Brand colors</h3><p className="mb-5 mt-1 text-sm text-slate-500">Apply your colors to the payment section and added pages.</p><div className="grid gap-4 sm:grid-cols-2">{STRIPE_THEME_FIELDS.map(({key,label}) => <div key={key} className="rounded-2xl border border-slate-200 p-4"><div className="mb-3 flex items-center justify-between gap-3"><label htmlFor={`stripe-color-${key}`} className="text-sm font-semibold text-slate-800">{label}</label><input type="color" aria-label={`Stripe ${label} color picker`} value={/^#[0-9a-f]{6}$/i.test(draft.theme[key]) ? draft.theme[key] : '#000000'} onChange={event => update({theme:{...draft.theme,[key]:event.target.value.toUpperCase()}})} className="h-10 w-10 cursor-pointer rounded-lg border border-slate-200 bg-white p-1"/></div><input id={`stripe-color-${key}`} aria-label={`Stripe ${label} color`} value={draft.theme[key]} maxLength={7} onChange={event => update({theme:{...draft.theme,[key]:event.target.value.toUpperCase()}})} className={inputClass}/></div>)}</div></>}
       </fieldset>
-      <DraftPreview profile={draft} language={language} selectedPage={tab === 'Pages' ? page : null} group={group} manifest={manifest} previewStageChange={changePreviewStage} previewLanguageChange={setLanguage}/>
+      <DraftPreview profile={draft} language={language} selectedPage={tab === 'Pages' ? page : null} group={group} manifest={manifest} previewStage={group === 'returning' ? returnPreviewStage : previewStageFor(group)} previewStageChange={changePreviewStage} previewLanguageChange={setLanguage}/>
     </div>
   </div>;
 }

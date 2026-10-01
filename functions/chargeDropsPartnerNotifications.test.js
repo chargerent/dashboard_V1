@@ -165,6 +165,37 @@ test("skips safely when no partner email can be resolved", async () => {
   assert.equal(result.reason, "partner-email-unavailable");
 });
 
+test("skips partner email for an Ocharge LLC company-managed location", async () => {
+  const db = fakeDb();
+  let sends = 0;
+  const service = createChargeDropsPartnerNotifications({
+    db,
+    admin,
+    async sendEmail() {
+      sends += 1;
+    },
+  });
+  const input = {
+    clientUid: "company-client-uid",
+    clientProfile: {
+      ...CLIENT,
+      regionalPartnerUid: "",
+      regionalPartnerId: "OCHARGELLC",
+      regionalPartnerType: "company_managed",
+    },
+    eventType: "onboarding_started",
+    eventKey: "company-client-uid",
+  };
+  const result = await service.notify(input);
+  assert.equal(result.status, "skipped");
+  assert.equal(result.reason, "company-managed-location");
+  assert.equal(sends, 0);
+  assert.equal(
+      db.records.get(`chargeDropsPartnerNotifications/${result.id}`).reason,
+      "company-managed-location",
+  );
+});
+
 test("retries only a definitely failed audited notification", async () => {
   const db = fakeDb({
     "users/partner-uid": PARTNER,

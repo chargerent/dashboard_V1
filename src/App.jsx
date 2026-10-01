@@ -52,7 +52,7 @@ const ReportingPage = lazy(() => import('./pages/ReportingPage.jsx'));
 const BindingPage = lazy(() => import('./pages/BindingPage.jsx'));
 const TemplatesPage = lazy(() => import('./pages/TemplatesPage.jsx'));
 const TestingPage = lazy(() => import('./pages/TestingPage.jsx'));
-const MediaPage = lazy(() => import('./pages/MediaPage.jsx'));
+const ChargerentMediaPage = lazy(() => import('./pages/ChargerentMediaPage.jsx'));
 const UiProfilesPage = lazy(() => import('./pages/UiProfilesPage.jsx'));
 const AiBoothsPage = lazy(() => import('./pages/AiBoothsPage.jsx'));
 const PayoutsPage = lazy(() => import('./pages/PayoutsPage.jsx'));
@@ -65,14 +65,18 @@ const ChargeDropsClientSetupPage = lazy(() => import('./pages/ChargeDropsClientS
 const ChargeDropsClientPortalPage = lazy(() => import('./pages/ChargeDropsClientPortalPage.jsx'));
 
 function readActivityNavigation() {
-  if (typeof window === 'undefined') return { page: 'dashboard', stationId: '' };
+  if (typeof window === 'undefined') return { page: 'dashboard', stationId: '', mediaTab: 'legacy' };
   const params = new URLSearchParams(window.location.search);
   const requestedPage = params.get('page');
+  const requestedMediaTab = params.get('mediaTab');
   return {
     page: import.meta.env.DEV && ['accounting-preview', 'payter-preview', 'profiles-preview', 'chargedrops-client-setup-preview', 'chargedrops-client-portal-preview'].includes(requestedPage)
       ? requestedPage
-      : requestedPage === 'activity' ? 'activity' : 'dashboard',
+      : requestedPage === 'activity'
+        ? 'activity'
+        : ['media', 'chargerent-media'].includes(requestedPage) ? 'media' : 'dashboard',
     stationId: String(params.get('station') || '').trim().toUpperCase(),
+    mediaTab: requestedPage === 'chargerent-media' || requestedMediaTab === 'campaign' ? 'campaign' : 'legacy',
   };
 }
 
@@ -88,6 +92,7 @@ function dashboardUrl() {
   const url = new URL(window.location.href);
   url.searchParams.delete('page');
   url.searchParams.delete('station');
+  url.searchParams.delete('mediaTab');
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
@@ -655,6 +660,7 @@ function buildClientInfoFromProfile(profile, uid) {
     reporting: false,
     testing: false,
     media: false,
+    campaign_manager: false,
     ui_editor: false,
     phone_control: false,
   };
@@ -702,6 +708,7 @@ function buildClientInfoFromProfile(profile, uid) {
       rep_commission: true,
       search: true,
       media: true,
+      campaign_manager: true,
       ui_editor: true,
       phone_control: true,
       binding: false,
@@ -892,6 +899,7 @@ function App() {
   );
   const [language, setLanguage] = useState('en');
   const [page, setPage] = useState(() => readActivityNavigation().page); // 'dashboard', 'activity', 'admin', 'payter', 'media', 'binding', 'templates', 'kiosk-editor', 'rentals', 'chargers', 'provision', 'reporting', 'analytics', 'testing'
+  const [mediaInitialTab, setMediaInitialTab] = useState(() => readActivityNavigation().mediaTab);
   const [profileNavigation, setProfileNavigation] = useState({});
   const [activityInitialStation, setActivityInitialStation] = useState(() => readActivityNavigation().stationId);
   const [dashboardSearchTerm, setDashboardSearchTerm] = useState('');
@@ -1221,6 +1229,11 @@ function App() {
     setPage('phone-control');
   }, []);
 
+  const onNavigateFromMedia = useCallback((destination = 'dashboard') => {
+    window.history.replaceState({}, '', dashboardUrl());
+    setPage(destination === 'admin' ? 'admin' : 'dashboard');
+  }, []);
+
   const onActivityStationChange = useCallback((stationId = '') => {
     const normalized = String(stationId || '').trim().toUpperCase();
     setActivityInitialStation(normalized);
@@ -1247,6 +1260,7 @@ function App() {
       const navigation = readActivityNavigation();
       setPage(navigation.page);
       setActivityInitialStation(navigation.stationId);
+      setMediaInitialTab(navigation.mediaTab);
     };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
@@ -3327,14 +3341,16 @@ function App() {
     const hasBindingAccess = clientInfo.username === 'chargerent' || clientInfo.features?.binding === true || clientInfo.commands?.binding === true;
     const hasReportingAccess = clientInfo.isAdmin || clientInfo.features?.reporting === true;
     const hasMediaAccess = clientInfo.isAdmin || clientInfo.features?.media === true;
+    const isPartnerAccount = clientInfo.partner === true || clientInfo.role === 'partner';
+    const hasCampaignManagerAccess = clientInfo.isAdmin || (isPartnerAccount && clientInfo.features?.campaign_manager === true);
     const hasUiProfilesAccess = clientInfo.isAdmin || clientInfo.features?.ui_editor === true || clientInfo.commands?.['client edit'] === true;
     const hasPhoneControlAccess = clientInfo.isAdmin || clientInfo.features?.phone_control === true;
     const hasCustomerSupportAccess = clientInfo.isAdmin === true && isCustomerSupportDesktopViewport;
     const hasPayterAccess = clientInfo.isAdmin === true;
     const hasAccountingAccess = clientInfo.isAdmin === true;
     const hasChargersAccess = canViewRentalDetails || clientInfo.features?.search === true;
-    const canOpenAdminTools = clientInfo.isAdmin || clientInfo.commands?.['client edit'] === true || hasMediaAccess || hasUiProfilesAccess;
-    const hasAiBoothsAccess = canOpenAdminTools;
+    const canOpenAdminTools = clientInfo.isAdmin || clientInfo.commands?.['client edit'] === true || hasMediaAccess || hasCampaignManagerAccess || hasUiProfilesAccess;
+    const hasAiBoothsAccess = clientInfo.isAdmin || clientInfo.commands?.['client edit'] === true || hasMediaAccess || hasUiProfilesAccess;
     const isRegularReportingUser = !clientInfo.isAdmin && clientInfo.role !== 'partner';
     const isChargeDropsClient = !clientInfo.isAdmin && (
       clientInfo.portalBrand === 'chargedrops' ||
@@ -3363,6 +3379,7 @@ function App() {
           <ActivityPage
             onLogout={handleLogout}
             onNavigateToDashboard={onNavigateFromActivityToDashboard}
+            onNavigateToAdmin={() => setPage('admin')}
             allStationsData={dedupedStationsData}
             initialStationId={activityInitialStation}
             onStationChange={onActivityStationChange}
@@ -3377,6 +3394,7 @@ function App() {
           <PhoneControlPage
             onLogout={handleLogout}
             onNavigateToDashboard={onNavigateFromPhoneToDashboard}
+            onNavigateToAdmin={canOpenAdminTools ? () => setPage('admin') : undefined}
             currentUser={clientInfo}
             allStationsData={dedupedStationsData}
             initialSearch={phoneControlInitialSearch}
@@ -3391,6 +3409,7 @@ function App() {
         return (
           <CustomerSupportPage
             onLogout={handleLogout}
+            onNavigateToAdmin={() => setPage('admin')}
             onNavigateToDashboard={(searchTerm = '') => {
               setDashboardSearchTerm(normalizeNavigationSearch(searchTerm));
               setPage('dashboard');
@@ -3421,7 +3440,10 @@ function App() {
             onNavigateToProvisionPage={() => setPage('provision')}
             onNavigateToAgreement={() => setPage('agreement')}
             onNavigateToTemplates={() => setPage('templates')}
-            onNavigateToMedia={() => setPage('media')}
+            onNavigateToMedia={() => {
+              setMediaInitialTab('legacy');
+              setPage('media');
+            }}
             onNavigateToUiProfiles={() => {setProfileNavigation({}); setPage('ui-profiles');}}
             onNavigateToAiBooths={openObailixConciergeWorkspace}
             onNavigateToPayouts={() => setPage('payouts')}
@@ -3430,6 +3452,8 @@ function App() {
             onNavigateToChargeDropsClientSetup={() => setPage('chargedrops-client-setup')}
             currentUser={clientInfo}
             t={t}
+            language={language}
+            setLanguage={setLanguage}
           />
         );
       case 'chargedrops-client-setup':
@@ -3527,19 +3551,27 @@ function App() {
           />
         );
       case 'media':
-        if (!hasMediaAccess) {
+        if (!hasMediaAccess && !hasCampaignManagerAccess) {
           return dashboard;
         }
 
         return (
-          <MediaPage
+          <ChargerentMediaPage
             onLogout={handleLogout}
-            onNavigateToDashboard={() => setPage('dashboard')}
-            onNavigateToAdmin={() => setPage('admin')}
+            onNavigateToDashboard={() => onNavigateFromMedia('dashboard')}
+            onNavigateToAdmin={() => onNavigateFromMedia('admin')}
             currentUser={clientInfo}
             allStationsData={dedupedStationsData}
             referenceTime={latestTimestamp}
             t={t}
+            initialTab={mediaInitialTab}
+            allowLegacyMedia={hasMediaAccess}
+            allowCampaignManager={hasCampaignManagerAccess}
+            onNavigateToDeviceManagement={hasPhoneControlAccess ? () => onNavigateToPhoneControl('') : undefined}
+            onNavigateToUiProfiles={hasUiProfilesAccess ? () => {
+              setProfileNavigation({initialSection: 'chargerentApp'});
+              setPage('ui-profiles');
+            } : undefined}
           />
         );
       case 'binding':
@@ -3565,6 +3597,7 @@ function App() {
             setLanguage={setLanguage}
             onLogout={handleLogout}
             onNavigateToDashboard={() => setPage('dashboard')}
+            onNavigateToAdmin={() => setPage('admin')}
           />
         );
       case 'templates':
@@ -3572,6 +3605,7 @@ function App() {
           <TemplatesPage
             t={t}
             onLogout={handleLogout}
+            onNavigateToDashboard={() => setPage('dashboard')}
             onNavigateToAdmin={() => setPage('admin')}
             currentUser={clientInfo}
           />
@@ -3581,6 +3615,7 @@ function App() {
         return (
           <RentalsPage
             onNavigateToProvisionPage={() => setPage('provision')}
+            onNavigateToAdmin={canOpenAdminTools ? () => setPage('admin') : undefined}
             onNavigateToDashboard={(searchTerm = '') => {
               setDashboardSearchTerm(normalizeNavigationSearch(searchTerm));
               setPage('dashboard');
@@ -3610,6 +3645,7 @@ function App() {
         if (!hasChargersAccess) return dashboard;
         return (
           <ChargersPage
+            onNavigateToAdmin={canOpenAdminTools ? () => setPage('admin') : undefined}
             onNavigateToDashboard={(searchTerm = '') => {
               setDashboardSearchTerm(normalizeNavigationSearch(searchTerm));
               setPage('dashboard');
@@ -3647,6 +3683,7 @@ function App() {
         return (
           <ReportingPage
             onNavigateToDashboard={() => setPage('dashboard')}
+            onNavigateToAdmin={canOpenAdminTools ? () => setPage('admin') : undefined}
             onNavigateToAnalytics={onNavigateToAnalytics}
             onLogout={handleLogout}
             t={t}
@@ -3667,6 +3704,7 @@ function App() {
             rentalData={rentalData}
             initialData={analyticsInitialData}
             onNavigateToDashboard={() => setPage('dashboard')}
+            onNavigateToAdmin={canOpenAdminTools ? () => setPage('admin') : undefined}
             onLogout={handleLogout}
             t={t}
           />
@@ -3680,6 +3718,7 @@ function App() {
           <TestingPage
             onLogout={handleLogout}
             onNavigateToDashboard={() => setPage('dashboard')}
+            onNavigateToAdmin={canOpenAdminTools ? () => setPage('admin') : undefined}
             clientInfo={clientInfo}
             t={t}
             language={language}
@@ -3710,6 +3749,7 @@ function App() {
             token={token}
             onLogout={handleLogout}
             onNavigateToDashboard={() => setPage('dashboard')}
+            onNavigateToAdmin={canOpenAdminTools ? () => setPage('admin') : undefined}
             t={t}
             kioskData={dedupedStationsData}
             onCommand={onCommand}

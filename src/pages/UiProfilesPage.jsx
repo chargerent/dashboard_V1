@@ -17,7 +17,7 @@ import {
 import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
 import DashboardPageActions from '../components/UI/DashboardPageActions.jsx';
 import TerminalProfileEditor from '../components/profiles/TerminalProfileEditor.jsx';
-import StripeProfileEditor from '../media-lab/StripeProfileEditor.jsx';
+import StripeProfileEditor from '../integrated-media/StripeProfileEditor.jsx';
 import {PROFILE_SECTIONS, getProfileDeviceTypes, getTerminalProfileCopy, isProfileSectionTarget, mergeProfileSection} from '../../functions/uiProfileSections.mjs';
 import {getApolloScreenFlowError} from '../../functions/apolloScreens.mjs';
 import {isProfileDeviceSectionAvailable, profileDeviceStatus, profileSectionContent} from '../utils/profileDevices.js';

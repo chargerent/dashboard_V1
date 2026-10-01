@@ -13,6 +13,24 @@ export const PHONE_KIOSK_COUNTRIES = [
   { code: 'US', label: 'US' },
 ];
 
+export const PHONE_DEVICE_KINDS = [
+  { value: 'managed_phone', label: 'Managed phone' },
+  { value: 'integrated_kiosk', label: 'Integrated kiosk' },
+];
+
+export function isIntegratedKiosk(device = {}) {
+  const safeDevice = device && typeof device === 'object' && !Array.isArray(device) ? device : {};
+  const inventory = safeDevice.inventory && typeof safeDevice.inventory === 'object' && !Array.isArray(safeDevice.inventory)
+    ? safeDevice.inventory
+    : {};
+  return String(safeDevice.deviceKind || inventory.deviceKind || '').trim().toLowerCase() ===
+    'integrated_kiosk' || String(inventory.deviceKind || '').trim().toLowerCase() === 'media_kiosk';
+}
+
+export function phoneDeviceTypeLabel(device = {}) {
+  return isIntegratedKiosk(device) ? 'Integrated kiosk' : 'Managed phone';
+}
+
 export function getPhoneStationCountryCode(stationId) {
   return String(stationId || '').trim().toUpperCase().match(/^(CA|FR|US)/)?.[1] || '';
 }
@@ -210,23 +228,35 @@ export function phoneLineNumberKey(value) {
 }
 
 export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
-  const inventory = rawDevice.inventory && typeof rawDevice.inventory === 'object'
-    ? rawDevice.inventory
+  const safeDevice = rawDevice && typeof rawDevice === 'object' && !Array.isArray(rawDevice)
+    ? rawDevice
+    : {};
+  const inventory = safeDevice.inventory && typeof safeDevice.inventory === 'object'
+    ? safeDevice.inventory
     : {};
   const stationId = String(
-    rawDevice.stationId || rawDevice.stationid || rawDevice.assignment?.stationId || '',
+    safeDevice.stationId || safeDevice.stationid || safeDevice.assignment?.stationId || '',
   ).trim().toUpperCase();
-  const market = String(rawDevice.market || getPhoneStationCountryCode(stationId) || '')
+  const market = String(safeDevice.market || getPhoneStationCountryCode(stationId) || '')
     .trim().toUpperCase();
   const lastSeenAtMs = phoneTimestampToMillis(
-    rawDevice.lastSeenAt || rawDevice.heartbeatAt || inventory.collectedAt,
+    safeDevice.lastSeenAt || safeDevice.heartbeatAt || inventory.collectedAt,
   );
-  const rawLocation = rawDevice.location && typeof rawDevice.location === 'object'
-    ? rawDevice.location
+  const rawLocation = safeDevice.location && typeof safeDevice.location === 'object'
+    ? safeDevice.location
     : {};
-  const rawTerminal = rawDevice.terminal && typeof rawDevice.terminal === 'object'
-    ? rawDevice.terminal
+  const rawTerminal = safeDevice.terminal && typeof safeDevice.terminal === 'object'
+    ? safeDevice.terminal
     : {};
+  const rawM2Terminal = inventory.stripeTerminal && typeof inventory.stripeTerminal === 'object'
+    ? inventory.stripeTerminal
+    : inventory.m2Terminal && typeof inventory.m2Terminal === 'object'
+      ? inventory.m2Terminal
+      : {};
+  const deviceKind = String(safeDevice.deviceKind || '').trim().toLowerCase() === 'integrated_kiosk' ||
+    String(inventory.deviceKind || '').trim().toLowerCase() === 'media_kiosk'
+    ? 'integrated_kiosk'
+    : 'managed_phone';
   const latitude = Number(rawLocation.latitude);
   const longitude = Number(rawLocation.longitude);
   const hasCoordinates = Number.isFinite(latitude) && latitude >= -90 && latitude <= 90 &&
@@ -267,32 +297,34 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
     optionalNumber(inventoryValue) ?? optionalNumber(connectedValue)
   );
   const currentAgentPhoneNumber = String(inventory.phoneNumber || '').trim();
-  const retainedAgentPhoneNumber = String(rawDevice.reportedPhoneNumber || '').trim();
+  const retainedAgentPhoneNumber = String(safeDevice.reportedPhoneNumber || '').trim();
   const agentPhoneNumber = currentAgentPhoneNumber || retainedAgentPhoneNumber;
-  const manualPhoneNumber = String(rawDevice.manualPhoneNumber || '').trim();
+  const manualPhoneNumber = String(safeDevice.manualPhoneNumber || '').trim();
   const effectivePhoneNumber = agentPhoneNumber || manualPhoneNumber;
   const batteryPercent = optionalNumber(inventory.batteryPercent);
 
   return {
-    id: String(rawDevice.deviceId || documentId || '').trim(),
+    id: String(safeDevice.deviceId || documentId || '').trim(),
     stationId,
     assignmentState: stationId ? 'assigned' : 'unassigned',
     market,
-    displayName: String(rawDevice.displayName || rawDevice.name || '').trim(),
-    enrollmentState: String(rawDevice.enrollmentState || rawDevice.status || 'pending').toLowerCase(),
+    displayName: String(safeDevice.displayName || safeDevice.name || '').trim(),
+    deviceKind,
+    packageName: String(safeDevice.packageName || inventory.packageName || '').trim(),
+    enrollmentState: String(safeDevice.enrollmentState || safeDevice.status || 'pending').toLowerCase(),
     lastSeenAtMs,
-    lastSeenAt: rawDevice.lastSeenAt || rawDevice.heartbeatAt || null,
-    lastCommand: rawDevice.lastCommand || null,
+    lastSeenAt: safeDevice.lastSeenAt || safeDevice.heartbeatAt || null,
+    lastCommand: safeDevice.lastCommand || null,
     phoneLine: {
       number: effectivePhoneNumber,
       key: phoneLineNumberKey(effectivePhoneNumber),
       source: agentPhoneNumber ? 'agent' : manualPhoneNumber ? 'manual' : '',
       agentNumber: agentPhoneNumber,
       manualNumber: manualPhoneNumber,
-      reportedAtMs: phoneTimestampToMillis(rawDevice.reportedPhoneNumberAt),
-      manualUpdatedAtMs: phoneTimestampToMillis(rawDevice.manualPhoneNumberUpdatedAt),
+      reportedAtMs: phoneTimestampToMillis(safeDevice.reportedPhoneNumberAt),
+      manualUpdatedAtMs: phoneTimestampToMillis(safeDevice.manualPhoneNumberUpdatedAt),
     },
-    screen: rawDevice.screen && typeof rawDevice.screen === 'object' ? rawDevice.screen : {},
+    screen: safeDevice.screen && typeof safeDevice.screen === 'object' ? safeDevice.screen : {},
     terminal: {
       enabled: rawTerminal.enabled === true,
       state: String(rawTerminal.state || (rawTerminal.enabled ? 'pending' : 'disabled')).trim().toLowerCase(),
@@ -302,6 +334,7 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
       stripeLocationId: String(rawTerminal.stripeLocationId || '').trim(),
       stripeAccountCountry: String(rawTerminal.stripeAccountCountry || '').trim().toUpperCase(),
       stripeMode: String(rawTerminal.stripeMode || '').trim().toLowerCase(),
+      stripeReaderType: String(rawTerminal.stripeReaderType || '').trim().toLowerCase(),
       packageName: String(rawTerminal.packageName || '').trim(),
       lockdownEnabled: rawTerminal.lockdownEnabled === true,
       lockdownState: String(rawTerminal.lockdownState ||
@@ -326,7 +359,7 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
     },
     inventory: {
       manufacturer: String(inventory.manufacturer || '').trim(),
-      model: String(inventory.model || rawDevice.model || 'Android phone').trim(),
+      model: String(inventory.model || safeDevice.model || 'Android phone').trim(),
       androidVersion: String(inventory.androidVersion || '').trim(),
       securityPatch: String(inventory.securityPatch || '').trim(),
       systemUpdatePolicy: String(inventory.systemUpdatePolicy || 'unknown').trim().toLowerCase(),
@@ -335,7 +368,7 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
       systemUpdateWindowExpiresAt: phoneTimestampToMillis(inventory.systemUpdateWindowExpiresAt),
       systemUpdatePending: inventory.systemUpdatePending === true,
       systemUpdateReceivedAt: phoneTimestampToMillis(inventory.systemUpdateReceivedAt),
-      agentVersion: String(inventory.agentVersion || rawDevice.agentVersion || '').trim(),
+      agentVersion: String(inventory.agentVersion || safeDevice.agentVersion || '').trim(),
       agentVersionCode: Number.isSafeInteger(Number(inventory.agentVersionCode))
         ? Number(inventory.agentVersionCode)
         : 0,
@@ -421,10 +454,26 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
       locationEnabled: inventory.locationEnabled === true,
       remoteUiInputEnabled: inventory.remoteUiInputEnabled === true,
       isDeviceOwner: inventory.isDeviceOwner === true,
+      deviceKind: String(inventory.deviceKind || '').trim().toLowerCase(),
+      packageName: String(inventory.packageName || safeDevice.packageName || '').trim(),
+      m2Terminal: {
+        configured: rawM2Terminal.configured === true,
+        stationId: String(rawM2Terminal.stationId || '').trim().toUpperCase(),
+        provisionId: String(rawM2Terminal.provisionId || '').trim(),
+        moduleId: String(rawM2Terminal.moduleId || '').trim(),
+        currency: String(rawM2Terminal.currency || '').trim().toLowerCase(),
+        stripeMode: String(rawM2Terminal.stripeMode || '').trim().toLowerCase(),
+        stripeAccountCountry: String(rawM2Terminal.stripeAccountCountry || '').trim().toUpperCase(),
+        readerType: String(rawM2Terminal.readerType || '').trim().toLowerCase(),
+        readerName: String(rawM2Terminal.readerName || '').trim(),
+        stripeLocationId: String(rawM2Terminal.stripeLocationId || '').trim(),
+        expectedReaderSerial: String(rawM2Terminal.expectedReaderSerial || '').trim(),
+        connectedReaderSerial: String(rawM2Terminal.connectedReaderSerial || '').trim(),
+      },
       storageAvailableBytes: Number(inventory.storageAvailableBytes || 0),
       storageTotalBytes: Number(inventory.storageTotalBytes || 0),
     },
-    raw: rawDevice,
+    raw: safeDevice,
   };
 }
 

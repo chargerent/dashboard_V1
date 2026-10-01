@@ -101,6 +101,57 @@ function createFakeSupportStore(ticket) {
   return {admin, committedBatches, db, directWrites};
 }
 
+function createFakeInboundEmailStore() {
+  const tickets = new Map();
+  const messages = new Map();
+  const reference = (kind, id, ticketId = "") => ({kind, id, ticketId});
+  const emptyQuery = {
+    limit() {
+      return this;
+    },
+    async get() {
+      return {docs: []};
+    },
+  };
+  const db = {
+    collection(name) {
+      assert.equal(name, "supportTickets");
+      return {
+        doc(ticketId) {
+          const ticketRef = reference("ticket", ticketId);
+          return {
+            ...ticketRef,
+            collection(collectionName) {
+              assert.equal(collectionName, "messages");
+              return {doc: (messageId) => reference("message", messageId, ticketId)};
+            },
+          };
+        },
+        where() {
+          return emptyQuery;
+        },
+      };
+    },
+    async runTransaction(callback) {
+      const transaction = {
+        async get(ref) {
+          const record = ref.kind === "ticket" ? tickets.get(ref.id) : messages.get(`${ref.ticketId}:${ref.id}`);
+          return {exists: Boolean(record), data: () => record};
+        },
+        set(ref, data) {
+          if (ref.kind === "ticket") tickets.set(ref.id, data);
+          else messages.set(`${ref.ticketId}:${ref.id}`, data);
+        },
+      };
+      return callback(transaction);
+    },
+  };
+  const admin = {
+    firestore: {FieldValue: {serverTimestamp: () => "server-time"}},
+  };
+  return {admin, db, messages, tickets};
+}
+
 test("website request types map to support queue categories", () => {
   assert.equal(requestCategory("other"), "customer_support");
   assert.equal(requestCategory("event"), "sales");
@@ -157,6 +208,42 @@ test("new inbox messages receive a useful initial category", () => {
   assert.equal(inferEmailCategory("Hello", "Can someone contact me?"), "general");
 });
 
+test("a free-form message to the sales address creates a Sales case", async () => {
+  const store = createFakeInboundEmailStore();
+  const service = createSupportTicketService({
+    db: store.db,
+    admin: store.admin,
+    clock: () => new Date("2026-09-29T12:00:00.000Z"),
+  });
+
+  const result = await service.importInboundEmail({
+    messageId: "gmail-sales-lead-1",
+    threadId: "gmail-sales-thread-1",
+    rfcMessageId: "<sales-lead-1@example.com>",
+    from: "roza@example.com",
+    fromName: "Roza Prospect",
+    to: "sales@charge.rent",
+    originalRecipient: "sales@charge.rent",
+    inboundMailbox: "george@charge.rent",
+    category: "sales",
+    subject: "Event in Sunnyvale",
+    body: "We are hosting a summit and would like portable power banks.",
+    receivedAt: "2026-09-29T12:00:00.000Z",
+  });
+
+  assert.equal(result.created, true);
+  const ticket = store.tickets.get(result.ticketId);
+  assert.equal(ticket.category, "sales");
+  assert.match(ticket.displayTicketNumber, /^SL-/);
+  assert.equal(ticket.customer.email, "roza@example.com");
+  assert.equal(ticket.originalRecipient, "sales@charge.rent");
+  assert.equal(ticket.inboundMailbox, "george@charge.rent");
+  assert.equal(ticket.replyAddress, "support@charge.rent");
+  const message = [...store.messages.values()][0];
+  assert.equal(message.body, "We are hosting a summit and would like portable power banks.");
+  assert.equal(message.originalRecipient, "sales@charge.rent");
+});
+
 test("chatbot events normalize into customer-service cases without storing full card data", () => {
   const normalized = normalizeChatbotEvent({
     provider: "partner-chatbot",
@@ -210,7 +297,6 @@ test("Arthur's Disney chatbot submission maps into a complete customer-service c
     language: "fr",
     session_id: "sess_1727385600000_x4k2p9a",
     submitted_at: "2026-09-27T14:32:00.000Z",
-    chat_transcript: "Guest: I need a refund\nCharlie: ...",
   }, {createdAt: "server-time", createdAtIso: "2026-09-27T14:32:00.000Z"});
 
   assert.match(normalized.id, /^CHAT-[a-f0-9]{20}$/);
@@ -228,7 +314,7 @@ test("Arthur's Disney chatbot submission maps into a complete customer-service c
   assert.equal(normalized.ticket.details.submittedLanguage, "fr");
   assert.equal(normalized.ticket.details.locale, "fr");
   assert.equal(normalized.ticket.details.rentalDate, "2026-09-27");
-  assert.equal(normalized.ticket.message, "Guest: I need a refund\nCharlie: ...");
+  assert.equal(normalized.ticket.message, "The cable was broken");
   assert.equal(normalized.message.createdAtIso, "2026-09-27T14:32:00.000Z");
 });
 
@@ -245,11 +331,11 @@ test("Disney chatbot submissions derive the rental date and accept an explicit o
     session_id: "sess_1727385600000_abcdefghi",
     submitted_at: "2026-09-27T14:32:00.000Z",
     rental_date: "2026-09-26",
-    chat_transcript: "Guest: I was charged twice.",
   };
   const normalized = normalizeChatbotEvent(validSubmission);
   assert.equal(normalized.ticket.details.rentalDate, "2026-09-26");
   assert.equal(normalized.ticket.replyChannel, "chatbot");
+  assert.equal(normalized.ticket.message, "Double charge");
 
   const derivedDate = normalizeChatbotEvent({...validSubmission, rental_date: undefined});
   assert.equal(derivedDate.ticket.details.rentalDate, "2026-09-27");
@@ -331,7 +417,6 @@ test("retried Disney chatbot submissions create one case and one activity entry"
     session_id: "sess_1727385600000_retrytest",
     submitted_at: "2026-09-27T14:32:00.000Z",
     rental_date: "2026-09-27",
-    chat_transcript: "Guest: Nothing came out.",
   };
 
   const created = await service.importChatbotEvent(submission);

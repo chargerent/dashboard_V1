@@ -40,6 +40,32 @@ service cloud.firestore {
       }
     }
 
+    // Personal staff routing numbers are visible only to administrators and
+    // are changed through validated Cloud Functions.
+    match /supportTelephonyStaff/{staffId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    match /supportTelephonyConfig/{configId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // Uploaded MP3 prompt metadata is administrator-readable. Audio bytes stay
+    // private in Storage and are served through the constrained media function.
+    match /supportVoicePrompts/{promptId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // Canonical inbound and outbound support call history. The voice webhook is
+    // the only writer; administrators can review the log in Customer Service.
+    match /supportCallLogs/{callId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
     // ChargeDrops agreements contain immutable contract snapshots, signer
     // evidence, one-time-code hashes, and audit events. Clients and admins use
     // authenticated Cloud Functions so no browser can alter the record trail.
@@ -188,6 +214,10 @@ service cloud.firestore {
       allow read: if request.auth != null &&
         collection != 'workspaceProvisioning' &&
         collection != 'supportTickets' &&
+        collection != 'supportTelephonyStaff' &&
+        collection != 'supportTelephonyConfig' &&
+        collection != 'supportVoicePrompts' &&
+        collection != 'supportCallLogs' &&
         collection != 'chargeDropsAgreements' &&
         collection != 'chargeDropsAgreementChallenges' &&
         collection != 'chargeDropsPartnerNotifications' &&

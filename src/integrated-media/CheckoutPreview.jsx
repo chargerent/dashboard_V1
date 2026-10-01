@@ -1,7 +1,8 @@
 import {MEDIA_HOSTED,mediaUrl,mediaFetch} from './mediaApi.js';
-import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
+/* eslint-disable react-refresh/only-export-components */
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {createPortal} from 'react-dom';
-import {stripeQrDataUrl} from './stripeQr.js';
+import {customerHelpQrDataUrl,customerHelpSmsUrl,stripeQrDataUrl} from './stripeQr.js';
 
 import {STRIPE_UI_LANGUAGES,defaultStripeUi,validateStripeUi,stripeText,stripePageText,resolveStripeLanguage} from './stripeUi.js';
 import {checkoutMoney,checkoutUsesColumns,checkoutLinkUrl,checkoutReturnReceiptUrl,normalizeCheckoutReturnNotice,canPresentCheckoutReturn,checkoutReturnContext,mayDismissCheckoutReturn,returnReceiptSizing,floatingCheckoutGeometry,IDLE_CHECKOUT_FLOW,enabledCheckoutPages,beginCheckoutFlow,nextCheckoutPage,previousCheckoutPage,canCreateCheckout} from './checkoutFlow.js';
@@ -24,7 +25,7 @@ async function request(path,options={}) {
     const response=await mediaFetch(`${API}${path}`,{...options,signal:controller.signal,headers:{...(options.body?{'Content-Type':'application/json'}:{}),...options.headers}});
     const body=await response.json().catch(()=>({}));
     if(controller.signal.aborted)throw new Error('The connection timed out. Reconnecting to your rental…');
-    if(!response.ok){const failure=new Error(body.error?.message || `The local simulator returned ${response.status}.`);failure.status=response.status;throw failure;}
+    if(!response.ok){const failure=new Error(body.error?.message || `The media service returned ${response.status}.`);failure.status=response.status;throw failure;}
     return body;
   } catch(failure) {
     if(controller.signal.aborted)throw new Error('The connection timed out. Reconnecting to your rental…');
@@ -37,7 +38,7 @@ export function useBrowserCheckout({onEvent}) {
   const [returnEvent,setReturnEvent]=useState(null);
   const [offer,setOffer]=useState(null),[interaction,setInteraction]=useState(null),[connected,setConnected]=useState(false),[error,setError]=useState(''),[busy,setBusy]=useState(''),[recovering,setRecovering]=useState(true);
   const interactionId=useRef(stored('interaction')),createKey=useRef(stored('createKey')),polling=useRef(false),operation=useRef(false),epoch=useRef(0),latestEvent=useRef(onEvent),cursor=useRef(Number(stored('cursor')) || 0),initialEvents=useRef(stored('cursor')!==null);
-  latestEvent.current=onEvent;
+  useEffect(()=>{latestEvent.current=onEvent;},[onEvent]);
   function accept(value) {setInteraction(value || null);if(value?.id && interactionId.current!==value.id){interactionId.current=value.id;remember('interaction',value.id);}}
   async function refresh() {
     if(MEDIA_HOSTED){setRecovering(false);return;}
@@ -60,7 +61,7 @@ export function useBrowserCheckout({onEvent}) {
         }
         cursor.current=Number(events.cursor) || cursor.current;remember('cursor',cursor.current);initialEvents.current=true;
       } catch { /* Checkout recovery remains available when the event stream is briefly unavailable. */ }
-    } catch(failure) {if(readEpoch===epoch.current){setConnected(false);setRecovering(false);}}
+    } catch {if(readEpoch===epoch.current){setConnected(false);setRecovering(false);}}
     finally{polling.current=false;}
   }
   useEffect(()=>{refresh();const timer=setInterval(refresh,1000);return()=>clearInterval(timer);},[actorId]);
@@ -89,8 +90,8 @@ export function useBrowserCheckout({onEvent}) {
   return {actorId,offer,interaction,returnEvent,connected,error,busy,recovering,start:()=>act('start'),pay:()=>act('pay'),cancel:()=>act('cancel'),reset,refresh};
 }
 
-const CUSTOMER_STAGES=new Set(['start','ready','page','review','waiting_for_card','authorizing','dispensing','succeeded','declined','cancelled','failed','recovering','returning','returned','information','terms','map','receipt','out_of_order','loading']);
-const LINK_STAGES=new Set(['terms','map','receipt']);
+const CUSTOMER_STAGES=new Set(['start','ready','page','review','waiting_for_card','authorizing','dispensing','succeeded','declined','cancelled','failed','recovering','returning','returned','information','terms','map','out_of_order','loading']);
+const LINK_STAGES=new Set(['terms','map']);
 const INFORMATION_STAGES=new Set(['information',...LINK_STAGES]);
 
 export function LanguageFlag({language}) {
@@ -120,7 +121,7 @@ export function CheckoutPanel({checkout={},previewOnly=false,previewStage,previe
     if(previewOnly && STRIPE_UI_LANGUAGES.some(item=>item.key===previewLanguage) && !value.enabledLanguages.includes(previewLanguage))value={...value,enabledLanguages:[...value.enabledLanguages,previewLanguage]};
     return value;
   },[stripeUi,previewOnly,previewLanguage]);
-  const [selectedLanguage,setSelectedLanguage]=useState(''),[flow,setFlow]=useState({...IDLE_CHECKOUT_FLOW}),[offerChanged,setOfferChanged]=useState(false),[qrOpen,setQrOpen]=useState(false),[qrImage,setQrImage]=useState(null);
+  const [selectedLanguage,setSelectedLanguage]=useState(''),[flow,setFlow]=useState({...IDLE_CHECKOUT_FLOW}),[offerChanged,setOfferChanged]=useState(false),[qrOpen,setQrOpen]=useState(false),[qrImage,setQrImage]=useState(null),[helpQrImage,setHelpQrImage]=useState(null);
   const [returnNotice,setReturnNotice]=useState(()=>normalizeCheckoutReturnNotice(checkout.returnEvent)),[noticeNow,setNoticeNow]=useState(Date.now);
   const [documentHidden,setDocumentHidden]=useState(()=>typeof document!=='undefined' && document.hidden);
   const lastReturn=useRef(checkout.returnEvent?.eventId),shownReturn=useRef(null);
@@ -153,7 +154,7 @@ export function CheckoutPanel({checkout={},previewOnly=false,previewStage,previe
   const flowPages=controlled?profile.pages.filter(page=>page.enabled!==false || page.id===previewPageId):pages;
   const currentPage=phase==='idle' && shownFlow.step==='page'?(controlled?profile.pages:pages).find(page=>page.id===shownFlow.pageId):null;
   const localStage=shownFlow.step==='page' && !currentPage?'review':shownFlow.step;
-  const auxiliary=INFORMATION_STAGES.has(localStage) && (phase==='idle' || (phase==='succeeded' && localStage==='receipt'));
+  const auxiliary=INFORMATION_STAGES.has(localStage) && phase==='idle';
   const outOfOrder=!previewOnly && phase==='idle' && ['start','ready'].includes(localStage) && (!connected || !offer || offer.controllerOnline===false);
   const restoring=recovering || (!previewOnly && !connected && interaction && !ended);
   const returnSafe=canPresentCheckoutReturn({flow,phase,busy,recovering:restoring,suppressed:documentHidden || checkout.noticeSuppressed});
@@ -175,16 +176,19 @@ export function CheckoutPanel({checkout={},previewOnly=false,previewStage,previe
   },[stage,currentPage?.id]);
   const currency=interaction?.currency || offer?.currency || 'usd';
   const money=value=>checkoutMoney(value,currency,language);
-  const values=noticePresentation?{deposit:'—',fee:'—',refund:'—',slot:returnNotice?.slot ?? '—',available:'—'}:{deposit:money(interaction?.amountCents ?? offer?.depositAmountCents ?? offer?.amountCents),fee:money(returned?interaction?.settlement?.chargedAmountCents:offer?.rentalFeeCents),refund:money(returned?interaction?.settlement?.refundedAmountCents:offer?.refundAmountCents),slot:interaction?.slot ?? '—',available:offer?.availableCount ?? '—'};
+  const values=noticePresentation?{deposit:'—',fee:'—',refund:'—',slot:returnNotice?.slot ?? interaction?.returnSlot ?? interaction?.slot ?? '—',available:'—'}:{deposit:money(interaction?.amountCents ?? offer?.depositAmountCents ?? offer?.amountCents),fee:money(returned?interaction?.settlement?.chargedAmountCents:offer?.rentalFeeCents),refund:money(returned?interaction?.settlement?.refundedAmountCents:offer?.refundAmountCents),slot:interaction?.returnSlot ?? interaction?.slot ?? '—',available:offer?.availableCount ?? '—'};
   const text=key=>stripeText(profile,language,key,values);
   const pageText=key=>stripePageText(profile,currentPage,language,key,values);
-  const title=currentPage?pageText('title'):text(`${stage}.title`),body=noticePresentation?text('popup.return'):currentPage?pageText('body'):text(`${stage}.body`);
+  const title=currentPage?pageText('title'):text(`${stage}.title`),body=currentPage?pageText('body'):text(`${stage}.body`);
   const themeStyle={...Object.fromEntries(Object.entries(profile.theme).map(([key,value])=>[`--checkout-${key}`,value])),'--checkout-pixel':`calc(var(--ms-preview-pixel) * ${geometry.scale})`};
   const px=value=>`calc(var(--ms-preview-pixel) * ${value})`;
   const cardStyle={...themeStyle,'--return-qr-size':px(receiptSizing.qr),'--return-done-height':px(receiptSizing.done),'--return-gap':px(receiptSizing.gap),width:px(idle?geometry.idleWidth:geometry.expandedWidth),height:px(idle?geometry.idleHeight:geometry.expandedHeight),bottom:px(geometry.bottom),borderRadius:px(geometry.radius)};
   const canSubmit=!previewOnly && canCreateCheckout(flow,{connected,available:offer?.canRent,busy,recovering,quoteKey});
   const link=stage==='returned'?(noticePresentation?checkoutReturnReceiptUrl(profile,showingReturn?returnNotice:null,interaction):checkoutLinkUrl(profile,'receipt',interaction)):LINK_STAGES.has(stage)?checkoutLinkUrl(profile,stage,interaction):null;
+  const helpStationId=String(checkout.stationId || STATION).trim().toUpperCase(),helpSmsLink=customerHelpSmsUrl(helpStationId);
+  const showHelpQr=!currentPage && stage==='ready' && !!helpSmsLink;
   useEffect(()=>{let active=true;setQrImage(null);setQrOpen(false);if(link)stripeQrDataUrl(link).then(value=>{if(active)setQrImage(value);}).catch(()=>{});return()=>{active=false;};},[link]);
+  useEffect(()=>{let active=true;setHelpQrImage(null);if(helpSmsLink)customerHelpQrDataUrl(helpStationId).then(value=>{if(active)setHelpQrImage(value);}).catch(()=>{});return()=>{active=false;};},[helpSmsLink,helpStationId]);
   function selectFlow(value){if(controlled){previewStageChange?.(value.step,value.pageId);return;}setFlow(value);}
   function begin(){setOfferChanged(false);selectFlow(beginCheckoutFlow(pages));}
   function done(){if(controlled){previewStageChange?.('start');return;}const safe=!showingReturn || mayDismissCheckoutReturn(shownReturn.current,returnNotice?.eventId,returnContext,returnSafe);setReturnNotice(null);setQrOpen(false);if(!safe)return;setFlow({...IDLE_CHECKOUT_FLOW});setOfferChanged(false);if(!returnOnly && !previewOnly && ended)checkout.reset?.();}
@@ -204,9 +208,9 @@ export function CheckoutPanel({checkout={},previewOnly=false,previewStage,previe
     if(stage==='loading')return busyMessage('connecting');
     if(stage==='recovering')return <>{button('recovering.title',()=>{if(!previewOnly)checkout.refresh?.();},{secondary:true,disabled:!!busy})}{['awaiting_payment','authorizing'].includes(interaction?.phase) && button('cancel',()=>{if(!previewOnly)checkout.cancel?.();},{secondary:true,disabled:!!busy || !connected})}</>;
     if(stage==='out_of_order')return null;
-    if(stage==='succeeded')return <div className="ms-checkout-row">{navigation.receipt!==false && button('receipt',()=>showInformation('receipt'),{secondary:true,disabled:!!busy,presentationOnly:true})}{button('done',done,{disabled:!!busy,presentationOnly:true})}</div>;
+    if(stage==='succeeded')return button('done',done,{disabled:!!busy,presentationOnly:true});
     if(INFORMATION_STAGES.has(stage))return <>{link && button('openLink',()=>setQrOpen(true),{disabled:!qrImage,presentationOnly:true})}{button('back',back,{secondary:true,presentationOnly:true})}</>;
-    if(stage==='returning')return button('back',done,{secondary:true,presentationOnly:true});
+    if(stage==='returning')return busyMessage('returnPending');
     if(stage==='returned')return <><div className="ms-return-receipt" aria-label={text('receipt.title')}>{link?<>{qrImage?<img className="ms-checkout-qr" src={qrImage} alt={text('receiptScan')}/>:<span className="ms-return-qr-pending" aria-hidden="true"/>}<p>{text('receiptScan')}</p></>:<><span className="ms-return-qr-pending" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M13 5h22v38l-5-3-6 3-6-3-5 3V5zm6 10h10m-10 8h10m-10 8h6"/></svg></span><p>{text('receiptPending')}</p></>}</div>{button('done',done,{disabled:!!busy,presentationOnly:true})}</>;
     if(['declined','cancelled','failed'].includes(stage))return button('done',done,{disabled:!!busy,presentationOnly:true});
     return null;
@@ -218,7 +222,8 @@ export function CheckoutPanel({checkout={},previewOnly=false,previewStage,previe
   if(returnOnly && !showingReturn && !(controlled && stage==='returned'))return null;
   return <div className="ms-checkout-viewport" style={themeStyle}><section ref={panel} className={`ms-checkout-panel ${stage} ${checkoutUsesColumns(viewportWidth,viewportHeight,returnOnly ? .16 : height)?'compact':''}`} style={cardStyle} lang={language} aria-label="Floating payment card" data-checkout-phase={stage} data-floating-state={idle?'idle':'expanded'}>
     {idle?<div className="ms-idle-actions">{button('start',()=>selectFlow({step:'ready',pageId:null,consent:false}),{disabled:!!busy,presentationOnly:true})}{flags}</div>:<>
-    <div className="ms-checkout-main" key={`copy-${stage}-${currentPage?.id || ''}`}><div className="ms-checkout-brand"><span>{text('brand')}</span>{flags}</div><h2>{title}</h2>{body && (!LINK_STAGES.has(stage) || link) && <p className="ms-checkout-body">{body}</p>}
+    {flags && <div className="ms-checkout-language-corner">{flags}</div>}
+    <div className="ms-checkout-main" key={`copy-${stage}-${currentPage?.id || ''}`}><h2>{title}</h2>{stage==='returned' && <p className="ms-return-slot">{text('returnSlot')}</p>}{body && (!LINK_STAGES.has(stage) || link) && <p className="ms-checkout-body">{body}</p>}
       {stage==='information' && ['rent','charge','return'].map(key=><div className="ms-checkout-instruction" key={key}><strong>{text(`information.${key}Title`)}</strong><p>{text(`information.${key}Body`)}</p></div>)}
       {stage==='review' && <><p className="ms-checkout-pricing">{text('pricing')}</p><p className="ms-checkout-terms">{text('terms')}</p></>}
       {stage==='ready' && unavailable && <p className="ms-reader-caption">{text(offer?.reader?.status==='disconnected'?'readerUnavailable':'unavailable')}</p>}
@@ -226,24 +231,8 @@ export function CheckoutPanel({checkout={},previewOnly=false,previewStage,previe
       {!noticePresentation && !previewOnly && error && connected && <p className="ms-checkout-error" role="alert">{text('errorGeneric')}</p>}
       {!noticePresentation && !previewOnly && !connected && !recovering && <p className="ms-checkout-error" role="status">{text('connectionLost')}</p>}
       {!noticePresentation && phase!=='idle' && settlementKey && !auxiliary && <p className="ms-checkout-settlement">{text(settlementKey)}</p>}
-      {stage==='returning' && <p className="ms-checkout-terms">{text('returnPending')}</p>}
-      {text('support') && (['information','returning','returned','out_of_order'].includes(stage) || (LINK_STAGES.has(stage) && !link)) && <p className="ms-checkout-terms">{text('support')}</p>}
+      {showHelpQr && <div className="ms-checkout-help" data-help-sms={helpSmsLink}>{helpQrImage?<img className="ms-checkout-help-qr" src={helpQrImage} alt={`Help QR code for ${helpStationId}`}/>:<span className="ms-checkout-help-pending" aria-hidden="true"/>}</div>}
     </div>
     <div className="ms-checkout-actions" key={`actions-${stage}-${currentPage?.id || ''}`}>{renderActions()}</div></>}
   </section>{dialog}</div>;
-}
-
-export function PaymentScenarioControls({checkout}) {
-  const [scenario,setScenario]=useState('success'),[current,setCurrent]=useState(null),[busy,setBusy]=useState(''),[message,setMessage]=useState(''),[selectedInteractionId,setSelectedInteractionId]=useState('');
-  useEffect(()=>{if(MEDIA_HOSTED)return;let live=true,reading=false;const refresh=async()=>{if(reading)return;reading=true;try{const value=await request('/lab/payments');if(live)setCurrent(value);}catch{}finally{reading=false;}};request('/lab/payments').then(value=>{if(live){setCurrent(value);setScenario(value.scenario || 'success');}}).catch(()=>{});const timer=setInterval(refresh,2000);return()=>{live=false;clearInterval(timer);};},[]);
-  const awaiting=current?.interactions?.filter(item=>item.phase==='awaiting_payment') || [];
-  const selected=awaiting.find(item=>item.id===selectedInteractionId);
-  async function apply() {setBusy('scenario');setMessage('');try{const value=await post('/lab/payments',{scenario});setCurrent(value);setScenario(value.scenario || scenario);setMessage('Simulation scenario applied.');checkout.refresh();}catch(failure){setMessage(failure.message);}finally{setBusy('');}}
-  async function presentCard(){
-    if(!selected || busy)return;
-    setBusy('card');setMessage('');
-    try{const result=await post(`${CHECKOUT}/interactions/${encodeURIComponent(selected.id)}/pay`,{actorId:selected.actorId});setCurrent(value=>({...value,interactions:value.interactions.map(item=>item.id===result.interaction.id?result.interaction:item)}));setSelectedInteractionId('');setMessage(`Simulated card presented for slot ${selected.slot}. Result: ${result.interaction.phase.replaceAll('_',' ')}.`);checkout.refresh();}catch(failure){setMessage(failure.message);}finally{setBusy('');}
-  }
-  if(MEDIA_HOSTED)return <p className="ms-panel-description">Payment simulation is available only in the laptop lab.</p>;
-  return <section className="ms-panel ms-test-card ms-payment-scenarios"><div className="ms-card-heading"><div><h2>Payment scenarios</h2><p className="ms-panel-description">Choose the outcome for the local M2 reader and module simulator.</p></div><span className="ms-badge purple"><i/>Simulation</span></div><div className="ms-payment-scenario-row"><label className="ms-field"><span>Next payment scenario</span><select value={scenario} onChange={event=>setScenario(event.target.value)} aria-label="Payment scenario"><option value="success">Payment approved · charger released</option><option value="decline">Card declined</option><option value="reader_disconnected">Reader disconnected</option><option value="vend_failed">Payment approved · release failed</option><option value="vend_timeout">Payment approved · release timed out</option></select></label><button className="ms-button" type="button" disabled={!!busy} onClick={apply}>{busy==='scenario'?'Applying…':'Apply scenario'}</button></div><div className="ms-payment-scenario-row"><label className="ms-field"><span>Waiting rental</span><select aria-label="Waiting rental for simulated card" value={selectedInteractionId} onChange={event=>setSelectedInteractionId(event.target.value)}><option value="">{awaiting.length?'Choose a waiting rental':'No rental is waiting for a card'}</option>{awaiting.map(item=><option key={item.id} value={item.id}>Slot {item.slot} · {item.id.slice(0,8)}{item.actorId===checkout.actorId?' · this browser':''}</option>)}</select></label><button className="ms-button" type="button" disabled={!!busy || !selected} onClick={presentCard}>{busy==='card'?'Presenting…':'Present simulated card'}</button></div>{message && <p className="ms-scenario-message" role="status">{message}</p>}<div className="ms-payment-snapshot"><div><small>Browser checkout</small><strong>{checkout.recovering?'Restoring rental…':!checkout.connected?'Connection unavailable':checkout.interaction?.phase?.replaceAll('_',' ') || 'Ready for a new rental'}</strong></div><div><small>Payment · Simulation</small><strong>{checkout.interaction?.moneyStatus || 'none'}</strong></div><div><small>Slot</small><strong>{checkout.interaction?.slot ?? '—'}</strong></div></div><p className="ms-panel-description">This browser tab keeps its own rental session. Presenting a card affects only the selected waiting rental; no real card is charged.</p></section>;
 }

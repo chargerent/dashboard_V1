@@ -34,7 +34,7 @@ export function floatingCheckoutGeometry(width=1080,height=1920,fraction=.16) {
 export function checkoutLinkUrl(profile,stage,interaction) {
   for(const candidate of [stage==='receipt'?interaction?.receiptUrl:null,profile?.links?.[stage]]){
     if(typeof candidate!=='string' || !candidate.trim())continue;
-    try{const url=new URL(candidate);if(url.protocol==='https:' && !url.username && !url.password)return url.href;}catch{}
+    try{const url=new URL(candidate);if(url.protocol==='https:' && !url.username && !url.password)return url.href;}catch{/* Invalid links are omitted from the kiosk preview. */}
   }
   return null;
 }

@@ -183,7 +183,6 @@ function cleanIsoTimestamp(value, fallback) {
 function isDisneyChatbotSubmission(payload) {
   return [
     "session_id",
-    "chat_transcript",
     "station_id",
     "card_last4",
     "amount_requested",
@@ -202,7 +201,6 @@ function normalizeDisneyChatbotSubmission(payload) {
   const cardLastFour = cleanText(payload.card_last4, 100);
   const language = cleanText(payload.language, 20).toLowerCase();
   const sessionId = cleanText(payload.session_id, 500);
-  const transcript = cleanText(payload.chat_transcript, 12000);
   const reasonDetail = cleanText(payload.reason_detail, 1000);
   const rawEmail = payload.guest_email === null ? "" : cleanText(payload.guest_email, 254);
   const email = cleanEmail(rawEmail);
@@ -227,9 +225,7 @@ function normalizeDisneyChatbotSubmission(payload) {
   if (!DISNEY_CHATBOT_LANGUAGES.has(language)) {
     throw new Error("The Disney chatbot language is invalid.");
   }
-  if (!sessionId || !transcript) {
-    throw new Error("A Disney chatbot session ID and chat transcript are required.");
-  }
+  if (!sessionId) throw new Error("A Disney chatbot session ID is required.");
   if (!submittedAt) throw new Error("The Disney chatbot submission timestamp is required.");
   const normalizedSubmittedAt = cleanIsoTimestamp(submittedAt, "");
   const rentalDate = cleanText(payload.rental_date, 30) || normalizedSubmittedAt.slice(0, 10);
@@ -253,7 +249,7 @@ function normalizeDisneyChatbotSubmission(payload) {
       date: rentalDate,
       cardLastFour,
     },
-    message: transcript,
+    message: reasonDetail || DISNEY_CHATBOT_REASONS.get(reason),
     disneySubmission: {
       reason,
       reasonLabel: DISNEY_CHATBOT_REASONS.get(reason),
@@ -968,6 +964,8 @@ function createSupportTicketService({db, admin, sendEmail = null, clock = () => 
     const externalThreadId = cleanText(data?.threadId, 500);
     const rfcMessageId = cleanText(data?.rfcMessageId, 500);
     const references = cleanText(data?.references, 2000);
+    const inboundMailbox = cleanEmail(data?.inboundMailbox);
+    const originalRecipient = cleanEmail(data?.originalRecipient || data?.to);
     const arrayUnion = admin.firestore.FieldValue.arrayUnion;
     const batch = db.batch();
     batch.set(messageRef, {
@@ -984,6 +982,8 @@ function createSupportTicketService({db, admin, sendEmail = null, clock = () => 
       ...(cleanText(data?.inReplyTo, 500) ? {inReplyTo: cleanText(data.inReplyTo, 500)} : {}),
       ...(references ? {references} : {}),
       ...(cleanText(data?.matchMethod, 80) ? {matchMethod: cleanText(data.matchMethod, 80)} : {}),
+      ...(inboundMailbox ? {inboundMailbox} : {}),
+      ...(originalRecipient ? {originalRecipient} : {}),
       createdAt: serverTimestamp(),
       createdAtIso: cleanText(data?.receivedAt, 80) || now.toISOString(),
     });
@@ -1003,6 +1003,8 @@ function createSupportTicketService({db, admin, sendEmail = null, clock = () => 
       ...(externalMessageId ? {lastInboundGmailMessageId: externalMessageId} : {}),
       ...(rfcMessageId ? {lastInboundRfcMessageId: rfcMessageId} : {}),
       ...(references ? {lastInboundReferences: references} : {}),
+      ...(inboundMailbox ? {lastInboundMailbox: inboundMailbox} : {}),
+      ...(originalRecipient ? {lastInboundRecipient: originalRecipient} : {}),
       emailMatchStatus: "matched",
     });
     await batch.commit();
@@ -1067,6 +1069,8 @@ function createSupportTicketService({db, admin, sendEmail = null, clock = () => 
     const threadId = cleanText(data?.threadId, 500);
     const rfcMessageId = cleanText(data?.rfcMessageId, 500);
     const references = cleanText(data?.references, 2000);
+    const inboundMailbox = cleanEmail(data?.inboundMailbox);
+    const originalRecipient = cleanEmail(data?.originalRecipient || data?.to);
     const appearsToBeReply = /^(?:re|fwd?):/i.test(subject) ||
       Boolean(cleanText(data?.inReplyTo, 500) || references);
     let duplicate = false;
@@ -1113,6 +1117,14 @@ function createSupportTicketService({db, admin, sendEmail = null, clock = () => 
         emailMatchStatus: appearsToBeReply ? "unmatched_reply" : "new_email",
         ...(threadId ? {gmailThreadId: threadId, gmailThreadIds: [threadId]} : {}),
         lastInboundGmailMessageId: externalMessageId,
+        ...(inboundMailbox ? {
+          inboundMailbox,
+          lastInboundMailbox: inboundMailbox,
+        } : {}),
+        ...(originalRecipient ? {
+          originalRecipient,
+          lastInboundRecipient: originalRecipient,
+        } : {}),
         ...(rfcMessageId ? {lastInboundRfcMessageId: rfcMessageId} : {}),
         ...(references ? {lastInboundReferences: references} : {}),
       });
@@ -1129,6 +1141,8 @@ function createSupportTicketService({db, admin, sendEmail = null, clock = () => 
         ...(rfcMessageId ? {rfcMessageId} : {}),
         ...(cleanText(data?.inReplyTo, 500) ? {inReplyTo: cleanText(data.inReplyTo, 500)} : {}),
         ...(references ? {references} : {}),
+        ...(inboundMailbox ? {inboundMailbox} : {}),
+        ...(originalRecipient ? {originalRecipient} : {}),
         matchMethod: appearsToBeReply ? "unmatched_reply" : "new_email",
         createdAt: serverTimestamp(),
         createdAtIso: receivedAtIso,

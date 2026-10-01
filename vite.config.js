@@ -85,11 +85,6 @@ export default defineConfig(({ command }) => ({
       ignored: ['**/dist/**', '**/.codex-tmp/**', '**/tmp/**'],
     },
     proxy: {
-      // Isolated laptop media lab; never route these requests to a live API.
-      '/__media_lab': {
-        target: 'http://127.0.0.1:8765',
-        rewrite: (path) => path.replace(/^\/__media_lab/, ''),
-      },
       '/__functions': {
         target: 'https://us-central1-node-red-alerts.cloudfunctions.net',
         changeOrigin: true,

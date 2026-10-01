@@ -49,6 +49,7 @@ const common = {
   settlementCaptured:['Payment completed','Payment completed.','Paiement effectué.','Pago completado.'],
   settlementAuthorized:['Payment authorized','Payment authorized; waiting for release.','Paiement autorisé ; en attente de la remise du chargeur.','Pago autorizado; esperando la entrega del cargador.'],
   returnConfirmed:['Return confirmed','Return confirmed. Your rental is complete.','Retour confirmé. Votre location est terminée.','Devolución confirmada. Tu alquiler ha finalizado.'],
+  returnSlot:['Returned slot','Returned to slot {slot}','Rendu dans le compartiment {slot}','Devuelto en el compartimento {slot}'],
   errorGeneric:['Checkout error','We could not complete that request. Please try again or ask a staff member.','La demande n’a pas pu aboutir. Réessayez ou adressez-vous au personnel.','No se ha podido completar la solicitud. Inténtalo de nuevo o consulta al personal.'],
   offerChanged:['Price changed','The rental details changed. Please review the current price and terms.','Les détails de location ont changé. Vérifiez le tarif et les conditions actuels.','Los detalles del alquiler han cambiado. Revisa el precio y las condiciones actuales.'],
   returnPending:['Return pending','Waiting for the kiosk to confirm your return.','En attente de confirmation du retour par la borne.','Esperando a que el quiosco confirme la devolución.'],
@@ -75,7 +76,12 @@ const stages = {
   failed:['Charger was not released','Le chargeur n’a pas été remis','No se ha entregado el cargador','No release was confirmed. Please ask a staff member before trying again.','La remise du chargeur n’a pas été confirmée. Adressez-vous au personnel avant de réessayer.','No se ha confirmado la entrega. Consulta al personal antes de volver a intentarlo.'],
   recovering:['Checking your checkout','Vérification de votre location','Comprobando tu alquiler','Restoring your existing checkout. Please wait before starting another rental.','Récupération de votre location en cours. Veuillez patienter avant d’en commencer une autre.','Recuperando tu alquiler actual. Espera antes de iniciar otro.'],
   returning:['Return your charger','Rendez votre chargeur','Devuelve tu cargador','Insert your charger fully into an empty slot.','Insérez complètement votre chargeur dans un compartiment vide.','Introduce el cargador completamente en un compartimento vacío.'],
-  returned:['Charger returned · Thank you','Chargeur rendu · Merci','Cargador devuelto · Gracias','Return confirmed. Any refund will appear after settlement is confirmed.','Retour confirmé. Le remboursement apparaîtra après confirmation du règlement.','Devolución confirmada. El reembolso aparecerá cuando se confirme la liquidación.'],
+  returned:['Charger returned · Thank you','Chargeur rendu · Merci','Cargador devuelto · Gracias','Your return is complete. Scan the QR code for your receipt.','Votre retour est terminé. Scannez le code QR pour obtenir votre reçu.','Tu devolución ha finalizado. Escanea el código QR para obtener tu recibo.'],
+};
+const legacyReturnedBodies = {
+  en:'Return confirmed. Any refund will appear after settlement is confirmed.',
+  fr:'Retour confirmé. Le remboursement apparaîtra après confirmation du règlement.',
+  es:'Devolución confirmada. El reembolso aparecerá cuando se confirme la liquidación.',
 };
 export const STRIPE_UI_FIELDS = [
   ...Object.entries(common).map(([key,[label]])=>({key,label,section:'General'})),
@@ -87,7 +93,7 @@ export function defaultStripeUi() {
     locales[key]=Object.fromEntries(Object.entries(common).map(([field,values])=>[field,values[i+1]]));
     Object.entries(stages).forEach(([stage,values])=>{locales[key][`${stage}.title`]=values[i];locales[key][`${stage}.body`]=values[i+3];});
   });
-  return {schemaVersion:1,defaultLanguage:'en',enabledLanguages:['en','fr','es'],navigation:{language:true,information:true,terms:true,map:true,receipt:true},links:{terms:'',map:'',receipt:''},theme:{background:'#f6f9f4',surface:'#e2ebdf',primary:'#143c2d',secondary:'#143c2d',text:'#143c2d',muted:'#426354',buttonText:'#ffffff',danger:'#943925'},locales,pages:[]};
+  return {schemaVersion:1,defaultLanguage:'en',enabledLanguages:['en','fr','es'],navigation:{language:true,information:true,terms:true,map:true,receipt:false},links:{terms:'',map:'',receipt:''},theme:{background:'#f6f9f4',surface:'#e2ebdf',primary:'#143c2d',secondary:'#143c2d',text:'#143c2d',muted:'#426354',buttonText:'#ffffff',danger:'#943925'},locales,pages:[]};
 }
 const plain=value=>value!==null && typeof value==='object' && !Array.isArray(value) && [Object.prototype,null].includes(Object.getPrototypeOf(value));
 const reject=message=>{throw Object.assign(new Error(message),{status:400,code:'INVALID_STRIPE_UI'});};
@@ -119,7 +125,11 @@ export function validateStripeUi(input) {
   known(input.locales,languages,'Languages');
   for(const [language,fields] of Object.entries(input.locales)){
     known(fields,STRIPE_UI_FIELDS.map(({key})=>key),`${language} text`);
-    for(const [key,value] of Object.entries(fields))result.locales[language][key]=textValue(value,`${language} ${key}`);
+    for(const [key,value] of Object.entries(fields)){
+      const text=textValue(value,`${language} ${key}`);
+      if(key==='returned.body' && legacyReturnedBodies[language]===text)continue;
+      result.locales[language][key]=text;
+    }
   }
   if(!Array.isArray(input.pages)||input.pages.length>12)reject('Use at most 12 added pages.');
   const ids=new Set();

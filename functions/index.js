@@ -7,12 +7,32 @@ const {defineSecret} = require("firebase-functions/params");
 const crypto = require("node:crypto");
 const admin = require("firebase-admin");
 const Stripe = require("stripe");
+const twilio = require("twilio");
 const mqtt = require("mqtt");
 const {createGmailApiSender} = require("./gmailApiSender");
-const {DEFAULT_TOPIC: SUPPORT_GMAIL_TOPIC, createGmailSupportInbox} = require("./gmailSupportInbox");
+const {
+  DEFAULT_SALES_MAILBOX,
+  DEFAULT_SALES_RECIPIENT,
+  DEFAULT_TOPIC: SUPPORT_GMAIL_TOPIC,
+  SALES_SYNC_DOCUMENT,
+  createGmailSupportInbox,
+} = require("./gmailSupportInbox");
 const {createWorkspaceProvisioning} = require("./workspaceProvisioning");
 const {createWorkspaceNotification, isValidWorkspaceContactEmail} = require("./workspaceNotification");
 const {createSupportTicketService, secretsMatch} = require("./supportTickets");
+const {
+  createSupportTelephonyService,
+  normalizeE164,
+  splitRoutingStaff,
+  staffSupportNumbers,
+} = require("./supportTelephony");
+const {createSupportMobileService} = require("./supportMobile");
+const {
+  VOICE_PROMPT_DEFINITIONS,
+  decodeVoicePromptUpload,
+  normalizeVoicePromptKey,
+  voicePromptStoragePath,
+} = require("./supportVoicePrompts");
 const {createAccountingService} = require("./accounting");
 const {preparePartnerKit} = require("./partnerKit");
 const {createChargeDropsAgreementService} = require("./chargeDropsAgreements");
@@ -21,6 +41,13 @@ const {
   createChargeDropsPartnerNotifications,
   NOTIFICATIONS_COLLECTION: CHARGEDROPS_PARTNER_NOTIFICATIONS_COLLECTION,
 } = require("./chargeDropsPartnerNotifications");
+const {
+  COMPANY_MANAGED_PARTNER_TYPE,
+  HOUSE_REGIONAL_PARTNER_ID,
+  buildCompanyManagedRevenueAllocation,
+  isCompanyManagedChargeDrops,
+  shouldCreatePartnerPayout,
+} = require("./chargeDropsRevenue");
 const {rbcOpenApi} = require("./rbcOpenRouting/api");
 const {preserveProvisionedUiMode} = require("./uiProfileSnapshot");
 const {
@@ -76,7 +103,28 @@ const gmailApiSender = createGmailApiSender({admin});
 const workspaceProvisioning = createWorkspaceProvisioning({admin, db});
 const workspaceNotification = createWorkspaceNotification({db, sendEmail: sendLoginInviteEmail});
 const supportTickets = createSupportTicketService({db, admin, sendEmail: sendSupportReplyEmail});
+const supportTelephony = createSupportTelephonyService({
+  db,
+  admin,
+  sendMessage: (message) => getTwilioClient().messages.create(message),
+});
+const supportMobile = createSupportMobileService({
+  db,
+  admin,
+  ticketService: supportTickets,
+  telephonyService: supportTelephony,
+});
 const gmailSupportInbox = createGmailSupportInbox({admin, db, ticketService: supportTickets});
+const gmailSalesInbox = createGmailSupportInbox({
+  admin,
+  db,
+  ticketService: supportTickets,
+  mailboxAddress: process.env.SALES_GMAIL_SOURCE_INBOX || DEFAULT_SALES_MAILBOX,
+  recipientFilter: process.env.SALES_GMAIL_RECIPIENT || DEFAULT_SALES_RECIPIENT,
+  defaultCategory: "sales",
+  syncDocument: SALES_SYNC_DOCUMENT,
+});
+const gmailInboxes = Object.freeze([gmailSupportInbox, gmailSalesInbox]);
 const accounting = createAccountingService({db, admin});
 const ELEVENLABS_API_KEY = defineSecret("ELEVENLABS_API_KEY");
 const EVENT_INTAKE_SECRET = defineSecret("EVENT_INTAKE_SECRET");
@@ -85,9 +133,17 @@ const GMAIL_APP_PASSWORD = defineSecret("GMAIL_APP_PASSWORD");
 const CONTACT_FORM_WEBHOOK_TOKEN = defineSecret("CONTACT_FORM_WEBHOOK_TOKEN");
 const SUPPORT_COMMUNICATIONS_WEBHOOK_TOKEN = defineSecret("SUPPORT_COMMUNICATIONS_WEBHOOK_TOKEN");
 const CHATBOT_SUPPORT_WEBHOOK_TOKEN = defineSecret("CHATBOT_SUPPORT_WEBHOOK_TOKEN");
+const TWILIO_ACCOUNT_SID = defineSecret("TWILIO_ACCOUNT_SID");
+const TWILIO_AUTH_TOKEN = defineSecret("TWILIO_AUTH_TOKEN");
+const TWILIO_SUPPORT_NUMBER = defineSecret("TWILIO_SUPPORT_NUMBER");
+const TWILIO_API_KEY_SID = defineSecret("TWILIO_API_KEY_SID");
+const TWILIO_API_KEY_SECRET = defineSecret("TWILIO_API_KEY_SECRET");
+const TWILIO_TWIML_APP_SID = defineSecret("TWILIO_TWIML_APP_SID");
+const TWILIO_PUSH_CREDENTIAL_SID = defineSecret("TWILIO_PUSH_CREDENTIAL_SID");
 const PHONE_CONTROL_SIGNING_PRIVATE_KEY = defineSecret("PHONE_CONTROL_SIGNING_PRIVATE_KEY");
 const TURN_SHARED_SECRET = defineSecret("TURN_SHARED_SECRET");
 const STRIPE_TEST_SECRET_KEY = defineSecret("STRIPE_TEST_SECRET_KEY");
+const STRIPE_FR_LIVE_SECRET_KEY = defineSecret("STRIPE_FR_LIVE_SECRET_KEY");
 const STRIPE_CONNECT_SECRET_KEY = defineSecret("STRIPE_CONNECT_SECRET_KEY");
 const STRIPE_CONNECT_WEBHOOK_SECRET = defineSecret(
     "STRIPE_CONNECT_WEBHOOK_SECRET",
@@ -108,6 +164,14 @@ const AUTH_MAPPING_DOMAIN = "auth.charge.rent";
 const CHARGEDROPS_PROJECT_ID = "chargedrops-dev";
 const CHARGEDROPS_APP_NAME = "chargedrops-client-onboarding";
 const DEFAULT_DASHBOARD_LOGIN_URL = "https://chargerentstations.com/portal/";
+const TWILIO_SMS_WEBHOOK_URL =
+  "https://us-central1-node-red-alerts.cloudfunctions.net/support_twilioSms";
+const TWILIO_VOICE_WEBHOOK_URL =
+  "https://us-central1-node-red-alerts.cloudfunctions.net/support_twilioVoice";
+const SUPPORT_VOICE_PROMPT_MEDIA_URL =
+  "https://us-central1-node-red-alerts.cloudfunctions.net/support_voicePromptMedia";
+const SUPPORT_TTS_VOICE = "Polly.Joanna-Neural";
+const SUPPORT_TTS_LANGUAGE = "en-US";
 const LOGIN_INVITE_FROM_EMAIL = "solutions@charge.rent";
 const LOGIN_INVITE_FROM_NAME = "Chargerent";
 const SUPPORT_FROM_EMAIL = "support@charge.rent";
@@ -617,22 +681,54 @@ const functions = {
   },
 };
 
-const stripeTestClients = new Map();
+const stripeTerminalClients = new Map();
 const stripeConnectClients = new Map();
+let twilioClient = null;
 let besiterTerminalGateway = null;
 
-function getStripeTestClient(options = {}) {
+function getTwilioClient() {
+  if (twilioClient) return twilioClient;
+  const accountSid = String(TWILIO_ACCOUNT_SID.value() || "").trim();
+  const authToken = String(TWILIO_AUTH_TOKEN.value() || "").trim();
+  if (!/^AC[a-f0-9]{32}$/i.test(accountSid) || !authToken) {
+    throw new Error("Twilio credentials are not configured.");
+  }
+  twilioClient = twilio(accountSid, authToken);
+  return twilioClient;
+}
+
+async function deleteTwilioRecordingForRetention(recordingSid) {
+  const normalizedSid = String(recordingSid || "").trim();
+  if (!/^RE[a-f0-9]{32}$/i.test(normalizedSid)) {
+    throw new Error("The Twilio recording ID is invalid.");
+  }
+  try {
+    await getTwilioClient().recordings(normalizedSid).remove();
+  } catch (error) {
+    if (Number(error?.status) === 404 || Number(error?.code) === 20404) return;
+    throw error;
+  }
+}
+
+function getStripeTerminalClient(options = {}) {
   const accountCountry = String(options.accountCountry || options.stripeAccountCountry || "US")
       .trim().toUpperCase();
   const mode = String(options.mode || options.stripeMode || "test").trim().toLowerCase();
-  if (mode !== "test" || !new Set(["US", "CA", "FR"]).has(accountCountry)) {
-    throw new Error("A supported test Stripe account country is required.");
+  if (!new Set(["test", "live"]).has(mode) ||
+      !new Set(["US", "CA", "FR"]).has(accountCountry)) {
+    throw new Error("A supported Stripe Terminal mode and account country are required.");
+  }
+  if (mode === "live" && accountCountry !== "FR") {
+    throw new Error("Live Stripe Terminal is currently enabled only for the French account.");
   }
   const cacheKey = `${mode}:${accountCountry}`;
-  if (stripeTestClients.has(cacheKey)) return stripeTestClients.get(cacheKey);
-  const secretKey = String(STRIPE_TEST_SECRET_KEY.value() || "").trim();
-  if (!secretKey.startsWith("sk_test_")) {
-    throw new Error("STRIPE_TEST_SECRET_KEY must contain a Stripe test-mode secret key.");
+  if (stripeTerminalClients.has(cacheKey)) return stripeTerminalClients.get(cacheKey);
+  const secretParameter = mode === "live" ? STRIPE_FR_LIVE_SECRET_KEY : STRIPE_TEST_SECRET_KEY;
+  const secretName = mode === "live" ? "STRIPE_FR_LIVE_SECRET_KEY" : "STRIPE_TEST_SECRET_KEY";
+  const expectedPrefix = mode === "live" ? "sk_live_" : "sk_test_";
+  const secretKey = String(secretParameter.value() || "").trim();
+  if (!secretKey.startsWith(expectedPrefix)) {
+    throw new Error(`${secretName} must contain a Stripe ${mode}-mode secret key.`);
   }
   const client = new Stripe(secretKey, {
     appInfo: {
@@ -641,7 +737,7 @@ function getStripeTestClient(options = {}) {
     },
     maxNetworkRetries: 2,
   });
-  stripeTestClients.set(cacheKey, client);
+  stripeTerminalClients.set(cacheKey, client);
   return client;
 }
 
@@ -688,7 +784,7 @@ const besiterTerminalGatewayProxy = {
 const kioskTerminalStore = createFirestoreKioskTerminalStore(db);
 const kioskTerminalService = createKioskTerminalService({
   store: kioskTerminalStore,
-  getStripeClient: getStripeTestClient,
+  getStripeClient: getStripeTerminalClient,
   besiterGateway: besiterTerminalGatewayProxy,
 });
 const kioskTerminalHandler = createKioskTerminalHandler(kioskTerminalService);
@@ -3159,6 +3255,13 @@ async function validateChargeDropsPartner(profile) {
   const requestedClientId = String(
       profile?.regionalPartnerId || "",
   ).trim().toUpperCase();
+  if (requestedClientId === HOUSE_REGIONAL_PARTNER_ID) {
+    return {
+      uid: "",
+      clientId: HOUSE_REGIONAL_PARTNER_ID,
+      type: COMPANY_MANAGED_PARTNER_TYPE,
+    };
+  }
   let partnerDoc = null;
   if (requestedUid) {
     const snapshot = await db.collection("users").doc(requestedUid).get();
@@ -3188,7 +3291,7 @@ async function validateChargeDropsPartner(profile) {
         "Choose an active regional partner with a valid contact email.",
     );
   }
-  return {uid: partnerDoc.id, clientId: partnerClientId};
+  return {uid: partnerDoc.id, clientId: partnerClientId, type: "regional_partner"};
 }
 
 async function notifyChargeDropsPartnerSafely(notification) {
@@ -3214,10 +3317,29 @@ async function createChargeDropsClientImpl(data, authState) {
   }
   assertChargeDropsLocationProfile(inputProfile);
   const partner = await validateChargeDropsPartner(inputProfile);
+  const clientRevenueShare = Number(
+      inputProfile.revShare ?? inputProfile.commission,
+  );
+  if (!Number.isFinite(clientRevenueShare) ||
+      clientRevenueShare < 0 || clientRevenueShare > 100) {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Client revenue share must be between 0 and 100 percent.",
+    );
+  }
+  const companyManaged = partner.type === COMPANY_MANAGED_PARTNER_TYPE;
   const profile = {
     ...inputProfile,
     regionalPartnerUid: partner.uid,
     regionalPartnerId: partner.clientId,
+    regionalPartnerType: partner.type,
+    ...(companyManaged ? {
+      partnerRevenueShare: "0",
+      chargedrops: {
+        ...(inputProfile.chargedrops || {}),
+        revenueAllocation: buildCompanyManagedRevenueAllocation(clientRevenueShare),
+      },
+    } : {}),
   };
   const creation = await createAuthUserAndProfileImpl({
     ...data,
@@ -3260,6 +3382,7 @@ async function createChargeDropsClientImpl(data, authState) {
     ...creation,
     regionalPartnerUid: partner.uid,
     regionalPartnerId: partner.clientId,
+    regionalPartnerType: partner.type,
     venueSync,
     venueSyncError,
     partnerNotifications,
@@ -4795,7 +4918,7 @@ async function mediaAssignPlaylistImpl(data, authState) {
     }
 
     if (!isMediaConfigurableKiosk(kiosk)) {
-      failures.push({stationid, reason: "Only V2 CT8, CK24, CK48, or V1 CK50 kiosks are supported"});
+      failures.push({stationid, reason: "Only V2 CT8, CK24, CK48, or V1 CK50 Besiter kiosks are supported"});
       return;
     }
 
@@ -8493,7 +8616,7 @@ async function uiProfileListImpl(authState) {
 }
 
 async function uiProfileUpsertSectionImpl(data, authState) {
-  const {mergeProfileSection, isProfileSectionTarget} = await import('./uiProfileSections.mjs');
+  const {mergeProfileSection} = await import('./uiProfileSections.mjs');
   const source = clonePlain(data.profile) || {};
   const clientId = String(source.clientId || '').trim().toUpperCase();
   const section = data.section;
@@ -8517,18 +8640,10 @@ async function uiProfileUpsertSectionImpl(data, authState) {
     if (snap.exists && Number(source.version) !== Number(existing.version)) {
       throw new functions.https.HttpsError('aborted', 'This profile changed. Reload it before saving.');
     }
-    if (stationid) {
-      if (section !== 'p68') throw new functions.https.HttpsError('invalid-argument', 'Only P68 profiles support kiosk overrides.');
-      const kiosks = await transaction.get(db.collection('kiosks').where('stationid', '==', stationid));
-      if (kiosks.size !== 1 || kiosks.docs.some((doc) => {
-        const kiosk = doc.data();
-        return String(kiosk.info?.client || kiosk.info?.clientId || '').trim().toUpperCase() !== clientId
-          || !canManageUiProfileForKiosk(authState, kiosk) || !isProfileSectionTarget(kiosk, section);
-      })) throw new functions.https.HttpsError('permission-denied', 'The kiosk does not belong to this client and terminal type.');
-    }
+    if (stationid) throw new functions.https.HttpsError('invalid-argument', 'Terminal profiles are client-wide and do not support kiosk overrides.');
     let next;
     try {
-      next = mergeProfileSection(existing, source, section, stationid, data.useDefault === true);
+      next = mergeProfileSection(existing, source, section);
     } catch (error) {
       throw new functions.https.HttpsError('invalid-argument', error.message);
     }
@@ -10047,6 +10162,7 @@ async function createPurchaseApprovalReports({users, kiosks, referenceDate, incl
 
         const repId = String(kiosk?.info?.rep || "").trim().toUpperCase();
         if (!repId) return;
+        if (!shouldCreatePartnerPayout(seed.client, repId)) return;
         const percent = Number(kiosk?.info?.reppercent) || Number(byClientId.get(repId)?.commission) || 0;
         const existing = partnerMap.get(repId) || {
           clientId: repId,
@@ -10064,6 +10180,7 @@ async function createPurchaseApprovalReports({users, kiosks, referenceDate, incl
       });
       const uniqueClientPercents = [...new Set(stationClientPercents.map((percent) => cents(percent)))];
       const displayClientPercent = uniqueClientPercents.length === 1 ? uniqueClientPercents[0] : cents(profileClientPercent);
+      const companyManaged = isCompanyManagedChargeDrops(seed.client);
 
       const clientEmail = getPayoutContactEmail(seed.client);
       const adminEmail = getPayoutAdminEmail(seed.client.paymentAdmin);
@@ -10089,6 +10206,9 @@ async function createPurchaseApprovalReports({users, kiosks, referenceDate, incl
           rentalCount: seed.rentalCount,
           totalRevenue,
           clientShare: cents(clientShare),
+          ...(companyManaged ? {
+            companyRetained: cents(totalRevenue - clientShare),
+          } : {}),
         },
         partnerBreakdown: Array.from(partnerMap.values()).filter((partner) => partner.share > 0),
         stationids: Array.from(seed.stationIds),
@@ -11103,6 +11223,30 @@ function gmailNotificationPayload(event) {
   }
 }
 
+function gmailInboxForNotification(payload) {
+  const emailAddress = String(payload?.emailAddress || "").trim().toLowerCase();
+  if (!emailAddress) return gmailSupportInbox;
+  return gmailInboxes.find((inbox) => inbox.getStatus().mailbox === emailAddress) || null;
+}
+
+async function handleGmailInboxNotification(payload) {
+  const inbox = gmailInboxForNotification(payload);
+  if (!inbox) return {ok: true, skipped: true, reason: "unexpected-mailbox"};
+  return inbox.handleNotification(payload);
+}
+
+async function runGmailInboxOperation(operation) {
+  const inboxes = await Promise.all(gmailInboxes.map(async (inbox) => {
+    const status = inbox.getStatus();
+    return {
+      mailbox: status.mailbox,
+      recipientFilter: status.recipientFilter,
+      result: await inbox[operation](),
+    };
+  }));
+  return {ok: true, inboxes};
+}
+
 async function runSupportAdminAction(action) {
   try {
     return await action();
@@ -11142,6 +11286,889 @@ async function handleSupportWebhook(req, res, {secret, action}) {
     });
     res.status(400).json({ok: false, error: "invalid-request"});
   }
+}
+
+function twilioSecretValue(secret) {
+  try {
+    return String(secret.value() || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function twilioRequestUrl(req) {
+  if (req.twilioPublicUrl) {
+    const publicUrl = new URL(req.twilioPublicUrl);
+    const originalUrl = String(req.originalUrl || "");
+    const queryIndex = originalUrl.indexOf("?");
+    publicUrl.search = queryIndex >= 0 ? originalUrl.slice(queryIndex) : "";
+    return publicUrl.toString();
+  }
+  const forwardedProtocol = String(req.get("x-forwarded-proto") || "")
+      .split(",")[0].trim();
+  const protocol = forwardedProtocol || req.protocol || "https";
+  return `${protocol}://${req.get("host")}${req.originalUrl}`;
+}
+
+function twilioCallbackUrl(req, phase, parameters = {}) {
+  const current = new URL(twilioRequestUrl(req));
+  current.search = "";
+  current.searchParams.set("phase", phase);
+  for (const [key, value] of Object.entries(parameters)) {
+    if (value !== undefined && value !== null && value !== "") {
+      current.searchParams.set(key, String(value));
+    }
+  }
+  return current.toString();
+}
+
+function fixedTwilioCallbackUrl(baseUrl, phase, parameters = {}) {
+  const current = new URL(baseUrl);
+  current.searchParams.set("phase", phase);
+  for (const [key, value] of Object.entries(parameters)) {
+    if (value !== undefined && value !== null && value !== "") {
+      current.searchParams.set(key, String(value));
+    }
+  }
+  return current.toString();
+}
+
+async function handleTwilioWebhook(req, res, action, publicUrl) {
+  res.set("Cache-Control", "no-store");
+  if (req.method !== "POST") {
+    res.set("Allow", "POST");
+    res.status(405).send("Method not allowed");
+    return;
+  }
+  const authToken = twilioSecretValue(TWILIO_AUTH_TOKEN);
+  const signature = String(req.get("x-twilio-signature") || "").trim();
+  req.twilioPublicUrl = publicUrl;
+  if (!authToken) {
+    res.status(503).send("Twilio is not configured");
+    return;
+  }
+  const valid = twilio.validateRequest(
+      authToken,
+      signature,
+      twilioRequestUrl(req),
+      req.body || {},
+  );
+  if (!valid) {
+    res.status(403).send("Invalid Twilio signature");
+    return;
+  }
+  try {
+    await action(req.body || {}, req, res);
+  } catch (error) {
+    console.error("Twilio support webhook failed", {
+      phase: String(req.query?.phase || "incoming"),
+      message: error?.message || "unknown error",
+    });
+    res.status(500).send("Twilio webhook failed");
+  }
+}
+
+function sendTwiml(res, response) {
+  res.type("text/xml").status(200).send(response.toString());
+}
+
+function voiceTicketParameters(req) {
+  return {
+    ticketId: String(req.query?.ticketId || "").trim(),
+    callSid: String(req.query?.callSid || "").trim(),
+  };
+}
+
+function voicePromptDocument(promptKey) {
+  return db.collection("supportVoicePrompts").doc(normalizeVoicePromptKey(promptKey));
+}
+
+function buildVoicePromptMediaUrl(promptKey, revision = "") {
+  const url = new URL(SUPPORT_VOICE_PROMPT_MEDIA_URL);
+  url.searchParams.set("prompt", normalizeVoicePromptKey(promptKey));
+  if (revision) url.searchParams.set("v", String(revision));
+  return url.toString();
+}
+
+async function appendVoicePrompt(voiceVerb, promptKey) {
+  const normalizedKey = normalizeVoicePromptKey(promptKey);
+  try {
+    const snapshot = await voicePromptDocument(normalizedKey).get();
+    const metadata = snapshot.exists ? snapshot.data() || {} : {};
+    if (metadata.storagePath === voicePromptStoragePath(normalizedKey)) {
+      voiceVerb.play(buildVoicePromptMediaUrl(normalizedKey, metadata.revision));
+      return "mp3";
+    }
+  } catch (error) {
+    console.error("Unable to load support voice prompt", {
+      promptKey: normalizedKey,
+      message: error?.message || "unknown error",
+    });
+  }
+  voiceVerb.say({voice: SUPPORT_TTS_VOICE, language: SUPPORT_TTS_LANGUAGE},
+      VOICE_PROMPT_DEFINITIONS[normalizedKey].fallback);
+  return "text";
+}
+
+function appendCallTranscription(response, req, {ticketId, callSid}) {
+  const start = response.start();
+  start.transcription({
+    statusCallbackUrl: twilioCallbackUrl(req, "transcription", {ticketId, callSid}),
+    languageCode: "en-US",
+    track: "both_tracks",
+    inboundTrackLabel: "Agent",
+    outboundTrackLabel: "Customer",
+    partialResults: false,
+    enableAutomaticPunctuation: true,
+    profanityFilter: false,
+    transcriptionEngine: "deepgram",
+    speechModel: "nova-3",
+    hints: "Chargerent,kiosk,rental,charger,Payter,Besiter,Stripe",
+  });
+}
+
+async function uploadSupportVoicePrompt(data, authState) {
+  const upload = decodeVoicePromptUpload(data);
+  const storagePath = voicePromptStoragePath(upload.promptKey);
+  const revision = String(Date.now());
+  const nowIso = new Date().toISOString();
+  await getStorageBucket().file(storagePath).save(upload.buffer, {
+    resumable: false,
+    metadata: {
+      contentType: upload.contentType,
+      cacheControl: "private,max-age=0,no-transform",
+      contentDisposition: `inline; filename="${sanitizeFileName(upload.fileName)}"`,
+      metadata: {
+        promptKey: upload.promptKey,
+        originalFileName: upload.fileName,
+        revision,
+      },
+    },
+  });
+  const metadata = {
+    promptKey: upload.promptKey,
+    label: VOICE_PROMPT_DEFINITIONS[upload.promptKey].label,
+    fileName: upload.fileName,
+    contentType: upload.contentType,
+    size: upload.buffer.length,
+    storagePath,
+    revision,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAtIso: nowIso,
+    updatedBy: String(
+        authState?.profile?.displayName || authState?.profile?.name ||
+        authState?.profile?.username || authState?.uid || "admin",
+    ).trim().slice(0, 100),
+  };
+  await voicePromptDocument(upload.promptKey).set(metadata);
+  return {
+    ok: true,
+    prompt: {
+      promptKey: metadata.promptKey,
+      label: metadata.label,
+      fileName: metadata.fileName,
+      contentType: metadata.contentType,
+      size: metadata.size,
+      storagePath: metadata.storagePath,
+      revision: metadata.revision,
+      updatedAtIso: metadata.updatedAtIso,
+      updatedBy: metadata.updatedBy,
+      mediaUrl: buildVoicePromptMediaUrl(upload.promptKey, revision),
+    },
+  };
+}
+
+async function handleSupportVoicePromptMedia(req, res) {
+  if (!new Set(["GET", "HEAD"]).has(req.method)) {
+    res.set("Allow", "GET, HEAD");
+    res.status(405).send("Method not allowed");
+    return;
+  }
+  let promptKey;
+  try {
+    promptKey = normalizeVoicePromptKey(req.query?.prompt);
+  } catch {
+    res.status(404).send("Prompt not found");
+    return;
+  }
+  const snapshot = await voicePromptDocument(promptKey).get();
+  const metadata = snapshot.exists ? snapshot.data() || {} : {};
+  const expectedPath = voicePromptStoragePath(promptKey);
+  if (metadata.storagePath !== expectedPath) {
+    res.status(404).send("Prompt not found");
+    return;
+  }
+  const file = getStorageBucket().file(expectedPath);
+  const [exists] = await file.exists();
+  if (!exists) {
+    res.status(404).send("Prompt not found");
+    return;
+  }
+  res.set({
+    "Cache-Control": "public, max-age=300, no-transform",
+    "Content-Type": "audio/mpeg",
+    "Content-Disposition": `inline; filename="${sanitizeFileName(metadata.fileName || `${promptKey}.mp3`)}"`,
+    "X-Content-Type-Options": "nosniff",
+  });
+  if (req.method === "HEAD") {
+    res.status(200).end();
+    return;
+  }
+  await new Promise((resolve, reject) => {
+    file.createReadStream()
+        .on("error", reject)
+        .on("end", resolve)
+        .pipe(res);
+  });
+}
+
+async function voicemailResponse(req, {ticketId, callSid}) {
+  const response = new twilio.twiml.VoiceResponse();
+  await appendVoicePrompt(response, "voicemail_greeting");
+  response.record({
+    action: twilioCallbackUrl(req, "voicemail-finished", {ticketId, callSid}),
+    method: "POST",
+    maxLength: 120,
+    timeout: 5,
+    finishOnKey: "#",
+    playBeep: true,
+    recordingStatusCallback: twilioCallbackUrl(req, "voicemail-ready", {ticketId, callSid}),
+    recordingStatusCallbackMethod: "POST",
+    recordingStatusCallbackEvent: "completed",
+  });
+  return response;
+}
+
+async function callbackOfferResponse(req, {ticketId, callSid, includeRecordingNotice = false}) {
+  const response = new twilio.twiml.VoiceResponse();
+  if (includeRecordingNotice) {
+    await appendVoicePrompt(response, "recording_notice");
+  }
+  const gather = response.gather({
+    action: twilioCallbackUrl(req, "callback-choice", {ticketId, callSid}),
+    method: "POST",
+    input: "dtmf",
+    numDigits: 1,
+    timeout: 7,
+    actionOnEmptyResult: true,
+  });
+  await appendVoicePrompt(gather, "callback_offer");
+  return response;
+}
+
+function supportQueueName(callSid) {
+  return `support-${String(callSid || "").trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(-48)}`;
+}
+
+function customerClientCallerId(phone) {
+  return `client:customer_${String(phone || "").replace(/[^0-9]/g, "").slice(0, 15)}`;
+}
+
+async function cancelAgentCalls(callSids = []) {
+  await Promise.allSettled([...new Set(callSids.filter(Boolean))].map(async (sid) => {
+    try {
+      await getTwilioClient().calls(sid).update({status: "canceled"});
+    } catch {
+      await getTwilioClient().calls(sid).update({status: "completed"});
+    }
+  }));
+}
+
+async function startSupportRoutingGroup(req, {callSid, group}) {
+  const route = await supportTelephony.startRoutingGroup({callSid, group});
+  if (!route.start) return route;
+  const supportNumber = normalizeE164(
+      route.supportNumber || twilioSecretValue(TWILIO_SUPPORT_NUMBER),
+  );
+  await Promise.all(route.members.map(async (member) => {
+    try {
+      const agentCall = await getTwilioClient().calls.create({
+        to: route.routingMode === "app" ?
+          `client:${member.twilioIdentity}` : member.phoneE164,
+        from: route.routingMode === "app" ?
+          customerClientCallerId(route.customerPhone) :
+          supportNumber,
+        url: twilioCallbackUrl(req, "agent-connect", {
+          ticketId: route.ticketId,
+          callSid,
+          group,
+          staffId: member.id,
+        }),
+        method: "POST",
+        timeout: 18,
+        statusCallback: twilioCallbackUrl(req, "agent-status", {
+          ticketId: route.ticketId,
+          callSid,
+          group,
+          staffId: member.id,
+        }),
+        statusCallbackMethod: "POST",
+        statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
+      });
+      await supportTelephony.recordRoutingAttempt({
+        callSid,
+        group,
+        staffId: member.id,
+        agentCallSid: agentCall.sid,
+        status: agentCall.status || "initiated",
+      });
+    } catch (error) {
+      console.error("Unable to ring support staff", {
+        callSid,
+        group,
+        staffId: member.id,
+        message: error?.message || "unknown error",
+      });
+      const result = await supportTelephony.recordRoutingAttempt({
+        callSid,
+        group,
+        staffId: member.id,
+        status: "failed",
+      });
+      if (result.nextGroup) {
+        await startSupportRoutingGroup(req, {callSid, group: result.nextGroup});
+      }
+    }
+  }));
+  return route;
+}
+
+async function queuedCallerResponse(req, {ticketId, callSid, queueName}) {
+  const response = new twilio.twiml.VoiceResponse();
+  await appendVoicePrompt(response, "recording_notice");
+  response.enqueue({
+    action: twilioCallbackUrl(req, "queue-complete", {ticketId, callSid}),
+    method: "POST",
+    waitUrl: twilioCallbackUrl(req, "queue-wait", {ticketId, callSid}),
+    waitUrlMethod: "POST",
+  }, queueName);
+  return response;
+}
+
+async function supportTwilioVoiceAction(payload, req, res) {
+  const phase = String(req.query?.phase || "incoming").trim();
+
+  if (phase === "outgoing") {
+    const member = await supportTelephony.voiceStaffForIdentity(payload.From);
+    const response = new twilio.twiml.VoiceResponse();
+    if (!member) {
+      response.say("This account is not authorized to place Chargerent support calls.");
+      response.hangup();
+      sendTwiml(res, response);
+      return;
+    }
+    const destination = normalizeE164(payload.To);
+    const assignedSupportNumbers = staffSupportNumbers(
+        member,
+        twilioSecretValue(TWILIO_SUPPORT_NUMBER),
+    );
+    if (!assignedSupportNumbers.length) {
+      response.say("This account is not assigned to a Chargerent support number.");
+      response.hangup();
+      sendTwiml(res, response);
+      return;
+    }
+    const supportNumber = assignedSupportNumbers[0];
+    const callSid = String(payload.CallSid || "").trim();
+    const imported = await supportTelephony.importOutboundCall({
+      callSid,
+      from: supportNumber,
+      to: destination,
+      staffId: member.id,
+      staffName: member.name,
+      staffIdentity: member.twilioIdentity,
+    });
+    appendCallTranscription(response, req, {ticketId: imported.ticketId, callSid});
+    const dial = response.dial({
+      answerOnBridge: true,
+      callerId: supportNumber,
+      timeout: 30,
+      record: "record-from-answer-dual",
+      recordingStatusCallback: twilioCallbackUrl(req, "recording-ready", {
+        ticketId: imported.ticketId,
+        callSid,
+      }),
+      recordingStatusCallbackMethod: "POST",
+      recordingStatusCallbackEvent: "completed",
+      action: twilioCallbackUrl(req, "outgoing-complete", {
+        ticketId: imported.ticketId,
+        callSid,
+      }),
+      method: "POST",
+    });
+    dial.number({
+      url: twilioCallbackUrl(req, "outgoing-notice", {
+        ticketId: imported.ticketId,
+        callSid,
+      }),
+      method: "POST",
+      statusCallback: twilioCallbackUrl(req, "outgoing-status", {
+        ticketId: imported.ticketId,
+        callSid,
+      }),
+      statusCallbackMethod: "POST",
+      statusCallbackEvent: "initiated ringing answered completed",
+    }, destination);
+    sendTwiml(res, response);
+    return;
+  }
+
+  if (phase === "incoming") {
+    const imported = await supportTelephony.importInboundCall(payload);
+    const callSid = String(payload.CallSid || "").trim();
+    const routingMode = await supportTelephony.voiceRoutingMode();
+    const supportNumber = normalizeE164(payload.To);
+    const defaultSupportNumber = normalizeE164(twilioSecretValue(TWILIO_SUPPORT_NUMBER));
+    const eligibleStaff = (await supportTelephony.listRoutingStaff()).filter((member) =>
+      staffSupportNumbers(member, defaultSupportNumber).includes(supportNumber),
+    );
+    const staff = splitRoutingStaff(eligibleStaff, {
+      deliveryMode: routingMode,
+      requireAvailable: routingMode === "app",
+    });
+    const queueName = supportQueueName(callSid);
+    const routing = await supportTelephony.beginCallRouting({
+      ticketId: imported.ticketId,
+      callSid,
+      queueName,
+      routingMode,
+      customerPhone: payload.From,
+      supportNumber,
+      primary: staff.primary,
+      backup: staff.backup,
+    });
+    if (!routing.hasStaff) {
+      await supportTelephony.updateCall({
+        ticketId: imported.ticketId,
+        callSid,
+        disposition: "unanswered",
+        providerStatus: "no-available-staff",
+      });
+    }
+    const response = routing.hasStaff ?
+      await queuedCallerResponse(req, {ticketId: imported.ticketId, callSid, queueName}) :
+      await callbackOfferResponse(req, {
+        ticketId: imported.ticketId,
+        callSid,
+        includeRecordingNotice: true,
+      });
+    sendTwiml(res, response);
+    return;
+  }
+
+  const {ticketId, callSid} = voiceTicketParameters(req);
+  if (phase === "outgoing-notice") {
+    const response = new twilio.twiml.VoiceResponse();
+    await appendVoicePrompt(response, "recording_notice");
+    sendTwiml(res, response);
+    return;
+  }
+
+  if (phase === "queue-wait") {
+    const state = await supportTelephony.callRoutingWaitState(callSid);
+    if (state.expired && state.cancelCallSids?.length) {
+      await cancelAgentCalls(state.cancelCallSids);
+    }
+    const response = new twilio.twiml.VoiceResponse();
+    if (state.leave) {
+      response.leave();
+      sendTwiml(res, response);
+      return;
+    }
+    await startSupportRoutingGroup(req, {callSid, group: state.currentGroup});
+    const refreshed = await supportTelephony.callRoutingWaitState(callSid);
+    if (refreshed.leave) {
+      response.leave();
+    } else {
+      await appendVoicePrompt(response, "hold_waiting");
+      response.pause({length: 4});
+    }
+    sendTwiml(res, response);
+    return;
+  }
+
+  if (phase === "agent-connect") {
+    const staffId = String(req.query?.staffId || "").trim();
+    const claim = await supportTelephony.claimCallRouting({
+      callSid,
+      staffId,
+      agentCallSid: payload.CallSid,
+    });
+    const response = new twilio.twiml.VoiceResponse();
+    if (!claim.won) {
+      response.say("This support call was answered by another team member.");
+      response.hangup();
+      sendTwiml(res, response);
+      return;
+    }
+    await supportTelephony.updateCall({
+      ticketId,
+      callSid,
+      disposition: "answered",
+      providerStatus: "in-progress",
+      dialCallSid: payload.CallSid,
+      acceptedByStaffId: staffId,
+      acceptedByName: claim.staffName,
+    });
+    await cancelAgentCalls(claim.cancelCallSids);
+    appendCallTranscription(response, req, {ticketId, callSid});
+    const dial = response.dial({
+      record: "record-from-answer-dual",
+      recordingStatusCallback: twilioCallbackUrl(req, "recording-ready", {ticketId, callSid}),
+      recordingStatusCallbackMethod: "POST",
+      recordingStatusCallbackEvent: "completed",
+      action: twilioCallbackUrl(req, "agent-finished", {ticketId, callSid}),
+      method: "POST",
+    });
+    dial.queue(claim.queueName);
+    sendTwiml(res, response);
+    return;
+  }
+
+  if (phase === "agent-status") {
+    const result = await supportTelephony.recordRoutingAttempt({
+      callSid,
+      group: String(req.query?.group || "primary"),
+      staffId: String(req.query?.staffId || "").trim(),
+      agentCallSid: payload.CallSid,
+      status: payload.CallStatus,
+    });
+    if (result.nextGroup) {
+      await startSupportRoutingGroup(req, {callSid, group: result.nextGroup});
+    }
+    res.status(204).send("");
+    return;
+  }
+
+  if (phase === "agent-finished") {
+    const response = new twilio.twiml.VoiceResponse();
+    response.hangup();
+    sendTwiml(res, response);
+    return;
+  }
+
+  if (phase === "queue-complete") {
+    const queueResult = String(payload.QueueResult || "").trim().toLowerCase();
+    if (queueResult === "bridged") {
+      await supportTelephony.updateCall({
+        ticketId,
+        callSid,
+        disposition: "answered",
+        providerStatus: "completed",
+        dialCallDuration: payload.QueueTime,
+      });
+      const response = new twilio.twiml.VoiceResponse();
+      response.hangup();
+      sendTwiml(res, response);
+      return;
+    }
+    await supportTelephony.updateCall({
+      ticketId,
+      callSid,
+      disposition: "unanswered",
+      providerStatus: queueResult || "no-answer",
+    });
+    if (queueResult === "hangup") {
+      const response = new twilio.twiml.VoiceResponse();
+      response.hangup();
+      sendTwiml(res, response);
+      return;
+    }
+    sendTwiml(res, await callbackOfferResponse(req, {ticketId, callSid}));
+    return;
+  }
+
+  if (phase === "callback-offer") {
+    sendTwiml(res, await callbackOfferResponse(req, {ticketId, callSid}));
+    return;
+  }
+
+  if (phase === "outgoing-status") {
+    const status = String(payload.CallStatus || "").trim().toLowerCase();
+    await supportTelephony.updateCall({
+      ticketId,
+      callSid,
+      callStatus: status,
+      providerStatus: status,
+      dialCallSid: payload.CallSid,
+      ...(status === "in-progress" || status === "answered" ? {disposition: "answered"} : {}),
+    });
+    res.status(204).send("");
+    return;
+  }
+
+  if (phase === "outgoing-complete") {
+    const dialStatus = String(payload.DialCallStatus || "").trim().toLowerCase();
+    await supportTelephony.updateCall({
+      ticketId,
+      callSid,
+      callStatus: dialStatus,
+      providerStatus: dialStatus,
+      disposition: dialStatus === "completed" ? "answered" : "unanswered",
+      dialCallSid: payload.DialCallSid,
+      dialCallDuration: payload.DialCallDuration,
+    });
+    const response = new twilio.twiml.VoiceResponse();
+    response.hangup();
+    sendTwiml(res, response);
+    return;
+  }
+
+  if (phase === "recording-ready") {
+    await supportTelephony.updateCall({
+      ticketId,
+      callSid,
+      recordingSid: payload.RecordingSid,
+      recordingUrl: payload.RecordingUrl,
+      recordingDuration: payload.RecordingDuration,
+      recordingStatus: payload.RecordingStatus,
+      recordingChannels: payload.RecordingChannels,
+      recordingStartTime: payload.RecordingStartTime,
+      recordingSource: payload.RecordingSource,
+    });
+    res.status(204).send("");
+    return;
+  }
+
+  if (phase === "transcription") {
+    await supportTelephony.recordTranscriptionEvent({
+      ticketId,
+      callSid,
+      ...payload,
+    });
+    res.status(204).send("");
+    return;
+  }
+
+  if (phase === "callback-choice") {
+    if (String(payload.Digits || "") === "1") {
+      await supportTelephony.requestCallback({ticketId, callSid});
+      const response = new twilio.twiml.VoiceResponse();
+      await appendVoicePrompt(response, "callback_confirmed");
+      response.hangup();
+      sendTwiml(res, response);
+      return;
+    }
+    sendTwiml(res, await voicemailResponse(req, {ticketId, callSid}));
+    return;
+  }
+
+  if (phase === "voicemail-finished") {
+    const response = new twilio.twiml.VoiceResponse();
+    await appendVoicePrompt(response, "voicemail_confirmed");
+    response.hangup();
+    sendTwiml(res, response);
+    return;
+  }
+
+  if (phase === "voicemail-ready") {
+    await supportTelephony.updateCall({
+      ticketId,
+      callSid,
+      disposition: "voicemail",
+      recordingSid: payload.RecordingSid,
+      recordingUrl: payload.RecordingUrl,
+      recordingDuration: payload.RecordingDuration,
+      recordingStatus: payload.RecordingStatus,
+      recordingChannels: payload.RecordingChannels,
+      recordingStartTime: payload.RecordingStartTime,
+      recordingSource: payload.RecordingSource,
+      providerStatus: payload.RecordingStatus,
+    });
+    res.status(204).send("");
+    return;
+  }
+
+  res.status(400).send("Unsupported voice event");
+}
+
+async function supportTwilioSmsAction(payload, req, res) {
+  const phase = String(req.query?.phase || "incoming").trim();
+  if (phase === "status") {
+    await supportTelephony.updateSmsStatus({
+      ticketId: req.query?.ticketId,
+      messageDocId: req.query?.messageDocId,
+      providerStatus: payload.EventType || payload.MessageStatus || payload.SmsStatus,
+      channelPrefix: payload.ChannelPrefix,
+      errorCode: payload.ErrorCode,
+    });
+    res.status(204).send("");
+    return;
+  }
+  await supportTelephony.importInboundSms(payload);
+  sendTwiml(res, new twilio.twiml.MessagingResponse());
+}
+
+function supportMobileErrorStatus(error) {
+  const code = String(error?.code || "").toLowerCase();
+  if (code.includes("unauthenticated")) return 401;
+  if (code.includes("permission-denied")) return 403;
+  return 400;
+}
+
+async function handleSupportMobileRequest(req, res, action) {
+  res.set("Cache-Control", "no-store");
+  if (req.method !== "POST") {
+    res.set("Allow", "POST");
+    res.status(405).json({ok: false, message: "POST is required."});
+    return;
+  }
+  try {
+    const authState = await getAuthorizedProfileFromRequest(req, getRequestData(req));
+    const result = await action(getRequestData(req), authState);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error("Support mobile request failed", {
+      message: error?.message || "unknown error",
+      code: error?.code || "unknown",
+    });
+    res.status(supportMobileErrorStatus(error)).json({
+      ok: false,
+      message: String(error?.message || "The support mobile request failed."),
+    });
+  }
+}
+
+async function createSupportVoiceAccessToken(authState) {
+  const member = await supportTelephony.voiceStaffForUser(authState.uid);
+  if (!member) {
+    throw new functions.https.HttpsError(
+        "permission-denied",
+        "This account is not assigned to support calling.",
+    );
+  }
+
+  const accountSid = twilioSecretValue(TWILIO_ACCOUNT_SID);
+  const apiKeySid = twilioSecretValue(TWILIO_API_KEY_SID);
+  const apiKeySecret = twilioSecretValue(TWILIO_API_KEY_SECRET);
+  const twimlAppSid = twilioSecretValue(TWILIO_TWIML_APP_SID);
+  const pushCredentialSid = twilioSecretValue(TWILIO_PUSH_CREDENTIAL_SID);
+  if (!/^AC[a-f0-9]{32}$/i.test(accountSid) ||
+      !/^SK[a-f0-9]{32}$/i.test(apiKeySid) ||
+      !apiKeySecret ||
+      !/^AP[a-f0-9]{32}$/i.test(twimlAppSid) ||
+      !/^CR[a-f0-9]{32}$/i.test(pushCredentialSid)) {
+    throw new Error("Support voice credentials are not configured.");
+  }
+
+  const ttlSeconds = 3600;
+  const AccessToken = twilio.jwt.AccessToken;
+  const token = new AccessToken(accountSid, apiKeySid, apiKeySecret, {
+    identity: member.twilioIdentity,
+    ttl: ttlSeconds,
+  });
+  token.addGrant(new AccessToken.VoiceGrant({
+    incomingAllow: true,
+    outgoingApplicationSid: twimlAppSid,
+    pushCredentialSid,
+  }));
+  return {
+    token: token.toJwt(),
+    identity: member.twilioIdentity,
+    available: member.available === true,
+    expiresAt: new Date(Date.now() + ttlSeconds * 1000).toISOString(),
+  };
+}
+
+async function listSupportMobileCallLog(data, authState) {
+  const member = await supportTelephony.voiceStaffForUser(authState.uid);
+  if (!member) {
+    throw new functions.https.HttpsError(
+        "permission-denied",
+        "This account is not assigned to support calling.",
+    );
+  }
+  const supportNumbers = staffSupportNumbers(member, twilioSecretValue(TWILIO_SUPPORT_NUMBER));
+  return {
+    calls: await supportTelephony.listCallLogs(data?.limit, supportNumbers),
+  };
+}
+
+async function listSupportMobileCases(data, authState) {
+  const member = await supportTelephony.voiceStaffForUser(authState.uid);
+  if (!member) {
+    throw new functions.https.HttpsError(
+        "permission-denied",
+        "This account is not assigned to support calling.",
+    );
+  }
+  const supportNumbers = staffSupportNumbers(member, twilioSecretValue(TWILIO_SUPPORT_NUMBER));
+  return {
+    cases: await supportTelephony.listActiveCases(data?.limit, supportNumbers),
+  };
+}
+
+async function updateSupportMobileCallCase(data, authState) {
+  const member = await supportTelephony.voiceStaffForUser(authState.uid);
+  if (!member) {
+    throw new functions.https.HttpsError(
+        "permission-denied",
+        "This account is not assigned to support calling.",
+    );
+  }
+  return supportTelephony.linkCallToCase(data, authState, {
+    supportNumbers: staffSupportNumbers(member, twilioSecretValue(TWILIO_SUPPORT_NUMBER)),
+  });
+}
+
+async function assertSupportMobileStaff(authState) {
+  const member = await supportTelephony.voiceStaffForUser(authState.uid);
+  if (!member) {
+    throw new functions.https.HttpsError(
+        "permission-denied",
+        "This account is not assigned to Chargerent support.",
+    );
+  }
+  return member;
+}
+
+async function searchSupportMobileRentals(data, authState) {
+  const member = await assertSupportMobileStaff(authState);
+  await supportTelephony.assertCaseAccess(
+      data?.ticketId,
+      staffSupportNumbers(member, twilioSecretValue(TWILIO_SUPPORT_NUMBER)),
+  );
+  return supportMobile.searchRentals(data, authState);
+}
+
+async function matchSupportMobileRental(data, authState) {
+  const member = await assertSupportMobileStaff(authState);
+  await supportTelephony.assertCaseAccess(
+      data?.ticketId,
+      staffSupportNumbers(member, twilioSecretValue(TWILIO_SUPPORT_NUMBER)),
+  );
+  return supportMobile.matchRental(data, authState);
+}
+
+async function listSupportMobileTextConversations(data, authState) {
+  await assertSupportMobileStaff(authState);
+  const [conversations, capabilities] = await Promise.all([
+    supportMobile.listTextConversations(data?.limit),
+    supportMobile.messagingCapabilities(),
+  ]);
+  return {conversations, capabilities};
+}
+
+async function listSupportMobileTextMessages(data, authState) {
+  await assertSupportMobileStaff(authState);
+  return supportMobile.listTextMessages(data);
+}
+
+async function supportMobileMessageCapabilities(data, authState) {
+  await assertSupportMobileStaff(authState);
+  return supportMobile.messagingCapabilities(data);
+}
+
+async function sendSupportMobileText(data, authState) {
+  await assertSupportMobileStaff(authState);
+  return supportMobile.sendText(data, authState, {
+    fromNumber: twilioSecretValue(TWILIO_SUPPORT_NUMBER),
+    statusCallbackUrl: ({ticketId, messageDocId}) => fixedTwilioCallbackUrl(
+        TWILIO_SMS_WEBHOOK_URL,
+        "status",
+        {ticketId, messageDocId},
+    ),
+  });
 }
 
 exports.admin_listUsers = functions.https.onCall(async (data, context) => {
@@ -11406,6 +12433,131 @@ exports.support_chatbotEvent = functions.runWith({
   action: (data) => supportTickets.importChatbotEvent(data),
 }));
 
+exports.support_twilioSms = functions.runWith({
+  secrets: [TWILIO_AUTH_TOKEN],
+  timeoutSeconds: 30,
+}).https.onRequest(async (req, res) => handleTwilioWebhook(
+    req,
+    res,
+    supportTwilioSmsAction,
+    TWILIO_SMS_WEBHOOK_URL,
+));
+
+exports.support_twilioVoice = functions.runWith({
+  secrets: [TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_SUPPORT_NUMBER],
+  timeoutSeconds: 30,
+}).https.onRequest(async (req, res) => handleTwilioWebhook(
+    req,
+    res,
+    supportTwilioVoiceAction,
+    TWILIO_VOICE_WEBHOOK_URL,
+));
+
+exports.support_voicePromptMedia = functions.runWith({
+  timeoutSeconds: 30,
+}).https.onRequest(handleSupportVoicePromptMedia);
+
+exports.support_mobileVoiceToken = functions.runWith({
+  secrets: [
+    TWILIO_ACCOUNT_SID,
+    TWILIO_API_KEY_SID,
+    TWILIO_API_KEY_SECRET,
+    TWILIO_TWIML_APP_SID,
+    TWILIO_PUSH_CREDENTIAL_SID,
+  ],
+  timeoutSeconds: 30,
+}).https.onRequest(async (req, res) => handleSupportMobileRequest(
+    req,
+    res,
+    (_data, authState) => createSupportVoiceAccessToken(authState),
+));
+
+exports.support_mobileAvailability = functions.runWith({
+  timeoutSeconds: 30,
+}).https.onRequest(async (req, res) => handleSupportMobileRequest(
+    req,
+    res,
+    (data, authState) => supportTelephony.setVoiceAvailability(data?.available === true, authState),
+));
+
+exports.support_mobileCallLog = functions.runWith({
+  secrets: [TWILIO_SUPPORT_NUMBER],
+  timeoutSeconds: 30,
+}).https.onRequest(async (req, res) => handleSupportMobileRequest(
+    req,
+    res,
+    (data, authState) => listSupportMobileCallLog(data, authState),
+));
+
+exports.support_mobileCases = functions.runWith({
+  secrets: [TWILIO_SUPPORT_NUMBER],
+  timeoutSeconds: 30,
+}).https.onRequest(async (req, res) => handleSupportMobileRequest(
+    req,
+    res,
+    (data, authState) => listSupportMobileCases(data, authState),
+));
+
+exports.support_mobileCallCase = functions.runWith({
+  secrets: [TWILIO_SUPPORT_NUMBER],
+  timeoutSeconds: 30,
+}).https.onRequest(async (req, res) => handleSupportMobileRequest(
+    req,
+    res,
+    (data, authState) => updateSupportMobileCallCase(data, authState),
+));
+
+exports.support_mobileRentalSearch = functions.runWith({
+  secrets: [TWILIO_SUPPORT_NUMBER],
+  timeoutSeconds: 30,
+}).https.onRequest(async (req, res) => handleSupportMobileRequest(
+    req,
+    res,
+    (data, authState) => searchSupportMobileRentals(data, authState),
+));
+
+exports.support_mobileMatchRental = functions.runWith({
+  secrets: [TWILIO_SUPPORT_NUMBER],
+  timeoutSeconds: 30,
+}).https.onRequest(async (req, res) => handleSupportMobileRequest(
+    req,
+    res,
+    (data, authState) => matchSupportMobileRental(data, authState),
+));
+
+exports.support_mobileTextConversations = functions.runWith({
+  timeoutSeconds: 30,
+}).https.onRequest(async (req, res) => handleSupportMobileRequest(
+    req,
+    res,
+    (data, authState) => listSupportMobileTextConversations(data, authState),
+));
+
+exports.support_mobileTextThread = functions.runWith({
+  timeoutSeconds: 30,
+}).https.onRequest(async (req, res) => handleSupportMobileRequest(
+    req,
+    res,
+    (data, authState) => listSupportMobileTextMessages(data, authState),
+));
+
+exports.support_mobileMessageCapabilities = functions.runWith({
+  timeoutSeconds: 30,
+}).https.onRequest(async (req, res) => handleSupportMobileRequest(
+    req,
+    res,
+    (data, authState) => supportMobileMessageCapabilities(data, authState),
+));
+
+exports.support_mobileSendSms = functions.runWith({
+  secrets: [TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_SUPPORT_NUMBER],
+  timeoutSeconds: 120,
+}).https.onRequest(async (req, res) => handleSupportMobileRequest(
+    req,
+    res,
+    (data, authState) => sendSupportMobileText(data, authState),
+));
+
 exports.support_updateTicket = functions.https.onCall(async (data, context) => {
   const authState = await assertAdminFromContext(context);
   return runSupportAdminAction(() => supportTickets.updateTicket(data, authState));
@@ -11426,12 +12578,45 @@ exports.support_sendReply = functions.runWith({timeoutSeconds: 120}).https.onCal
   return runSupportAdminAction(() => supportTickets.sendReply(data, authState));
 });
 
+exports.support_sendSmsReply = functions.runWith({
+  secrets: [TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_SUPPORT_NUMBER],
+  timeoutSeconds: 120,
+}).https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  return runSupportAdminAction(() => supportTelephony.sendSmsReply(data, authState, {
+    fromNumber: twilioSecretValue(TWILIO_SUPPORT_NUMBER),
+    statusCallbackUrl: ({ticketId, messageDocId}) => fixedTwilioCallbackUrl(
+        TWILIO_SMS_WEBHOOK_URL,
+        "status",
+        {ticketId, messageDocId},
+    ),
+  }));
+});
+
+exports.support_upsertTelephonyStaff = functions.https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  return runSupportAdminAction(() => supportTelephony.upsertRoutingStaff(data, authState));
+});
+
+exports.support_setVoiceRoutingMode = functions.https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  return runSupportAdminAction(() => supportTelephony.setVoiceRoutingMode(data?.routingMode, authState));
+});
+
+exports.support_uploadVoicePrompt = functions.runWith({
+  timeoutSeconds: 120,
+  memory: "512MiB",
+}).https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  return runSupportAdminAction(() => uploadSupportVoicePrompt(data, authState));
+});
+
 exports.support_gmailInboxChanged = onMessagePublished({
   topic: SUPPORT_GMAIL_TOPIC,
   region: "us-central1",
   timeoutSeconds: 540,
   retry: true,
-}, async (event) => gmailSupportInbox.handleNotification(gmailNotificationPayload(event)));
+}, async (event) => handleGmailInboxNotification(gmailNotificationPayload(event)));
 
 exports.support_gmailWatchRenewal = onSchedule({
   schedule: "every day 00:15",
@@ -11439,7 +12624,7 @@ exports.support_gmailWatchRenewal = onSchedule({
   region: "us-central1",
   timeoutSeconds: 540,
   retryCount: 3,
-}, async () => gmailSupportInbox.renewWatch());
+}, async () => runGmailInboxOperation("renewWatch"));
 
 exports.support_gmailInboxReconcile = onSchedule({
   schedule: "every 15 minutes",
@@ -11447,16 +12632,30 @@ exports.support_gmailInboxReconcile = onSchedule({
   region: "us-central1",
   timeoutSeconds: 540,
   retryCount: 3,
-}, async () => gmailSupportInbox.syncMailbox());
+}, async () => runGmailInboxOperation("syncMailbox"));
+
+exports.support_purgeExpiredCallContent = onSchedule({
+  schedule: "15 * * * *",
+  timeZone: "UTC",
+  region: "us-central1",
+  timeoutSeconds: 540,
+  retryCount: 3,
+  secrets: [TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN],
+}, async () => {
+  const result = await supportTelephony.purgeExpiredCallContent({
+    deleteRecording: deleteTwilioRecordingForRetention,
+  });
+  console.log("Support call content retention completed", result);
+});
 
 exports.support_syncGmailInbox = functions.runWith({timeoutSeconds: 540}).https.onCall(async (_data, context) => {
   await assertAdminFromContext(context);
-  return runSupportAdminAction(() => gmailSupportInbox.syncMailbox());
+  return runSupportAdminAction(() => runGmailInboxOperation("syncMailbox"));
 });
 
 exports.support_renewGmailWatch = functions.runWith({timeoutSeconds: 540}).https.onCall(async (_data, context) => {
   await assertAdminFromContext(context);
-  return runSupportAdminAction(() => gmailSupportInbox.renewWatch());
+  return runSupportAdminAction(() => runGmailInboxOperation("renewWatch"));
 });
 
 exports.phoneControl_createEnrollment = functions.runWith({
@@ -11480,14 +12679,14 @@ exports.phoneControl_httpCreateEnrollment = handleHttpFunction(async (data, req)
 }, {secrets: [PHONE_CONTROL_SIGNING_PRIVATE_KEY]});
 
 exports.phoneControl_assignDevice = functions.runWith({
-  secrets: [PHONE_CONTROL_SIGNING_PRIVATE_KEY, STRIPE_TEST_SECRET_KEY],
+  secrets: [PHONE_CONTROL_SIGNING_PRIVATE_KEY, STRIPE_TEST_SECRET_KEY, STRIPE_FR_LIVE_SECRET_KEY],
 }).https.onCall(async (data, context) => {
   const authState = await assertAdminFromContext(context);
   return assignPhoneDevice(data, authState, {
     db,
     admin,
     privateKeyPem: PHONE_CONTROL_SIGNING_PRIVATE_KEY.value(),
-    getStripeClient: getStripeTestClient,
+    getStripeClient: getStripeTerminalClient,
     stripeMode: "test",
     packageName: "com.chargerent.kiosk.test.debug",
   });
@@ -11499,11 +12698,15 @@ exports.phoneControl_httpAssignDevice = handleHttpFunction(async (data, req) => 
     db,
     admin,
     privateKeyPem: PHONE_CONTROL_SIGNING_PRIVATE_KEY.value(),
-    getStripeClient: getStripeTestClient,
+    getStripeClient: getStripeTerminalClient,
     stripeMode: "test",
     packageName: "com.chargerent.kiosk.test.debug",
   });
-}, {secrets: [PHONE_CONTROL_SIGNING_PRIVATE_KEY, STRIPE_TEST_SECRET_KEY]});
+}, {secrets: [
+  PHONE_CONTROL_SIGNING_PRIVATE_KEY,
+  STRIPE_TEST_SECRET_KEY,
+  STRIPE_FR_LIVE_SECRET_KEY,
+]});
 
 exports.phoneControl_listDevices = functions.https.onCall(async (data, context) => {
   const authState = await getAuthorizedProfileFromContext(context);
@@ -12476,19 +13679,19 @@ exports.stationBinding_httpMoveModule = handleHttpFunction(async (data, req) => 
 });
 
 exports.kioskTerminalApi = functions.runWith({
-  secrets: [STRIPE_TEST_SECRET_KEY, BESITER_MQTT_CREDENTIALS],
+  secrets: [STRIPE_TEST_SECRET_KEY, STRIPE_FR_LIVE_SECRET_KEY, BESITER_MQTT_CREDENTIALS],
 }).https.onRequest(kioskTerminalHandler);
 
 exports.kioskTerminal_settleStripeReturn = onDocumentWritten({
   document: "rentals/{rentalId}",
-  secrets: [STRIPE_TEST_SECRET_KEY],
+  secrets: [STRIPE_TEST_SECRET_KEY, STRIPE_FR_LIVE_SECRET_KEY],
 }, async (event) => {
   if (!event.data.after.exists) return;
   const rentalId = event.params.rentalId;
   await settleStripeReturn({
     rental: event.data.after.data() || {},
     rentalId,
-    getStripeClient: getStripeTestClient,
+    getStripeClient: getStripeTerminalClient,
     store: kioskTerminalStore,
   });
 });

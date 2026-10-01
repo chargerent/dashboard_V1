@@ -10,7 +10,6 @@ const RETURN_SESSION_TTL_MS = 2 * 60 * 1000;
 const VEND_RESULT_TTL_MS = 2 * 60 * 1000;
 const SHARED_TEST_ACCOUNT_CURRENCY_OVERRIDES = Object.freeze({
   US: "usd",
-  FR: "usd",
 });
 const KIOSK_CURRENCY_CODES = Object.freeze({
   usd: "US",
@@ -451,10 +450,22 @@ function validateInstallation(installation) {
       fail(503, "installation-not-configured", `The installation is missing ${field}.`);
     }
   }
-  if (cleanString(installation.stripeMode).toLowerCase() !== "test") {
-    fail(503, "stripe-mode-mismatch", "This pilot endpoint requires Stripe test mode.");
+  const stripeMode = cleanString(installation.stripeMode, 10).toLowerCase();
+  if (!new Set(["test", "live"]).has(stripeMode)) {
+    fail(503, "stripe-mode-mismatch", "The Stripe Terminal mode is not configured.");
   }
   const stripeAccountCountry = normalizeStripeAccountCountry(installation.stripeAccountCountry);
+  if (stripeMode === "live" && (
+    stripeAccountCountry !== "FR" ||
+    cleanString(installation.stripeReaderType, 40).toLowerCase() !== "bbpos_wisepad3" ||
+    cleanString(installation.packageName, 160) !== "com.chargerent.media.lab"
+  )) {
+    fail(
+        503,
+        "live-terminal-not-approved",
+        "Live Stripe Terminal is approved only for the French integrated kiosk app with WisePad 3.",
+    );
+  }
   if (!cleanString(installation.stripeLocationId, 160).startsWith("tml_")) {
     fail(503, "stripe-location-not-configured", "The kiosk Stripe location is not configured.");
   }
@@ -1192,24 +1203,26 @@ function createKioskTerminalService({
       const session = await store.getReturnSession(cleanString(returnSessionId, 100));
       assertReturnOwner(session, installation);
       let outcome = session.outcome;
+      let returnSlot = Number(session.returnSlot) || null;
       if (outcome === "pending") {
         const returnedRental = await store.findReturnSince(session);
         if (returnedRental) {
           outcome = "received";
+          returnSlot = Number(returnedRental.returnSlotid) || null;
           await store.updateReturnSession(session.id, {
             outcome,
             state: "besiter_return_confirmed",
             rentalId: returnedRental.id,
             chargerSn: Number(returnedRental.chargerid || returnedRental.sn) || null,
             returnModuleId: cleanString(returnedRental.returnModuleid, 80) || null,
-            returnSlot: Number(returnedRental.returnSlotid) || null,
+            returnSlot,
             receivedAt: returnedRental.returnTime || now().toISOString(),
           }, now());
         } else if (valueMillis(session.expiresAt) <= now().getTime()) {
           outcome = "failed";
         }
       }
-      return {status: 200, body: {outcome}};
+      return {status: 200, body: {outcome, returnSlot}};
     },
   };
 }
@@ -1281,6 +1294,7 @@ module.exports = {
   createFirestoreKioskTerminalStore,
   createKioskTerminalHandler,
   createKioskTerminalService,
+  validateInstallation,
   resolveKioskOffer,
   normalizeBesiterAvailability,
   settleStripeReturn,

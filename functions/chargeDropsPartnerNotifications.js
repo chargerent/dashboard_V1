@@ -1,6 +1,7 @@
 /* eslint-env node */
 
 const crypto = require("node:crypto");
+const {isCompanyManagedChargeDrops} = require("./chargeDropsRevenue");
 
 const NOTIFICATIONS_COLLECTION = "chargeDropsPartnerNotifications";
 const TEMPLATE_VERSION = "chargedrops-partner-onboarding-v1";
@@ -259,6 +260,22 @@ function createChargeDropsPartnerNotifications({
     const saved = existing.exists ? existing.data() || {} : {};
     if (["sent", "sending", "unknown", "skipped"].includes(saved.status)) {
       return {id, status: saved.status, duplicate: true};
+    }
+
+    if (isCompanyManagedChargeDrops(clientProfile)) {
+      await ref.set({
+        id,
+        clientUid: normalizedUid,
+        clientId: text(clientProfile?.clientId, 80).toUpperCase(),
+        eventType,
+        eventKey: text(eventKey, 240),
+        templateVersion: TEMPLATE_VERSION,
+        status: "skipped",
+        reason: "company-managed-location",
+        createdAt: saved.createdAt || serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }, {merge: true});
+      return {id, status: "skipped", reason: "company-managed-location"};
     }
 
     const partner = await resolvePartner(clientProfile);

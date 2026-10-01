@@ -12,6 +12,7 @@ import { filterStationsForClient } from '../utils/helpers';
 import { normalizeStationId, parseStationQrInput } from '../utils/stationQr';
 import useKioskCommandFlow from '../hooks/useKioskCommandFlow';
 import { useIdleTimer } from '../hooks/useIdleTimer';
+import DashboardPageActions, { DashboardLanguageToggle } from '../components/UI/DashboardPageActions.jsx';
 
 const CAMERA_SCAN_INTERVAL_MS = 250;
 
@@ -36,6 +37,7 @@ function getScannerErrorMessage(error, t) {
 export default function TestingPage({
     onLogout,
     onNavigateToDashboard,
+    onNavigateToAdmin,
     clientInfo,
     t,
     language,
@@ -384,16 +386,13 @@ export default function TestingPage({
 
             <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 backdrop-blur">
                 <div className="mx-auto flex max-w-md items-center justify-between gap-3 px-4 py-3">
-                    <button onClick={onNavigateToDashboard} className="rounded-full bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700" type="button">
-                        {t('back_to_dashboard')}
-                    </button>
-                    <div className="flex items-center gap-2">
-                        <button onClick={() => setLanguage('en')} className={`rounded-md px-2 py-1 text-sm font-bold ${language === 'en' ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-700'}`} type="button">EN</button>
-                        <button onClick={() => setLanguage('fr')} className={`rounded-md px-2 py-1 text-sm font-bold ${language === 'fr' ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-700'}`} type="button">FR</button>
-                        <button onClick={onLogout} className="rounded-full bg-red-500 px-3 py-2 text-sm font-semibold text-white" type="button">
-                            {t('logout')}
-                        </button>
-                    </div>
+                    <DashboardLanguageToggle language={language} setLanguage={setLanguage} />
+                    <DashboardPageActions
+                        onNavigateToDashboard={onNavigateToDashboard}
+                        onNavigateToAdmin={onNavigateToAdmin}
+                        onLogout={onLogout}
+                        t={t}
+                    />
                 </div>
             </header>
 

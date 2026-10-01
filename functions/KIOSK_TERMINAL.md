@@ -1,13 +1,15 @@
 # Chargerent kiosk Terminal backend
 
-`kioskTerminalApi` is the Firebase HTTPS backend for the Android Tap to Pay
-kiosk. The first pilot is restricted to CA8019 through its installation record.
+`kioskTerminalApi` is the Firebase HTTPS backend for the integrated Chargerent
+Android kiosk app and its external Stripe Terminal reader.
 
 ## Secret boundary
 
-The Cloud Function binds `STRIPE_TEST_SECRET_KEY` from Google Secret Manager.
-For the pilot this must be a U.S. Stripe account test secret key beginning
-`sk_test_`. Never put this value in Firestore, Gradle, an APK, or a device.
+The Cloud Function binds `STRIPE_TEST_SECRET_KEY` and
+`STRIPE_FR_LIVE_SECRET_KEY` from Google Secret Manager. The latter must belong
+to a French Stripe account and begin `sk_live_`. It is accepted only for an FR
+installation using `bbpos_wisepad3` and package `com.chargerent.media.lab`.
+Never put either value in Firestore, Gradle, an APK, or a device.
 
 The Android app receives short-lived Stripe Terminal connection tokens and
 PaymentIntent client secrets from this API. It never receives the Stripe secret
@@ -32,7 +34,7 @@ only the hash, and encrypts the one-time raw token to that enrolled phone's
 Android Keystore command key. Do not create or paste raw installation tokens in
 the dashboard or Firestore.
 
-The CA8019 pilot document has this shape:
+An installation document has this shape:
 
 ```json
 {
@@ -103,7 +105,10 @@ npm run test:phone-control
 npx eslint kioskTerminal.js kioskTerminal.test.js besiterGateway.js besiterGateway.test.js index.js
 ```
 
-Before deployment, set both server secrets and create the CA8019 installation
-by re-saving its phone assignment with the terminal option enabled. Do not
-deploy while CA8019 is empty: the live Besiter response will correctly be
-`sold_out` or `offline`, and Rent will remain disabled.
+Before enabling live mode, confirm that the secret belongs to the French Stripe
+account, Stripe reports `details_submitted` and `charges_enabled`, the station
+resolves to country `FR`, the assigned device is the integrated kiosk app, and
+the reader type is WisePad 3. Re-saving the FR8011 assignment creates a new
+installation token and a French live Terminal Location. Reader readiness, a
+successful card authorization, and a successful physical vend remain separate
+checks.

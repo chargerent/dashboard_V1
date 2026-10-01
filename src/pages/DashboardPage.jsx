@@ -18,7 +18,9 @@ import { filterProvisionedStations, filterStationsForClient, isKioskOnline, isKi
 import GlobalRentalActivity from '../components/Dashboard/GlobalRentalActivity';
 import LocationSummary from '../components/Dashboard/LocationSummary';
 import CommandStatusToast from '../components/UI/CommandStatusToast';
-import { ChatBubbleLeftRightIcon, CheckCircleIcon, CpuChipIcon, ComputerDesktopIcon, DevicePhoneMobileIcon, ExclamationTriangleIcon, QrCodeIcon, SparklesIcon } from '@heroicons/react/24/outline';
+import DashboardPageActions, { DashboardLanguageToggle } from '../components/UI/DashboardPageActions.jsx';
+import { ChatBubbleLeftRightIcon, CheckCircleIcon, CpuChipIcon, ExclamationTriangleIcon, QrCodeIcon, SparklesIcon } from '@heroicons/react/24/outline';
+import DeviceManagementIcon from '../components/UI/DeviceManagementIcon.jsx';
 import useKioskCommandFlow from '../hooks/useKioskCommandFlow';
 import { callFunctionWithAuth } from '../utils/callableRequest';
 import { aggregateRentalDashboardStats } from '../utils/rentalDashboardStats';
@@ -759,16 +761,15 @@ return (
             <header className="bg-white shadow-sm">
                 <div className="max-w-screen-2xl mx-auto py-3 px-3 sm:px-4 lg:px-6">
                     <div className="flex items-center justify-between gap-3 border-b border-gray-100 pb-3">
-                        <div className="flex items-center gap-2">
-                            <button onClick={() => setLanguage('en')} className={`px-2 py-1 text-sm font-bold rounded-md ${language === 'en' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}>EN</button>
-                            <button onClick={() => setLanguage('fr')} className={`px-2 py-1 text-sm font-bold rounded-md ${language === 'fr' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}>FR</button>
-                        </div>
+                        <DashboardLanguageToggle language={language} setLanguage={setLanguage} />
                         <span className="rounded-md bg-gray-100 px-2 py-1 text-xs font-semibold text-gray-600 whitespace-nowrap">
                             Dashboard v{DASHBOARD_VERSION}
                         </span>
-                        <button onClick={onLogout} className="p-2 rounded-md bg-red-500 text-white hover:bg-red-600" title={t('logout')}>
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
-                        </button>
+                        <DashboardPageActions
+                            onNavigateToAdmin={canOpenAdminTools ? onNavigateToAdmin : undefined}
+                            onLogout={onLogout}
+                            t={t}
+                        />
                     </div>
                     <div className="mt-3 flex flex-wrap items-center justify-end gap-2 sm:gap-4">
                     {hasStatusAccess && (
@@ -798,24 +799,14 @@ return (
                             </svg>
                         </button>
                     )}
-                    {import.meta.env.DEV && (
-                        <a
-                            href="?page=kiosk-control-lab"
-                            className="rounded-md bg-emerald-100 p-2 text-emerald-700 transition-colors hover:bg-emerald-200"
-                            title="Open local Kiosk Control"
-                            aria-label="Kiosk Control"
-                        >
-                            <ComputerDesktopIcon className="h-6 w-6" />
-                        </a>
-                    )}
                     {hasPhoneControlAccess && (
                         <button
                             onClick={onNavigateToPhoneControl}
                             className="rounded-md bg-violet-100 p-2 text-violet-700 transition-colors hover:bg-violet-200"
-                            title="Phone Control"
-                            aria-label="Phone Control"
+                            title="Device Management"
+                            aria-label="Device Management"
                         >
-                            <DevicePhoneMobileIcon className="h-6 w-6" />
+                            <DeviceManagementIcon className="h-6 w-6" />
                         </button>
                     )}
                     {canUseCustomerSupport && (
@@ -866,11 +857,6 @@ return (
 	                    {canOpenAdminTools && (
 	                        <button onClick={onNavigateToAiBooths} className="hidden sm:inline-flex items-center justify-center p-2 rounded-md bg-cyan-100 text-cyan-800 hover:bg-cyan-200" title="AI Booths">
 	                            <SparklesIcon className="h-6 w-6" />
-		                        </button>
-	                    )}
-		                    {canOpenAdminTools && (
-		                        <button onClick={onNavigateToAdmin} className="p-2 rounded-md bg-orange-100 text-orange-700 hover:bg-orange-200" title={t('admin_tools')}>
-		                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
 		                        </button>
 	                    )}
                     </div>
