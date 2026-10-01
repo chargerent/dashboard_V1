@@ -2,7 +2,7 @@ import {MEDIA_HOSTED,mediaUrl,mediaFetch} from './mediaApi.js';
 /* eslint-disable react-refresh/only-export-components */
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {createPortal} from 'react-dom';
-import {customerHelpQrDataUrl,customerHelpSmsUrl,stripeQrDataUrl} from './stripeQr.js';
+import {customerHelpQrDataUrl,customerHelpUrl,stripeQrDataUrl} from './stripeQr.js';
 
 import {STRIPE_UI_LANGUAGES,defaultStripeUi,validateStripeUi,stripeText,stripePageText,resolveStripeLanguage} from './stripeUi.js';
 import {checkoutMoney,checkoutUsesColumns,checkoutLinkUrl,checkoutReturnReceiptUrl,normalizeCheckoutReturnNotice,canPresentCheckoutReturn,checkoutReturnContext,mayDismissCheckoutReturn,returnReceiptSizing,floatingCheckoutGeometry,IDLE_CHECKOUT_FLOW,enabledCheckoutPages,beginCheckoutFlow,nextCheckoutPage,previousCheckoutPage,canCreateCheckout} from './checkoutFlow.js';
@@ -185,10 +185,10 @@ export function CheckoutPanel({checkout={},previewOnly=false,previewStage,previe
   const cardStyle={...themeStyle,'--return-qr-size':px(receiptSizing.qr),'--return-done-height':px(receiptSizing.done),'--return-gap':px(receiptSizing.gap),width:px(idle?geometry.idleWidth:geometry.expandedWidth),height:px(idle?geometry.idleHeight:geometry.expandedHeight),bottom:px(geometry.bottom),borderRadius:px(geometry.radius)};
   const canSubmit=!previewOnly && canCreateCheckout(flow,{connected,available:offer?.canRent,busy,recovering,quoteKey});
   const link=stage==='returned'?(noticePresentation?checkoutReturnReceiptUrl(profile,showingReturn?returnNotice:null,interaction):checkoutLinkUrl(profile,'receipt',interaction)):LINK_STAGES.has(stage)?checkoutLinkUrl(profile,stage,interaction):null;
-  const helpStationId=String(checkout.stationId || STATION).trim().toUpperCase(),helpSmsLink=customerHelpSmsUrl(helpStationId);
-  const showHelpQr=!currentPage && stage==='ready' && !!helpSmsLink;
+  const helpStationId=String(checkout.stationId || STATION).trim().toUpperCase(),helpTemplate=profile.links?.help || '',helpLink=customerHelpUrl(helpTemplate,helpStationId);
+  const showHelpQr=!currentPage && stage==='ready' && !!helpLink;
   useEffect(()=>{let active=true;setQrImage(null);setQrOpen(false);if(link)stripeQrDataUrl(link).then(value=>{if(active)setQrImage(value);}).catch(()=>{});return()=>{active=false;};},[link]);
-  useEffect(()=>{let active=true;setHelpQrImage(null);if(helpSmsLink)customerHelpQrDataUrl(helpStationId).then(value=>{if(active)setHelpQrImage(value);}).catch(()=>{});return()=>{active=false;};},[helpSmsLink,helpStationId]);
+  useEffect(()=>{let active=true;setHelpQrImage(null);if(helpLink)customerHelpQrDataUrl(helpTemplate,helpStationId).then(value=>{if(active)setHelpQrImage(value);}).catch(()=>{});return()=>{active=false;};},[helpLink,helpTemplate,helpStationId]);
   function selectFlow(value){if(controlled){previewStageChange?.(value.step,value.pageId);return;}setFlow(value);}
   function begin(){setOfferChanged(false);selectFlow(beginCheckoutFlow(pages));}
   function done(){if(controlled){previewStageChange?.('start');return;}const safe=!showingReturn || mayDismissCheckoutReturn(shownReturn.current,returnNotice?.eventId,returnContext,returnSafe);setReturnNotice(null);setQrOpen(false);if(!safe)return;setFlow({...IDLE_CHECKOUT_FLOW});setOfferChanged(false);if(!returnOnly && !previewOnly && ended)checkout.reset?.();}
@@ -231,7 +231,7 @@ export function CheckoutPanel({checkout={},previewOnly=false,previewStage,previe
       {!noticePresentation && !previewOnly && error && connected && <p className="ms-checkout-error" role="alert">{text('errorGeneric')}</p>}
       {!noticePresentation && !previewOnly && !connected && !recovering && <p className="ms-checkout-error" role="status">{text('connectionLost')}</p>}
       {!noticePresentation && phase!=='idle' && settlementKey && !auxiliary && <p className="ms-checkout-settlement">{text(settlementKey)}</p>}
-      {showHelpQr && <div className="ms-checkout-help" data-help-sms={helpSmsLink}>{helpQrImage?<img className="ms-checkout-help-qr" src={helpQrImage} alt={`Help QR code for ${helpStationId}`}/>:<span className="ms-checkout-help-pending" aria-hidden="true"/>}</div>}
+      {showHelpQr && <div className="ms-checkout-help" data-help-url={helpLink}><strong className="ms-checkout-help-title">{text('helpTitle')}</strong>{helpQrImage?<img className="ms-checkout-help-qr" src={helpQrImage} alt={`Help QR code for ${helpStationId}`}/>:<span className="ms-checkout-help-pending" aria-hidden="true"/>}<span className="ms-checkout-help-scan">{text('helpScan')}</span></div>}
     </div>
     <div className="ms-checkout-actions" key={`actions-${stage}-${currentPage?.id || ''}`}>{renderActions()}</div></>}
   </section>{dialog}</div>;

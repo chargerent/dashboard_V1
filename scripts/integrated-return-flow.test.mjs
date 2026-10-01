@@ -47,19 +47,31 @@ test('checkout cards omit branding and keep language in the top-right corner', (
 });
 
 test('help is QR-only on Rent Return and omitted from every other checkout page', () => {
-  assert.match(preview, /const showHelpQr=!currentPage && stage==='ready' && !!helpSmsLink/);
-  assert.match(preview, /data-help-sms=\{helpSmsLink\}/);
+  assert.match(preview, /const showHelpQr=!currentPage && stage==='ready' && !!helpLink/);
+  assert.match(preview, /data-help-url=\{helpLink\}/);
+  assert.match(preview, /text\('helpTitle'\)/);
+  assert.match(preview, /text\('helpScan'\)/);
   assert.match(preview, /alt=\{`Help QR code for \$\{helpStationId\}`\}/);
   assert.doesNotMatch(preview, /<p[^>]*>\{text\('support'\)\}<\/p>/);
   assert.doesNotMatch(preview, /\['information','returning','returned','out_of_order'\]\.includes\(stage\)/);
   assert.match(editor, /!\['brand','support','receipt','receipt\.title','receipt\.body','tap','insert'/);
 });
 
-test('the Rent Return help QR uses a framed side-by-side layout instead of stacking below copy', () => {
+test('the Rent Return help QR stays beside the copy without a white frame', () => {
   assert.match(styles, /\.ms-checkout-panel\.ready \.ms-checkout-main\{display:grid;grid-template-columns:minmax\(0,1fr\) auto/);
   assert.match(styles, /\.ms-checkout-panel \.ms-checkout-help\{grid-column:2;grid-row:1\/span 10;align-self:center/);
-  assert.match(styles, /width:calc\(var\(--checkout-pixel\) \* 128\);height:calc\(var\(--checkout-pixel\) \* 128\)/);
+  assert.match(styles, /background:transparent;border:0;border-radius:0;box-shadow:none/);
   assert.match(styles, /width:calc\(var\(--checkout-pixel\) \* 112\);height:calc\(var\(--checkout-pixel\) \* 112\)/);
+});
+
+test('the Rent Return help QR accepts an HTTPS URL with the station variable', () => {
+  const profile = defaultStripeUi();
+  profile.links.help = 'https://example.com/help?station={stationId}';
+  assert.equal(validateStripeUi(profile).links.help, profile.links.help);
+  assert.match(editor, /label="Help QR URL"/);
+  assert.match(editor, /\{stationId\}/);
+  profile.links.help = 'https://example.com/help?station={unknown}';
+  assert.throws(() => validateStripeUi(profile), /stationId/);
 });
 
 test('the standalone Receipt page is removed but Return Complete keeps receipt configuration', () => {

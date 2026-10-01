@@ -14,6 +14,8 @@ const common = {
   receipt:['Receipt button','Receipt','Reçu','Recibo'],
   receiptScan:['Return receipt QR caption','Scan for your receipt','Scannez pour obtenir votre reçu','Escanea para obtener tu recibo'],
   receiptPending:['Return receipt pending','Receipt available soon','Reçu bientôt disponible','Recibo disponible pronto'],
+  helpTitle:['Help QR heading','Need help?','Besoin d’aide ?','¿Necesitas ayuda?'],
+  helpScan:['Help QR instruction','Scan me!','Scannez-moi !','¡Escanéame!'],
   support:['Support message','Need help? Please ask a staff member.','Besoin d’aide ? Adressez-vous au personnel.','¿Necesitas ayuda? Consulta al personal.'],
   linkUnavailable:['Link unavailable','This link is not available yet. Please ask a staff member.','Ce lien n’est pas encore disponible. Adressez-vous au personnel.','Este enlace aún no está disponible. Consulta al personal.'],
   openLink:['Show QR code button','Show QR code','Afficher le code QR','Mostrar código QR'],
@@ -93,7 +95,7 @@ export function defaultStripeUi() {
     locales[key]=Object.fromEntries(Object.entries(common).map(([field,values])=>[field,values[i+1]]));
     Object.entries(stages).forEach(([stage,values])=>{locales[key][`${stage}.title`]=values[i];locales[key][`${stage}.body`]=values[i+3];});
   });
-  return {schemaVersion:1,defaultLanguage:'en',enabledLanguages:['en','fr','es'],navigation:{language:true,information:true,terms:true,map:true,receipt:false},links:{terms:'',map:'',receipt:''},theme:{background:'#f6f9f4',surface:'#e2ebdf',primary:'#143c2d',secondary:'#143c2d',text:'#143c2d',muted:'#426354',buttonText:'#ffffff',danger:'#943925'},locales,pages:[]};
+  return {schemaVersion:1,defaultLanguage:'en',enabledLanguages:['en','fr','es'],navigation:{language:true,information:true,terms:true,map:true,receipt:false},links:{terms:'',map:'',receipt:'',help:''},theme:{background:'#f6f9f4',surface:'#e2ebdf',primary:'#143c2d',secondary:'#143c2d',text:'#143c2d',muted:'#426354',buttonText:'#ffffff',danger:'#943925'},locales,pages:[]};
 }
 const plain=value=>value!==null && typeof value==='object' && !Array.isArray(value) && [Object.prototype,null].includes(Object.getPrototypeOf(value));
 const reject=message=>{throw Object.assign(new Error(message),{status:400,code:'INVALID_STRIPE_UI'});};
@@ -116,7 +118,12 @@ export function validateStripeUi(input) {
     known(input.links,Object.keys(result.links),'Links');
     for(const [key,value] of Object.entries(input.links)){
       const link=textValue(value,`${key} link`,1000).trim();
-      if(link){let url;try{url=new URL(link);}catch{reject('Links must be valid HTTPS addresses or blank.');}if(url.protocol!=='https:'||!url.hostname||url.username||url.password||/[\s\\]/.test(link))reject('Links must be valid HTTPS addresses without credentials.');}
+      const variables=link.match(/\{[^{}]+\}/g) || [];
+      if(key==='help' && variables.some(variable=>variable!=='{stationId}'))reject('The Help QR URL supports only the {stationId} variable.');
+      if(key!=='help' && variables.length)reject('Only the Help QR URL supports a variable.');
+      const resolved=key==='help'?link.replaceAll('{stationId}','US8004'):link;
+      if(/[{}]/.test(resolved))reject('Links contain an unsupported variable.');
+      if(resolved){let url;try{url=new URL(resolved);}catch{reject('Links must be valid HTTPS addresses or blank.');}if(url.protocol!=='https:'||!url.hostname||url.username||url.password||/[\s\\]/.test(resolved))reject('Links must be valid HTTPS addresses without credentials.');}
       result.links[key]=link;
     }
   }
