@@ -6,7 +6,7 @@ export const PROFILE_PREVIEW_KIOSKS = [
   {stationid: 'SAMPLE-A01', info: {client: 'APOLLO SAMPLE', location: 'Apollo only'}, hardware: {gateway: 'APOLLO', screen: 'no screen'}},
   {stationid: 'SAMPLE-A02', info: {client: 'APOLLO SAMPLE', location: 'Second Apollo'}, hardware: {gateway: 'APOLLO', screen: 'no screen'}},
   {stationid: 'SAMPLE-P01', info: {client: 'P68 SAMPLE', location: 'P68 only'}, hardware: {gateway: 'PAYTERP68', screen: 'no screen'}, screen: {mode: 'picture'}},
-  {stationid: 'SAMPLE-M01', info: {client: 'MIXED SAMPLE', location: 'Touchscreen and P68'}, hardware: {gateway: 'PAYTERP68', screen: '7in'}, screen: {mode: 'picture'}, ui: {mode: 'UI'}},
+  {stationid: 'SAMPLE-M01', info: {client: 'MIXED SAMPLE', location: 'Touchscreen, P68, and Chargerent app'}, hardware: {gateway: 'PAYTERP68', screen: '7in'}, screen: {mode: 'picture'}, ui: {mode: 'UI'}, profileCapabilities: {chargerentApp: true}},
   {stationid: 'SAMPLE-M02', info: {client: 'MIXED SAMPLE', location: 'Apollo'}, hardware: {gateway: 'APOLLO', screen: 'no screen'}},
 ];
 
@@ -23,7 +23,7 @@ export function createProfilePreviewApi() {
     return profile;
   });
   return async (name, data) => {
-    if (name === 'uiProfile_list') return {profiles: cloneProfileValue(profiles), capabilities: {scopedProfiles: 1, apolloScreens: 1, apolloEstablishedScreenRemoval: 1, apolloPublishing: false, apolloTestScreens: 1, apolloProfileTestsEnabled: false, apolloTestStationIds: []}};
+    if (name === 'uiProfile_list') return {profiles: cloneProfileValue(profiles), capabilities: {scopedProfiles: 1, chargerentAppProfiles: 1, integratedKioskStationIds: ['SAMPLE-M01'], apolloScreens: 1, apolloEstablishedScreenRemoval: 1, apolloPublishing: false, apolloTestScreens: 1, apolloProfileTestsEnabled: false, apolloTestStationIds: []}};
     if (name !== 'uiProfile_upsert') throw new Error('Publishing is disabled in the local preview.');
     const existing = profiles.find(({id}) => id === data.profile.id);
     if (existing.version !== data.profile.version) throw new Error('Profile changed. Reload the preview.');

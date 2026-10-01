@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {buildSectionUiSnapshot, getProfileDeviceTypes, getTerminalProfileCopy, hasTerminalOverride, isProfileSectionTarget, mergeProfileSection, readP68Locales, setTerminalProfileCopy, writeP68Locales} from '../functions/uiProfileSections.mjs';
+import {buildSectionUiSnapshot, getChargerentAppProfile, getProfileDeviceTypes, getTerminalProfileCopy, isProfileSectionTarget, mergeProfileSection, readP68Locales, setTerminalProfileCopy, writeP68Locales} from '../functions/uiProfileSections.mjs';
 import {createDefaultKioskUiProfile} from '../src/utils/kioskUiProfiles.js';
 import {normalizeKioskData} from '../src/utils/helpers.js';
-import {profileDeviceStatus} from '../src/utils/profileDevices.js';
+import {isProfileDeviceSectionAvailable, profileDeviceStatus} from '../src/utils/profileDevices.js';
 import {createProfilePreviewApi} from '../src/utils/profilePreview.js';
 
 const profile = () => ({...createDefaultKioskUiProfile('CLIENT'), terminalProfiles: {apollo: {translations: {en: {startpage: {title: 'Welcome'}}}}}});
@@ -27,6 +27,7 @@ test('device types enforce Apollo, P68 and Kiosk access eligibility', () => {
   assert.deepEqual(getProfileDeviceTypes(kiosk()), ['kiosk', 'p68']);
   assert.deepEqual(getProfileDeviceTypes({hardware: {gateway: 'APOLLO', screen: 'E32in'}}), ['kiosk', 'apollo']);
   assert.deepEqual(getProfileDeviceTypes({hardware: {screen: '49'}}), ['kiosk']);
+  assert.deepEqual(getProfileDeviceTypes({profileCapabilities: {chargerentApp: true}}), ['chargerentApp']);
   assert.deepEqual(getProfileDeviceTypes({hardware: {}, ui: {mode: 'UI'}}), []);
   assert.equal(isProfileSectionTarget(kiosk(), 'apollo'), false);
   assert.equal(isProfileSectionTarget(kiosk(), 'admin'), false);
@@ -34,6 +35,37 @@ test('device types enforce Apollo, P68 and Kiosk access eligibility', () => {
   assert.equal(isProfileSectionTarget({ui: {mode: 'ui'}}, 'admin'), true);
   assert.equal(isProfileSectionTarget({ui: {mode: 'media'}}, 'admin'), false);
   assert.equal(isProfileSectionTarget({}, 'admin'), false);
+});
+
+test('Chargerent app profile is client-wide and saves independently from kiosk and terminal UI', () => {
+  const original = profile();
+  const source = structuredClone(original);
+  source.applicationProfiles.chargerentMedia.checkout.height = .41;
+  source.applicationProfiles.chargerentMedia.stripeUi.theme.primary = '#123456';
+  source.ui.mode = 'wrong';
+  source.languages.locales.en.screens.start.startButton = 'wrong';
+  const result = mergeProfileSection(original, source, 'chargerentApp');
+  assert.equal(getChargerentAppProfile(result).checkout.height, .41);
+  assert.equal(getChargerentAppProfile(result).stripeUi.theme.primary, '#123456');
+  assert.deepEqual(result.ui, original.ui);
+  assert.deepEqual(result.languages, original.languages);
+  assert.throws(() => mergeProfileSection(original, source, 'chargerentApp', 'FR8011'), /client-wide/);
+  assert.throws(() => buildSectionUiSnapshot({profileCapabilities: {chargerentApp: true}}, result, 'chargerentApp', {}, 'now'), /integrated media service/);
+});
+
+test('Chargerent app editor is isolated to integrated kiosk client profiles', () => {
+  const capabilities = {chargerentAppProfiles: 1};
+  const integratedKiosk = {stationid: 'FR8011', profileCapabilities: {chargerentApp: true}};
+  const legacyKiosk = {stationid: 'CA0014', hardware: {screen: '7in'}};
+  const appProfile = profile();
+  const legacyProfile = structuredClone(appProfile);
+  delete legacyProfile.applicationProfiles;
+
+  assert.equal(isProfileDeviceSectionAvailable('chargerentApp', capabilities, [integratedKiosk], appProfile), true);
+  assert.equal(isProfileDeviceSectionAvailable('chargerentApp', capabilities, [], appProfile), true);
+  assert.equal(isProfileDeviceSectionAvailable('chargerentApp', capabilities, [legacyKiosk], legacyProfile), false);
+  assert.equal(isProfileDeviceSectionAvailable('chargerentApp', {}, [integratedKiosk], appProfile), false);
+  assert.equal(isProfileDeviceSectionAvailable('kiosk', capabilities, [legacyKiosk], legacyProfile), true);
 });
 
 test('saving P68 text preserves touchscreen, Apollo, PINs and other overrides', () => {
@@ -74,19 +106,22 @@ test('Apollo flows are client-wide and kiosk overrides are rejected', () => {
   legacy.terminalProfiles.apollo.overrides = {K1: custom};
   const result = mergeProfileSection(legacy, original, 'apollo');
   assert.equal(result.terminalProfiles.apollo.overrides, undefined);
-  assert.equal(hasTerminalOverride(legacy, 'apollo', 'K1'), false);
   assert.deepEqual(getTerminalProfileCopy(legacy, 'apollo', 'K1'), getTerminalProfileCopy(original, 'apollo'));
 });
 
-test('client default edits retain saved kiosk overrides', () => {
+test('P68 profiles are client-wide and legacy kiosk overrides are removed', () => {
   const original = profile();
   const custom = getTerminalProfileCopy(original, 'p68');
   custom.locales.en.start = 'Custom K1';
-  const existing = setTerminalProfileCopy(original, 'p68', 'K1', custom);
-  const source = structuredClone(existing);
+  assert.throws(() => setTerminalProfileCopy(original, 'p68', 'K1', custom), /client-wide/);
+  assert.throws(() => mergeProfileSection(original, original, 'p68', 'K1'), /client-wide/);
+  const existing = structuredClone(original);
+  existing.terminalProfiles.p68 = {overrides: {K1: custom}};
+  const source = structuredClone(original);
   source.languages.locales.en.terminals.PAYTERP68.start = 'New default';
   const result = mergeProfileSection(existing, source, 'p68');
-  assert.equal(getTerminalProfileCopy(result, 'p68', 'K1').locales.en.start, 'Custom K1');
+  assert.equal(result.terminalProfiles.p68.overrides, undefined);
+  assert.equal(getTerminalProfileCopy(result, 'p68', 'K1').locales.en.start, 'New default');
   assert.equal(getTerminalProfileCopy(result, 'p68', 'K2').locales.en.start, 'New default');
 });
 
@@ -105,14 +140,14 @@ test('P68 publication preserves installed UI and legacy language representation'
   assert.deepEqual(target, original);
 });
 
-test('P68 publication resolves the requested kiosk override', () => {
+test('P68 publication ignores legacy kiosk overrides and uses the client profile', () => {
   const original = profile();
   const copy = getTerminalProfileCopy(original, 'p68');
   copy.locales.en.start = 'K1 custom';
-  const saved = setTerminalProfileCopy(original, 'p68', 'K1', copy);
-  const result = buildSectionUiSnapshot(kiosk(), saved, 'p68', {}, 'now');
-  assert.equal(result.languages.en.payter.start, 'K1 custom');
-  assert.equal(result.profileSections.p68.source, 'custom');
+  original.terminalProfiles.p68 = {overrides: {K1: copy}};
+  const result = buildSectionUiSnapshot(kiosk(), original, 'p68', {}, 'now');
+  assert.equal(result.languages.en.payter.start, readP68Locales(original.languages).en.start);
+  assert.equal(result.profileSections.p68.source, 'client');
 });
 
 test('touchscreen publication retains previously applied P68 text and section metadata', () => {

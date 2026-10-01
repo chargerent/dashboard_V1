@@ -8382,6 +8382,8 @@ function serializeUiProfileDoc(docSnap) {
     ui: clonePlain(data.ui) || {},
     languages: clonePlain(data.languages) || {},
     terminalProfiles: clonePlain(data.terminalProfiles) || {},
+    applicationProfiles: clonePlain(data.applicationProfiles) || {},
+    publishedSections: clonePlain(data.publishedSections) || {},
     sectionVersions: clonePlain(data.sectionVersions) || {},
     createdAt: serializeFirestoreTimestamp(data.createdAt),
     updatedAt: serializeFirestoreTimestamp(data.updatedAt),
@@ -8455,6 +8457,25 @@ async function uiProfileListImpl(authState) {
           .filter(Boolean),
   ));
 
+  const integratedDeviceSnap = await db.collection("phoneDevices").get();
+  const integratedDeviceStationIds = Array.from(new Set(integratedDeviceSnap.docs
+      .map((doc) => doc.data() || {})
+      .filter((device) => String(device.deviceKind || "").trim().toLowerCase() === "integrated_kiosk" ||
+        String(device.inventory?.deviceKind || "").trim().toLowerCase() === "media_kiosk")
+      .map((device) => normalizeStationId(device.stationId || ""))
+      .filter(Boolean)));
+  const integratedKioskStationIds = [];
+  for (const chunk of chunkArray(integratedDeviceStationIds, 30)) {
+    const kiosks = await db.collection("kiosks").where("stationid", "in", chunk).get();
+    kiosks.docs.forEach((doc) => {
+      const kiosk = doc.data() || {};
+      const clientId = String(kiosk.info?.client || kiosk.info?.clientId || "").trim().toUpperCase();
+      if (clientId && canManageUiProfileClient(authState, clientId)) {
+        integratedKioskStationIds.push(normalizeStationId(kiosk.stationid || doc.id));
+      }
+    });
+  }
+
   return {
     profiles: [...profilesByClient.values()],
     capabilities: {
@@ -8465,6 +8486,8 @@ async function uiProfileListImpl(authState) {
       apolloTestScreens: 1,
       apolloProfileTestsEnabled: runtime.apolloProfileTestsEnabled === true,
       apolloTestStationIds,
+      chargerentAppProfiles: 1,
+      integratedKioskStationIds: [...new Set(integratedKioskStationIds)].sort(),
     },
   };
 }
@@ -8515,8 +8538,9 @@ async function uiProfileUpsertSectionImpl(data, authState) {
         adminpassword: normalizeUiProfilePin(next.admin?.adminpassword, 'Admin PIN'),
       };
     }
+    const profileName = cleanUiProfileName(source.name || existing.name || `${clientId} Kiosk UI`) || `${clientId} Kiosk UI`;
     transaction.set(ref, {
-      ...next, name: `${clientId} Kiosk UI`, clientId, status: 'draft',
+      ...next, name: profileName, clientId, status: 'draft',
       version: Number(existing.version || 0) + 1,
       sectionVersions: {...existing.sectionVersions, [section]: Number(existing.sectionVersions?.[section] || 0) + 1},
       createdAt: existing.createdAt || admin.firestore.FieldValue.serverTimestamp(),
@@ -8550,19 +8574,62 @@ async function uiProfileApplySectionImpl(data, authState) {
     if (kioskDocs.length !== stationids.length || new Set(kioskDocs.map((doc) => normalizeStationId(doc.data().stationid))).size !== stationids.length) {
       throw new functions.https.HttpsError('failed-precondition', 'Kiosk assignments changed or are duplicated. Reload before publishing.');
     }
+    const integratedAssignments = new Map();
+    if (section === 'chargerentApp') {
+      const assignmentDocs = await Promise.all(stationids.map((stationid) => transaction.get(db.collection('phoneKioskAssignments').doc(stationid))));
+      const deviceIds = assignmentDocs.map((assignment) => String(assignment.data()?.deviceId || '').trim());
+      if (assignmentDocs.some((assignment) => !assignment.exists) || deviceIds.some((deviceId) => !deviceId)) {
+        throw new functions.https.HttpsError('failed-precondition', 'A Chargerent app assignment changed. Reload before publishing.');
+      }
+      const deviceDocs = await Promise.all(deviceIds.map((deviceId) => transaction.get(db.collection('phoneDevices').doc(deviceId))));
+      assignmentDocs.forEach((assignment, index) => {
+        const stationid = normalizeStationId(assignment.data()?.stationId || assignment.id);
+        const device = deviceDocs[index].data() || {};
+        const isIntegrated = String(device.deviceKind || '').trim().toLowerCase() === 'integrated_kiosk'
+          || String(device.inventory?.deviceKind || '').trim().toLowerCase() === 'media_kiosk';
+        if (!deviceDocs[index].exists || !isIntegrated || normalizeStationId(device.stationId || '') !== stationid) {
+          throw new functions.https.HttpsError('failed-precondition', 'A Chargerent app assignment changed. Reload before publishing.');
+        }
+        integratedAssignments.set(stationid, deviceDocs[index].id);
+      });
+    }
     for (const doc of kioskDocs) {
       const kiosk = doc.data();
       if (!canManageUiProfileForKiosk(authState, kiosk)
         || String(kiosk.info?.client || kiosk.info?.clientId || '').trim().toUpperCase() !== profile.clientId
-        || !isProfileSectionTarget(kiosk, section)) {
+        || (section === 'chargerentApp'
+          ? !integratedAssignments.has(normalizeStationId(kiosk.stationid || doc.id))
+          : !isProfileSectionTarget(kiosk, section))) {
         throw new functions.https.HttpsError('failed-precondition', 'A kiosk no longer matches this client and device type. Reload before publishing.');
       }
     }
     const appliedAt = new Date().toISOString();
+    if (section === 'chargerentApp') {
+      transaction.set(snap.ref, {
+        publishedSections: {
+          chargerentApp: {
+            profileVersion: Number(profile.sectionVersions?.chargerentApp || profile.version || 1),
+            publishedAt: appliedAt,
+            value: clonePlain(profile.applicationProfiles?.chargerentMedia) || {},
+          },
+        },
+      }, {merge: true});
+    }
     const updatedKiosks = kioskDocs.map((doc) => {
       const kiosk = doc.data();
       const kioskSnapshot = preserveProvisionedUiMode(buildUiProfileSnapshot(profile), kiosk.ui);
-      const ui = buildSectionUiSnapshot(kiosk, profile, section, kioskSnapshot, appliedAt);
+      const ui = section === 'chargerentApp' ? {
+        ...clonePlain(kiosk.ui),
+        profileSections: {
+          ...clonePlain(kiosk.ui?.profileSections),
+          chargerentApp: {
+            profileId: profile.id,
+            profileVersion: Number(profile.sectionVersions?.chargerentApp || profile.version || 1),
+            appliedAt,
+            source: 'client',
+          },
+        },
+      } : buildSectionUiSnapshot(kiosk, profile, section, kioskSnapshot, appliedAt);
       const update = {ui, updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: normalizeUsername(authState.profile?.username)};
       if (section === 'kiosk') update.uiProfileId = profileId;
       const next = {...clonePlain(kiosk), ui};
@@ -8628,6 +8695,9 @@ async function uiProfileUpsertImpl(data, authState) {
     admin: {userpassword, adminpassword},
     ui: clonePlain(source.ui) || {},
     languages: clonePlain(source.languages) || {},
+    terminalProfiles: clonePlain(source.terminalProfiles || existing.terminalProfiles) || {},
+    applicationProfiles: clonePlain(source.applicationProfiles || existing.applicationProfiles) || {},
+    sectionVersions: clonePlain(source.sectionVersions || existing.sectionVersions) || {},
     updatedAt: timestamp,
     updatedByUid: authState.uid || "",
     updatedByUsername: normalizeUsername(authState.profile?.username),

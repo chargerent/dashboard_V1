@@ -1,3 +1,5 @@
+import {defaultChargerentAppProfile} from './chargerentAppProfile.js';
+
 export const KIOSK_PROFILE_LANGUAGES = [
   { key: 'en', label: 'English' },
   { key: 'fr', label: 'French' },
@@ -550,7 +552,6 @@ function legacyLocaleToV2(language, locale) {
     pricing: PRICING_COPY[locale],
   };
 }
-
 export const DEFAULT_KIOSK_LANGUAGES_V2 = {
   schemaVersion: 2,
   defaultLocale: 'en',
@@ -622,6 +623,9 @@ export function createDefaultKioskUiProfile(clientId = '') {
     },
     ui: cloneProfileValue(DEFAULT_KIOSK_UI),
     languages: cloneProfileValue(DEFAULT_KIOSK_LANGUAGES_V2),
+    applicationProfiles: {
+      chargerentMedia: defaultChargerentAppProfile(),
+    },
   };
 }
 
@@ -635,6 +639,7 @@ export function createKioskUiProfileFromTemplate(clientId = '', templateProfile 
     admin: cloneProfileValue(templateProfile.admin || target.admin),
     ui: cloneProfileValue(templateProfile.ui || target.ui),
     languages: cloneProfileValue(templateProfile.languages || target.languages),
+    applicationProfiles: cloneProfileValue(templateProfile.applicationProfiles || target.applicationProfiles),
   };
 }
 

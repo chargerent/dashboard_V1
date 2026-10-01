@@ -1,7 +1,5 @@
-import {MEDIA_HOSTED,mediaUrl,mediaFetch} from './mediaApi.js';
 import {useMediaAssetUrl} from './mediaAssetUrl.js';
-export {MEDIA_HOSTED as stripeProfileHosted} from './mediaApi.js';
-import React, {useEffect, useMemo, useRef, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import {CheckoutPanel} from './CheckoutPreview.jsx';
 import {floatingCheckoutGeometry} from './checkoutFlow.js';
 import {previewPaymentHeight} from './mediaLayout.js';
@@ -39,24 +37,12 @@ const OPTIONAL_PAGES = [
   {key:'terms',label:'Terms',section:'terms'}, {key:'map',label:'Map',section:'map'}, {key:'receipt',label:'Receipt',section:'receipt'},
 ];
 
-const API = mediaUrl('/api/stripe-ui');
 const inputClass = 'mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-normal text-slate-900 outline-none focus:border-cyan-500 focus:ring-4 focus:ring-cyan-500/10';
 const buttonClass = 'inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40';
-const copy = value => JSON.parse(JSON.stringify(value));
-async function request(method = 'GET', body) {
-  const response = await mediaFetch(API + (method === 'PUBLISH' ? '/publish' : ''), {
-    method: method === 'PUBLISH' ? 'POST' : method,
-    ...(body ? {headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)} : {}),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error?.message || payload.error || `Unable to load Stripe settings (${response.status}).`);
-  return payload;
-}
 
 function Field({label, children, hint}) {
   return <label className="block text-sm font-semibold text-slate-700">{label}{children}{hint && <span className="mt-1.5 block text-xs font-normal leading-5 text-slate-500">{hint}</span>}</label>;
 }
-
 const PREVIEW_OFFER = {currency:'usd', amountCents:500, depositAmountCents:500, rentalFeeCents:100, refundAmountCents:400, availableCount:4, canRent:true, reader:{status:'ready'}};
 
 function MediaPreviewZone({zone, assets, width, height}) {
@@ -113,69 +99,49 @@ function ScaledDevicePreview({profile, language, selectedPage, group, manifest, 
   </div>;
 }
 
-function DraftPreview({profile, language, selectedPage, group, manifest, manifestError, reloadManifest, previewStageChange, previewLanguageChange}) {
+function DraftPreview({profile, language, selectedPage, group, manifest, previewStageChange, previewLanguageChange}) {
   const [zoom,setZoom] = useState(false);
   const {screenWidth:width,screenHeight:height,fraction,paymentHeight,idleWidth,idleHeight,expandedWidth,margin,detailHeight} = previewGeometry(manifest);
   const idle = !selectedPage && previewStageFor(group) === 'start';
   const cardSize = `${idle?idleWidth:expandedWidth} × ${idle?idleHeight:paymentHeight}`;
   const previewProps = {profile,language,selectedPage,group,manifest,previewStageChange,previewLanguageChange};
   return <aside className="rounded-2xl border border-slate-200 bg-slate-50 p-4 xl:sticky xl:top-4" aria-label="Stripe preview">
-    <div className="flex items-center justify-between gap-2"><h3 className="font-bold text-slate-900">Screen preview</h3><button type="button" onClick={reloadManifest} aria-label="Refresh preview layout" className="rounded-lg p-1.5 text-slate-500 hover:bg-white"><Icon name="reload" size={16}/></button></div>
+    <div className="flex items-center justify-between gap-2"><h3 className="font-bold text-slate-900">Screen preview</h3></div>
     <p className="mb-3 mt-1 text-xs text-slate-500">{STRIPE_LANGUAGES.find(item => item.key === language)?.label} · {selectedPage?.name || sectionLabel(group)}</p>
-    {manifest ? <>
+    <>
       <div className="overflow-hidden rounded-lg border border-slate-200 shadow-sm"><ScaledDevicePreview {...previewProps}/></div>
       <p className="mt-3 text-xs font-semibold text-slate-700">{width} × {height} · full-screen media</p>
       {fraction > 0 && <p className="mt-1 text-xs leading-5 text-slate-600">{idle?'Start':'Expanded checkout'} card: {cardSize} px · {margin} px from the bottom.</p>}
-      <p className="mt-1 text-xs leading-5 text-slate-500">Published layout, revision {manifest.revision}. Text and colors use your current draft.</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">Client profile preview. Text and colors use your current draft.</p>
       {fraction > 0 ? <button type="button" onClick={() => setZoom(true)} className={`${buttonClass} mt-3 w-full`}><Icon name="display" size={16}/>Enlarge floating card</button> : <p className="mt-3 text-xs leading-5 text-slate-500">The checkout card is disabled in the published media layout.</p>}
-    </> : <p className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500">{manifestError || 'Loading the kiosk layout…'}</p>}
-    {manifestError && manifest && <p role="status" className="mt-3 text-xs text-amber-800">{manifestError} Showing the last loaded layout.</p>}
-    <p className="mt-3 text-xs leading-5 text-slate-500">Press Start to preview the expanded card, or select Start above to collapse it. Preview uses example amounts and slot. Set expanded card height in Media → Layout.</p>
+    </>
+    <p className="mt-3 text-xs leading-5 text-slate-500">Press Start to preview the expanded card, or select Start above to collapse it. Preview uses example amounts and slot. Use Expanded panel height above to change its size.</p>
     {zoom && manifest && <div role="dialog" aria-modal="true" aria-label="Enlarged payment preview" className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4" onClick={() => setZoom(false)}><div className="w-full max-w-4xl rounded-2xl bg-white p-5 shadow-xl" onClick={event => event.stopPropagation()}><div className="mb-4 flex items-start justify-between gap-4"><div><h3 className="font-bold text-slate-900">Floating card · enlarged</h3><p className="mt-1 text-xs text-slate-500">{cardSize} px card, scaled with its {width} × {detailHeight} px bottom frame. Media is hidden in this detail view.</p></div><button type="button" className={buttonClass} onClick={() => setZoom(false)} aria-label="Close enlarged payment preview"><Icon name="close" size={18}/></button></div><div className="overflow-hidden rounded-lg border border-slate-200"><ScaledDevicePreview {...previewProps} paymentOnly/></div></div></div>}
   </aside>;
 }
 
-export default function StripeProfileEditor() {
-  const [draft, setDraft] = useState(null);
-  const [saved, setSaved] = useState(null);
-  const [version, setVersion] = useState(0);
-  const [revision, setRevision] = useState(0);
-  const [published, setPublished] = useState(null);
-  const [manifest, setManifest] = useState(null), [manifestError,setManifestError] = useState('');
+export default function StripeProfileEditor({value, checkout, onChange, disabled = false, manifest: providedManifest}) {
+  const draft = value || createStripeUi();
+  const manifest = useMemo(() => providedManifest || ({
+    revision: 0,
+    orientation: 'portrait',
+    background: '#000000',
+    assets: [],
+    zones: [],
+    checkout: checkout || {enabled: true, height: 0.32},
+  }), [checkout, providedManifest]);
   const [tab, setTab] = useState('Text');
   const [language, setLanguage] = useState('en');
   const [group, setGroup] = useState('start');
   const [selectedPageId, setSelectedPageId] = useState('');
   const [query, setQuery] = useState('');
-  const [busy, setBusy] = useState('load');
-  const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const [confirmRemove, setConfirmRemove] = useState('');
   const groups = SECTION_META.filter(section => STRIPE_FIELDS.some(field => field.group === section.key)).map(section => section.key);
-  const dirty = draft && JSON.stringify(draft) !== JSON.stringify(saved);
-  const unpublished = saved && JSON.stringify(saved) !== JSON.stringify(published);
   const validation = useMemo(() => {if (!draft) return ''; try {normalizeStripeUi(draft); return '';} catch (failure) {return failure.message;}}, [draft]);
   const page = draft?.pages.find(item => item.id === selectedPageId) || draft?.pages[0];
   const visibleFields = STRIPE_FIELDS.filter(field => field.group === group && (!query || `${field.label} ${draft?.locales?.[language]?.[field.key] || ''}`.toLowerCase().includes(query.toLowerCase())));
 
-  async function load() {
-    setBusy('load'); setError('');
-    try {
-      const payload = await request();
-      const next = normalizeStripeUi(payload.draft || createStripeUi());
-      setDraft(copy(next)); setSaved(copy(next)); setVersion(payload.version); setRevision(payload.revision); setPublished(payload.published);
-    } catch (failure) {setError(failure.message);} finally {setBusy('');}
-  }
-  async function loadManifest() {
-    try {
-      const response = await mediaFetch('/api/stations/LAB-US8004');
-      const payload = await response.json();
-      if (!response.ok || !payload.manifest) throw new Error('Unable to load the published screen layout.');
-      setManifest(payload.manifest); setManifestError('');
-    } catch (failure) {setManifestError(failure.message);}
-  }
-  useEffect(() => {load(); loadManifest();}, []);
-  const update = change => {setDraft(previous => ({...previous, ...change})); setNotice('');};
+  const update = change => onChange?.({...draft, ...change});
   const updateText = (key, value) => update({locales: {...draft.locales, [language]: {...draft.locales[language], [key]: value}}});
   const updatePage = next => update({pages: draft.pages.map(item => item.id === next.id ? next : item)});
   const updatePageText = (key, value) => updatePage({...page, locales: {...page.locales, [language]: {...page.locales[language], [key]: value}}});
@@ -197,38 +163,15 @@ export default function StripeProfileEditor() {
     if (target < 0 || target >= draft.pages.length) return;
     const pages = [...draft.pages]; [pages[index], pages[target]] = [pages[target], pages[index]]; update({pages});
   }
-  async function save() {
-    if (busy || validation) return;
-    setBusy('save'); setError(''); setNotice('');
-    try {
-      const payload = await request('PUT', {draft, version});
-      setDraft(copy(payload.draft)); setSaved(copy(payload.draft)); setVersion(payload.version); setRevision(payload.revision); setPublished(payload.published);
-      setNotice(MEDIA_HOSTED?'Stripe draft saved to the hosted service. It is ready to publish.':'Stripe draft saved on this laptop. It is ready to publish.');
-    } catch (failure) {setError(failure.message);} finally {setBusy('');}
-  }
-  async function publish() {
-    if (busy || dirty || validation) return;
-    setBusy('publish'); setError(''); setNotice('');
-    try {
-      const payload = await request('PUBLISH', {version, baseRevision: revision});
-      setDraft(copy(payload.draft)); setSaved(copy(payload.draft)); setVersion(payload.version); setRevision(payload.revision); setPublished(payload.published);
-      setNotice(`Stripe UI published to ${MEDIA_HOSTED?'US8004':'LAB-US8004'} as revision ${payload.revision}. The app will apply it when connected.`); loadManifest();
-    } catch (failure) {setError(failure.message);} finally {setBusy('');}
-  }
-  if (!draft) return <div className="rounded-xl border border-slate-200 p-6 text-sm text-slate-600">{busy ? 'Loading Stripe settings…' : <><p role="alert">{error}</p><button type="button" onClick={load} className={`${buttonClass} mt-4`}>Try again</button></>}</div>;
-
   return <div data-testid="stripe-profile-editor">
     <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
-      <div><h2 className="flex items-center gap-2 text-lg font-bold text-slate-900"><Icon name="card"/>Stripe checkout</h2><p className="mt-1 text-sm text-slate-500">{dirty ? 'Unsaved changes' : unpublished ? 'Saved draft · not published' : 'Published settings'} · revision {revision}</p></div>
-      <div className="flex gap-2"><button type="button" onClick={save} disabled={Boolean(busy || !dirty || validation)} className={buttonClass}>{busy === 'save' ? 'Saving…' : 'Save draft'}</button><button type="button" onClick={publish} disabled={Boolean(busy || dirty || validation || !unpublished)} className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40">{busy === 'publish' ? 'Publishing…' : (MEDIA_HOSTED?'Publish to US8004':'Publish to LAB-US8004')}</button></div>
+      <div><h2 className="flex items-center gap-2 text-lg font-bold text-slate-900"><Icon name="card"/>Stripe checkout</h2><p className="mt-1 text-sm text-slate-500">Saved and published with this client profile.</p></div>
     </div>
-    <div className="mb-5 rounded-xl border border-cyan-100 bg-cyan-50 px-4 py-3 text-sm leading-5 text-cyan-900">These Stripe UI settings belong to <strong>{MEDIA_HOSTED?'US8004':'LAB-US8004'}</strong> {MEDIA_HOSTED?'on the hosted service. Payment processing requires a separate integration.':'on this laptop. Payment processing remains in test mode.'}</div>
-    {error && <div role="alert" className="mb-4 rounded-xl bg-red-50 p-3 text-sm text-red-800">{error}<button type="button" onClick={load} className="ml-3 font-semibold underline">Reload saved draft</button></div>}
-    {notice && <p role="status" className="mb-4 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</p>}
+    <div className="mb-5 rounded-xl border border-cyan-100 bg-cyan-50 px-4 py-3 text-sm leading-5 text-cyan-900">These settings control the checkout screens inside the Chargerent integrated Android app. Reader provisioning and payment processing are managed separately.</div>
     {validation && <p role="alert" className="mb-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{validation}</p>}
     <nav aria-label="Stripe settings" className="mb-5 flex gap-1 border-b border-slate-100 pb-3">{['Text', 'Pages', 'Colors'].map(name => <button key={name} type="button" aria-pressed={tab === name} onClick={() => setTab(name)} className={`rounded-lg px-4 py-2 text-sm font-semibold ${tab === name ? 'bg-cyan-50 text-cyan-800' : 'text-slate-500 hover:bg-slate-50'}`}>{name}</button>)}</nav>
     <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_280px]">
-      <fieldset disabled={Boolean(busy)} className="min-w-0 disabled:opacity-60">
+      <fieldset disabled={disabled} className="min-w-0 disabled:opacity-60">
         {tab !== 'Colors' && <div role="tablist" aria-label="Stripe language" className="mb-5 flex gap-1 rounded-xl bg-slate-100 p-1">{STRIPE_LANGUAGES.map(({key, label}) => <button type="button" role="tab" aria-selected={language === key} key={key} onClick={() => setLanguage(key)} className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold ${language === key ? 'bg-white text-cyan-800 shadow-sm' : 'text-slate-500'}`}>{label}</button>)}</div>}
         {tab === 'Text' && <>
           <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -261,7 +204,7 @@ export default function StripeProfileEditor() {
         </>}
         {tab === 'Colors' && <><h3 className="font-bold text-slate-900">Brand colors</h3><p className="mb-5 mt-1 text-sm text-slate-500">Apply your colors to the payment section and added pages.</p><div className="grid gap-4 sm:grid-cols-2">{STRIPE_THEME_FIELDS.map(({key,label}) => <div key={key} className="rounded-2xl border border-slate-200 p-4"><div className="mb-3 flex items-center justify-between gap-3"><label htmlFor={`stripe-color-${key}`} className="text-sm font-semibold text-slate-800">{label}</label><input type="color" aria-label={`Stripe ${label} color picker`} value={/^#[0-9a-f]{6}$/i.test(draft.theme[key]) ? draft.theme[key] : '#000000'} onChange={event => update({theme:{...draft.theme,[key]:event.target.value.toUpperCase()}})} className="h-10 w-10 cursor-pointer rounded-lg border border-slate-200 bg-white p-1"/></div><input id={`stripe-color-${key}`} aria-label={`Stripe ${label} color`} value={draft.theme[key]} maxLength={7} onChange={event => update({theme:{...draft.theme,[key]:event.target.value.toUpperCase()}})} className={inputClass}/></div>)}</div></>}
       </fieldset>
-      <DraftPreview profile={draft} language={language} selectedPage={tab === 'Pages' ? page : null} group={group} manifest={manifest} manifestError={manifestError} reloadManifest={loadManifest} previewStageChange={changePreviewStage} previewLanguageChange={setLanguage}/>
+      <DraftPreview profile={draft} language={language} selectedPage={tab === 'Pages' ? page : null} group={group} manifest={manifest} previewStageChange={changePreviewStage} previewLanguageChange={setLanguage}/>
     </div>
   </div>;
 }

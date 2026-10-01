@@ -92,6 +92,7 @@ export function defaultStripeUi() {
 const plain=value=>value!==null && typeof value==='object' && !Array.isArray(value) && [Object.prototype,null].includes(Object.getPrototypeOf(value));
 const reject=message=>{throw Object.assign(new Error(message),{status:400,code:'INVALID_STRIPE_UI'});};
 const known=(value,keys,label)=>{if(!plain(value))reject(`${label} must be an object.`);if(Object.keys(value).some(key=>!keys.includes(key)))reject(`${label} has an unsupported field.`);};
+// eslint-disable-next-line no-control-regex
 const textValue=(value,label,max=2000)=>{if(typeof value!=='string'||value.length>max||/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(value))reject(`${label} must be text of at most ${max} characters.`);return value;};
 export function validateStripeUi(input) {
   const result=defaultStripeUi();

@@ -1,9 +1,17 @@
 import {resolveKioskUiProfileStatus} from './kioskUiProfileStatus.js';
-import {getTerminalProfileCopy, hasTerminalOverride} from '../../functions/uiProfileSections.mjs';
+import {getChargerentAppProfile, getTerminalProfileCopy, isProfileSectionTarget} from '../../functions/uiProfileSections.mjs';
 
-export function profileSectionContent(profile, section, stationId = '') {
+export function isProfileDeviceSectionAvailable(section, capabilities = {}, matchingKiosks = [], profile = null) {
+  const hasMatchingKiosk = matchingKiosks.some((kiosk) => isProfileSectionTarget(kiosk, section));
+  if (section !== 'chargerentApp') return hasMatchingKiosk;
+
+  const hasSavedAppProfile = Boolean(profile?.applicationProfiles?.chargerentMedia);
+  return capabilities.chargerentAppProfiles === 1 && (hasMatchingKiosk || hasSavedAppProfile);
+}
+export function profileSectionContent(profile, section) {
+  if (section === 'chargerentApp') return getChargerentAppProfile(profile) || {};
   if (section === 'p68' || section === 'apollo') {
-    return {custom: hasTerminalOverride(profile, section, stationId), ...getTerminalProfileCopy(profile, section, stationId)};
+    return getTerminalProfileCopy(profile, section);
   }
   if (section === 'admin') return profile?.admin || {};
   const languages = JSON.parse(JSON.stringify(profile?.languages || {}));
@@ -27,5 +35,7 @@ export function profileDeviceStatus(kiosk, section, profile, pendingAppliedAt = 
     if (status.desiredProfileId && status.desiredProfileId !== profile?.id) return 'Using another profile';
     return status.isConfirmed ? 'Confirmed loaded' : status.statusLabel;
   }
-  return section === 'apollo' ? 'Current terminal flow · not migrated' : 'Existing configuration · not published here';
+  if (section === 'apollo') return 'Current terminal flow · not migrated';
+  if (section === 'chargerentApp') return 'Not published to Chargerent apps';
+  return 'Existing configuration · not published here';
 }

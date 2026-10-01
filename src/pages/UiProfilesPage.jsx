@@ -5,8 +5,6 @@ import {
   BoltIcon,
   ChevronRightIcon,
   CreditCardIcon,
-  ComputerDesktopIcon,
-  HomeIcon,
   LockClosedIcon,
   MapPinIcon,
   MagnifyingGlassIcon,
@@ -17,19 +15,18 @@ import {
   ExclamationTriangleIcon,
 } from '@heroicons/react/24/solid';
 import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
+import DashboardPageActions from '../components/UI/DashboardPageActions.jsx';
 import TerminalProfileEditor from '../components/profiles/TerminalProfileEditor.jsx';
-import StripeProfileEditor, {stripeProfileHosted} from '../media-lab/StripeProfileEditor.jsx';
-
-// STRIPE_LOCAL_PROFILE_TAB: isolated development integration for LAB-US8004.
-const stripeLocalProfileEnabled = import.meta.env.DEV;
-import {PROFILE_SECTIONS, getProfileDeviceTypes, getTerminalProfileCopy, isProfileSectionTarget, hasTerminalOverride, mergeProfileSection} from '../../functions/uiProfileSections.mjs';
+import StripeProfileEditor from '../media-lab/StripeProfileEditor.jsx';
+import {PROFILE_SECTIONS, getProfileDeviceTypes, getTerminalProfileCopy, isProfileSectionTarget, mergeProfileSection} from '../../functions/uiProfileSections.mjs';
 import {getApolloScreenFlowError} from '../../functions/apolloScreens.mjs';
-import {profileDeviceStatus, profileSectionContent} from '../utils/profileDevices.js';
+import {isProfileDeviceSectionAvailable, profileDeviceStatus, profileSectionContent} from '../utils/profileDevices.js';
 import {createProfilePreviewApi, PROFILE_PREVIEW_KIOSKS} from '../utils/profilePreview.js';
 import LoadingSpinner from '../components/UI/LoadingSpinner.jsx';
 import { callFunctionWithAuth } from '../utils/callableRequest.js';
 import { formatDateTime } from '../utils/dateFormatter.js';
 import { isKioskOnline } from '../utils/helpers.js';
+import {normalizeChargerentAppProfile, readChargerentAppProfile, writeChargerentAppProfile} from '../utils/chargerentAppProfile.js';
 import {
   DEFAULT_KIOSK_UI,
   KIOSK_PROFILE_LANGUAGES,
@@ -110,7 +107,6 @@ const SECTION_PREVIEW_SCREEN = {
 function normalizeClientId(value) {
   return String(value || '').trim().toUpperCase();
 }
-
 function profileSortValue(profile) {
   return normalizeClientId(profile.clientId);
 }
@@ -525,7 +521,6 @@ export default function UiProfilesPage({
   const draftCache = useRef(new Map());
   const [capabilities, setCapabilities] = useState({});
   const [deviceSection, setDeviceSection] = useState(initialSection);
-  const [terminalTargetId, setTerminalTargetId] = useState('');
   const [saving, setSaving] = useState(false);
   const [apolloTesting, setApolloTesting] = useState(false);
   const [apolloTestStationId, setApolloTestStationId] = useState('');
@@ -548,7 +543,7 @@ export default function UiProfilesPage({
   const isDesktopViewport = useDesktopViewport();
 
   const canUseUiEditor = currentUser?.isAdmin || currentUser?.username === 'chargerent' || currentUser?.features?.ui_editor === true || currentUser?.commands?.['client edit'] === true;
-  const canLoadUiEditor = canUseUiEditor && (isDesktopViewport || (stripeLocalProfileEnabled && (previewMode || deviceSection === 'stripe')));
+  const canLoadUiEditor = canUseUiEditor && isDesktopViewport;
   const isAdmin = currentUser?.isAdmin || currentUser?.role === 'admin' || currentUser?.username === 'chargerent';
   const userClientId = normalizeClientId(currentUser?.clientId);
 
@@ -570,31 +565,39 @@ export default function UiProfilesPage({
     .filter((profile) => isAdmin || normalizeClientId(profile.clientId) === userClientId)
     .sort((a, b) => profileSortValue(a).localeCompare(profileSortValue(b))), [isAdmin, profiles, userClientId]);
   const profileClientId = normalizeClientId(draftProfile?.clientId || userClientId);
+  const savedProfile = profiles.find(({id}) => id === selectedProfileId);
+  const integratedKioskStationIds = useMemo(() => new Set(
+    (Array.isArray(capabilities.integratedKioskStationIds) ? capabilities.integratedKioskStationIds : [])
+      .map((stationId) => normalizeClientId(stationId)),
+  ), [capabilities.integratedKioskStationIds]);
   const matchingKiosks = useMemo(() => allStationsData
     .filter((kiosk) => {
       const kioskClientId = normalizeClientId(kiosk?.info?.client || kiosk?.info?.clientId);
       return profileClientId ? kioskClientId === profileClientId : true;
     })
-    .sort((a, b) => String(a.stationid || '').localeCompare(String(b.stationid || ''))), [allStationsData, profileClientId]);
+    .map((kiosk) => integratedKioskStationIds.has(normalizeClientId(kiosk.stationid || kiosk.stationId))
+      ? {...kiosk, profileCapabilities: {...kiosk.profileCapabilities, chargerentApp: true}}
+      : kiosk)
+    .sort((a, b) => String(a.stationid || '').localeCompare(String(b.stationid || ''))), [allStationsData, integratedKioskStationIds, profileClientId]);
 
-  const deviceSections = [...PROFILE_SECTIONS.filter(({key}) => matchingKiosks.some((kiosk) => isProfileSectionTarget(kiosk, key))), ...(stripeLocalProfileEnabled ? [{key: 'stripe', label: 'Stripe'}] : [])];
+  const deviceSections = PROFILE_SECTIONS.filter(({key}) => (
+    isProfileDeviceSectionAvailable(key, capabilities, matchingKiosks, savedProfile)
+  ));
   const activeDevice = deviceSections.find(({key}) => key === deviceSection)?.key || deviceSections[0]?.key || '';
   const deviceLabel = deviceSections.find(({key}) => key === activeDevice)?.label || 'No compatible profile';
   const targetKiosks = activeDevice ? matchingKiosks.filter((kiosk) => isProfileSectionTarget(kiosk, activeDevice)) : [];
   const isTerminal = ['apollo', 'p68'].includes(activeDevice);
-  const supportsTerminalOverrides = activeDevice === 'p68';
-  const targetStationId = supportsTerminalOverrides && targetKiosks.some((kiosk) => kiosk.stationid === terminalTargetId) ? terminalTargetId : '';
+  const isClientWide = ['apollo', 'p68', 'chargerentApp'].includes(activeDevice);
   const busy = saving || publishingAll || Boolean(publishingStationId) || apolloTesting;
   const sectionAllowed = activeDevice !== 'apollo' || isAdmin;
-  const apolloFlow = activeDevice === 'apollo' ? getTerminalProfileCopy(draftProfile, 'apollo', targetStationId).screenFlow : undefined;
+  const apolloFlow = activeDevice === 'apollo' ? getTerminalProfileCopy(draftProfile, 'apollo').screenFlow : undefined;
   const apolloFlowError = getApolloScreenFlowError(apolloFlow);
   const screenServiceReady = apolloFlow === undefined || capabilities.apolloScreens === 1;
   const removalServiceReady = !apolloFlow?.removedEstablishedScreenIds?.length || capabilities.apolloEstablishedScreenRemoval === 1;
-  const canSave = Boolean(activeDevice) && activeDevice !== 'stripe' && capabilities.scopedProfiles === 1 && screenServiceReady && removalServiceReady && !loading && sectionAllowed;
+  const canSave = Boolean(activeDevice) && capabilities.scopedProfiles === 1 && screenServiceReady && removalServiceReady && !loading && sectionAllowed;
   const canPublish = canSave && activeDevice !== 'apollo' && !previewMode && targetKiosks.length > 0;
-  const savedProfile = profiles.find(({id}) => id === selectedProfileId);
-  const dirty = activeDevice && activeDevice !== 'stripe'
-    ? JSON.stringify(profileSectionContent(draftProfile, activeDevice, targetStationId)) !== JSON.stringify(profileSectionContent(savedProfile, activeDevice, targetStationId))
+  const dirty = activeDevice
+    ? JSON.stringify(profileSectionContent(draftProfile, activeDevice)) !== JSON.stringify(profileSectionContent(savedProfile, activeDevice))
     : false;
   const allowedApolloTestIds = new Set((Array.isArray(capabilities.apolloTestStationIds) ? capabilities.apolloTestStationIds : []).map((stationId) => String(stationId || '').trim().toUpperCase()));
   const apolloTestKiosks = activeDevice === 'apollo' ? targetKiosks.filter((kiosk) => allowedApolloTestIds.has(String(kiosk.stationid || '').trim().toUpperCase())) : [];
@@ -620,7 +623,6 @@ export default function UiProfilesPage({
     setSelectedProfileId(id);
     setDraftProfile(cloneProfileValue(draftCache.current.get(id) || profile));
     setDeviceSection('');
-    setTerminalTargetId('');
     setApolloTestStationId('');
     setApolloTestSession(null);
     setSaveStatus(null);
@@ -717,16 +719,18 @@ export default function UiProfilesPage({
       if (invalid) {setSaveStatus({state: 'error', message: 'PINs must contain exactly five digits from 1 to 5.'}); return null;}
     }
     setSaving(true);
-    const useDefault = Boolean(targetStationId && !hasTerminalOverride(draftProfile, activeDevice, targetStationId));
     try {
-      const payload = await profileRequest('uiProfile_upsert', {profile: draftProfile, section: activeDevice, stationid: targetStationId, useDefault});
+      const profileToSave = activeDevice === 'chargerentApp'
+        ? writeChargerentAppProfile(draftProfile, normalizeChargerentAppProfile(readChargerentAppProfile(draftProfile)))
+        : draftProfile;
+      const payload = await profileRequest('uiProfile_upsert', {profile: profileToSave, section: activeDevice});
       const saved = payload?.profile;
       if (!saved) throw new Error('Profile save did not return a profile.');
       const normalized = {...saved, languages: normalizeKioskLanguages(saved.languages)};
       setProfiles((previous) => oneProfilePerClient([...previous.filter(({id}) => id !== saved.id), normalized]));
-      // Retain unsaved edits in other sections and other terminal overrides.
+      // Retain unsaved edits in other sections.
       setDraftProfile((previous) => ({
-        ...mergeProfileSection(previous, normalized, activeDevice, targetStationId, useDefault),
+        ...mergeProfileSection(previous, normalized, activeDevice),
         id: saved.id, version: saved.version, sectionVersions: saved.sectionVersions,
       }));
       setSaveStatus({state: 'success', message: `${deviceLabel} draft saved${previewMode ? ' in this preview' : ''}. No devices updated.`});
@@ -749,12 +753,16 @@ export default function UiProfilesPage({
       const payload = await profileRequest('uiProfile_apply', {profileId: saved.id, expectedVersion: saved.version, section: activeDevice, stationids: targets.map((kiosk) => kiosk.stationid)});
       const updated = Array.isArray(payload?.kiosks) ? payload.kiosks : [];
       if (updated.length !== targets.length || updated.some((kiosk) => !targets.some((target) => target.stationid === kiosk.stationid))) throw new Error('The server returned different targets. No device commands were sent.');
-      for (const kiosk of updated) {
-        if (!onCommand) throw new Error('Profile saved on the server, but the kiosk command connection is unavailable.');
-        await onCommand(kiosk.stationid, 'uichange', null, null, null, {kiosk, pushOnly: true, suppressCommandToast: true});
+      if (activeDevice !== 'chargerentApp') {
+        for (const kiosk of updated) {
+          if (!onCommand) throw new Error('Profile saved on the server, but the kiosk command connection is unavailable.');
+          await onCommand(kiosk.stationid, 'uichange', null, null, null, {kiosk, pushOnly: true, suppressCommandToast: true});
+        }
       }
       setPublishedAtOverrides((previous) => ({...previous, ...Object.fromEntries(updated.map((kiosk) => [`${activeDevice}:${kiosk.stationid}`, kiosk.ui?.profileSections?.[activeDevice]?.appliedAt]))}));
-      setSaveStatus({state: 'success', message: `${deviceLabel} update requested for ${updated.length} kiosk${updated.length === 1 ? '' : 's'}. Awaiting device confirmation.`});
+      setSaveStatus({state: 'success', message: activeDevice === 'chargerentApp'
+        ? `${deviceLabel} published for ${profileClientId}. ${updated.length} enrolled app${updated.length === 1 ? '' : 's'} will download it while connected.`
+        : `${deviceLabel} update requested for ${updated.length} kiosk${updated.length === 1 ? '' : 's'}. Awaiting device confirmation.`});
     } catch (error) {
       setSaveStatus({state: 'error', message: error?.message || 'Could not publish profile.'});
     } finally {setPublishingStationId(''); setPublishingAll(false);}
@@ -780,14 +788,6 @@ export default function UiProfilesPage({
     }
   };
 
-  const useClientDefault = () => {
-    setDraftProfile((previous) => {
-      const next = cloneProfileValue(previous);
-      if (next.terminalProfiles?.[activeDevice]?.overrides) delete next.terminalProfiles[activeDevice].overrides[targetStationId];
-      return next;
-    });
-  };
-
   const selectedSectionConfig = CONTENT_SECTIONS.find((section) => section.key === selectedSection) || CONTENT_SECTIONS[0];
   const localeValue = draftProfile?.languages?.locales?.[selectedLanguage] || {};
   const sectionValue = getNestedValue(localeValue, selectedSectionConfig.path, {});
@@ -805,17 +805,20 @@ export default function UiProfilesPage({
     return <div className="min-h-screen bg-slate-100 p-6"><div className="mx-auto max-w-3xl rounded-2xl border border-red-200 bg-red-50 p-6 text-red-700">UI editor access is not enabled.</div></div>;
   }
 
-  if (!isDesktopViewport && !(stripeLocalProfileEnabled && (previewMode || deviceSection === 'stripe'))) {
+  if (!isDesktopViewport) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-100 p-6">
         <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm">
           <PaintBrushIcon className="mx-auto h-10 w-10 text-cyan-700" />
           <h1 className="mt-4 text-xl font-bold text-slate-900">Desktop required</h1>
           <p className="mt-2 text-sm leading-6 text-slate-500">Client profiles are available on desktop screens.</p>
-          <button type="button" onClick={onNavigateToDashboard} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">
-            <HomeIcon className="h-5 w-5" />
-            Back to dashboard
-          </button>
+          <DashboardPageActions
+            className="mt-5"
+            onNavigateToDashboard={onNavigateToDashboard}
+            onNavigateToAdmin={onNavigateToAdmin}
+            onLogout={onLogout}
+            t={t}
+          />
         </div>
       </div>
     );
@@ -829,31 +832,17 @@ export default function UiProfilesPage({
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Client profiles</h1>
           </div>
-          <div className="flex items-center gap-3">
-            <button type="button" onClick={onNavigateToDashboard} className="rounded-md bg-gray-200 p-2 text-gray-700 hover:bg-gray-300" title={t('back_to_dashboard')}>
-              <HomeIcon className="h-6 w-6" />
-            </button>
-            <button type="button" onClick={onNavigateToAdmin} className="rounded-md bg-orange-100 p-2 text-orange-700 hover:bg-orange-200" title={t('admin_tools')}>
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-              </svg>
-            </button>
-            <button type="button" onClick={onLogout} className="rounded-md bg-red-500 p-2 text-white hover:bg-red-600" title={t('logout')}>
-              <ArrowRightOnRectangleIcon className="h-6 w-6" />
-            </button>
-          </div>
+          <DashboardPageActions
+            onNavigateToDashboard={onNavigateToDashboard}
+            onNavigateToAdmin={onNavigateToAdmin}
+            onLogout={onLogout}
+            t={t}
+          />
         </div>
       </header>
 
       <main className={`mx-auto grid max-w-[1600px] gap-5 px-4 py-5 sm:px-6 lg:grid-cols-[240px_minmax(0,1fr)] lg:px-8 ${activeDevice === 'kiosk' ? 'xl:grid-cols-[240px_minmax(0,1fr)_340px]' : ''}`}>
         <aside className="space-y-4">
-          {activeDevice === 'stripe' ? <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">Stripe kiosk</h2>
-            <p className="mt-3 font-bold text-slate-900">{stripeProfileHosted ? 'US8004' : 'LAB-US8004'}</p>
-            <p className="mt-1 text-sm leading-5 text-slate-500">{stripeProfileHosted ? 'Shared hosted profile for the US8004 CT8 media and payment app.' : 'Shared laptop profile for the CT8 media and payment app.'}</p>
-            <a href="?page=kiosk-control-lab" className="mt-4 flex items-center gap-2 text-sm font-semibold text-cyan-700 hover:text-cyan-900"><ComputerDesktopIcon className="h-4 w-4"/>Kiosk Control</a>
-            <a href="?page=kiosk-control-lab&amp;section=media" className="mt-3 flex items-center gap-2 text-sm font-semibold text-cyan-700 hover:text-cyan-900"><PaintBrushIcon className="h-4 w-4"/>Media and layout</a>
-          </div> : <>
           <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
             <div className="mb-2 px-1">
               <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500">Client profiles</h2>
@@ -866,7 +855,7 @@ export default function UiProfilesPage({
                 aria-label="Client profile"
               >
                 {visibleProfiles.map((profile) => (
-                  <option key={profile.id} value={profile.id}>{profile.clientId}</option>
+                  <option key={profile.id} value={profile.id}>{profile.name || profile.clientId}</option>
                 ))}
               </select>
             ) : <p className="px-2 py-5 text-center text-sm text-slate-500">No client profiles available.</p>}
@@ -898,18 +887,18 @@ export default function UiProfilesPage({
                         </span>
                         <span className="block truncate text-[11px] text-slate-500">{kiosk.info?.location || kiosk.info?.place || 'No location'}</span>
                       </span>
-                      {activeDevice !== 'apollo' && <button
+                      {!['apollo', 'chargerentApp'].includes(activeDevice) && <button
                         type="button"
-                        onClick={() => {setTerminalTargetId(supportsTerminalOverrides ? kiosk.stationid : ''); if (!supportsTerminalOverrides) publishProfile(kiosk.stationid);}}
-                        disabled={busy || (!supportsTerminalOverrides && !canPublish)}
-                        aria-label={supportsTerminalOverrides ? `Edit ${deviceLabel} for ${kiosk.stationid}` : `Publish ${deviceLabel} to ${kiosk.stationid}`}
+                        onClick={() => publishProfile(kiosk.stationid)}
+                        disabled={busy || !canPublish}
+                        aria-label={`Publish ${deviceLabel} to ${kiosk.stationid}`}
                         className="shrink-0 rounded-lg bg-cyan-700 px-2.5 py-1.5 text-[11px] font-bold text-white shadow-sm hover:bg-cyan-800 disabled:cursor-not-allowed disabled:bg-slate-300"
                       >
-                        {isPublishing ? 'Publishing…' : supportsTerminalOverrides ? 'Edit' : 'Publish'}
+                        {isPublishing ? 'Publishing…' : 'Publish'}
                       </button>}
                     </div>
                     <p className="mt-2 text-xs font-medium text-slate-600">{getProfileDeviceTypes(kiosk).map((type) => PROFILE_SECTIONS.find(({key}) => key === type).label).join(' · ') || 'Hardware not specified'}</p>
-                    {isTerminal && <p className="mt-1 text-xs text-cyan-800">{supportsTerminalOverrides && hasTerminalOverride(draftProfile, activeDevice, kiosk.stationid) ? 'Custom text' : 'Client default'}</p>}
+                    {isClientWide && <p className="mt-1 text-xs text-cyan-800">Client-wide profile</p>}
                     <p className="mt-1 text-xs text-slate-500">{profileDeviceStatus(kiosk, activeDevice, savedProfile, publishedAtOverrides[`${activeDevice}:${kiosk.stationid}`])}</p>
                     <p className="mt-2 text-[10px] font-medium text-slate-400">
                       Last published: {lastPublishedAt ? formatDateTime(lastPublishedAt) : 'Never'}
@@ -920,26 +909,26 @@ export default function UiProfilesPage({
               {!targetKiosks.length && <p className="px-2 py-5 text-center text-sm text-slate-500">No matching kiosks for this section.</p>}
             </div>
           </div>
-          </>}
         </aside>
 
         <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-200 p-4 sm:p-5">
             <div className="flex flex-wrap items-start justify-between gap-4">
-              <div><h2 className="text-lg font-bold text-slate-900">{activeDevice === 'stripe' ? (stripeProfileHosted ? 'US8004' : 'LAB-US8004') : profileClientId || 'Loading profile'} <span className="text-sm font-normal text-slate-500">· {deviceLabel}</span></h2>
-                {activeDevice === 'stripe' ? <p className="mt-1 text-sm text-slate-500">Text, pages, and colors for the Android checkout.</p> : <p className="mt-1 text-sm text-slate-500">{targetKiosks.length} matching kiosk{targetKiosks.length === 1 ? '' : 's'} · {dirty ? 'Unsaved changes' : 'No unsaved changes'}</p>}
+              <div><h2 className="text-lg font-bold text-slate-900">{profileClientId || 'Loading profile'} <span className="text-sm font-normal text-slate-500">· {deviceLabel}</span></h2>
+                <p className="mt-1 text-sm text-slate-500">{targetKiosks.length} matching kiosk{targetKiosks.length === 1 ? '' : 's'} · {dirty ? 'Unsaved changes' : 'No unsaved changes'}</p>
               </div>
-              {activeDevice && activeDevice !== 'stripe' && <div className="flex flex-wrap gap-2">
+              {activeDevice && <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={saveProfile} disabled={!canSave || busy || !dirty || Boolean(apolloFlowError)} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 disabled:opacity-40">{saving ? 'Saving…' : 'Save draft'}</button>
-                <button type="button" onClick={() => publishProfile(targetStationId)} disabled={!canPublish || busy} className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40">{publishingAll || publishingStationId ? 'Publishing…' : targetStationId ? `Publish to ${targetStationId}` : `Publish ${deviceLabel} (${targetKiosks.length})`}</button>
+                <button type="button" onClick={() => publishProfile()} disabled={!canPublish || busy} className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40">{publishingAll || publishingStationId ? 'Publishing…' : `Publish ${deviceLabel} (${targetKiosks.length})`}</button>
               </div>}
             </div>
             {deviceSections.length > 0 && <nav className="mt-5 flex flex-wrap gap-1 rounded-xl bg-slate-100 p-1" aria-label="Profile device sections">
-              {deviceSections.map(({key, label}) => <button type="button" key={key} aria-pressed={activeDevice === key} disabled={busy} onClick={() => {setDeviceSection(key); setTerminalTargetId(''); setApolloTestStationId(''); setApolloTestSession(null); setSaveStatus(null);}} className={`rounded-lg px-4 py-2.5 text-sm font-semibold ${activeDevice === key ? 'bg-white text-cyan-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>{label}</button>)}
+              {deviceSections.map(({key, label}) => <button type="button" key={key} aria-pressed={activeDevice === key} disabled={busy} onClick={() => {setDeviceSection(key); setApolloTestStationId(''); setApolloTestSession(null); setSaveStatus(null);}} className={`rounded-lg px-4 py-2.5 text-sm font-semibold ${activeDevice === key ? 'bg-white text-cyan-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>{label}</button>)}
             </nav>}
-            {previewMode && activeDevice !== 'stripe' && <p className="mt-4 rounded-lg bg-cyan-50 px-3 py-2 text-sm text-cyan-900">Local preview · sample kiosks. Saves stay in this preview; publishing is disabled.</p>}
-            {!loading && activeDevice && activeDevice !== 'stripe' && !canSave && <p role="status" className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{!sectionAllowed ? 'Apollo editing requires administrator access.' : 'Preview available. Saving and publishing require the updated profile service.'}</p>}
+            {previewMode && <p className="mt-4 rounded-lg bg-cyan-50 px-3 py-2 text-sm text-cyan-900">Local preview · sample kiosks. Saves stay in this preview; publishing is disabled.</p>}
+            {!loading && activeDevice && !canSave && <p role="status" className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{!sectionAllowed ? 'Apollo editing requires administrator access.' : 'Preview available. Saving and publishing require the updated profile service.'}</p>}
             {activeDevice === 'apollo' && <p className="mt-3 text-sm text-slate-500">This is one client-wide flow for every matching Apollo kiosk. Publishing stays unavailable until the terminal connection is validated.</p>}
+            {activeDevice === 'chargerentApp' && <p className="mt-3 text-sm text-slate-500">This client-wide app profile controls the integrated Chargerent media and Stripe UI. Reader provisioning, pricing, and payment processing remain separate.</p>}
             {activeDevice === 'apollo' && <div className="mt-4 rounded-xl border border-cyan-200 bg-cyan-50 p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
@@ -963,26 +952,37 @@ export default function UiProfilesPage({
               {capabilities.apolloProfileTestsEnabled === true && dirty && <p className="mt-2 text-xs text-cyan-900">Save this Apollo draft before testing so the terminal receives the reviewed version.</p>}
               {capabilities.apolloProfileTestsEnabled === true && !dirty && !apolloFlow?.entryScreenId && <p className="mt-2 text-xs text-cyan-900">Add a screen and select it under After Start, show before testing.</p>}
             </div>}
-            {supportsTerminalOverrides && <div className="mt-5 flex flex-wrap items-end gap-3">
-              <label className="min-w-48 flex-1 text-sm font-semibold text-slate-700">Editing
-                <select aria-label="Terminal profile target" value={targetStationId} disabled={busy} onChange={(event) => setTerminalTargetId(event.target.value)} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5">
-                  <option value="">Client default</option>
-                  {targetKiosks.map((kiosk) => <option key={kiosk.stationid} value={kiosk.stationid}>{kiosk.stationid} · {hasTerminalOverride(draftProfile, activeDevice, kiosk.stationid) ? 'Custom text' : 'Client default'}</option>)}
-                </select>
-              </label>
-              {targetStationId && hasTerminalOverride(draftProfile, activeDevice, targetStationId) && <button type="button" disabled={busy} onClick={useClientDefault} className="rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold text-slate-600">Use client default</button>}
-            </div>}
             {activeDevice === 'kiosk' && <div className="mt-5 flex gap-1 border-t border-slate-100 pt-3">
               {EDITOR_TABS.map((tab) => <button key={tab.key} type="button" onClick={() => setActiveTab(tab.key)} className={`rounded-lg px-4 py-2 text-sm font-semibold ${activeTab === tab.key ? 'bg-cyan-50 text-cyan-800' : 'text-slate-500'}`}>{tab.label}</button>)}
             </div>}
           </div>
-          <fieldset disabled={activeDevice !== 'stripe' && (busy || !sectionAllowed || loading)} className="min-w-0 p-4 sm:p-5">
-            {activeDevice === 'stripe' && <StripeProfileEditor />}
+          <fieldset disabled={busy || !sectionAllowed || loading} className="min-w-0 p-4 sm:p-5">
             {!loading && !activeDevice && <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center">
               <h2 className="font-bold text-slate-900">No compatible profile sections</h2>
-              <p className="mt-2 text-sm text-slate-500">This client has no kiosks that match the available kiosk, Apollo, P68, or Kiosk access rules.</p>
+              <p className="mt-2 text-sm text-slate-500">This client has no kiosks that match the available kiosk, Chargerent app, Apollo, P68, or Kiosk access rules.</p>
             </div>}
-            {isTerminal && draftProfile && <TerminalProfileEditor profile={draftProfile} section={activeDevice} stationId={targetStationId} language={selectedLanguage} onLanguageChange={setSelectedLanguage} onChange={setDraftProfile} disabled={busy || !sectionAllowed} allowEstablishedScreenRemoval={capabilities.apolloEstablishedScreenRemoval === 1} />}
+            {activeDevice === 'chargerentApp' && draftProfile && (() => {
+              const appProfile = readChargerentAppProfile(draftProfile);
+              const updateAppProfile = (value) => setDraftProfile((previous) => writeChargerentAppProfile(previous, value));
+              return <div>
+                <div className="mb-5 rounded-xl border border-cyan-100 bg-cyan-50 p-4">
+                  <h2 className="text-lg font-bold text-cyan-950">Chargerent integrated app</h2>
+                  <p className="mt-1 text-sm leading-6 text-cyan-900">Configure the client-facing checkout presentation here. Campaign Manager turns checkout on or off and assigns media to kiosks.</p>
+                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                    <div className="rounded-xl border border-cyan-200 bg-white p-3 text-sm text-slate-700">
+                      <span className="font-semibold">Checkout visibility</span>
+                      <p className="mt-1 text-xs leading-5 text-slate-500">Use the Checkout toggle in Campaign Manager. This profile supplies the checkout design and sizing.</p>
+                    </div>
+                    <label className="rounded-xl border border-cyan-200 bg-white p-3 text-sm font-semibold text-slate-700">
+                      <span>Expanded panel height · {Math.round(appProfile.checkout.height * 100)}%</span>
+                      <input type="range" min="10" max="50" step="1" value={Math.round(appProfile.checkout.height * 100)} onChange={(event) => updateAppProfile({...appProfile, checkout: {...appProfile.checkout, height: Number(event.target.value) / 100}})} className="mt-3 w-full accent-cyan-700" />
+                    </label>
+                  </div>
+                </div>
+                <StripeProfileEditor value={appProfile.stripeUi} checkout={appProfile.checkout} onChange={(stripeUi) => updateAppProfile({...appProfile, stripeUi})} disabled={busy || !sectionAllowed} />
+              </div>;
+            })()}
+            {isTerminal && draftProfile && <TerminalProfileEditor profile={draftProfile} section={activeDevice} language={selectedLanguage} onLanguageChange={setSelectedLanguage} onChange={setDraftProfile} disabled={busy || !sectionAllowed} allowEstablishedScreenRemoval={capabilities.apolloEstablishedScreenRemoval === 1} />}
             {activeDevice === 'kiosk' && activeTab === 'Content' && <div>
               <div className="mb-5 flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
                 <div>
