@@ -6,7 +6,7 @@ import {
   CheckCircleIcon, CheckIcon, ChevronDownIcon, ClockIcon, Cog6ToothIcon,
   ComputerDesktopIcon, ExclamationTriangleIcon, FolderIcon, ForwardIcon,
   HomeIcon, InformationCircleIcon, KeyIcon, LockClosedIcon, LockOpenIcon,
-  MapPinIcon, PauseIcon, PencilSquareIcon, PhotoIcon, PlayIcon, PlusIcon,
+  LifebuoyIcon, MapPinIcon, PauseIcon, PencilSquareIcon, PhotoIcon, PlayIcon, PlusIcon,
   MagnifyingGlassIcon, PhoneIcon, QrCodeIcon, ArrowDownTrayIcon, CreditCardIcon,
   PowerIcon, RectangleGroupIcon, ShieldCheckIcon, SignalIcon, Squares2X2Icon,
   SunIcon, TrashIcon, WifiIcon, XMarkIcon,
@@ -25,7 +25,7 @@ const ICONS = {
   unlock:LockOpenIcon, lock:LockClosedIcon, capture:CameraIcon, open:ArrowTopRightOnSquareIcon,
   power:PowerIcon, text:PencilSquareIcon, location:MapPinIcon, signal:SignalIcon,
   battery:Battery100Icon, apps:Squares2X2Icon, display:SunIcon, key:KeyIcon,
-  search:MagnifyingGlassIcon, phone:PhoneIcon, qr:QrCodeIcon, download:ArrowDownTrayIcon, card:CreditCardIcon,
+  search:MagnifyingGlassIcon, phone:PhoneIcon, qr:QrCodeIcon, download:ArrowDownTrayIcon, card:CreditCardIcon, support:LifebuoyIcon,
 };
 
 export function DashboardIcon({name,size=20,...props}) {

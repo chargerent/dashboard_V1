@@ -6,6 +6,7 @@ import {customerHelpQrDataUrl,customerHelpUrl,stripeQrDataUrl} from './stripeQr.
 
 import {STRIPE_UI_LANGUAGES,defaultStripeUi,validateStripeUi,stripeText,stripePageText,resolveStripeLanguage} from './stripeUi.js';
 import {checkoutMoney,checkoutUsesColumns,checkoutLinkUrl,checkoutReturnReceiptUrl,normalizeCheckoutReturnNotice,canPresentCheckoutReturn,checkoutReturnContext,mayDismissCheckoutReturn,returnReceiptSizing,floatingCheckoutGeometry,IDLE_CHECKOUT_FLOW,enabledCheckoutPages,beginCheckoutFlow,nextCheckoutPage,previousCheckoutPage,canCreateCheckout} from './checkoutFlow.js';
+import {DashboardIcon} from './DashboardIcons.jsx';
 export {checkoutMoney} from './checkoutFlow.js';
 
 const API=mediaUrl('/api/').replace(/\/$/,'');
@@ -203,7 +204,7 @@ export function CheckoutPanel({checkout={},previewOnly=false,previewStage,previe
     if(currentPage)return <div className="ms-checkout-row">{action(pageText('nextLabel') || text('continue'),()=>selectFlow(nextCheckoutPage(shownFlow,flowPages)),{disabled:!!busy,presentationOnly:true})}{button('back',back,{secondary:true,disabled:!!busy,presentationOnly:true})}</div>;
     if(stage==='review')return <>{offerChanged && <p className="ms-checkout-error" role="status">{text('offerChanged')}</p>}<label className="ms-checkout-consent"><input type="checkbox" checked={controlled?checkout.termsAccepted===true:flow.consent} disabled={!!busy || controlled} onChange={event=>selectFlow({...flow,consent:event.target.checked,quoteKey})}/><span>{text('consent')}</span></label><div className="ms-checkout-row">{button(busy==='start'?'starting':'continue',()=>{if(canSubmit)checkout.start?.();},{disabled:controlled?checkout.termsAccepted!==true:!canSubmit})}{button('back',back,{secondary:true,disabled:!!busy,presentationOnly:true})}</div></>;
     if(stage==='waiting_for_card')return button('cancel',()=>{if(!previewOnly)checkout.cancel?.();},{secondary:true,disabled:!!busy || !connected});
-    if(stage==='authorizing')return <>{busyMessage('authorizing.body')}{button('cancel',()=>{if(!previewOnly)checkout.cancel?.();},{secondary:true,disabled:!!busy || !connected})}</>;
+    if(stage==='authorizing')return <>{busyMessage('authorizing.body')}{button('cancel',()=>{if(!previewOnly)checkout.cancel?.();},{secondary:true,disabled:!connected})}</>;
     if(stage==='dispensing')return busyMessage('waitingSlot');
     if(stage==='loading')return busyMessage('connecting');
     if(stage==='recovering')return <>{button('recovering.title',()=>{if(!previewOnly)checkout.refresh?.();},{secondary:true,disabled:!!busy})}{['awaiting_payment','authorizing'].includes(interaction?.phase) && button('cancel',()=>{if(!previewOnly)checkout.cancel?.();},{secondary:true,disabled:!!busy || !connected})}</>;
@@ -231,7 +232,7 @@ export function CheckoutPanel({checkout={},previewOnly=false,previewStage,previe
       {!noticePresentation && !previewOnly && error && connected && <p className="ms-checkout-error" role="alert">{text('errorGeneric')}</p>}
       {!noticePresentation && !previewOnly && !connected && !recovering && <p className="ms-checkout-error" role="status">{text('connectionLost')}</p>}
       {!noticePresentation && phase!=='idle' && settlementKey && !auxiliary && <p className="ms-checkout-settlement">{text(settlementKey)}</p>}
-      {showHelpQr && <div className="ms-checkout-help" data-help-url={helpLink}><strong className="ms-checkout-help-title">{text('helpTitle')}</strong>{helpQrImage?<img className="ms-checkout-help-qr" src={helpQrImage} alt={`Help QR code for ${helpStationId}`}/>:<span className="ms-checkout-help-pending" aria-hidden="true"/>}<span className="ms-checkout-help-scan">{text('helpScan')}</span></div>}
+      {showHelpQr && <div className="ms-checkout-help" data-help-url={helpLink}><div className="ms-checkout-help-heading"><DashboardIcon name="support" size={18}/><strong className="ms-checkout-help-title">{text('helpTitle')}</strong></div>{helpQrImage?<img className="ms-checkout-help-qr" src={helpQrImage} alt={`Help QR code for ${helpStationId}`}/>:<span className="ms-checkout-help-pending" aria-hidden="true"/>}<span className="ms-checkout-help-scan">{text('helpScan')}</span></div>}
     </div>
     <div className="ms-checkout-actions" key={`actions-${stage}-${currentPage?.id || ''}`}>{renderActions()}</div></>}
   </section>{dialog}</div>;

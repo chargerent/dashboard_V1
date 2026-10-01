@@ -57,11 +57,13 @@ test('help is QR-only on Rent Return and omitted from every other checkout page'
   assert.match(editor, /!\['brand','support','receipt','receipt\.title','receipt\.body','tap','insert'/);
 });
 
-test('the Rent Return help QR stays beside the copy without a white frame', () => {
-  assert.match(styles, /\.ms-checkout-panel\.ready \.ms-checkout-main\{display:grid;grid-template-columns:minmax\(0,1fr\) auto/);
-  assert.match(styles, /\.ms-checkout-panel \.ms-checkout-help\{grid-column:2;grid-row:1\/span 10;align-self:center/);
-  assert.match(styles, /background:transparent;border:0;border-radius:0;box-shadow:none/);
-  assert.match(styles, /width:calc\(var\(--checkout-pixel\) \* 112\);height:calc\(var\(--checkout-pixel\) \* 112\)/);
+test('the Rent Return help QR uses the soft support card without changing actions', () => {
+  assert.match(styles, /\.ms-checkout-panel\.ready \.ms-checkout-main\{display:block;padding-bottom:0/);
+  assert.match(styles, /\.ms-checkout-panel \.ms-checkout-help\{position:absolute;left:20%;bottom:calc\(var\(--checkout-pixel\) \* 34\);transform:translateX\(-50%\)/);
+  assert.match(styles, /\.ms-checkout-panel\.ready \.ms-checkout-actions>button[^\n]+width:60%/);
+  assert.match(styles, /background:var\(--checkout-background\);border:[^\n]+border-radius:[^\n]+box-shadow:/);
+  assert.match(styles, /width:calc\(var\(--checkout-pixel\) \* 160\);height:calc\(var\(--checkout-pixel\) \* 160\)/);
+  assert.match(preview, /ms-checkout-help-heading[^\n]+name="support"/);
 });
 
 test('the Rent Return help QR accepts an HTTPS URL with the station variable', () => {
