@@ -10,7 +10,7 @@ import {stripeText,resolveStripeLanguage} from './stripeUi.js';
 import {checkoutPopupValues} from './checkoutFlow.js';
 
 const API = mediaUrl('/api/').replace(/\/$/,'');
-const STATION = 'LAB-US8004';
+const STATION = 'LOCAL-KIOSK';
 const STATION_API = `/stations/${STATION}`;
 const FORMATS = ['image/jpeg', 'image/png', 'image/webp', 'video/mp4', 'video/quicktime'];
 const VIDEO_MAX_BYTES = 2 * 1024 * 1024 * 1024;

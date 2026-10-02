@@ -1,6 +1,6 @@
 export const IDLE_CHECKOUT_FLOW={step:'start',pageId:null,consent:false};
 export const RETURN_NOTICE_MS=20000;
-export function normalizeCheckoutReturnNotice(event,{stationId='LAB-US8004',now=Date.now()}={}) {
+export function normalizeCheckoutReturnNotice(event,{stationId='LOCAL-KIOSK',now=Date.now()}={}) {
   if(event?.type!=='charger_returned' || event.stationId!==stationId || typeof event.eventId!=='string' || !event.eventId || event.eventId.length>160 || !Number.isSafeInteger(event.slot) || event.slot<=0)return null;
   const occurredAt=Date.parse(event.occurredAt),sourceExpiry=Date.parse(event.expiresAt);
   const noticeExpiresAt=Math.min(Math.min(occurredAt,now)+RETURN_NOTICE_MS,Number.isFinite(sourceExpiry)?sourceExpiry:Infinity);
@@ -75,5 +75,5 @@ export function canCreateCheckout(flow,{connected,available,busy,recovering,quot
   return flow.step==='review' && flow.consent===true && connected===true && available===true && !busy && !recovering && (quoteKey===undefined || flow.quoteKey===quoteKey);
 }
 export function isFreshReturnForFlow(flow,event) {
-  return flow.step==='returning' && event?.type==='charger_returned' && event.stationId==='LAB-US8004' && Number.isFinite(flow.returnAfter) && Date.parse(event.occurredAt)>=flow.returnAfter;
+  return flow.step==='returning' && event?.type==='charger_returned' && event.stationId==='LOCAL-KIOSK' && Number.isFinite(flow.returnAfter) && Date.parse(event.occurredAt)>=flow.returnAfter;
 }

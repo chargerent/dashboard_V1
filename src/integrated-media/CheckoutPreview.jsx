@@ -10,7 +10,7 @@ import {DashboardIcon} from './DashboardIcons.jsx';
 export {checkoutMoney} from './checkoutFlow.js';
 
 const API=mediaUrl('/api/').replace(/\/$/,'');
-const STATION='LAB-US8004';
+const STATION='LOCAL-KIOSK';
 const CHECKOUT=`/device/stations/${STATION}/checkout`;
 // Each preview tab owns its rental. The former shared localStorage namespace is
 // intentionally not migrated: selecting a rental from another tab is unsafe.
