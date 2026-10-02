@@ -1,4 +1,5 @@
 import {useMediaAssetUrl} from './mediaAssetUrl.js';
+import {mediaFetch} from './mediaApi.js';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {CheckoutPanel} from './CheckoutPreview.jsx';
 import {floatingCheckoutGeometry} from './checkoutFlow.js';
@@ -88,7 +89,7 @@ function ScaledDevicePreview({profile, language, selectedPage, group, manifest, 
   const assets = Object.fromEntries((manifest.assets || []).map(asset => [asset.id,asset]));
   const previewProfile = {...profile,enabledLanguages:[...new Set([...profile.enabledLanguages,language])]};
   const stage = selectedPage ? 'page' : previewStage || previewStageFor(group);
-  const previewCheckout = {offer:PREVIEW_OFFER, connected:true, recovering:false, interaction:{slot:7,currency:'usd',amountCents:500}};
+  const previewCheckout = {stationId:manifest.stationId,offer:PREVIEW_OFFER, connected:true, recovering:false, interaction:{slot:7,currency:'usd',amountCents:500}};
   return <div ref={box} style={{position:'relative',width:'100%',height:displayWidth?canvasHeight*scale:undefined,aspectRatio:`${screenWidth} / ${canvasHeight || 1}`,overflow:'hidden',background:manifest.background || '#000'}} data-testid={paymentOnly?'stripe-payment-detail':'stripe-device-preview'} data-screen-width={screenWidth} data-screen-height={screenHeight} data-payment-fraction={fraction}>
     {displayWidth > 0 && <div data-kiosk-viewport style={{position:'absolute',top:0,left:0,width:screenWidth,height:canvasHeight,transform:`scale(${scale})`,transformOrigin:'top left','--ms-preview-pixel':'1px',fontFamily:'Roboto,Arial,sans-serif',boxSizing:'border-box'}}>
       {!paymentOnly && <div data-testid="stripe-preview-media" style={{position:'absolute',inset:0,width:screenWidth,height:screenHeight,overflow:'hidden'}}>{(manifest.zones || []).map(zone => <MediaPreviewZone key={zone.id} zone={zone} assets={assets} width={zone.width*screenWidth} height={zone.height*screenHeight}/>)}</div>}
@@ -100,7 +101,7 @@ function ScaledDevicePreview({profile, language, selectedPage, group, manifest, 
   </div>;
 }
 
-function DraftPreview({profile, language, selectedPage, group, manifest, previewStage, previewStageChange, previewLanguageChange}) {
+function DraftPreview({profile, language, selectedPage, group, manifest, previewStage, previewStageChange, previewLanguageChange, previewStations, previewStationId, onPreviewStationChange, previewOrientation, onPreviewOrientationChange, manifestError}) {
   const [zoom,setZoom] = useState(false);
   const {screenWidth:width,screenHeight:height,fraction,paymentHeight,idleWidth,idleHeight,expandedWidth,margin,detailHeight} = previewGeometry(manifest);
   const idle = !selectedPage && (previewStage || previewStageFor(group)) === 'start';
@@ -108,6 +109,14 @@ function DraftPreview({profile, language, selectedPage, group, manifest, preview
   const previewProps = {profile,language,selectedPage,group,manifest,previewStage,previewStageChange,previewLanguageChange};
   return <aside className="rounded-2xl border border-slate-200 bg-slate-50 p-4 xl:sticky xl:top-4" aria-label="Stripe preview">
     <div className="flex items-center justify-between gap-2"><h3 className="font-bold text-slate-900">Screen preview</h3></div>
+    {previewStations.length > 0 && <label className="mb-2 mt-2 block text-xs font-semibold text-slate-600">Kiosk
+      <select aria-label="Preview kiosk" value={previewStationId} onChange={event => onPreviewStationChange(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800">{previewStations.map(id => <option key={id} value={id}>{id}</option>)}</select>
+    </label>}
+    {previewStations.length > 0 && <label className="mb-2 block text-xs font-semibold text-slate-600">Screen orientation
+      <select aria-label="Preview screen orientation" value={previewOrientation} onChange={event => onPreviewOrientationChange(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800"><option value="auto">Campaign setting</option><option value="landscape">Landscape display</option><option value="portrait">Portrait display</option></select>
+    </label>}
+    {previewOrientation !== 'auto' && <p className="mb-2 text-xs text-slate-500">Preview-only display setting; the kiosk campaign is unchanged.</p>}
+    {manifestError && <p role="status" className="mb-2 text-xs text-amber-700">{manifestError}</p>}
     <p className="mb-3 mt-1 text-xs text-slate-500">{STRIPE_LANGUAGES.find(item => item.key === language)?.label} · {selectedPage?.name || sectionLabel(group)}</p>
     <>
       <div className="overflow-hidden rounded-lg border border-slate-200 shadow-sm"><ScaledDevicePreview {...previewProps}/></div>
@@ -121,19 +130,53 @@ function DraftPreview({profile, language, selectedPage, group, manifest, preview
   </aside>;
 }
 
-export default function StripeProfileEditor({value, checkout, onChange, disabled = false, manifest: providedManifest}) {
+export default function StripeProfileEditor({value, checkout, onChange, disabled = false, manifest: providedManifest, previewStations = []}) {
   const draft = useMemo(() => {
     try { return normalizeStripeUi(value || createStripeUi()); }
     catch { return value || createStripeUi(); }
   }, [value]);
-  const manifest = useMemo(() => providedManifest || ({
+  const stationIds = previewStations.filter(id => typeof id === 'string' && /^[A-Z0-9][A-Z0-9_-]{1,39}$/.test(id));
+  const stationKey = stationIds.join(',');
+  const [previewStationId, setPreviewStationId] = useState(stationIds[0] || '');
+  const [previewOrientation, setPreviewOrientation] = useState('auto');
+  const [stationManifest, setStationManifest] = useState(null);
+  const [manifestError, setManifestError] = useState('');
+  useEffect(() => {
+    if (!stationIds.includes(previewStationId)) setPreviewStationId(stationIds[0] || '');
+  }, [stationKey, previewStationId]);
+  useEffect(() => {
+    if (providedManifest || !previewStationId) return;
+    const controller = new AbortController();
+    setStationManifest(null); setManifestError('');
+    mediaFetch(`/api/stations/${previewStationId}/manifest`, {signal: controller.signal})
+      .then(async response => {
+        if (!response.ok) throw new Error(`Kiosk preview unavailable (${response.status}).`);
+        const value = await response.json();
+        if (!value.manifest || !['portrait','landscape'].includes(value.manifest.orientation)) throw new Error('Kiosk preview layout is unavailable.');
+        setStationManifest(value.manifest);
+      })
+      .catch(error => {if (!controller.signal.aborted) setManifestError(error.message);});
+    return () => controller.abort();
+  }, [providedManifest, previewStationId]);
+  useEffect(() => {
+    if (!previewStationId) return;
+    const saved = window.localStorage.getItem(`chargerent-preview-orientation:${previewStationId}`);
+    setPreviewOrientation(['portrait','landscape'].includes(saved) ? saved : 'auto');
+  }, [previewStationId]);
+  const changePreviewOrientation = (value) => {
+    setPreviewOrientation(value);
+    if (previewStationId) {
+      if (value === 'auto') window.localStorage.removeItem(`chargerent-preview-orientation:${previewStationId}`);
+      else window.localStorage.setItem(`chargerent-preview-orientation:${previewStationId}`, value);
+    }
+  };
+  const manifest = useMemo(() => ({...(providedManifest || stationManifest || {
     revision: 0,
     orientation: 'portrait',
     background: '#000000',
     assets: [],
     zones: [],
-    checkout: checkout || {enabled: true, height: 0.32},
-  }), [checkout, providedManifest]);
+  }), ...(previewOrientation === 'auto' ? {} : {orientation: previewOrientation}), checkout: {...(providedManifest || stationManifest)?.checkout, ...checkout, enabled: true}}), [checkout, providedManifest, stationManifest, previewOrientation]);
   const [tab, setTab] = useState('Text');
   const [language, setLanguage] = useState('en');
   const [group, setGroup] = useState('start');
@@ -213,7 +256,7 @@ export default function StripeProfileEditor({value, checkout, onChange, disabled
         </>}
         {tab === 'Colors' && <><h3 className="font-bold text-slate-900">Brand colors</h3><p className="mb-5 mt-1 text-sm text-slate-500">Apply your colors to the payment section and added pages.</p><div className="grid gap-4 sm:grid-cols-2">{STRIPE_THEME_FIELDS.map(({key,label}) => <div key={key} className="rounded-2xl border border-slate-200 p-4"><div className="mb-3 flex items-center justify-between gap-3"><label htmlFor={`stripe-color-${key}`} className="text-sm font-semibold text-slate-800">{label}</label><input type="color" aria-label={`Stripe ${label} color picker`} value={/^#[0-9a-f]{6}$/i.test(draft.theme[key]) ? draft.theme[key] : '#000000'} onChange={event => update({theme:{...draft.theme,[key]:event.target.value.toUpperCase()}})} className="h-10 w-10 cursor-pointer rounded-lg border border-slate-200 bg-white p-1"/></div><input id={`stripe-color-${key}`} aria-label={`Stripe ${label} color`} value={draft.theme[key]} maxLength={7} onChange={event => update({theme:{...draft.theme,[key]:event.target.value.toUpperCase()}})} className={inputClass}/></div>)}</div></>}
       </fieldset>
-      <DraftPreview profile={draft} language={language} selectedPage={tab === 'Pages' ? page : null} group={group} manifest={manifest} previewStage={group === 'returning' ? returnPreviewStage : previewStageFor(group)} previewStageChange={changePreviewStage} previewLanguageChange={setLanguage}/>
+      <DraftPreview profile={draft} language={language} selectedPage={tab === 'Pages' ? page : null} group={group} manifest={manifest} previewStage={group === 'returning' ? returnPreviewStage : previewStageFor(group)} previewStageChange={changePreviewStage} previewLanguageChange={setLanguage} previewStations={stationIds} previewStationId={previewStationId} onPreviewStationChange={setPreviewStationId} previewOrientation={previewOrientation} onPreviewOrientationChange={changePreviewOrientation} manifestError={manifestError}/>
     </div>
   </div>;
 }

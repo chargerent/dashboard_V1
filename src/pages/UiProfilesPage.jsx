@@ -979,7 +979,7 @@ export default function UiProfilesPage({
                     </label>
                   </div>
                 </div>
-                <StripeProfileEditor value={appProfile.stripeUi} checkout={appProfile.checkout} onChange={(stripeUi) => updateAppProfile({...appProfile, stripeUi})} disabled={busy || !sectionAllowed} />
+                <StripeProfileEditor value={appProfile.stripeUi} checkout={appProfile.checkout} previewStations={targetKiosks.map((kiosk) => String(kiosk.stationid || kiosk.stationId || '').trim().toUpperCase())} onChange={(stripeUi) => updateAppProfile({...appProfile, stripeUi})} disabled={busy || !sectionAllowed} />
               </div>;
             })()}
             {isTerminal && draftProfile && <TerminalProfileEditor profile={draftProfile} section={activeDevice} language={selectedLanguage} onLanguageChange={setSelectedLanguage} onChange={setDraftProfile} disabled={busy || !sectionAllowed} allowEstablishedScreenRemoval={capabilities.apolloEstablishedScreenRemoval === 1} />}

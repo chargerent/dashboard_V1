@@ -3,10 +3,18 @@ import fs from 'node:fs';
 import test from 'node:test';
 
 import {defaultStripeUi, stripeText, validateStripeUi} from '../src/integrated-media/stripeUi.js';
+import {floatingCheckoutGeometry} from '../src/integrated-media/checkoutFlow.js';
 
 const editor = fs.readFileSync(new URL('../src/integrated-media/StripeProfileEditor.jsx', import.meta.url), 'utf8');
 const preview = fs.readFileSync(new URL('../src/integrated-media/CheckoutPreview.jsx', import.meta.url), 'utf8');
 const styles = fs.readFileSync(new URL('../src/integrated-media/media-studio.css', import.meta.url), 'utf8');
+
+test('the dashboard uses the same minimum portrait and landscape checkout heights as Android', () => {
+  assert.equal(floatingCheckoutGeometry(1920, 1080, .16).expandedHeight, 360);
+  assert.equal(floatingCheckoutGeometry(1920, 1080, .16, 1.6).expandedHeight, 420);
+  assert.equal(floatingCheckoutGeometry(1920, 1080, .40).expandedHeight, 432);
+  assert.equal(floatingCheckoutGeometry(1080, 1920, .16).expandedHeight, 384);
+});
 
 test('return copy includes an explicit localized returned-slot line', () => {
   const profile = validateStripeUi(defaultStripeUi());
@@ -34,7 +42,8 @@ test('the editor merges instructions and completion into one Return section', ()
 });
 
 test('the kiosk preview waits for confirmation and shares one completed-return card', () => {
-  assert.match(preview, /if\(stage==='returning'\)return busyMessage\('returnPending'\)/);
+  assert.match(preview, /if\(stage==='returning'\)return .*busyMessage\('returnPending'\).*button\('cancel'/);
+  assert.match(preview, /button\('cancel',\(\)=>selectFlow\(\{\.\.\.IDLE_CHECKOUT_FLOW,step:'ready'\}\)/);
   assert.match(preview, /stage==='returned'.*text\('returnSlot'\)/s);
   assert.match(preview, /ms-return-receipt/);
   assert.doesNotMatch(preview, /if\(stage==='returning'\)return button\('back'/);
@@ -59,10 +68,17 @@ test('help is QR-only on Rent Return and omitted from every other checkout page'
 
 test('the Rent Return help QR uses the soft support card without changing actions', () => {
   assert.match(styles, /\.ms-checkout-panel\.ready \.ms-checkout-main\{display:block;padding-bottom:0/);
-  assert.match(styles, /\.ms-checkout-panel \.ms-checkout-help\{position:absolute;left:20%;bottom:calc\(var\(--checkout-pixel\) \* 34\);transform:translateX\(-50%\)/);
+  assert.match(styles, /\.ms-checkout-panel\.compact[^\n]+grid-template-columns:minmax\(0,\.78fr\) minmax\(0,1fr\)[^\n]+gap:calc\(var\(--checkout-pixel\) \* 24\)/);
+  assert.match(styles, /\.ms-checkout-panel\.compact \.ms-checkout-actions button[^\n]+height:calc\(var\(--checkout-pixel\) \* 96\)/);
+  assert.match(styles, /\.ms-checkout-panel\.compact:not\(\.start\) \.ms-checkout-actions\{padding-top:0;justify-content:center\}/);
+  assert.match(styles, /\.ms-checkout-panel\.ready\.compact\.help-column\{display:flex;gap:0\}/);
+  assert.match(styles, /\.ms-checkout-panel\.ready\.compact\.help-column \.ms-checkout-main\{flex:\.78 1 0[^\n]+margin-right:calc\(var\(--checkout-pixel\) \* 24\)/);
+  assert.match(styles, /\.ms-checkout-panel\.ready\.compact\.help-column \.ms-checkout-help-zone\{flex:0 0 calc\(var\(--checkout-pixel\) \* 264\);margin-right:calc\(var\(--checkout-pixel\) \* 32\)/);
+  assert.match(styles, /\.ms-checkout-panel\.ready\.compact\.help-column \.ms-checkout-help-zone \.ms-checkout-help\{position:static/);
+  assert.match(preview, /helpInOwnColumn && <div className="ms-checkout-help-zone">\{helpCard\}<\/div>/);
   assert.match(styles, /\.ms-checkout-panel\.ready \.ms-checkout-actions>button[^\n]+width:60%/);
   assert.match(styles, /background:var\(--checkout-background\);border:[^\n]+border-radius:[^\n]+box-shadow:/);
-  assert.match(styles, /width:calc\(var\(--checkout-pixel\) \* 160\);height:calc\(var\(--checkout-pixel\) \* 160\)/);
+  assert.match(styles, /\.ms-checkout-panel\.ready\.compact\.help-column \.ms-checkout-help-qr[^\n]+width:calc\(var\(--checkout-pixel\) \* 176\);height:calc\(var\(--checkout-pixel\) \* 176\)/);
   assert.match(preview, /ms-checkout-help-heading[^\n]+name="support"/);
 });
 

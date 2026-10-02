@@ -617,7 +617,7 @@ function AdminPage({
             )}
 
             {canAccessUiProfiles && (
-              <button onClick={onNavigateToUiProfiles} className="hidden rounded-md bg-sky-100 p-2 text-sky-700 hover:bg-sky-200 lg:inline-flex" title="Client profiles">
+              <button onClick={onNavigateToUiProfiles} className="inline-flex rounded-md bg-sky-100 p-2 text-sky-700 hover:bg-sky-200" title="Client profiles">
                 <PaintBrushIcon className="h-6 w-6" />
               </button>
             )}

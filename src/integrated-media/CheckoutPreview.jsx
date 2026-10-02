@@ -188,6 +188,7 @@ export function CheckoutPanel({checkout={},previewOnly=false,previewStage,previe
   const link=stage==='returned'?(noticePresentation?checkoutReturnReceiptUrl(profile,showingReturn?returnNotice:null,interaction):checkoutLinkUrl(profile,'receipt',interaction)):LINK_STAGES.has(stage)?checkoutLinkUrl(profile,stage,interaction):null;
   const helpStationId=String(checkout.stationId || STATION).trim().toUpperCase(),helpTemplate=profile.links?.help || '',helpLink=customerHelpUrl(helpTemplate,helpStationId);
   const showHelpQr=!currentPage && stage==='ready' && !!helpLink;
+  const helpInOwnColumn=showHelpQr && checkoutUsesColumns(viewportWidth,viewportHeight,returnOnly ? .16 : height);
   useEffect(()=>{let active=true;setQrImage(null);setQrOpen(false);if(link)stripeQrDataUrl(link).then(value=>{if(active)setQrImage(value);}).catch(()=>{});return()=>{active=false;};},[link]);
   useEffect(()=>{let active=true;setHelpQrImage(null);if(helpLink)customerHelpQrDataUrl(helpTemplate,helpStationId).then(value=>{if(active)setHelpQrImage(value);}).catch(()=>{});return()=>{active=false;};},[helpLink,helpTemplate,helpStationId]);
   function selectFlow(value){if(controlled){previewStageChange?.(value.step,value.pageId);return;}setFlow(value);}
@@ -211,7 +212,7 @@ export function CheckoutPanel({checkout={},previewOnly=false,previewStage,previe
     if(stage==='out_of_order')return null;
     if(stage==='succeeded')return button('done',done,{disabled:!!busy,presentationOnly:true});
     if(INFORMATION_STAGES.has(stage))return <>{link && button('openLink',()=>setQrOpen(true),{disabled:!qrImage,presentationOnly:true})}{button('back',back,{secondary:true,presentationOnly:true})}</>;
-    if(stage==='returning')return busyMessage('returnPending');
+    if(stage==='returning')return <>{busyMessage('returnPending')}{button('cancel',()=>selectFlow({...IDLE_CHECKOUT_FLOW,step:'ready'}),{secondary:true,disabled:!!busy,presentationOnly:true})}</>;
     if(stage==='returned')return <><div className="ms-return-receipt" aria-label={text('receipt.title')}>{link?<>{qrImage?<img className="ms-checkout-qr" src={qrImage} alt={text('receiptScan')}/>:<span className="ms-return-qr-pending" aria-hidden="true"/>}<p>{text('receiptScan')}</p></>:<><span className="ms-return-qr-pending" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M13 5h22v38l-5-3-6 3-6-3-5 3V5zm6 10h10m-10 8h10m-10 8h6"/></svg></span><p>{text('receiptPending')}</p></>}</div>{button('done',done,{disabled:!!busy,presentationOnly:true})}</>;
     if(['declined','cancelled','failed'].includes(stage))return button('done',done,{disabled:!!busy,presentationOnly:true});
     return null;
@@ -219,9 +220,10 @@ export function CheckoutPanel({checkout={},previewOnly=false,previewStage,previe
   const settlementKey=({voided:'settlementVoided',refunded:'settlementRefunded',captured:'settlementCaptured',authorized:'settlementAuthorized'})[interaction?.moneyStatus];
   const overlayTarget=panel.current?.closest('[data-kiosk-viewport],.ms-screen') || panel.current?.parentElement;
   const flags=navigation.language!==false?<FlagPicker language={language} languages={profile.enabledLanguages} label={text('language')} onChange={changeLanguage} disabled={!!busy}/>:null;
+  const helpCard=showHelpQr?<div className="ms-checkout-help" data-help-url={helpLink}><div className="ms-checkout-help-heading"><DashboardIcon name="support" size={18}/><strong className="ms-checkout-help-title">{text('helpTitle')}</strong></div>{helpQrImage?<img className="ms-checkout-help-qr" src={helpQrImage} alt={`Help QR code for ${helpStationId}`}/>:<span className="ms-checkout-help-pending" aria-hidden="true"/>}<span className="ms-checkout-help-scan">{text('helpScan')}</span></div>:null;
   const dialog=qrOpen && overlayTarget?createPortal(<div className="ms-checkout-dialog-shade" role="presentation" style={themeStyle}><section role="dialog" aria-modal="true" aria-label={title} className="ms-checkout-dialog"><h2>{title}</h2>{qrImage && <img src={qrImage} alt={title}/>}<p className="ms-checkout-dialog-url">{link}</p><button type="button" onClick={()=>setQrOpen(false)}>{text('back')}</button></section></div>,overlayTarget):null;
   if(returnOnly && !showingReturn && !(controlled && stage==='returned'))return null;
-  return <div className="ms-checkout-viewport" style={themeStyle}><section ref={panel} className={`ms-checkout-panel ${stage} ${checkoutUsesColumns(viewportWidth,viewportHeight,returnOnly ? .16 : height)?'compact':''}`} style={cardStyle} lang={language} aria-label="Floating payment card" data-checkout-phase={stage} data-floating-state={idle?'idle':'expanded'}>
+  return <div className="ms-checkout-viewport" style={themeStyle}><section ref={panel} className={`ms-checkout-panel ${stage} ${checkoutUsesColumns(viewportWidth,viewportHeight,returnOnly ? .16 : height)?'compact':''} ${helpInOwnColumn?'help-column':''}`} style={cardStyle} lang={language} aria-label="Floating payment card" data-checkout-phase={stage} data-floating-state={idle?'idle':'expanded'}>
     {idle?<div className="ms-idle-actions">{button('start',()=>selectFlow({step:'ready',pageId:null,consent:false}),{disabled:!!busy,presentationOnly:true})}{flags}</div>:<>
     {flags && <div className="ms-checkout-language-corner">{flags}</div>}
     <div className="ms-checkout-main" key={`copy-${stage}-${currentPage?.id || ''}`}><h2>{title}</h2>{stage==='returned' && <p className="ms-return-slot">{text('returnSlot')}</p>}{body && (!LINK_STAGES.has(stage) || link) && <p className="ms-checkout-body">{body}</p>}
@@ -232,8 +234,9 @@ export function CheckoutPanel({checkout={},previewOnly=false,previewStage,previe
       {!noticePresentation && !previewOnly && error && connected && <p className="ms-checkout-error" role="alert">{text('errorGeneric')}</p>}
       {!noticePresentation && !previewOnly && !connected && !recovering && <p className="ms-checkout-error" role="status">{text('connectionLost')}</p>}
       {!noticePresentation && phase!=='idle' && settlementKey && !auxiliary && <p className="ms-checkout-settlement">{text(settlementKey)}</p>}
-      {showHelpQr && <div className="ms-checkout-help" data-help-url={helpLink}><div className="ms-checkout-help-heading"><DashboardIcon name="support" size={18}/><strong className="ms-checkout-help-title">{text('helpTitle')}</strong></div>{helpQrImage?<img className="ms-checkout-help-qr" src={helpQrImage} alt={`Help QR code for ${helpStationId}`}/>:<span className="ms-checkout-help-pending" aria-hidden="true"/>}<span className="ms-checkout-help-scan">{text('helpScan')}</span></div>}
+      {!helpInOwnColumn && helpCard}
     </div>
+    {helpInOwnColumn && <div className="ms-checkout-help-zone">{helpCard}</div>}
     <div className="ms-checkout-actions" key={`actions-${stage}-${currentPage?.id || ''}`}>{renderActions()}</div></>}
   </section>{dialog}</div>;
 }

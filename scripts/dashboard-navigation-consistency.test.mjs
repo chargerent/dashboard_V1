@@ -104,3 +104,9 @@ test('dashboard navigation distinguishes device management from media control', 
   assert.match(deviceIcon, /<rect x="17" y="2\.5" width="9\.5" height="19"/);
   assert.match(admin, /title="Media Control"[\s\S]*?<PhotoIcon/);
 });
+
+test('Admin Tools keeps Client profiles visible below the desktop breakpoint', () => {
+  const admin = read('src/pages/AdminPage.jsx');
+  assert.match(admin, /onClick=\{onNavigateToUiProfiles\} className="inline-flex[^"]*" title="Client profiles"/);
+  assert.doesNotMatch(admin, /onClick=\{onNavigateToUiProfiles\} className="[^"]*\bhidden\b/);
+});

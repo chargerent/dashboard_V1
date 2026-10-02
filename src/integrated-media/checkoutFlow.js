@@ -27,9 +27,10 @@ export function checkoutReturnReceiptUrl(profile,event,interaction) {
   const matched=event?.interactionId && event.interactionId===interaction?.id && event.stationId===interaction.stationId?interaction:null;
   return checkoutLinkUrl(profile,'receipt',matched);
 }
-export function floatingCheckoutGeometry(width=1080,height=1920,fraction=.16) {
+export function floatingCheckoutGeometry(width=1080,height=1920,fraction=.16,fontScale=1) {
   const scale=Math.min(width,height)/1080;
-  return {scale,idleWidth:560*scale,idleHeight:128*scale,expandedWidth:width-64*scale,expandedHeight:Math.round(height*fraction),bottom:32*scale,radius:40*scale};
+  const minimum=height>width?384*scale:(360+Math.max(0,fontScale-1)*100)*scale;
+  return {scale,idleWidth:560*scale,idleHeight:128*scale,expandedWidth:width-64*scale,expandedHeight:Math.min(height,Math.round(Math.max(height*fraction,minimum))),bottom:32*scale,radius:40*scale};
 }
 export function checkoutLinkUrl(profile,stage,interaction) {
   for(const candidate of [stage==='receipt'?interaction?.receiptUrl:null,profile?.links?.[stage]]){
