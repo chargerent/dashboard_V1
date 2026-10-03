@@ -19,10 +19,9 @@ const voicePrompts = Object.freeze([
   { key: 'hold_waiting', label: 'Caller hold message', fallback: 'Played while available app staff are ringing.' },
   { key: 'staff_screen', label: 'Staff call screen', fallback: 'Chargerent customer support call. Press 1 to accept.' },
   { key: 'connecting', label: 'Connecting caller', fallback: 'Connecting you now.' },
-  { key: 'callback_offer', label: 'Missed-call choices', fallback: 'Offers callback at the caller ID or voicemail.' },
+  { key: 'callback_or_text', label: 'Callback or text options', fallback: 'Offers a callback or tells the caller to text the support number.' },
   { key: 'callback_confirmed', label: 'Callback confirmation', fallback: 'Confirms that support will call back.' },
-  { key: 'voicemail_greeting', label: 'Voicemail greeting', fallback: 'Requests contact, rental location, and a short description.' },
-  { key: 'voicemail_confirmed', label: 'Voicemail confirmation', fallback: 'Confirms that the support team will follow up.' },
+  { key: 'text_chat_available', label: 'Text support reminder', fallback: 'Tells the caller to text the number to chat with a representative.' },
 ]);
 const emptyForm = Object.freeze({
   staffId: '',
@@ -214,7 +213,7 @@ export default function TelephonyRoutingModal({ onClose, callSupportFunction, re
               <PhoneIcon className="h-6 w-6 text-blue-600" />
               <h2 id="telephony-routing-title" className="text-xl font-black text-gray-900">Call routing</h2>
             </div>
-            <p className="mt-1 text-sm text-gray-500">Each employee receives and sees calls only for their assigned support number(s).</p>
+            <p className="mt-1 text-sm text-gray-500">Active admins and partners use their dashboard login. Partner line subscriptions are managed on their account card.</p>
           </div>
           <button type="button" onClick={onClose} className="rounded-md p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-900" aria-label="Close call routing">
             <XMarkIcon className="h-6 w-6" />
@@ -226,6 +225,7 @@ export default function TelephonyRoutingModal({ onClose, callSupportFunction, re
             <section className="rounded-xl border border-blue-200 bg-blue-50 p-4">
               <h3 className="font-bold text-blue-950">Active incoming call route</h3>
               <p className="mt-1 text-xs text-blue-800">Choose where Twilio sends new calls. App routing rings only staff who are enabled and marked available.</p>
+              <p className="mt-2 text-xs text-blue-800">Admins are eligible for every support line. Partners are eligible only for the support number(s) on their dashboard account.</p>
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 <button type="button" disabled={readOnly || saving} onClick={() => updateRoutingMode('app')} className={`rounded-lg border px-3 py-3 text-left text-sm font-semibold ${routingMode === 'app' ? 'border-blue-600 bg-blue-600 text-white' : 'border-blue-200 bg-white text-blue-900'}`}>
                   iPhone staff apps
@@ -255,7 +255,7 @@ export default function TelephonyRoutingModal({ onClose, callSupportFunction, re
                           {(member.deliveryMode || 'phone') === 'app' && <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${member.available === true ? 'bg-blue-100 text-blue-800' : 'bg-amber-100 text-amber-800'}`}>{member.available === true ? 'Available in app' : 'Unavailable'}</span>}
                         </div>
                         <p className="mt-1 font-mono text-xs text-gray-500">{(member.deliveryMode || 'phone') === 'app' ? (member.twilioIdentity || 'App identity pending') : member.phoneE164} · order {member.routingOrder || 1}</p>
-                        <p className="mt-1 text-xs font-semibold text-blue-700">Lines: {(member.supportNumbers?.length ? member.supportNumbers : [defaultSupportNumber]).join(', ')}</p>
+                        <p className="mt-1 text-xs font-semibold text-blue-700">Lines: {member.allSupportNumbers === true ? 'All support lines' : (member.supportNumbers?.length ? member.supportNumbers : [defaultSupportNumber]).join(', ')}</p>
                       </div>
                       <button type="button" onClick={() => editStaff(member)} className="rounded-md border border-gray-300 p-2 text-gray-600 hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700" aria-label={`Edit ${member.name}`}>
                         <PencilSquareIcon className="h-4 w-4" />

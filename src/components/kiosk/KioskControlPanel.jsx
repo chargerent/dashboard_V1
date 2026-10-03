@@ -220,6 +220,10 @@ function KioskControlPanel({ kiosk, t, onCommand, serverUiVersion, serverFlowVer
         };
     }, [kiosk]);
 
+    if (kiosk.hardware?.type === 'CTF7') {
+        return <div className="rounded-lg bg-blue-50 p-4 text-sm text-blue-900">CTF7 commissioning: device controls will be available after the test unit and slot mapping are verified.</div>;
+    }
+
     return (
         <div
             className="bg-white p-3 rounded-lg shadow-inner h-full"

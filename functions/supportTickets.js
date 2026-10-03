@@ -641,11 +641,11 @@ function actorName(authState) {
   return cleanText(authState?.profile?.username || authState?.profile?.contact?.name || authState?.uid, 160) || "Dashboard admin";
 }
 
-function ensureTicketToken(subject, ticketNumber) {
-  const cleanSubject = cleanText(subject, 300);
-  const token = `[${ticketNumber}]`;
-  if (cleanSubject.includes(token)) return cleanSubject;
-  return `${cleanSubject || "Chargerent inquiry"} ${token}`;
+function replySubjectWithoutCaseNumber(subject) {
+  return cleanText(subject, 300)
+      .replace(/\s*\[(?:CS|SL|PT|GN)-[A-Z0-9]{4,10}\]\s*/gi, " ")
+      .replace(/\s{2,}/g, " ")
+      .trim() || "Chargerent inquiry";
 }
 
 function createSupportTicketService({db, admin, sendEmail = null, clock = () => new Date()}) {
@@ -823,7 +823,7 @@ function createSupportTicketService({db, admin, sendEmail = null, clock = () => 
     const body = cleanText(data?.body, 12000);
     if (!body) throw new Error("A reply message is required.");
     const displayTicketNumber = supportTicketDisplayNumber(ticket.ticketNumber || id, ticket.category);
-    const subject = ensureTicketToken(data?.subject, displayTicketNumber);
+    const subject = replySubjectWithoutCaseNumber(data?.subject);
     const sender = resolveReplySender(ticket.category, data?.senderKey);
     const now = clock();
     const messageRef = ref.collection("messages").doc();
@@ -864,7 +864,7 @@ function createSupportTicketService({db, admin, sendEmail = null, clock = () => 
     const body = cleanText(data?.body, 12000);
     if (!body) throw new Error("A reply message is required.");
     const displayTicketNumber = supportTicketDisplayNumber(ticket.ticketNumber || id, ticket.category);
-    const subject = ensureTicketToken(data?.subject, displayTicketNumber);
+    const subject = replySubjectWithoutCaseNumber(data?.subject);
     const sender = resolveReplySender(ticket.category, data?.senderKey);
     const messageRef = ref.collection("messages").doc();
     const startedAt = clock();

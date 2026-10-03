@@ -1,9 +1,24 @@
 /* eslint-env node */
 
+const {normalizeSupportNumbers, ticketCallSupportNumbers} = require("./supportTelephony");
+
 const ACTIVE_TICKET_STATUSES = new Set(["new", "in_progress", "waiting_customer"]);
+const CANADIAN_AREA_CODES = new Set([
+  "204", "226", "236", "249", "250", "257", "263", "289", "306", "343",
+  "354", "365", "367", "368", "382", "403", "416", "418", "428", "431",
+  "437", "438", "450", "468", "474", "506", "514", "519", "548", "579",
+  "581", "584", "587", "604", "613", "639", "647", "672", "683", "705",
+  "709", "742", "753", "778", "780", "782", "807", "819", "825", "867",
+  "873", "879", "902", "905",
+]);
 
 function cleanText(value, maxLength = 1000) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+}
+
+function cleanIdentifier(value, maxLength = 200) {
+  if (value === null || value === undefined) return "";
+  return String(value).trim().slice(0, maxLength);
 }
 
 function cleanDocumentId(value, label) {
@@ -16,6 +31,65 @@ function normalizeLastFour(value) {
   const digits = String(value ?? "").replace(/\D/g, "");
   if (!/^\d{4}$/.test(digits)) throw new Error("Enter the last four digits of the card used.");
   return digits;
+}
+
+function normalizeChargerId(value) {
+  const chargerId = cleanIdentifier(value, 40).toUpperCase();
+  if (!/^[A-Z0-9_-]{4,40}$/.test(chargerId)) {
+    throw new Error("Enter a valid charger ID.");
+  }
+  return chargerId;
+}
+
+function rentalChargerId(rental = {}) {
+  return cleanIdentifier(rental.sn ?? rental.chargerid, 40).toUpperCase();
+}
+
+function normalizedSupportScope(value) {
+  return value === undefined || value === null ? null : normalizeSupportNumbers(value);
+}
+
+function supportNumberCountry(value) {
+  const digits = cleanIdentifier(value, 40).replace(/\D/g, "");
+  if (digits.startsWith("33")) return "FR";
+  if (digits.startsWith("1") && digits.length >= 4) {
+    return CANADIAN_AREA_CODES.has(digits.slice(1, 4)) ? "CA" : "US";
+  }
+  return "";
+}
+
+function rentalStationCountry(rental = {}) {
+  const stationId = cleanIdentifier(rental.rentalStationid, 80).toUpperCase();
+  if (stationId.startsWith("CA")) return "CA";
+  if (stationId.startsWith("FR")) return "FR";
+  if (stationId.startsWith("US")) return "US";
+  return "";
+}
+
+function ticketSupportCountry(ticket = {}) {
+  const details = ticket.details && typeof ticket.details === "object" ? ticket.details : {};
+  const supportNumber = cleanIdentifier(
+      details.twilioSupportNumber || details.twilioSupportAddress ||
+      ticketCallSupportNumbers(ticket)[0],
+      40,
+  );
+  return supportNumberCountry(supportNumber);
+}
+
+function ticketMatchesSupportScope(ticket = {}, scope = null) {
+  return scope === null || ticketCallSupportNumbers(ticket)
+      .some((number) => scope.includes(number));
+}
+
+function messageMatchesSupportScope(message = {}, scope = null) {
+  if (scope === null) return true;
+  const direction = cleanText(message.direction, 20).toLowerCase();
+  const address = direction === "outbound" ? message.from : message.to;
+  try {
+    return normalizeSupportNumbers(address).some((number) => scope.includes(number));
+  } catch {
+    return false;
+  }
 }
 
 function isoString(value) {
@@ -34,6 +108,12 @@ function finiteNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function mobileRentalChargeAmount(rental = {}) {
+  const status = cleanText(rental.status, 80).toLowerCase().replace(/[\s-]+/g, "_");
+  if (!["returned", "refunded", "purchased"].includes(status)) return null;
+  return finiteNumber(rental.totalCharged ?? rental.buyprice);
+}
+
 function rentalActivityIso(rental = {}) {
   return isoString(
       rental.returnTime || rental.rentalTime || rental.rentedAt ||
@@ -41,22 +121,30 @@ function rentalActivityIso(rental = {}) {
   );
 }
 
+function rentalChronologyMillis(rental = {}) {
+  const value = isoString(
+      rental.rentalTime || rental.rentedAt || rental.createdAt || rental.updatedAt,
+  );
+  const millis = Date.parse(value);
+  return Number.isFinite(millis) ? millis : 0;
+}
+
 function mobileRentalSummary(id, rental = {}, station = {}) {
   return {
     id,
-    orderId: cleanText(
+    orderId: cleanIdentifier(
         rental.orderid || rental.rawid || rental.transactionid ||
         rental.transactionId || rental.paymentSessionId || id,
         200,
     ),
-    transactionId: cleanText(
+    transactionId: cleanIdentifier(
         rental.transactionid || rental.transactionId || rental.paymentSessionId ||
         rental.rawid || rental.orderid,
         200,
     ),
     cardLastFour: String(rental.card_last4 ?? "").replace(/\D/g, "").slice(-4),
-    chargerId: cleanText(rental.sn || rental.chargerid, 120),
-    stationId: cleanText(rental.rentalStationid, 80),
+    chargerId: cleanIdentifier(rental.sn || rental.chargerid, 120),
+    stationId: cleanIdentifier(rental.rentalStationid, 80),
     location: cleanText(
         rental.rentalLocation || rental.rentalPlace || station.info?.location || station.info?.place,
         180,
@@ -64,7 +152,7 @@ function mobileRentalSummary(id, rental = {}, station = {}) {
     rentalTime: isoString(rental.rentalTime || rental.rentedAt || rental.createdAt),
     returnTime: isoString(rental.returnTime),
     status: cleanText(rental.status, 80),
-    totalCharged: finiteNumber(rental.totalCharged ?? rental.buyprice),
+    totalCharged: mobileRentalChargeAmount(rental),
     symbol: cleanText(rental.symbol, 8) || "$",
     refundStatus: cleanText(rental.refundStatus || rental.refund_status, 80),
     refundAmount: finiteNumber(rental.refundAmount),
@@ -78,9 +166,9 @@ function linkedRentalPayload(id, rental = {}) {
   const summary = mobileRentalSummary(id, rental);
   return {
     documentId: id,
-    rawid: cleanText(rental.rawid, 200),
-    orderid: cleanText(rental.orderid, 200),
-    transactionid: cleanText(rental.transactionid || rental.transactionId, 200),
+    rawid: cleanIdentifier(rental.rawid, 200),
+    orderid: cleanIdentifier(rental.orderid, 200),
+    transactionid: cleanIdentifier(rental.transactionid || rental.transactionId, 200),
     cardLastFour: summary.cardLastFour,
     chargerId: summary.chargerId,
     rentalStationid: summary.stationId,
@@ -180,18 +268,37 @@ function createSupportMobileService({db, admin, ticketService, telephonyService,
 
   async function searchRentals(data = {}, authState = {}) {
     const {id: ticketId, ref: ticketRef, ticket} = await getTicket(data.ticketId);
-    const cardLastFour = normalizeLastFour(data.cardLastFour);
-    const values = [cardLastFour, Number(cardLastFour)];
-    const snapshots = await Promise.all(values.map((value) => db.collection("rentals")
-        .where("card_last4", "==", value)
-        .limit(100)
+    const searchMode = cleanText(data.searchMode, 40) === "charger_id" ?
+      "charger_id" : "card_last_four";
+    const cardLastFour = searchMode === "card_last_four" ?
+      normalizeLastFour(data.cardLastFour) : "";
+    const chargerId = searchMode === "charger_id" ? normalizeChargerId(data.chargerId) : "";
+    const supportCountry = ticketSupportCountry(ticket);
+    if (!supportCountry) {
+      throw new Error("This case does not identify the country of the support number dialed.");
+    }
+    const queries = searchMode === "charger_id" ? [
+      ["sn", chargerId],
+      ["chargerid", chargerId],
+      ...(/^\d+$/.test(chargerId) ? [
+        ["sn", Number(chargerId)],
+        ["chargerid", Number(chargerId)],
+      ] : []),
+    ] : [
+      ["card_last4", cardLastFour],
+      ["card_last4", Number(cardLastFour)],
+    ];
+    const snapshots = await Promise.all(queries.map(([field, value]) => db.collection("rentals")
+        .where(field, "==", value)
         .get()));
     const matches = new Map();
     for (const snapshot of snapshots) {
       for (const document of snapshot.docs) matches.set(document.id, document.data() || {});
     }
     const candidates = [...matches]
-        .sort((left, right) => rentalActivityIso(right[1]).localeCompare(rentalActivityIso(left[1])))
+        .filter(([, rental]) => rentalStationCountry(rental) === supportCountry)
+        .sort((left, right) =>
+          rentalChronologyMillis(right[1]) - rentalChronologyMillis(left[1]))
         .slice(0, 20);
     const stationIds = [...new Set(candidates
         .map(([, rental]) => cleanText(rental.rentalStationid, 80))
@@ -211,8 +318,15 @@ function createSupportMobileService({db, admin, ticketService, telephonyService,
     ));
     const nowIso = clock().toISOString();
     await ticketRef.set({
-      payment: {...(ticket.payment || {}), cardLastFour},
-      details: {...(ticket.details || {}), cardLastFour},
+      ...(searchMode === "card_last_four" ? {
+        payment: {...(ticket.payment || {}), cardLastFour},
+      } : {}),
+      details: {
+        ...(ticket.details || {}),
+        rentalSearchMode: searchMode,
+        ...(cardLastFour ? {cardLastFour} : {}),
+        ...(chargerId ? {chargerId} : {}),
+      },
       needsCaseMatch: true,
       updatedAt: serverTimestamp(),
       lastActivityAt: serverTimestamp(),
@@ -222,7 +336,7 @@ function createSupportMobileService({db, admin, ticketService, telephonyService,
           160,
       ),
     }, {merge: true});
-    return {ok: true, ticketId, cardLastFour, rentals};
+    return {ok: true, ticketId, searchMode, cardLastFour, chargerId, rentals};
   }
 
   async function matchRental(data = {}, authState = {}) {
@@ -231,11 +345,24 @@ function createSupportMobileService({db, admin, ticketService, telephonyService,
     const rentalSnapshot = await db.collection("rentals").doc(rentalId).get();
     if (!rentalSnapshot.exists) throw new Error("Rental was not found.");
     const rental = rentalSnapshot.data() || {};
-    const searchedLastFour = normalizeLastFour(
-        ticket.payment?.cardLastFour || ticket.details?.cardLastFour,
-    );
-    if (String(rental.card_last4 ?? "").replace(/\D/g, "").slice(-4) !== searchedLastFour) {
-      throw new Error("This rental does not match the card last four saved on the case.");
+    const searchMode = ticket.details?.rentalSearchMode === "charger_id" ?
+      "charger_id" : "card_last_four";
+    if (searchMode === "charger_id") {
+      const searchedChargerId = normalizeChargerId(ticket.details?.chargerId);
+      if (rentalChargerId(rental) !== searchedChargerId) {
+        throw new Error("This rental does not match the charger ID saved on the case.");
+      }
+    } else {
+      const searchedLastFour = normalizeLastFour(
+          ticket.payment?.cardLastFour || ticket.details?.cardLastFour,
+      );
+      if (String(rental.card_last4 ?? "").replace(/\D/g, "").slice(-4) !== searchedLastFour) {
+        throw new Error("This rental does not match the card last four saved on the case.");
+      }
+    }
+    const supportCountry = ticketSupportCountry(ticket);
+    if (!supportCountry || rentalStationCountry(rental) !== supportCountry) {
+      throw new Error("This rental is not from a kiosk in the country of the support number dialed.");
     }
     await ticketService.updateTicket({
       ticketId,
@@ -245,7 +372,7 @@ function createSupportMobileService({db, admin, ticketService, telephonyService,
     return {ok: true, ticketId, rental: mobileRentalSummary(rentalId, rental)};
   }
 
-  async function listTextConversations(requestedLimit = 100) {
+  async function listTextConversations(requestedLimit = 100, supportNumbers = undefined) {
     const parsedLimit = Number(requestedLimit);
     const resultLimit = Number.isFinite(parsedLimit) ?
       Math.min(150, Math.max(1, Math.floor(parsedLimit))) : 100;
@@ -253,18 +380,25 @@ function createSupportMobileService({db, admin, ticketService, telephonyService,
         .orderBy("lastActivityAtIso", "desc")
         .limit(300)
         .get();
+    const scope = normalizedSupportScope(supportNumbers);
     return snapshot.docs
-        .map((document) => mobileConversationSummary(document.id, document.data() || {}))
-        .filter((conversation) => conversation.customerPhone)
-        .filter((conversation) => {
-          const ticket = snapshot.docs.find((document) => document.id === conversation.id)?.data() || {};
-          return ["sms", "rcs"].includes(ticket.source) ||
-            ["sms", "rcs"].includes(ticket.channel);
+        .map((document) => ({
+          conversation: mobileConversationSummary(document.id, document.data() || {}),
+          ticket: document.data() || {},
+        }))
+        .filter(({conversation}) => conversation.customerPhone)
+        .filter(({ticket}) => ["sms", "rcs"].includes(ticket.source) ||
+          ["sms", "rcs"].includes(ticket.channel))
+        .filter(({ticket}) => ticketMatchesSupportScope(ticket, scope))
+        .map(({conversation}) => scope === null ? conversation : {
+          ...conversation,
+          lastMessage: "",
         })
         .slice(0, resultLimit);
   }
 
-  async function listTextMessages(data = {}) {
+  async function listTextMessages(data = {}, supportNumbers = undefined) {
+    await telephonyService.assertCaseAccess(data.ticketId, supportNumbers);
     const {id, ref, ticket} = await getTicket(data.ticketId);
     const customerPhone = cleanText(ticket.customer?.phoneE164 || ticket.customer?.phone, 40);
     if (!customerPhone) throw new Error("This support case does not have a customer phone number.");
@@ -278,6 +412,7 @@ function createSupportMobileService({db, admin, ticketService, telephonyService,
     const messages = snapshot.docs
         .map((document) => ({id: document.id, data: document.data() || {}}))
         .filter(({data: message}) => ["sms", "rcs"].includes(message.channel))
+        .filter(({data: message}) => messageMatchesSupportScope(message, normalizedSupportScope(supportNumbers)))
         .map(({id: messageId, data: message}) => mobileTextMessage(messageId, message));
     if (ticket.unread === true) {
       await ref.set({unread: false, updatedAt: serverTimestamp()}, {merge: true});
@@ -290,6 +425,7 @@ function createSupportMobileService({db, admin, ticketService, telephonyService,
   }
 
   async function sendText(data = {}, authState = {}, options = {}) {
+    await telephonyService.assertCaseAccess(data.ticketId, options.supportNumbers);
     const config = await messagingConfig();
     const templateId = cleanText(data.templateId, 120);
     const richTemplate = templateId ? config.templates.find((template) => template.id === templateId) : null;
@@ -318,8 +454,17 @@ module.exports = {
   createSupportMobileService,
   linkedRentalPayload,
   mobileConversationSummary,
+  mobileRentalChargeAmount,
   mobileRentalSummary,
   mobileTextMessage,
   normalizeMessagingConfig,
+  normalizeChargerId,
   normalizeLastFour,
+  rentalChargerId,
+  rentalChronologyMillis,
+  rentalStationCountry,
+  messageMatchesSupportScope,
+  supportNumberCountry,
+  ticketSupportCountry,
+  ticketMatchesSupportScope,
 };

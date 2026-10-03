@@ -19,21 +19,17 @@ const VOICE_PROMPT_DEFINITIONS = Object.freeze({
     label: "Connecting caller",
     fallback: "Connecting you now.",
   }),
-  callback_offer: Object.freeze({
-    label: "Missed-call choices",
-    fallback: "We are sorry we could not answer your call. Press 1 if you would like a Chargerent support specialist to call you back at the number you are calling from. Press 2 to leave a voicemail.",
+  callback_or_text: Object.freeze({
+    label: "Callback or text options",
+    fallback: "We are sorry we could not answer your call. Press 1 if you would like a Chargerent support specialist to call you back at the number you are calling from. You can also hang up and text this number to chat with a representative.",
   }),
   callback_confirmed: Object.freeze({
     label: "Callback confirmation",
     fallback: "Thank you. A Chargerent support specialist will call you back at the number you called from as soon as possible.",
   }),
-  voicemail_greeting: Object.freeze({
-    label: "Voicemail greeting",
-    fallback: "We are sorry we missed your call. Please leave your name, phone number, rental location, and a short description after the tone. Please do not provide a complete card number.",
-  }),
-  voicemail_confirmed: Object.freeze({
-    label: "Voicemail confirmation",
-    fallback: "Thank you. A Chargerent support team member will follow up as soon as possible.",
+  text_chat_available: Object.freeze({
+    label: "Text support reminder",
+    fallback: "To chat with a Chargerent support representative, please hang up and send a text message to the number you called.",
   }),
 });
 
@@ -43,6 +39,10 @@ function normalizeVoicePromptKey(value) {
     throw new Error("Choose a supported voice prompt.");
   }
   return key;
+}
+
+function unansweredCallChoice(digits) {
+  return String(digits || "").trim() === "1" ? "callback" : "text";
 }
 
 function voicePromptStoragePath(promptKey) {
@@ -92,5 +92,6 @@ module.exports = {
   decodeVoicePromptUpload,
   looksLikeMp3,
   normalizeVoicePromptKey,
+  unansweredCallChoice,
   voicePromptStoragePath,
 };

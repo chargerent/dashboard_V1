@@ -18,6 +18,7 @@ const {
   staffSupportNumbers,
   supportLineForCall,
   voiceIdentityFor,
+  WELCOME_AUTO_REPLY_BODY,
 } = require("./supportTelephony");
 
 function createFakeStore() {
@@ -25,6 +26,7 @@ function createFakeStore() {
   const tickets = new Map();
   const messages = new Map();
   const staff = new Map();
+  const users = new Map();
   const config = new Map();
   const callLogs = new Map();
   const routes = new Map();
@@ -148,6 +150,15 @@ function createFakeStore() {
           },
         };
       }
+      if (name === "users") {
+        return {
+          async get() {
+            return {
+              docs: [...users].map(([id, data]) => ({id, data: () => data})),
+            };
+          },
+        };
+      }
       if (name === "supportTelephonyConfig") return {doc: configRef};
       if (name === "supportCallLogs") {
         return {
@@ -216,7 +227,7 @@ function createFakeStore() {
       serverTimestamp: () => "server-time",
     }},
   };
-  return {admin, callLogs, config, db, messages, routes, staff, tickets};
+  return {admin, callLogs, config, db, messages, routes, staff, tickets, users};
 }
 
 test("phone numbers are stored in E.164 form", () => {
@@ -299,6 +310,70 @@ test("app routing requires an assigned user and only includes available identiti
   assert.deepEqual(groups.primary.map((member) => member.id), ["george"]);
 });
 
+test("active admin and partner dashboard accounts are automatic app staff", async () => {
+  const store = createFakeStore();
+  store.users.set("admin-1", {
+    username: "george",
+    role: "admin",
+    active: true,
+    contact: {name: "George"},
+  });
+  store.users.set("partner-1", {
+    username: "venue",
+    role: "partner",
+    active: true,
+    supportPhoneNumbers: ["+1 917 993 9355"],
+  });
+  store.users.set("user-1", {
+    username: "client",
+    role: "user",
+    active: true,
+  });
+  const service = createSupportTelephonyService({db: store.db, admin: store.admin});
+
+  const staff = await service.listRoutingStaff();
+  const adminMember = staff.find((member) => member.userUid === "admin-1");
+  const partnerMember = staff.find((member) => member.userUid === "partner-1");
+  assert.equal(adminMember.allSupportNumbers, true);
+  assert.equal(adminMember.deliveryMode, "app");
+  assert.deepEqual(partnerMember.supportNumbers, ["+19179939355"]);
+  assert.equal(staff.some((member) => member.userUid === "user-1"), false);
+  assert.equal((await service.voiceStaffForUser("partner-1")).twilioIdentity, "staff_partner_1");
+
+  await service.setVoiceAvailability(true, {
+    uid: "partner-1",
+    profile: {username: "venue", role: "partner"},
+  });
+  assert.equal(store.staff.get("USER-partner-1").available, true);
+});
+
+test("profile subscriptions override a legacy partner staff line", async () => {
+  const store = createFakeStore();
+  store.users.set("partner-1", {
+    username: "venue",
+    role: "partner",
+    supportPhoneNumbers: ["+33 1 87 65 43 21"],
+  });
+  store.staff.set("legacy-partner", {
+    name: "Venue",
+    deliveryMode: "app",
+    userUid: "partner-1",
+    twilioIdentity: "old-identity",
+    supportNumbers: ["+19179939355"],
+    routingGroup: "backup",
+    routingOrder: 3,
+    available: true,
+  });
+  const service = createSupportTelephonyService({db: store.db, admin: store.admin});
+  const member = await service.voiceStaffForUser("partner-1");
+
+  assert.equal(member.id, "legacy-partner");
+  assert.equal(member.twilioIdentity, "staff_partner_1");
+  assert.deepEqual(member.supportNumbers, ["+33187654321"]);
+  assert.equal(member.routingGroup, "backup");
+  assert.equal(member.available, true);
+});
+
 test("routing staff can be added, edited, disabled, and protected from duplicates", async () => {
   const store = createFakeStore();
   const service = createSupportTelephonyService({db: store.db, admin: store.admin});
@@ -356,10 +431,15 @@ test("voice routing mode defaults to phone and can be switched by an admin", asy
 
 test("inbound SMS creates one phone conversation and deduplicates retries", async () => {
   const store = createFakeStore();
+  const sent = [];
   const service = createSupportTelephonyService({
     db: store.db,
     admin: store.admin,
     clock: () => new Date("2026-09-28T01:00:00.000Z"),
+    sendMessage: async (message) => {
+      sent.push(message);
+      return {sid: "SM-welcome-1", status: "queued"};
+    },
   });
   const payload = {
     MessageSid: "SM-test-1",
@@ -372,18 +452,75 @@ test("inbound SMS creates one phone conversation and deduplicates retries", asyn
   const first = await service.importInboundSms(payload);
   const retry = await service.importInboundSms(payload);
 
-  assert.equal(first.ticketId, phoneTicketId(payload.From));
+  assert.equal(first.ticketId, phoneTicketId(payload.From, payload.To));
   assert.equal(first.duplicate, false);
   assert.equal(retry.duplicate, true);
   assert.equal(store.tickets.size, 1);
-  assert.equal(store.messages.size, 1);
+  assert.equal(store.messages.size, 2);
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0], {
+    from: "+19179939355",
+    to: "+18185550123",
+    body: WELCOME_AUTO_REPLY_BODY,
+  });
   const ticket = store.tickets.get(first.ticketId);
   assert.equal(ticket.source, "sms");
+  assert.equal(ticket.status, "in_progress");
+  assert.equal(ticket.welcomeAutoReplyStatus, "sent");
   assert.equal(ticket.customer.phoneE164, "+18185550123");
   assert.equal(ticket.replyChannel, "sms");
 });
 
-test("each inbound call creates its own case and records voicemail fallback", async () => {
+test("the same customer has separate text cases on different support lines", async () => {
+  const store = createFakeStore();
+  const service = createSupportTelephonyService({db: store.db, admin: store.admin});
+  const us = await service.importInboundSms({
+    MessageSid: "SM-us",
+    From: "+18185550123",
+    To: "+19179939355",
+    Body: "US line",
+  });
+  const france = await service.importInboundSms({
+    MessageSid: "SM-fr",
+    From: "+18185550123",
+    To: "+33187654321",
+    Body: "France line",
+  });
+
+  assert.notEqual(us.ticketId, france.ticketId);
+  assert.equal(store.tickets.get(us.ticketId).details.twilioSupportAddress, "+19179939355");
+  assert.equal(store.tickets.get(france.ticketId).details.twilioSupportAddress, "+33187654321");
+});
+
+test("staff can resolve only cases assigned to their support numbers", async () => {
+  const store = createFakeStore();
+  const service = createSupportTelephonyService({
+    db: store.db,
+    admin: store.admin,
+    clock: () => new Date("2026-09-28T02:00:00.000Z"),
+  });
+  const inbound = await service.importInboundSms({
+    MessageSid: "SM-resolve-1",
+    From: "+18185550123",
+    To: "+19179939355",
+    Body: "Please help",
+  });
+
+  const resolved = await service.resolveCase({ticketId: inbound.ticketId}, {
+    uid: "staff-1",
+    profile: {username: "george"},
+  }, {supportNumbers: ["+19179939355"]});
+
+  assert.equal(resolved.ok, true);
+  assert.equal(resolved.ticket.status, "resolved");
+  assert.equal(store.tickets.get(inbound.ticketId).unread, false);
+  assert.equal(store.tickets.get(inbound.ticketId).resolvedBy, "george");
+  await assert.rejects(() => service.resolveCase({ticketId: inbound.ticketId}, {}, {
+    supportNumbers: ["+33187654321"],
+  }), /not assigned/);
+});
+
+test("each inbound call creates its own case without requiring voicemail", async () => {
   const store = createFakeStore();
   const service = createSupportTelephonyService({
     db: store.db,
@@ -403,15 +540,6 @@ test("each inbound call creates its own case and records voicemail fallback", as
     To: "+19179939355",
   });
 
-  await service.updateCall({
-    ticketId: imported.ticketId,
-    callSid: "CA-test-1",
-    disposition: "voicemail",
-    recordingSid: "RE-test-1",
-    recordingUrl: "https://api.twilio.test/recording",
-    recordingDuration: "12",
-  });
-
   assert.equal(imported.ticketId, callTicketId("CA-test-1"));
   assert.equal(secondCall.ticketId, callTicketId("CA-test-2"));
   assert.notEqual(imported.ticketId, secondCall.ticketId);
@@ -419,11 +547,12 @@ test("each inbound call creates its own case and records voicemail fallback", as
   assert.equal(store.tickets.get(imported.ticketId).source, "phone");
   assert.equal(store.tickets.get(imported.ticketId).needsCaseMatch, true);
   const callMessage = store.messages.get(`${imported.ticketId}:${imported.messageId}`);
-  assert.equal(callMessage.type, "voicemail");
-  assert.equal(callMessage.disposition, "voicemail");
-  assert.equal(callMessage.recordingSid, "RE-test-1");
+  assert.equal(callMessage.type, "call");
+  assert.equal(callMessage.disposition, "ringing");
+  assert.equal(callMessage.recordingSid, undefined);
   const firstCallLog = [...store.callLogs.values()].find((entry) => entry.ticketId === imported.ticketId);
-  assert.equal(firstCallLog.disposition, "voicemail");
+  assert.equal(firstCallLog.disposition, "ringing");
+  assert.equal(firstCallLog.recordingSid, undefined);
 });
 
 test("answering an inbound call assigns and opens its fresh case", async () => {
@@ -979,11 +1108,11 @@ test("outbound SMS records the reviewed reply and callback identity", async () =
   });
 
   assert.equal(result.messageId, "SM-outbound-1");
-  assert.equal(sent.length, 1);
-  assert.equal(sent[0].from, "+19179939355");
-  assert.equal(sent[0].to, "+18185550123");
-  assert.match(sent[0].statusCallback, /messageDocId=generated-/);
-  assert.equal(store.tickets.get(inbound.ticketId).status, "waiting_customer");
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].from, "+19179939355");
+  assert.equal(sent[1].to, "+18185550123");
+  assert.match(sent[1].statusCallback, /messageDocId=generated-/);
+  assert.equal(store.tickets.get(inbound.ticketId).status, "in_progress");
   await assert.rejects(() => service.sendSmsReply({
     ticketId: inbound.ticketId,
     body: "x".repeat(1601),

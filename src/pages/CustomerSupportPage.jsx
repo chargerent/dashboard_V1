@@ -48,6 +48,8 @@ import {
   supportStatusLabel,
   supportTicketDisplayNumber,
   supportTicketMatchesStatusFilter,
+  shouldShowEmailCaseMatchWarning,
+  shouldShowRentalNoMatchWarning,
   ticketMatchesSearch,
 } from '../utils/supportTickets.js';
 
@@ -905,7 +907,7 @@ export default function CustomerSupportPage({
                     </div>
                   </div>
 
-                  {selectedTicket.needsCaseMatch && (
+                  {shouldShowEmailCaseMatchWarning(selectedTicket) && (
                     <div className="mt-4 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
                       <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 shrink-0" />
                       <p>This email looked like a reply, but Gmail could not safely match it to an existing case. Review it before responding.</p>
@@ -974,7 +976,7 @@ export default function CustomerSupportPage({
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <h3 className="text-lg font-bold text-gray-900">Rental investigation</h3>
-                        <p className="mt-1 text-sm text-gray-500">Exact last-four lookup limited to three days before or after the stated rental date, ranked by date and location. Kiosk position and refund status remain separate evidence.</p>
+                        <p className="mt-1 text-sm text-gray-500">Exact last-four lookup limited to three days before or after the stated rental date, ranked by date and location.</p>
                       </div>
                       <div className="flex items-center gap-2">
                         {rentalsLoading && <span className="text-sm text-gray-500">Matching…</span>}
@@ -991,7 +993,11 @@ export default function CustomerSupportPage({
                       </div>
                     </div>
                     {rentalError && <p className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-800">{rentalError}</p>}
-                    {!rentalsLoading && !rentalError && rentalMatches.length === 0 && (
+                    {shouldShowRentalNoMatchWarning(selectedTicket, {
+                      loading: rentalsLoading,
+                      error: rentalError,
+                      matchCount: rentalMatches.length,
+                    }) && (
                       <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
                         <div className="flex items-start gap-2"><ExclamationTriangleIcon className="mt-0.5 h-5 w-5 shrink-0" /><p>No rental with these exact last four digits was found within three days before or after the stated date. The suggested reply asks for the Apple Pay Device Account Number or Google Wallet virtual-card last four.</p></div>
                       </div>

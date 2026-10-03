@@ -41,7 +41,8 @@ export function checkoutLinkUrl(profile,stage,interaction) {
 }
 export function checkoutUsesColumns(width=1080,height=1920,fraction=.32) {
   const density=Math.min(width,height)/540;
-  return (width>height && width>680*density) || (height*fraction<180*density && width>=480*density);
+  const panelHeight=floatingCheckoutGeometry(width,height,fraction).expandedHeight;
+  return (width>height && width>680*density) || (panelHeight<220*density && width>=480*density);
 }
 export function checkoutMoney(cents,currency='usd',language='en') {return Number.isFinite(cents)?new Intl.NumberFormat(({en:'en-US',fr:'fr-FR',es:'es-ES'})[language] || 'en-US',{style:'currency',currency:currency.toUpperCase()}).format(cents/100):'—';}
 export function checkoutPopupValues({event,offer,interaction,language='en'}) {

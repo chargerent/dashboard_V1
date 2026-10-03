@@ -22,15 +22,20 @@ const {createWorkspaceNotification, isValidWorkspaceContactEmail} = require("./w
 const {createSupportTicketService, secretsMatch} = require("./supportTickets");
 const {
   createSupportTelephonyService,
+  memberCanReceiveSupportNumber,
   normalizeE164,
+  normalizeSupportNumbers,
   splitRoutingStaff,
   staffSupportNumbers,
+  ticketCallSupportNumbers,
 } = require("./supportTelephony");
 const {createSupportMobileService} = require("./supportMobile");
+const {createSupportNotificationService} = require("./supportNotifications");
 const {
   VOICE_PROMPT_DEFINITIONS,
   decodeVoicePromptUpload,
   normalizeVoicePromptKey,
+  unansweredCallChoice,
   voicePromptStoragePath,
 } = require("./supportVoicePrompts");
 const {createAccountingService} = require("./accounting");
@@ -57,6 +62,8 @@ const {
   settleStripeReturn,
 } = require("./kioskTerminal");
 const {createMqttBesiterGateway} = require("./besiterGateway");
+const {createAmazonExportService, createAmazonTransport} = require("./amazonRentalExport");
+const ctf7 = require("./ctf7Model");
 const {
   DASHBOARD_STATS_SCHEMA_VERSION,
   applyRentalProjection,
@@ -114,6 +121,11 @@ const supportMobile = createSupportMobileService({
   ticketService: supportTickets,
   telephonyService: supportTelephony,
 });
+const supportNotifications = createSupportNotificationService({
+  db,
+  admin,
+  listRoutingStaff: () => supportTelephony.listRoutingStaff(),
+});
 const gmailSupportInbox = createGmailSupportInbox({admin, db, ticketService: supportTickets});
 const gmailSalesInbox = createGmailSupportInbox({
   admin,
@@ -152,6 +164,7 @@ const CHARGEDROPS_AGREEMENT_OTP_SECRET = defineSecret(
     "CHARGEDROPS_AGREEMENT_OTP_SECRET",
 );
 const BESITER_MQTT_CREDENTIALS = defineSecret("BESITER_MQTT_CREDENTIALS");
+const AMAZON_RENTAL_MQTT_CREDENTIALS = defineSecret("AMAZON_RENTAL_MQTT_CREDENTIALS");
 const PAYTER_CPS_API_KEY = defineSecret("PAYTER_CPS_API_KEY");
 const STORAGE_BUCKET = "node-red-alerts.firebasestorage.app";
 const STORAGE_BUCKET_CANDIDATES = Array.from(new Set([
@@ -485,7 +498,7 @@ const V1_MEDIA_DEFAULT_ALLOWED_HOSTS = new Set([
   "storage.googleapis.com",
 ]);
 let v1MediaDefaultCache = {expiresAt: 0, value: null};
-const NEW_KIOSK_TYPES = new Set(["CT3", "CT4", "CT8", "CT12", "CK24", "CK40", "CK48"]);
+const NEW_KIOSK_TYPES = new Set(["CT3", "CT4", "CT8", "CT12", "CK24", "CK40", "CK48", "CTF7"]);
 const BOUND_KIOSK_TYPE_CONFIG = Object.freeze({
   CT3: {modules: 1, slots: 3},
   CT4: {modules: 1, slots: 4},
@@ -494,6 +507,7 @@ const BOUND_KIOSK_TYPE_CONFIG = Object.freeze({
   CK24: {modules: 6, slots: 24, screen: "24IN"},
   CK40: {modules: 10, slots: 40},
   CK48: {modules: 12, slots: 48},
+  CTF7: {modules: 1, slots: 7},
 });
 const V2_DEFAULT_WIFI = Object.freeze({
   name: "powerbank",
@@ -788,6 +802,13 @@ const kioskTerminalService = createKioskTerminalService({
   besiterGateway: besiterTerminalGatewayProxy,
 });
 const kioskTerminalHandler = createKioskTerminalHandler(kioskTerminalService);
+const amazonRentalExportService = createAmazonExportService({
+  db,
+  getTransport: () => createAmazonTransport({
+    credentials: AMAZON_RENTAL_MQTT_CREDENTIALS.value(),
+    connect: mqtt.connect,
+  }),
+});
 
 function setCorsHeaders(req, res) {
   const origin = req.headers.origin || "*";
@@ -2281,6 +2302,19 @@ function cleanProfile(input) {
   return clean;
 }
 
+function normalizeProfileSupportPhoneNumbers(profile = {}) {
+  const role = String(profile.role || "").trim().toLowerCase();
+  if (role !== "partner" && profile.partner !== true) return [];
+  try {
+    return normalizeSupportNumbers(profile.supportPhoneNumbers);
+  } catch {
+    throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Support phone numbers must include a country code, such as +19179939355.",
+    );
+  }
+}
+
 function isChargeDropsClientProfile(profile) {
   return profile?.product === "chargedrops" ||
     profile?.portalBrand === "chargedrops" ||
@@ -2933,7 +2967,15 @@ function recalculateKioskTotals(kiosk) {
     charging,
   };
 
-  const moduleIds = collectV2ModuleIds(normalizedModules);
+  const fanStation = normalizeKioskType(kiosk?.hardware?.type) === ctf7.MODEL;
+  const moduleIds = fanStation ? normalizedModules.map((module) => module.id) :
+    collectV2ModuleIds(normalizedModules);
+  if (fanStation) {
+    nextKiosk.hardware = {...nextKiosk.hardware, modules: normalizedModules.length,
+      capacity: ctf7.CAPACITY * normalizedModules.length, protocol: ctf7.PROTOCOL};
+    nextKiosk.count = 0;
+    nextKiosk.chargers = "soldout";
+  }
   if (moduleIds.length > 0) {
     nextKiosk.moduleIds = moduleIds;
     nextKiosk.hardware = syncModuleOrder(nextKiosk.hardware, moduleIds);
@@ -5200,7 +5242,7 @@ function createBoundKioskDocument({
   const initialModule = moduleData ? {
     ...clonePlain(moduleData),
     id: moduleId,
-  } : {
+  } : normalizeKioskType(kioskType) === ctf7.MODEL ? ctf7.createModule(moduleId) : {
     id: moduleId,
     total: 0,
     full: 0,
@@ -5271,6 +5313,16 @@ function createBoundKioskDocument({
     createdAt: timestamp,
   };
 
+  if (normalizeKioskType(kioskType) === ctf7.MODEL) {
+    kiosk.active = false;
+    kiosk.enabled = false;
+    kiosk.isNewSchema = true;
+    kiosk.hardware = {...kiosk.hardware, type: ctf7.MODEL,
+      protocol: ctf7.PROTOCOL, modules: 1, capacity: ctf7.CAPACITY,
+      screen: "no screen", audio: "off"};
+    delete kiosk.wifi;
+    kiosk.binding.commissioningState = "awaiting-device-verification";
+  }
   return recalculateKioskTotals(kiosk);
 }
 
@@ -8968,6 +9020,7 @@ async function upsertUserProfileImpl(data) {
   const clean = cleanProfile(profile);
   clean.username = normalizeUsername(clean.username);
   clean.clientId = String(clean.clientId || "").trim().toUpperCase();
+  clean.supportPhoneNumbers = normalizeProfileSupportPhoneNumbers(clean);
   clean.updatedAt = admin.firestore.FieldValue.serverTimestamp();
   if (!clean.createdAt) clean.createdAt = admin.firestore.FieldValue.serverTimestamp();
 
@@ -8982,6 +9035,11 @@ async function createAuthUserAndProfileImpl(data, authState = null) {
   const clientId = String(data?.clientId || "").trim().toUpperCase();
   const profileIn = data?.profile || {};
   const role = String(profileIn.role || "user").trim().toLowerCase();
+  const supportPhoneNumbers = normalizeProfileSupportPhoneNumbers({
+    ...profileIn,
+    role,
+    partner: role === "partner",
+  });
   const contactEmail = String(profileIn.contact?.email || "").trim().toLowerCase();
 
   if (!isValidWorkspaceContactEmail(contactEmail)) {
@@ -9080,6 +9138,7 @@ async function createAuthUserAndProfileImpl(data, authState = null) {
   clean.role = role;
   clean.contact = {...clean.contact, email: contactEmail};
   clean.clientId = role === "admin" ? "" : clientId;
+  clean.supportPhoneNumbers = supportPhoneNumbers;
   clean.authEmail = email;
   clean.updatedAt = admin.firestore.FieldValue.serverTimestamp();
   clean.createdAt = admin.firestore.FieldValue.serverTimestamp();
@@ -10607,7 +10666,21 @@ async function stationBindingBindModuleImpl(data, authState) {
   const country = normalizeCountry(data?.country);
   const requestedStationId = normalizeStationId(data?.stationid);
   const requestedKioskType = getRequestedKioskType(data, requestedStationId);
-  const moduleId = normalizeModuleId(data?.moduleId);
+  let moduleId = normalizeModuleId(data?.moduleId);
+  const isCtf7 = requestedKioskType === ctf7.MODEL;
+  const wireSerial = String(data?.machineSN || "").trim();
+  if (isCtf7) {
+    try {
+      moduleId = ctf7.moduleId(moduleId);
+    } catch (error) {
+      throw new functions.https.HttpsError("invalid-argument", error.message);
+    }
+    if (wireSerial && !/^[A-Za-z0-9_-]{10}$/.test(wireSerial)) {
+      throw new functions.https.HttpsError("invalid-argument", "Reported CTF7 machine SN must be exactly 10 characters.");
+    }
+  } else if (ctf7.isCtf7Module(moduleId)) {
+    throw new functions.https.HttpsError("invalid-argument", "Choose CTF7 for an LM fan module.");
+  }
 
   if (!moduleId) {
     throw new functions.https.HttpsError(
@@ -10675,6 +10748,7 @@ async function stationBindingBindModuleImpl(data, authState) {
 
   const docRef = db.collection("kiosks").doc(provisionid);
   const pendingRef = db.collection("pending").doc(moduleId);
+  const ctf7Ref = isCtf7 ? db.collection(ctf7.BINDINGS_COLLECTION).doc(moduleId) : null;
 
   await db.runTransaction(async (transaction) => {
     const [stationSnap, existingStationSnap] = await Promise.all([
@@ -10683,6 +10757,17 @@ async function stationBindingBindModuleImpl(data, authState) {
           db.collection("kiosks").where("stationid", "==", stationid).limit(1),
       ),
     ]);
+    const ctf7Snap = ctf7Ref ? await transaction.get(ctf7Ref) : null;
+    if (ctf7Snap?.data()?.state === "bound") {
+      throw new functions.https.HttpsError("already-exists", "This CTF7 module already has a station assignment.");
+    }
+    if (isCtf7 && wireSerial) {
+      const aliases = await transaction.get(db.collection(ctf7.BINDINGS_COLLECTION)
+          .where("machineSN", "==", wireSerial).limit(2));
+      if (aliases.docs.some((entry) => entry.id !== moduleId)) {
+        throw new functions.https.HttpsError("already-exists", "Reported CTF7 serial is registered to another module.");
+      }
+    }
 
     if (!existingStationSnap.empty) {
       throw new functions.https.HttpsError(
@@ -10698,18 +10783,24 @@ async function stationBindingBindModuleImpl(data, authState) {
       );
     }
 
-    transaction.set(
-        docRef,
-          createBoundKioskDocument({
+    const boundKiosk = createBoundKioskDocument({
             provisionid,
             stationid,
             moduleId,
             country,
             actorUid: authState.uid,
             kioskType: getRequestedKioskType(data, stationid),
-          }),
-        {merge: true},
-    );
+          });
+    if (isCtf7) {
+      boundKiosk.modules[0].machineSN = wireSerial || ctf7Snap?.data()?.machineSN || "";
+      transaction.set(ctf7Ref, ctf7.boundRegistry({module: boundKiosk.modules[0],
+        stationid, provisionid, previous: ctf7Snap?.data() || {},
+        timestamp: admin.firestore.FieldValue.serverTimestamp(), actorUid: authState.uid}));
+      if (wireSerial && ctf7.moduleId(wireSerial) !== moduleId) {
+        transaction.delete(db.collection("pending").doc(ctf7.moduleId(wireSerial)));
+      }
+    }
+    transaction.set(docRef, boundKiosk, {merge: true});
     transaction.delete(pendingRef);
   });
 
@@ -10808,12 +10899,24 @@ async function stationBindingUnbindModuleImpl(data, authState) {
 
   const docRef = matchingDoc.ref;
   const pendingRef = db.collection("pending").doc(moduleId);
+  const ctf7Ref = ctf7.isCtf7Module(moduleId) ? db.collection(ctf7.BINDINGS_COLLECTION).doc(moduleId) : null;
 
   await db.runTransaction(async (transaction) => {
     const [stationSnap, pendingSnap] = await Promise.all([
       transaction.get(docRef),
       transaction.get(pendingRef),
     ]);
+    const ctf7Snap = ctf7Ref ? await transaction.get(ctf7Ref) : null;
+    if (ctf7Ref) {
+      if (ctf7Snap?.data()?.state !== "bound" ||
+          ctf7Snap.data().provisionid !== docRef.id || ctf7Snap.data().stationid !== stationid) {
+        throw new functions.https.HttpsError("failed-precondition", "CTF7 assignment changed. Refresh before unbinding.");
+      }
+      const lockSnap = await transaction.get(db.collection("ctf7CommandLocks").doc(moduleId));
+      if (lockSnap.data()?.unresolved) {
+        throw new functions.https.HttpsError("failed-precondition", "Resolve the pending CTF7 dispense before unbinding.");
+      }
+    }
 
     if (!stationSnap.exists) {
       throw new functions.https.HttpsError(
@@ -10851,6 +10954,12 @@ async function stationBindingUnbindModuleImpl(data, authState) {
     }
 
     const pendingData = pendingSnap.exists ? pendingSnap.data() || {} : {};
+    if (ctf7Ref) {
+      transaction.set(ctf7Ref, {...(ctf7Snap?.data() || {}), state: "unbound",
+        stationid: "", provisionid: "", controlEnabled: false,
+        generation: Number(ctf7Snap?.data()?.generation || 0) + 1,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(), updatedBy: authState.uid});
+    }
     transaction.set(pendingRef, {
       ...pendingData,
       moduleId,
@@ -10936,6 +11045,10 @@ async function stationBindingMoveModuleImpl(data, authState) {
   const sourceModule = sourceModules.find(
       (module) => moduleIdsMatch(module?.id, moduleId),
   );
+  const isCtf7 = ctf7.isCtf7Module(sourceModule || moduleId);
+  if (isCtf7 && createNewStation && destinationKioskType !== ctf7.MODEL) {
+    throw new functions.https.HttpsError("failed-precondition", "Choose CTF7 for the new fan station.");
+  }
 
   if (!sourceModule) {
     throw new functions.https.HttpsError(
@@ -11009,6 +11122,9 @@ async function stationBindingMoveModuleImpl(data, authState) {
   }
 
   if (destinationDoc) {
+    if (isCtf7 !== (normalizeKioskType(destinationDoc.data()?.hardware?.type) === ctf7.MODEL)) {
+      throw new functions.https.HttpsError("failed-precondition", "CTF7 modules require a CTF7 station during commissioning.");
+    }
     const destinationModules = Array.isArray(destinationDoc.data()?.modules) ?
       destinationDoc.data().modules :
       [];
@@ -11029,6 +11145,7 @@ async function stationBindingMoveModuleImpl(data, authState) {
     destinationDoc.ref;
   const pendingRef = db.collection("pending").doc(moduleId);
   const rebindRef = db.collection("moduleRebindCommands").doc();
+  const ctf7Ref = isCtf7 ? db.collection(ctf7.BINDINGS_COLLECTION).doc(moduleId) : null;
 
   await db.runTransaction(async (transaction) => {
     const reads = [transaction.get(sourceRef), transaction.get(pendingRef)];
@@ -11045,6 +11162,17 @@ async function stationBindingMoveModuleImpl(data, authState) {
 
     const [sourceSnap, pendingSnap, destinationSnap, destinationStationSnap] =
       await Promise.all(reads);
+    const ctf7Snap = ctf7Ref ? await transaction.get(ctf7Ref) : null;
+    if (ctf7Ref) {
+      if (ctf7Snap?.data()?.state !== "bound" ||
+          ctf7Snap.data().provisionid !== sourceRef.id || ctf7Snap.data().stationid !== sourceStationid) {
+        throw new functions.https.HttpsError("failed-precondition", "CTF7 assignment changed. Refresh before moving.");
+      }
+      const lockSnap = await transaction.get(db.collection("ctf7CommandLocks").doc(moduleId));
+      if (lockSnap.data()?.unresolved) {
+        throw new functions.https.HttpsError("failed-precondition", "Resolve the pending CTF7 dispense before moving this module.");
+      }
+    }
 
     if (!sourceSnap.exists) {
       throw new functions.https.HttpsError(
@@ -11110,6 +11238,9 @@ async function stationBindingMoveModuleImpl(data, authState) {
       }
 
       const liveDestination = destinationSnap.data() || {};
+      if (isCtf7 !== (normalizeKioskType(liveDestination.hardware?.type) === ctf7.MODEL)) {
+        throw new functions.https.HttpsError("failed-precondition", "Fan and Besiter modules require separate stations during commissioning.");
+      }
       const destinationModules = Array.isArray(liveDestination.modules) ?
         liveDestination.modules :
         [];
@@ -11159,7 +11290,12 @@ async function stationBindingMoveModuleImpl(data, authState) {
       transaction.delete(pendingRef);
     }
 
-    transaction.set(rebindRef, {
+    if (ctf7Ref) {
+      transaction.set(ctf7Ref, ctf7.boundRegistry({module: movedModule,
+        stationid: destinationStationid, provisionid: destinationProvisionid,
+        previous: ctf7Snap?.data() || {}, timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        actorUid: authState.uid}));
+    } else transaction.set(rebindRef, {
       commandId: rebindRef.id,
       moduleId,
       sourceStationid,
@@ -11188,8 +11324,8 @@ async function stationBindingMoveModuleImpl(data, authState) {
     destinationStationid,
     destinationProvisionid,
     moduleId,
-    rebindCommandId: rebindRef.id,
-    reconnectState: "pending",
+    rebindCommandId: isCtf7 ? null : rebindRef.id,
+    reconnectState: isCtf7 ? "assignment-updated" : "pending",
     createNewStation,
     qrUrl: buildQrUrl(destinationStationid),
     nextStationid: followingStation,
@@ -11522,28 +11658,8 @@ async function handleSupportVoicePromptMedia(req, res) {
   });
 }
 
-async function voicemailResponse(req, {ticketId, callSid}) {
+async function callbackOfferResponse(req, {ticketId, callSid}) {
   const response = new twilio.twiml.VoiceResponse();
-  await appendVoicePrompt(response, "voicemail_greeting");
-  response.record({
-    action: twilioCallbackUrl(req, "voicemail-finished", {ticketId, callSid}),
-    method: "POST",
-    maxLength: 120,
-    timeout: 5,
-    finishOnKey: "#",
-    playBeep: true,
-    recordingStatusCallback: twilioCallbackUrl(req, "voicemail-ready", {ticketId, callSid}),
-    recordingStatusCallbackMethod: "POST",
-    recordingStatusCallbackEvent: "completed",
-  });
-  return response;
-}
-
-async function callbackOfferResponse(req, {ticketId, callSid, includeRecordingNotice = false}) {
-  const response = new twilio.twiml.VoiceResponse();
-  if (includeRecordingNotice) {
-    await appendVoicePrompt(response, "recording_notice");
-  }
   const gather = response.gather({
     action: twilioCallbackUrl(req, "callback-choice", {ticketId, callSid}),
     method: "POST",
@@ -11552,7 +11668,7 @@ async function callbackOfferResponse(req, {ticketId, callSid, includeRecordingNo
     timeout: 7,
     actionOnEmptyResult: true,
   });
-  await appendVoicePrompt(gather, "callback_offer");
+  await appendVoicePrompt(gather, "callback_or_text");
   return response;
 }
 
@@ -11645,6 +11761,22 @@ async function queuedCallerResponse(req, {ticketId, callSid, queueName}) {
   return response;
 }
 
+async function notifySupportAttention(data) {
+  try {
+    return await supportNotifications.notify({
+      ...data,
+      fallbackNumber: twilioSecretValue(TWILIO_SUPPORT_NUMBER),
+    });
+  } catch (error) {
+    console.error("Unable to send support app notification", {
+      type: String(data?.type || "unknown"),
+      resourceId: String(data?.resourceId || "").slice(0, 200),
+      message: error?.message || "unknown error",
+    });
+    return {ok: false};
+  }
+}
+
 async function supportTwilioVoiceAction(payload, req, res) {
   const phase = String(req.query?.phase || "incoming").trim();
 
@@ -11720,7 +11852,7 @@ async function supportTwilioVoiceAction(payload, req, res) {
     const supportNumber = normalizeE164(payload.To);
     const defaultSupportNumber = normalizeE164(twilioSecretValue(TWILIO_SUPPORT_NUMBER));
     const eligibleStaff = (await supportTelephony.listRoutingStaff()).filter((member) =>
-      staffSupportNumbers(member, defaultSupportNumber).includes(supportNumber),
+      memberCanReceiveSupportNumber(member, supportNumber, defaultSupportNumber),
     );
     const staff = splitRoutingStaff(eligibleStaff, {
       deliveryMode: routingMode,
@@ -11744,14 +11876,19 @@ async function supportTwilioVoiceAction(payload, req, res) {
         disposition: "unanswered",
         providerStatus: "no-available-staff",
       });
+      await notifySupportAttention({
+        type: "missed_call",
+        resourceId: imported.ticketId,
+        ticketId: imported.ticketId,
+        supportNumber,
+        destination: "missed_calls",
+        title: "Missed support call",
+        body: "A customer could not reach an available representative.",
+      });
     }
     const response = routing.hasStaff ?
       await queuedCallerResponse(req, {ticketId: imported.ticketId, callSid, queueName}) :
-      await callbackOfferResponse(req, {
-        ticketId: imported.ticketId,
-        callSid,
-        includeRecordingNotice: true,
-      });
+      await callbackOfferResponse(req, {ticketId: imported.ticketId, callSid});
     sendTwiml(res, response);
     return;
   }
@@ -11868,6 +12005,14 @@ async function supportTwilioVoiceAction(payload, req, res) {
       disposition: "unanswered",
       providerStatus: queueResult || "no-answer",
     });
+    await notifySupportAttention({
+      type: "missed_call",
+      resourceId: ticketId,
+      ticketId,
+      destination: "missed_calls",
+      title: "Missed support call",
+      body: "A customer support call was not answered.",
+    });
     if (queueResult === "hangup") {
       const response = new twilio.twiml.VoiceResponse();
       response.hangup();
@@ -11879,6 +12024,14 @@ async function supportTwilioVoiceAction(payload, req, res) {
   }
 
   if (phase === "callback-offer") {
+    await notifySupportAttention({
+      type: "missed_call",
+      resourceId: ticketId,
+      ticketId,
+      destination: "missed_calls",
+      title: "Missed support call",
+      body: "A customer support call was not answered.",
+    });
     sendTwiml(res, await callbackOfferResponse(req, {ticketId, callSid}));
     return;
   }
@@ -11941,7 +12094,7 @@ async function supportTwilioVoiceAction(payload, req, res) {
   }
 
   if (phase === "callback-choice") {
-    if (String(payload.Digits || "") === "1") {
+    if (unansweredCallChoice(payload.Digits) === "callback") {
       await supportTelephony.requestCallback({ticketId, callSid});
       const response = new twilio.twiml.VoiceResponse();
       await appendVoicePrompt(response, "callback_confirmed");
@@ -11949,33 +12102,10 @@ async function supportTwilioVoiceAction(payload, req, res) {
       sendTwiml(res, response);
       return;
     }
-    sendTwiml(res, await voicemailResponse(req, {ticketId, callSid}));
-    return;
-  }
-
-  if (phase === "voicemail-finished") {
     const response = new twilio.twiml.VoiceResponse();
-    await appendVoicePrompt(response, "voicemail_confirmed");
+    await appendVoicePrompt(response, "text_chat_available");
     response.hangup();
     sendTwiml(res, response);
-    return;
-  }
-
-  if (phase === "voicemail-ready") {
-    await supportTelephony.updateCall({
-      ticketId,
-      callSid,
-      disposition: "voicemail",
-      recordingSid: payload.RecordingSid,
-      recordingUrl: payload.RecordingUrl,
-      recordingDuration: payload.RecordingDuration,
-      recordingStatus: payload.RecordingStatus,
-      recordingChannels: payload.RecordingChannels,
-      recordingStartTime: payload.RecordingStartTime,
-      recordingSource: payload.RecordingSource,
-      providerStatus: payload.RecordingStatus,
-    });
-    res.status(204).send("");
     return;
   }
 
@@ -11995,7 +12125,18 @@ async function supportTwilioSmsAction(payload, req, res) {
     res.status(204).send("");
     return;
   }
-  await supportTelephony.importInboundSms(payload);
+  const imported = await supportTelephony.importInboundSms(payload);
+  if (!imported.duplicate) {
+    await notifySupportAttention({
+      type: "text",
+      resourceId: imported.ticketId,
+      ticketId: imported.ticketId,
+      supportNumber: payload.To,
+      destination: "messages",
+      title: "New support message",
+      body: "A customer sent a new support message.",
+    });
+  }
   sendTwiml(res, new twilio.twiml.MessagingResponse());
 }
 
@@ -12030,13 +12171,7 @@ async function handleSupportMobileRequest(req, res, action) {
 }
 
 async function createSupportVoiceAccessToken(authState) {
-  const member = await supportTelephony.voiceStaffForUser(authState.uid);
-  if (!member) {
-    throw new functions.https.HttpsError(
-        "permission-denied",
-        "This account is not assigned to support calling.",
-    );
-  }
+  const member = await assertSupportMobileStaff(authState);
 
   const accountSid = twilioSecretValue(TWILIO_ACCOUNT_SID);
   const apiKeySid = twilioSecretValue(TWILIO_API_KEY_SID);
@@ -12070,44 +12205,56 @@ async function createSupportVoiceAccessToken(authState) {
   };
 }
 
+function supportScopeForStaff(authState, member, fallbackNumber = "") {
+  if (authState?.isAdmin) return undefined;
+  const role = String(authState?.profile?.role || "").trim().toLowerCase();
+  const isPartner = role === "partner" || authState?.profile?.partner === true;
+  return staffSupportNumbers(member, isPartner ? "" : fallbackNumber);
+}
+
 async function listSupportMobileCallLog(data, authState) {
-  const member = await supportTelephony.voiceStaffForUser(authState.uid);
-  if (!member) {
-    throw new functions.https.HttpsError(
-        "permission-denied",
-        "This account is not assigned to support calling.",
-    );
-  }
-  const supportNumbers = staffSupportNumbers(member, twilioSecretValue(TWILIO_SUPPORT_NUMBER));
+  const member = await assertSupportMobileStaff(authState);
+  const supportNumbers = supportScopeForStaff(
+      authState,
+      member,
+      twilioSecretValue(TWILIO_SUPPORT_NUMBER),
+  );
   return {
     calls: await supportTelephony.listCallLogs(data?.limit, supportNumbers),
   };
 }
 
 async function listSupportMobileCases(data, authState) {
-  const member = await supportTelephony.voiceStaffForUser(authState.uid);
-  if (!member) {
-    throw new functions.https.HttpsError(
-        "permission-denied",
-        "This account is not assigned to support calling.",
-    );
-  }
-  const supportNumbers = staffSupportNumbers(member, twilioSecretValue(TWILIO_SUPPORT_NUMBER));
+  const member = await assertSupportMobileStaff(authState);
+  const supportNumbers = supportScopeForStaff(
+      authState,
+      member,
+      twilioSecretValue(TWILIO_SUPPORT_NUMBER),
+  );
   return {
     cases: await supportTelephony.listActiveCases(data?.limit, supportNumbers),
   };
 }
 
 async function updateSupportMobileCallCase(data, authState) {
-  const member = await supportTelephony.voiceStaffForUser(authState.uid);
-  if (!member) {
-    throw new functions.https.HttpsError(
-        "permission-denied",
-        "This account is not assigned to support calling.",
-    );
-  }
+  const member = await assertSupportMobileStaff(authState);
   return supportTelephony.linkCallToCase(data, authState, {
-    supportNumbers: staffSupportNumbers(member, twilioSecretValue(TWILIO_SUPPORT_NUMBER)),
+    supportNumbers: supportScopeForStaff(
+        authState,
+        member,
+        twilioSecretValue(TWILIO_SUPPORT_NUMBER),
+    ),
+  });
+}
+
+async function resolveSupportMobileCase(data, authState) {
+  const member = await assertSupportMobileStaff(authState);
+  return supportTelephony.resolveCase(data, authState, {
+    supportNumbers: supportScopeForStaff(
+        authState,
+        member,
+        twilioSecretValue(TWILIO_SUPPORT_NUMBER),
+    ),
   });
 }
 
@@ -12126,7 +12273,7 @@ async function searchSupportMobileRentals(data, authState) {
   const member = await assertSupportMobileStaff(authState);
   await supportTelephony.assertCaseAccess(
       data?.ticketId,
-      staffSupportNumbers(member, twilioSecretValue(TWILIO_SUPPORT_NUMBER)),
+      supportScopeForStaff(authState, member, twilioSecretValue(TWILIO_SUPPORT_NUMBER)),
   );
   return supportMobile.searchRentals(data, authState);
 }
@@ -12135,23 +12282,24 @@ async function matchSupportMobileRental(data, authState) {
   const member = await assertSupportMobileStaff(authState);
   await supportTelephony.assertCaseAccess(
       data?.ticketId,
-      staffSupportNumbers(member, twilioSecretValue(TWILIO_SUPPORT_NUMBER)),
+      supportScopeForStaff(authState, member, twilioSecretValue(TWILIO_SUPPORT_NUMBER)),
   );
   return supportMobile.matchRental(data, authState);
 }
 
 async function listSupportMobileTextConversations(data, authState) {
-  await assertSupportMobileStaff(authState);
+  const member = await assertSupportMobileStaff(authState);
+  const supportNumbers = supportScopeForStaff(authState, member);
   const [conversations, capabilities] = await Promise.all([
-    supportMobile.listTextConversations(data?.limit),
+    supportMobile.listTextConversations(data?.limit, supportNumbers),
     supportMobile.messagingCapabilities(),
   ]);
   return {conversations, capabilities};
 }
 
 async function listSupportMobileTextMessages(data, authState) {
-  await assertSupportMobileStaff(authState);
-  return supportMobile.listTextMessages(data);
+  const member = await assertSupportMobileStaff(authState);
+  return supportMobile.listTextMessages(data, supportScopeForStaff(authState, member));
 }
 
 async function supportMobileMessageCapabilities(data, authState) {
@@ -12160,15 +12308,39 @@ async function supportMobileMessageCapabilities(data, authState) {
 }
 
 async function sendSupportMobileText(data, authState) {
-  await assertSupportMobileStaff(authState);
+  const member = await assertSupportMobileStaff(authState);
+  const supportNumbers = supportScopeForStaff(authState, member);
+  const access = await supportTelephony.assertCaseAccess(data?.ticketId, supportNumbers);
+  const ticketNumbers = ticketCallSupportNumbers(access.ticket);
+  const defaultNumber = normalizeE164(twilioSecretValue(TWILIO_SUPPORT_NUMBER));
+  const fromNumber = supportNumbers === undefined ?
+    (ticketNumbers[0] || defaultNumber) :
+    ticketNumbers.find((number) => supportNumbers.includes(number));
+  if (!fromNumber) {
+    throw new functions.https.HttpsError(
+        "permission-denied",
+        "This conversation is not assigned to one of your support numbers.",
+    );
+  }
   return supportMobile.sendText(data, authState, {
-    fromNumber: twilioSecretValue(TWILIO_SUPPORT_NUMBER),
+    fromNumber,
+    supportNumbers,
     statusCallbackUrl: ({ticketId, messageDocId}) => fixedTwilioCallbackUrl(
         TWILIO_SMS_WEBHOOK_URL,
         "status",
         {ticketId, messageDocId},
     ),
   });
+}
+
+async function registerSupportMobileNotificationToken(data, authState) {
+  await assertSupportMobileStaff(authState);
+  return supportNotifications.registerDevice(data, authState);
+}
+
+async function acknowledgeSupportMobileNotification(data, authState) {
+  await assertSupportMobileStaff(authState);
+  return supportNotifications.acknowledge(data, authState);
 }
 
 exports.admin_listUsers = functions.https.onCall(async (data, context) => {
@@ -12434,7 +12606,7 @@ exports.support_chatbotEvent = functions.runWith({
 }));
 
 exports.support_twilioSms = functions.runWith({
-  secrets: [TWILIO_AUTH_TOKEN],
+  secrets: [TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN],
   timeoutSeconds: 30,
 }).https.onRequest(async (req, res) => handleTwilioWebhook(
     req,
@@ -12507,6 +12679,15 @@ exports.support_mobileCallCase = functions.runWith({
     (data, authState) => updateSupportMobileCallCase(data, authState),
 ));
 
+exports.support_mobileResolveCase = functions.runWith({
+  secrets: [TWILIO_SUPPORT_NUMBER],
+  timeoutSeconds: 30,
+}).https.onRequest(async (req, res) => handleSupportMobileRequest(
+    req,
+    res,
+    (data, authState) => resolveSupportMobileCase(data, authState),
+));
+
 exports.support_mobileRentalSearch = functions.runWith({
   secrets: [TWILIO_SUPPORT_NUMBER],
   timeoutSeconds: 30,
@@ -12556,6 +12737,22 @@ exports.support_mobileSendSms = functions.runWith({
     req,
     res,
     (data, authState) => sendSupportMobileText(data, authState),
+));
+
+exports.support_mobileRegisterNotificationToken = functions.runWith({
+  timeoutSeconds: 30,
+}).https.onRequest(async (req, res) => handleSupportMobileRequest(
+    req,
+    res,
+    (data, authState) => registerSupportMobileNotificationToken(data, authState),
+));
+
+exports.support_mobileAcknowledgeNotification = functions.runWith({
+  timeoutSeconds: 30,
+}).https.onRequest(async (req, res) => handleSupportMobileRequest(
+    req,
+    res,
+    (data, authState) => acknowledgeSupportMobileNotification(data, authState),
 ));
 
 exports.support_updateTicket = functions.https.onCall(async (data, context) => {
@@ -12647,6 +12844,27 @@ exports.support_purgeExpiredCallContent = onSchedule({
   });
   console.log("Support call content retention completed", result);
 });
+
+exports.support_notifyNewCase = onDocumentWritten(
+    "supportTickets/{ticketId}",
+    async (event) => {
+      if (!event.data.after.exists) return;
+      const after = event.data.after.data() || {};
+      const before = event.data.before.exists ? event.data.before.data() || {} : null;
+      if (String(after.status || "").toLowerCase() !== "new" ||
+          String(before?.status || "").toLowerCase() === "new") return;
+      const source = String(after.source || after.channel || "").trim().toLowerCase();
+      if (new Set(["phone", "sms", "rcs"]).has(source)) return;
+      await notifySupportAttention({
+        type: "case",
+        resourceId: event.params.ticketId,
+        ticketId: event.params.ticketId,
+        destination: "cases",
+        title: "New support case",
+        body: "A new Chargerent support case is waiting.",
+      });
+    },
+);
 
 exports.support_syncGmailInbox = functions.runWith({timeoutSeconds: 540}).https.onCall(async (_data, context) => {
   await assertAdminFromContext(context);
@@ -13697,3 +13915,22 @@ exports.kioskTerminal_settleStripeReturn = onDocumentWritten({
 });
 
 exports.rbcOpenApi = rbcOpenApi;
+
+exports.rentals_exportAmazon = onDocumentWritten({
+  document: "rentals/{rentalId}",
+  secrets: [AMAZON_RENTAL_MQTT_CREDENTIALS],
+  timeoutSeconds: 120,
+  retry: true,
+}, async (event) => {
+  if (!event.data.after.exists) return;
+  const id = await amazonRentalExportService.enqueue(event.data.after.data(), event.params.rentalId);
+  if (id) await amazonRentalExportService.deliver(id);
+});
+
+exports.rentals_retryAmazonExports = onSchedule({
+  schedule: "every 1 minutes",
+  secrets: [AMAZON_RENTAL_MQTT_CREDENTIALS],
+  timeoutSeconds: 360,
+}, async () => {
+  await amazonRentalExportService.retryPending();
+});

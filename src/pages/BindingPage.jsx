@@ -5,6 +5,7 @@ import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
 import DashboardPageActions from '../components/UI/DashboardPageActions.jsx';
 import { callFunctionWithAuth } from '../utils/callableRequest.js';
 import { buildStationQrUrl, normalizeStationId, parseStationQrInput } from '../utils/stationQr.js';
+import { parseCtf7ModuleId } from '../utils/ctf7.js';
 
 const COUNTRY_OPTIONS = [
   { code: 'CA', label: 'Canada' },
@@ -12,7 +13,7 @@ const COUNTRY_OPTIONS = [
   { code: 'US', label: 'United States' },
 ];
 
-const KIOSK_TYPE_OPTIONS = ['CT3', 'CT4', 'CT8', 'CT12', 'CK24', 'CK40', 'CK48'];
+const KIOSK_TYPE_OPTIONS = ['CT3', 'CT4', 'CT8', 'CT12', 'CK24', 'CK40', 'CK48', 'CTF7'];
 const DEFAULT_KIOSK_TYPE = 'CT8';
 
 function normalizeModuleId(moduleId) {
@@ -223,6 +224,7 @@ export default function BindingPage({
   const [stationQrInput, setStationQrInput] = useState('');
   const [moduleId, setModuleId] = useState('');
   const [kioskType, setKioskType] = useState(DEFAULT_KIOSK_TYPE);
+  const [ctf7MachineSN, setCtf7MachineSN] = useState('');
   const [stationInfo, setStationInfo] = useState({ stationid: '', qrUrl: '' });
   const [pageError, setPageError] = useState('');
   const [moveError, setMoveError] = useState('');
@@ -410,6 +412,7 @@ export default function BindingPage({
   }, []);
 
   const resetBindingForm = useCallback(() => {
+    setCtf7MachineSN('');
     setStationQrInput('');
     setModuleId('');
     setStationInfo({ stationid: '', qrUrl: '' });
@@ -484,6 +487,7 @@ export default function BindingPage({
   }, [commitStationQrInput]);
 
   const commitModuleInput = useCallback((rawValue) => {
+    if (kioskType === 'CTF7') return false;
     const parsedValue = parseModuleScanInput(rawValue);
 
     if (!parsedValue.moduleId || parsedValue.mode === 'literal' || parsedValue.mode === 'invalid') {
@@ -495,7 +499,7 @@ export default function BindingPage({
     }
 
     return true;
-  }, []);
+  }, [kioskType]);
 
   useEffect(() => {
     const trimmedModuleId = moduleId.trim();
@@ -543,9 +547,11 @@ export default function BindingPage({
       return { error: t('module_id_required') };
     }
 
-    const parsedValue = parseModuleScanInput(rawModuleValue);
+    const parsedValue = kioskType === 'CTF7' ? {
+      mode: 'literal', moduleId: parseCtf7ModuleId(rawModuleValue),
+    } : parseModuleScanInput(rawModuleValue);
 
-    if (parsedValue.mode === 'invalid') {
+    if (parsedValue.mode === 'invalid' || !parsedValue.moduleId) {
       return { error: t('module_scan_invalid') };
     }
 
@@ -558,7 +564,7 @@ export default function BindingPage({
       parsedValue,
       resolvedModuleId,
     };
-  }, [allStationsData, moduleId, t]);
+  }, [allStationsData, kioskType, moduleId, t]);
 
   const resolveUnbindRequest = useCallback(() => {
     const requestedStationid = normalizeStationId(stationInfo.stationid);
@@ -697,6 +703,7 @@ export default function BindingPage({
         stationid: normalizedStationId,
         moduleId: moduleResolution.resolvedModuleId,
         kioskType,
+        ...(kioskType === 'CTF7' ? {machineSN: ctf7MachineSN.trim()} : {}),
       });
 
       resetBindingForm();
@@ -711,6 +718,7 @@ export default function BindingPage({
     ensureSignedIn,
     focusStationQrInput,
     kioskType,
+    ctf7MachineSN,
     moduleId,
     normalizedStationId,
     resetBindingForm,
@@ -946,10 +954,22 @@ export default function BindingPage({
                       value={moduleId}
                       onChange={handleModuleInputChange}
                       onKeyDown={handleModuleInputKeyDown}
-                      placeholder="867652077228617"
+                      placeholder={kioskType === 'CTF7' ? 'ZDHW0726090' : '867652077228617'}
                       className="w-full rounded-md border border-gray-300 bg-white px-4 py-3 text-sm font-medium text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
                     />
                   </label>
+                  {kioskType === 'CTF7' && (
+                    <div className="space-y-3 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-gray-700">
+                      <p>One CTF7 unit is one module with seven slots. Enter its label serial above. The module keeps this identity when assigned to another station.</p>
+                      <label className="block">
+                        <span className="mb-2 block font-semibold">Reported machine serial (optional)</span>
+                        <input type="text" value={ctf7MachineSN} onChange={(event) => setCtf7MachineSN(event.target.value)}
+                          maxLength={10} placeholder="10 characters from the unit login"
+                          className="w-full rounded-md border border-gray-300 bg-white px-4 py-3 font-mono" />
+                      </label>
+                      <p>Leave this blank until the unit connects. Rentals stay disabled until its seven physical slots are verified.</p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex flex-col gap-3 sm:flex-row">

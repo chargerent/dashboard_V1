@@ -17,6 +17,26 @@ const CHECKOUT=`/device/stations/${STATION}/checkout`;
 // sessionStorage keeps the actor, interaction and create key across this tab's reloads.
 const STORAGE='chargerent-media-browser-checkout-tab-v1';
 const TERMINAL=new Set(['succeeded','declined','cancelled','failed']);
+const MOCK_QR_STAGES=new Set(['terms','map']);
+const CHECKOUT_STEP_ICONS={rent:'qr',card:'card',scanner:'qr',phone:'phone',charge:'bolt',return:'download'};
+const DECORATIVE_QR_PATTERN=[
+  '111111101100001111111','100000101110001000001','101110101001101011101','101110100010101011101','101110101010101011101','100000100111001000001','111111101010101111111',
+  '000000001010000000000','101011100011001000111','101101001000001000001','000000111001010110010','100001010010111111011','110010101000000000001','000000001011111110111',
+  '111111100000110100011','101110101111010111101','101110100110110101001','101110101010100010000','100000101011111000111','111111101111010111101','111111101101001000001',
+];
+function MockQrCode({label}) {
+  return <svg className="ms-checkout-mock-qr" viewBox="0 0 25 25" role="img" aria-label={label} shapeRendering="crispEdges">
+    <rect width="25" height="25" fill="#fff"/>
+    {DECORATIVE_QR_PATTERN.flatMap((row,y)=>[...row].map((cell,x)=>cell==='1'?<rect key={`${x}-${y}`} x={x+2} y={y+2} width="1" height="1" fill="currentColor"/>:null))}
+  </svg>;
+}
+function checkoutGatewayStep(checkout) {
+  const gateway=String(checkout.offer?.gateway || checkout.offer?.reader?.type || '').trim().toLowerCase().replace(/[^a-z0-9]+/g,'_');
+  if(/(^|_)(phone|mobile|sms)(_|$)/.test(gateway))return 'phone';
+  if(/(^|_)(scanner|barcode)(_|$)/.test(gateway))return 'scanner';
+  if(/(^|_)(p68|stripe|apollo|card|reader|m2|wisepad|s700|bbpos)(_|$)/.test(gateway))return 'card';
+  return 'rent';
+}
 function stored(key) {try{return sessionStorage.getItem(`${STORAGE}:${key}`);}catch{return null;}}
 function remember(key,value) {try{if(value===null)sessionStorage.removeItem(`${STORAGE}:${key}`);else sessionStorage.setItem(`${STORAGE}:${key}`,String(value));}catch{/* The current session still works when storage is disabled. */}}
 async function request(path,options={}) {
@@ -170,7 +190,7 @@ export function CheckoutPanel({checkout={},previewOnly=false,previewStage,previe
     if(mayDismissCheckoutReturn(shownReturn.current,returnNotice.eventId,returnContext,returnSafe)){setFlow({...IDLE_CHECKOUT_FLOW});if(!returnOnly && !previewOnly && ended)checkout.reset?.();}
     setReturnNotice(null);setQrOpen(false);
   },[returnNotice,noticeNow,returnSafe,returnContext,ended,previewOnly,returnOnly]);
-  const geometry=floatingCheckoutGeometry(viewportWidth,viewportHeight,returnOnly ? .16 : height),idle=stage==='start';
+  const geometry=floatingCheckoutGeometry(viewportWidth,viewportHeight,returnOnly ? .16 : height),idle=stage==='start' || stage==='loading';
   const receiptSizing=returnReceiptSizing(geometry.expandedHeight,geometry.scale);
   useEffect(()=>{
     for(const scroller of panel.current?.querySelectorAll('.ms-checkout-main,.ms-checkout-actions') || [])scroller.scrollTop=0;
@@ -180,12 +200,15 @@ export function CheckoutPanel({checkout={},previewOnly=false,previewStage,previe
   const values=noticePresentation?{deposit:'—',fee:'—',refund:'—',slot:returnNotice?.slot ?? interaction?.returnSlot ?? interaction?.slot ?? '—',available:'—'}:{deposit:money(interaction?.amountCents ?? offer?.depositAmountCents ?? offer?.amountCents),fee:money(returned?interaction?.settlement?.chargedAmountCents:offer?.rentalFeeCents),refund:money(returned?interaction?.settlement?.refundedAmountCents:offer?.refundAmountCents),slot:interaction?.returnSlot ?? interaction?.slot ?? '—',available:offer?.availableCount ?? '—'};
   const text=key=>stripeText(profile,language,key,values);
   const pageText=key=>stripePageText(profile,currentPage,language,key,values);
-  const title=currentPage?pageText('title'):text(`${stage}.title`),body=currentPage?pageText('body'):text(`${stage}.body`);
+  const liveTerminalEnabled=checkout.liveTerminalEnabled===true;
+  const presentationStage=liveTerminalEnabled && stage==='authorizing'?'waiting_for_card':stage;
+  const title=currentPage?pageText('title'):text(`${presentationStage}.title`),body=currentPage?pageText('body'):text(`${presentationStage}.body`);
   const themeStyle={...Object.fromEntries(Object.entries(profile.theme).map(([key,value])=>[`--checkout-${key}`,value])),'--checkout-pixel':`calc(var(--ms-preview-pixel) * ${geometry.scale})`};
   const px=value=>`calc(var(--ms-preview-pixel) * ${value})`;
   const cardStyle={...themeStyle,'--return-qr-size':px(receiptSizing.qr),'--return-done-height':px(receiptSizing.done),'--return-gap':px(receiptSizing.gap),width:px(idle?geometry.idleWidth:geometry.expandedWidth),height:px(idle?geometry.idleHeight:geometry.expandedHeight),bottom:px(geometry.bottom),borderRadius:px(geometry.radius)};
   const canSubmit=!previewOnly && canCreateCheckout(flow,{connected,available:offer?.canRent,busy,recovering,quoteKey});
   const link=stage==='returned'?(noticePresentation?checkoutReturnReceiptUrl(profile,showingReturn?returnNotice:null,interaction):checkoutLinkUrl(profile,'receipt',interaction)):LINK_STAGES.has(stage)?checkoutLinkUrl(profile,stage,interaction):null;
+  const mockLink=!link && MOCK_QR_STAGES.has(stage);
   const helpStationId=String(checkout.stationId || STATION).trim().toUpperCase(),helpTemplate=profile.links?.help || '',helpLink=customerHelpUrl(helpTemplate,helpStationId);
   const showHelpQr=!currentPage && stage==='ready' && !!helpLink;
   const helpInOwnColumn=showHelpQr && checkoutUsesColumns(viewportWidth,viewportHeight,returnOnly ? .16 : height);
@@ -200,12 +223,16 @@ export function CheckoutPanel({checkout={},previewOnly=false,previewStage,previe
   const action=(label,onClick,{secondary=false,disabled=false,key=label,presentationOnly=false}={})=><button key={key} type="button" className={secondary?'ms-checkout-secondary':'ms-checkout-primary'} disabled={disabled} onClick={()=>{if(!controlled || presentationOnly)onClick?.();}}>{label}</button>;
   const button=(key,onClick,options={})=>action(text(key),onClick,{...options,key});
   const busyMessage=key=><div className="ms-checkout-progress" role="status"><span>{text(key)}</span><i/></div>;
+  const howItWorksStep=key=><div className="ms-checkout-instruction ms-checkout-step" key={key}>
+    <span className="ms-checkout-step-icon"><DashboardIcon name={CHECKOUT_STEP_ICONS[key]}/></span>
+    <span className="ms-checkout-step-copy"><strong>{text(`information.${key}Title`)}</strong><p>{text(`information.${key}Body`)}</p></span>
+  </div>;
   function renderActions(){
     if(stage==='ready')return <>{button('rent',begin,{disabled:!!busy || unavailable,presentationOnly:true})}<div className="ms-checkout-row">{button('return',()=>selectFlow({step:'returning',pageId:null,consent:false,returnAfter:Date.now()}),{secondary:true,disabled:!!busy,presentationOnly:true})}{button('cancel',done,{secondary:true,disabled:!!busy,presentationOnly:true})}</div><div className="ms-checkout-utilities">{navigation.map!==false && button('map',()=>showInformation('map'),{secondary:true,presentationOnly:true})}{navigation.terms!==false && button('termsButton',()=>showInformation('terms'),{secondary:true,presentationOnly:true})}{navigation.information!==false && button('information',()=>showInformation('information'),{secondary:true,presentationOnly:true})}</div></>;
     if(currentPage)return <div className="ms-checkout-row">{action(pageText('nextLabel') || text('continue'),()=>selectFlow(nextCheckoutPage(shownFlow,flowPages)),{disabled:!!busy,presentationOnly:true})}{button('back',back,{secondary:true,disabled:!!busy,presentationOnly:true})}</div>;
     if(stage==='review')return <>{offerChanged && <p className="ms-checkout-error" role="status">{text('offerChanged')}</p>}<label className="ms-checkout-consent"><input type="checkbox" checked={controlled?checkout.termsAccepted===true:flow.consent} disabled={!!busy || controlled} onChange={event=>selectFlow({...flow,consent:event.target.checked,quoteKey})}/><span>{text('consent')}</span></label><div className="ms-checkout-row">{button(busy==='start'?'starting':'continue',()=>{if(canSubmit)checkout.start?.();},{disabled:controlled?checkout.termsAccepted!==true:!canSubmit})}{button('back',back,{secondary:true,disabled:!!busy,presentationOnly:true})}</div></>;
-    if(stage==='waiting_for_card')return button('cancel',()=>{if(!previewOnly)checkout.cancel?.();},{secondary:true,disabled:!!busy || !connected});
-    if(stage==='authorizing')return <>{busyMessage('authorizing.body')}{button('cancel',()=>{if(!previewOnly)checkout.cancel?.();},{secondary:true,disabled:!connected})}</>;
+    if(stage==='waiting_for_card')return <>{liveTerminalEnabled && busyMessage('tap')}{button('cancel',()=>{if(!previewOnly)checkout.cancel?.();},{secondary:true,disabled:!!busy || !connected})}</>;
+    if(stage==='authorizing')return <>{busyMessage(liveTerminalEnabled?'tap':'authorizing.body')}{button('cancel',()=>{if(!previewOnly)checkout.cancel?.();},{secondary:true,disabled:!connected})}</>;
     if(stage==='dispensing')return busyMessage('waitingSlot');
     if(stage==='loading')return busyMessage('connecting');
     if(stage==='recovering')return <>{button('recovering.title',()=>{if(!previewOnly)checkout.refresh?.();},{secondary:true,disabled:!!busy})}{['awaiting_payment','authorizing'].includes(interaction?.phase) && button('cancel',()=>{if(!previewOnly)checkout.cancel?.();},{secondary:true,disabled:!!busy || !connected})}</>;
@@ -220,17 +247,18 @@ export function CheckoutPanel({checkout={},previewOnly=false,previewStage,previe
   const settlementKey=({voided:'settlementVoided',refunded:'settlementRefunded',captured:'settlementCaptured',authorized:'settlementAuthorized'})[interaction?.moneyStatus];
   const overlayTarget=panel.current?.closest('[data-kiosk-viewport],.ms-screen') || panel.current?.parentElement;
   const flags=navigation.language!==false?<FlagPicker language={language} languages={profile.enabledLanguages} label={text('language')} onChange={changeLanguage} disabled={!!busy}/>:null;
-  const helpCard=showHelpQr?<div className="ms-checkout-help" data-help-url={helpLink}><div className="ms-checkout-help-heading"><DashboardIcon name="support" size={18}/><strong className="ms-checkout-help-title">{text('helpTitle')}</strong></div>{helpQrImage?<img className="ms-checkout-help-qr" src={helpQrImage} alt={`Help QR code for ${helpStationId}`}/>:<span className="ms-checkout-help-pending" aria-hidden="true"/>}<span className="ms-checkout-help-scan">{text('helpScan')}</span></div>:null;
+  const helpTitle=text('helpTitle').trim().replace(/\s*[?？]\s*$/u,'');
+  const helpCard=showHelpQr?<div className="ms-checkout-help" data-help-url={helpLink}><div className="ms-checkout-help-heading"><strong className="ms-checkout-help-title">{helpTitle}</strong><span className="ms-checkout-help-mark" aria-hidden="true">?</span></div>{helpQrImage?<img className="ms-checkout-help-qr" src={helpQrImage} alt={`Help QR code for ${helpStationId}`}/>:<span className="ms-checkout-help-pending" aria-hidden="true"/>}<span className="ms-checkout-help-scan">{text('helpScan')}</span></div>:null;
   const dialog=qrOpen && overlayTarget?createPortal(<div className="ms-checkout-dialog-shade" role="presentation" style={themeStyle}><section role="dialog" aria-modal="true" aria-label={title} className="ms-checkout-dialog"><h2>{title}</h2>{qrImage && <img src={qrImage} alt={title}/>}<p className="ms-checkout-dialog-url">{link}</p><button type="button" onClick={()=>setQrOpen(false)}>{text('back')}</button></section></div>,overlayTarget):null;
   if(returnOnly && !showingReturn && !(controlled && stage==='returned'))return null;
-  return <div className="ms-checkout-viewport" style={themeStyle}><section ref={panel} className={`ms-checkout-panel ${stage} ${checkoutUsesColumns(viewportWidth,viewportHeight,returnOnly ? .16 : height)?'compact':''} ${helpInOwnColumn?'help-column':''}`} style={cardStyle} lang={language} aria-label="Floating payment card" data-checkout-phase={stage} data-floating-state={idle?'idle':'expanded'}>
-    {idle?<div className="ms-idle-actions">{button('start',()=>selectFlow({step:'ready',pageId:null,consent:false}),{disabled:!!busy,presentationOnly:true})}{flags}</div>:<>
+  return <div className="ms-checkout-viewport" style={themeStyle}><div className="ms-terminal-indicator" data-terminal-status={connected && offer?.reader?.status==='ready'?'connected':'unavailable'} role="img" aria-label={text(connected && offer?.reader?.status==='ready'?'terminalConnected':'terminalUnavailable')}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M8.25 3.75h7.5A2.25 2.25 0 0 1 18 6v12a2.25 2.25 0 0 1-2.25 2.25h-7.5A2.25 2.25 0 0 1 6 18V6a2.25 2.25 0 0 1 2.25-2.25ZM8.75 6.75h6.5v4.5h-6.5ZM9 14.5h.01M12 14.5h.01M15 14.5h.01M9 17.5h.01M12 17.5h.01M15 17.5h.01"/></svg></div><section ref={panel} className={`ms-checkout-panel ${stage} ${idle?'start':''} ${checkoutUsesColumns(viewportWidth,viewportHeight,returnOnly ? .16 : height)?'compact':''} ${helpInOwnColumn?'help-column':''}`} style={cardStyle} lang={language} aria-label="Floating payment card" data-checkout-phase={stage} data-floating-state={idle?'idle':'expanded'}>
+    {idle?<div className="ms-idle-actions">{button('start',()=>selectFlow({step:'ready',pageId:null,consent:false}),{disabled:stage==='loading' || !!busy,presentationOnly:true})}{flags}</div>:<>
     {flags && <div className="ms-checkout-language-corner">{flags}</div>}
-    <div className="ms-checkout-main" key={`copy-${stage}-${currentPage?.id || ''}`}><h2>{title}</h2>{stage==='returned' && <p className="ms-return-slot">{text('returnSlot')}</p>}{body && (!LINK_STAGES.has(stage) || link) && <p className="ms-checkout-body">{body}</p>}
-      {stage==='information' && ['rent','charge','return'].map(key=><div className="ms-checkout-instruction" key={key}><strong>{text(`information.${key}Title`)}</strong><p>{text(`information.${key}Body`)}</p></div>)}
+    <div className="ms-checkout-main" key={`copy-${stage}-${currentPage?.id || ''}`}><h2>{title}</h2>{stage==='returned' && <p className="ms-return-slot">{text('returnSlot')}</p>}{body && stage!=='information' && (!LINK_STAGES.has(stage) || link || mockLink) && <p className="ms-checkout-body">{body}</p>}
+      {stage==='information' && <div className="ms-how-it-works-steps">{[checkoutGatewayStep(checkout),'charge','return'].map(howItWorksStep)}</div>}
       {stage==='review' && <><p className="ms-checkout-pricing">{text('pricing')}</p><p className="ms-checkout-terms">{text('terms')}</p></>}
       {stage==='ready' && unavailable && <p className="ms-reader-caption">{text(offer?.reader?.status==='disconnected'?'readerUnavailable':'unavailable')}</p>}
-      {LINK_STAGES.has(stage) && (link?(qrImage?<img className="ms-checkout-qr" src={qrImage} alt={title}/>:<p className="ms-checkout-terms">{text('connecting')}</p>):<p className="ms-checkout-terms">{text('linkUnavailable')}</p>)}
+      {LINK_STAGES.has(stage) && (link?(qrImage?<img className="ms-checkout-qr" src={qrImage} alt={title}/>:<p className="ms-checkout-terms">{text('connecting')}</p>):mockLink?<MockQrCode label={text('mockQr')}/>:<p className="ms-checkout-terms">{text('linkUnavailable')}</p>)}
       {!noticePresentation && !previewOnly && error && connected && <p className="ms-checkout-error" role="alert">{text('errorGeneric')}</p>}
       {!noticePresentation && !previewOnly && !connected && !recovering && <p className="ms-checkout-error" role="status">{text('connectionLost')}</p>}
       {!noticePresentation && phase!=='idle' && settlementKey && !auxiliary && <p className="ms-checkout-settlement">{text(settlementKey)}</p>}

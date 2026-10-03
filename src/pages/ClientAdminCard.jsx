@@ -43,6 +43,10 @@ const getPaymentAdminLabel = (value) => {
     return admin ? `${admin.label} (${admin.email})` : 'N/A';
 };
 
+const formatSupportPhoneNumbers = (value) => (
+    Array.isArray(value) ? value.join(', ') : String(value || '')
+);
+
 const getEffectiveAdminFeatures = (account, featuresList) => {
     const rawFeatures = account?.features || {};
     const username = String(account?.username || '').trim().toLowerCase();
@@ -183,6 +187,19 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
                                 <option value="admin">admin</option>
                             </select>
                         </div>
+                        {isPartnerRole && (
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700">Subscribed support phone number(s)</label>
+                                <input
+                                    type="text"
+                                    value={formatSupportPhoneNumbers(editedData.supportPhoneNumbers)}
+                                    onChange={(e) => onDataChange('supportPhoneNumbers', e.target.value)}
+                                    placeholder="+1 917 993 9355"
+                                    className="mt-1 block w-full rounded-md border border-gray-300 p-2 font-mono shadow-sm"
+                                />
+                                <p className="mt-1 text-xs text-gray-500">Separate multiple numbers with commas. These lines control call routing and all Support app visibility.</p>
+                            </div>
+                        )}
                         <div>
                             <label className="block text-sm font-medium text-gray-700">Password (leave blank to keep unchanged)</label>
                             <input type="password" placeholder="Enter new password to change" value={editedData.password || ''} onChange={(e) => onDataChange('password', e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" minLength={12} />
@@ -363,6 +380,9 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
                         )}
                         {isPartnerRole && (
                             <p><strong>Revenue Model:</strong> Purchase + Lease</p>
+                        )}
+                        {isPartnerRole && (
+                            <p><strong>Support lines:</strong> {formatSupportPhoneNumbers(client.supportPhoneNumbers) || 'None assigned'}</p>
                         )}
                         {showPayoutFields && (
                             <>

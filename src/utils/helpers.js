@@ -1,6 +1,8 @@
 // src/utils/helpers.js
 
-const NEW_KIOSK_TYPES = new Set(['CT3', 'CT4', 'CT8', 'CT12', 'CK24', 'CK48']);
+import { isCtf7Module } from './ctf7.js';
+
+const NEW_KIOSK_TYPES = new Set(['CT3', 'CT4', 'CT8', 'CT12', 'CK24', 'CK48', 'CTF7']);
 const ONLINE_WINDOW_MS = 10 * 60 * 1000;
 const LEGACY_TIMESTAMP_PATTERN = /(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2}):(\d{2})/;
 const HAS_TIMEZONE_PATTERN = /(Z|[+-]\d{2}:?\d{2})$/i;
@@ -327,6 +329,7 @@ export const normalizeKioskData = (kiosks) => {
         const isNewSchema = modulesSource.length > 0 && Array.isArray(modulesSource[0].slots);
 
         const normalizedModules = modulesSource.map(module => {
+            const fanModule = isCtf7Module(module, kiosk);
             let slots = [];
             const rawModuleFw = String(module?.FW ?? '').trim();
             const parsedModuleFw = Number(rawModuleFw);
@@ -347,18 +350,26 @@ export const normalizeKioskData = (kiosks) => {
                 // New schema: slots array with status/sn/lock/holeDetection fields
                 slots = (module.slots || []).map(slotData => {
                     const status = Number(slotData.status ?? 0);
-                    const sn = Number(slotData.sn ?? 0);
+                    const sn = fanModule ? String(slotData.sn ?? '') : Number(slotData.sn ?? 0);
                     const chargingCurrent = Number(slotData.chargingCurrent ?? slotData.chargeCurrent ?? 0);
                     const chargingVoltage = Number(slotData.chargingVoltage ?? slotData.chargeVoltage ?? 0);
                     const chargeVoltage = Number(slotData.chargeVoltage ?? slotData.chargingVoltage ?? 0);
                     const areaCode = Number(slotData.areaCode ?? 0);
                     const holeDetection = Number(slotData.holeDetection ?? 0);
-                    const softwareVersion = Number(slotData.softwareVersion ?? 0);
-                    const hasCharger = status === 1 && sn !== 0;
+                    const softwareVersion = fanModule ? String(slotData.softwareVersion ?? '') : Number(slotData.softwareVersion ?? 0);
+                    const hasCharger = status === 1 && hasNonZeroChargerId(sn);
                     const isSstatError = holeDetection === 192;
                     return {
                         position: slotData.position,
-                        sn: hasCharger ? sn : 0,
+                        sn: hasCharger ? sn : fanModule ? '' : 0,
+                        observed: slotData.observed,
+                        observedAt: slotData.observedAt,
+                        cabin: slotData.cabin,
+                        channel: slotData.channel,
+                        abnormal: slotData.abnormal,
+                        mode: slotData.mode,
+                        functionModel: slotData.functionModel,
+                        hardwareVersion: slotData.hardwareVersion,
                         batteryLevel: hasCharger ? slotData.batteryLevel : null,
                         chargingCurrent,
                         isLocked: !!slotData.lock,
@@ -414,6 +425,14 @@ export const normalizeKioskData = (kiosks) => {
             const lastUpdated = module.lastUpdated || kiosk.timestamp;
             return {
                 id: module.id,
+                model: module.model,
+                protocol: module.protocol,
+                manufacturerSerial: module.manufacturerSerial,
+                machineSN: module.machineSN,
+                capacity: module.capacity,
+                topologyVerified: module.topologyVerified,
+                inventoryVerified: module.inventoryVerified,
+                reportedInfo: module.reportedInfo,
                 modtype: module?.modtype ?? module?.modType ?? null,
                 lastUpdated,
                 slots,

@@ -6,6 +6,13 @@ const ROUTING_GROUPS = new Set(["primary", "backup"]);
 const DELIVERY_MODES = new Set(["phone", "app"]);
 const TERMINAL_TICKET_STATUSES = new Set(["resolved", "closed"]);
 const MAX_SMS_BODY_LENGTH = 1600;
+const WELCOME_AUTO_REPLY_VERSION = "v1";
+const WELCOME_AUTO_REPLY_MESSAGE_ID = "automatic-welcome-v1";
+const WELCOME_AUTO_REPLY_BODY = [
+  "Thank you for contacting Chargerent, how can I help you?",
+  "",
+  "For return locations please visit: https://charge.rent/en/station-finder.",
+].join("\n");
 const VOICE_ROUTING_MODES = new Set(["app", "phone"]);
 const ROUTING_TERMINAL_STATUSES = new Set([
   "busy", "canceled", "completed", "failed", "no-answer",
@@ -79,6 +86,68 @@ function staffSupportNumbers(member = {}, fallbackNumber = "") {
     return normalizeSupportNumbers(member.supportNumbers ?? member.supportNumber);
   }
   return normalizeSupportNumbers(fallbackNumber);
+}
+
+function supportProfileRole(profile = {}) {
+  const username = cleanText(profile.username, 160).toLowerCase();
+  const role = cleanText(profile.role, 40).toLowerCase();
+  if (username === "chargerent" || role === "admin") return "admin";
+  if (role === "partner" || profile.partner === true) return "partner";
+  return role || "user";
+}
+
+function isSupportAppProfile(profile = {}) {
+  const role = supportProfileRole(profile);
+  return profile.active !== false && (role === "admin" || role === "partner");
+}
+
+function profileSupportNumbers(profile = {}) {
+  const nestedSupport = profile.support && typeof profile.support === "object" ?
+    profile.support : {};
+  return normalizeSupportNumbers(
+      profile.supportPhoneNumbers ?? nestedSupport.phoneNumbers ?? nestedSupport.supportNumbers,
+  );
+}
+
+function automaticStaffId(uid) {
+  return `USER-${cleanDocumentId(uid, "User")}`;
+}
+
+function automaticRoutingStaff(uid, profile = {}, existing = null) {
+  const role = supportProfileRole(profile);
+  const profileNumbers = profileSupportNumbers(profile);
+  const hasProfileNumbers = Object.prototype.hasOwnProperty.call(profile, "supportPhoneNumbers") ||
+    Object.prototype.hasOwnProperty.call(profile.support || {}, "phoneNumbers") ||
+    Object.prototype.hasOwnProperty.call(profile.support || {}, "supportNumbers");
+  const existingNumbers = existing ? staffSupportNumbers(existing, "") : [];
+  const supportNumbers = role === "admin" ? existingNumbers :
+    (hasProfileNumbers ? profileNumbers : existingNumbers);
+  return {
+    ...(existing || {}),
+    id: existing?.id || automaticStaffId(uid),
+    name: cleanText(
+        profile.displayName || profile.name || profile.contact?.name ||
+        profile.username || existing?.name || "Support staff",
+        100,
+    ),
+    deliveryMode: "app",
+    userUid: uid,
+    twilioIdentity: voiceIdentityFor(uid),
+    routingGroup: existing?.routingGroup === "backup" ? "backup" : "primary",
+    routingOrder: Number(existing?.routingOrder) || 1,
+    enabled: existing?.enabled !== false,
+    available: existing?.available === true,
+    accountRole: role,
+    allSupportNumbers: role === "admin",
+    ...(role !== "admin" || Object.prototype.hasOwnProperty.call(existing || {}, "supportNumbers") ?
+      {supportNumbers} : {}),
+  };
+}
+
+function memberCanReceiveSupportNumber(member = {}, supportNumber = "", fallbackNumber = "") {
+  if (member.allSupportNumbers === true) return true;
+  const normalizedNumber = normalizeE164(supportNumber);
+  return staffSupportNumbers(member, fallbackNumber).includes(normalizedNumber);
 }
 
 function safeE164(value) {
@@ -219,8 +288,12 @@ function normalizeStaffInput(input = {}) {
   };
 }
 
-function phoneTicketId(phoneE164) {
-  const digest = crypto.createHash("sha256").update(normalizeE164(phoneE164)).digest("hex");
+function phoneTicketId(phoneE164, supportAddress = "") {
+  const customerNumber = normalizeE164(phoneE164);
+  const supportLine = cleanText(supportAddress, 200).toLowerCase();
+  const digest = crypto.createHash("sha256")
+      .update(supportLine ? `${customerNumber}|${supportLine}` : customerNumber)
+      .digest("hex");
   return `PHONE-${digest.slice(0, 20)}`;
 }
 
@@ -341,8 +414,8 @@ function createSupportTelephonyService({
   if (!db || !admin) throw new Error("Firestore dependencies are required.");
   const serverTimestamp = () => admin.firestore.FieldValue.serverTimestamp();
 
-  function ticketReference(phoneE164) {
-    const id = phoneTicketId(phoneE164);
+  function ticketReference(phoneE164, supportAddress = "") {
+    const id = phoneTicketId(phoneE164, supportAddress);
     return {id, ref: db.collection("supportTickets").doc(id)};
   }
 
@@ -408,13 +481,15 @@ function createSupportTelephonyService({
     if (!normalizedExternalId) throw new Error("A Twilio message or call ID is required.");
     const messageBody = cleanText(body, 12000) ||
       (channel === "phone" ? "Incoming customer call." : "Customer sent an attachment.");
-    const id = ticketId ? cleanDocumentId(ticketId, "Ticket") : phoneTicketId(phoneE164);
+    const id = ticketId ? cleanDocumentId(ticketId, "Ticket") :
+      phoneTicketId(phoneE164, supportAddress);
     const ref = db.collection("supportTickets").doc(id);
     const messageId = providerDocumentId(type, normalizedExternalId);
     const messageRef = ref.collection("messages").doc(messageId);
     const now = clock();
     const nowIso = now.toISOString();
     let duplicate = false;
+    let shouldSendWelcomeAutoReply = false;
 
     await db.runTransaction(async (transaction) => {
       const [ticketSnapshot, messageSnapshot] = await Promise.all([
@@ -423,11 +498,18 @@ function createSupportTelephonyService({
       ]);
       if (messageSnapshot.exists) {
         duplicate = true;
+        const existing = ticketSnapshot.exists ? ticketSnapshot.data() : null;
+        shouldSendWelcomeAutoReply = Boolean(existing &&
+          (channel === "sms" || channel === "rcs") &&
+          existing.welcomeAutoReplyVersion === WELCOME_AUTO_REPLY_VERSION &&
+          ["pending", "failed"].includes(existing.welcomeAutoReplyStatus));
         return;
       }
 
       const existing = ticketSnapshot.exists ? ticketSnapshot.data() : null;
       if (!existing) {
+        const isTextConversation = channel === "sms" || channel === "rcs";
+        shouldSendWelcomeAutoReply = isTextConversation;
         transaction.set(ref, {
           schemaVersion: 1,
           ticketNumber: id,
@@ -438,7 +520,7 @@ function createSupportTelephonyService({
           category: "customer_support",
           requestType: channel,
           subject: channel === "phone" ? `Phone call from ${phoneE164}` : `Text message from ${phoneE164}`,
-          status: "new",
+          status: isTextConversation ? "in_progress" : "new",
           priority: "normal",
           unread: true,
           assignedTo: "",
@@ -463,12 +545,21 @@ function createSupportTelephonyService({
           lastInboundAtIso: nowIso,
           replyAddress: phoneE164,
           linkedRental: null,
+          ...(isTextConversation ? {
+            welcomeAutoReplyVersion: WELCOME_AUTO_REPLY_VERSION,
+            welcomeAutoReplyStatus: "pending",
+          } : {}),
           ...(channel === "phone" ? {needsCaseMatch: true} : {}),
         });
       } else {
+        const isTextConversation = channel === "sms" || channel === "rcs";
+        shouldSendWelcomeAutoReply = isTextConversation &&
+          existing.welcomeAutoReplyVersion === WELCOME_AUTO_REPLY_VERSION &&
+          ["pending", "failed"].includes(existing.welcomeAutoReplyStatus);
         transaction.update(ref, {
           unread: true,
-          status: TERMINAL_TICKET_STATUSES.has(existing.status) ? "new" : (existing.status || "new"),
+          status: isTextConversation ? "in_progress" :
+            (TERMINAL_TICKET_STATUSES.has(existing.status) ? "new" : (existing.status || "new")),
           replyChannel,
           updatedAt: serverTimestamp(),
           lastActivityAt: serverTimestamp(),
@@ -499,13 +590,108 @@ function createSupportTelephonyService({
       });
     });
 
-    return {ok: true, ticketId: id, messageId, duplicate};
+    return {ok: true, ticketId: id, messageId, duplicate, shouldSendWelcomeAutoReply};
+  }
+
+  async function sendWelcomeAutoReply({ticketId, from, to, messagingServiceSid = ""} = {}) {
+    if (typeof sendMessage !== "function") {
+      return {ok: false, skipped: true, reason: "SMS delivery is not configured."};
+    }
+    const id = cleanDocumentId(ticketId, "Support case");
+    const normalizedMessagingServiceSid = cleanText(messagingServiceSid, 80);
+    const normalizedFrom = normalizedMessagingServiceSid ? "" : normalizeE164(from);
+    const normalizedTo = normalizeCustomerAddress(to);
+    const ticketRef = db.collection("supportTickets").doc(id);
+    const messageRef = ticketRef.collection("messages").doc(WELCOME_AUTO_REPLY_MESSAGE_ID);
+    const startedAt = clock();
+    let shouldSend = false;
+
+    await db.runTransaction(async (transaction) => {
+      const messageSnapshot = await transaction.get(messageRef);
+      const message = messageSnapshot.exists ? messageSnapshot.data() || {} : {};
+      if (messageSnapshot.exists && message.deliveryStatus !== "failed") return;
+      shouldSend = true;
+      transaction.set(messageRef, {
+        type: "message",
+        direction: "outbound",
+        channel: "sms",
+        requestedChannel: normalizedMessagingServiceSid ? "rcs_or_sms" : "sms",
+        messagingServiceSid: normalizedMessagingServiceSid,
+        from: normalizedFrom,
+        to: normalizedTo,
+        body: WELCOME_AUTO_REPLY_BODY,
+        authorUid: "system",
+        authorName: "Chargerent automatic reply",
+        automatic: true,
+        automaticReplyVersion: WELCOME_AUTO_REPLY_VERSION,
+        deliveryStatus: "sending",
+        provider: "twilio",
+        createdAt: messageSnapshot.exists ? message.createdAt : serverTimestamp(),
+        createdAtIso: messageSnapshot.exists ? message.createdAtIso : startedAt.toISOString(),
+        updatedAt: serverTimestamp(),
+        updatedAtIso: startedAt.toISOString(),
+      }, {merge: true});
+      transaction.update(ticketRef, {
+        welcomeAutoReplyStatus: "sending",
+        updatedAt: serverTimestamp(),
+      });
+    });
+
+    if (!shouldSend) return {ok: true, skipped: true};
+
+    try {
+      const sent = await sendMessage({
+        ...(normalizedMessagingServiceSid ?
+          {messagingServiceSid: normalizedMessagingServiceSid} : {from: normalizedFrom}),
+        to: normalizedTo,
+        body: WELCOME_AUTO_REPLY_BODY,
+      });
+      const sentAt = clock();
+      const batch = db.batch();
+      batch.update(messageRef, {
+        externalMessageId: cleanText(sent?.sid, 100),
+        providerStatus: cleanText(sent?.status, 40) || "queued",
+        deliveryStatus: deliveryStatus(sent?.status || "queued"),
+        sentAt: serverTimestamp(),
+        sentAtIso: sentAt.toISOString(),
+        updatedAt: serverTimestamp(),
+        updatedAtIso: sentAt.toISOString(),
+      });
+      batch.update(ticketRef, {
+        status: "in_progress",
+        welcomeAutoReplyStatus: "sent",
+        welcomeAutoReplySentAt: serverTimestamp(),
+        welcomeAutoReplySentAtIso: sentAt.toISOString(),
+        lastReplyAt: serverTimestamp(),
+        lastReplyAtIso: sentAt.toISOString(),
+        updatedAt: serverTimestamp(),
+      });
+      await batch.commit();
+      return {ok: true, skipped: false, messageId: cleanText(sent?.sid, 100)};
+    } catch (error) {
+      const failedAt = clock();
+      const batch = db.batch();
+      batch.update(messageRef, {
+        deliveryStatus: "failed",
+        deliveryError: "Automatic SMS delivery failed.",
+        failedAt: serverTimestamp(),
+        failedAtIso: failedAt.toISOString(),
+        updatedAt: serverTimestamp(),
+        updatedAtIso: failedAt.toISOString(),
+      });
+      batch.update(ticketRef, {
+        welcomeAutoReplyStatus: "failed",
+        updatedAt: serverTimestamp(),
+      });
+      await batch.commit();
+      throw error;
+    }
   }
 
   async function importInboundSms(payload = {}) {
     const mediaCount = Math.max(0, Number(payload.NumMedia) || 0);
     const channel = inboundMessagingChannel(payload);
-    return importInbound({
+    const imported = await importInbound({
       channel,
       externalId: payload.MessageSid || payload.SmsMessageSid || payload.SmsSid,
       from: payload.From,
@@ -521,6 +707,17 @@ function createSupportTelephonyService({
         messagingServiceSid: cleanText(payload.MessagingServiceSid, 80),
       },
     });
+    const inboundMessagingServiceSid = cleanText(payload.MessagingServiceSid, 80);
+    const canAddressReply = channel === "sms" || /^MG[a-f0-9]{32}$/i.test(inboundMessagingServiceSid);
+    if (imported.shouldSendWelcomeAutoReply && typeof sendMessage === "function" && canAddressReply) {
+      await sendWelcomeAutoReply({
+        ticketId: imported.ticketId,
+        from: payload.To,
+        to: payload.From,
+        messagingServiceSid: inboundMessagingServiceSid,
+      });
+    }
+    return imported;
   }
 
   async function importInboundCall(payload = {}) {
@@ -575,7 +772,7 @@ function createSupportTelephonyService({
     if (!normalizedCallSid) throw new Error("A Twilio call ID is required.");
     const supportNumber = normalizeE164(from);
     const customerNumber = normalizeE164(to);
-    const {id, ref} = ticketReference(customerNumber);
+    const {id, ref} = ticketReference(customerNumber, supportNumber);
     const messageId = providerDocumentId("call", normalizedCallSid);
     const messageRef = ref.collection("messages").doc(messageId);
     const now = clock();
@@ -684,8 +881,28 @@ function createSupportTelephonyService({
   }
 
   async function listRoutingStaff() {
-    const snapshot = await db.collection("supportTelephonyStaff").get();
-    return snapshot.docs.map((document) => ({id: document.id, ...document.data()})).sort(staffSort);
+    const [staffSnapshot, userSnapshot] = await Promise.all([
+      db.collection("supportTelephonyStaff").get(),
+      db.collection("users").get(),
+    ]);
+    const configured = staffSnapshot.docs
+        .map((document) => ({id: document.id, ...document.data()}));
+    const configuredByUid = new Map(configured
+        .filter((member) => cleanText(member.userUid, 160))
+        .map((member) => [cleanText(member.userUid, 160), member]));
+    const automatic = userSnapshot.docs
+        .map((document) => ({uid: document.id, profile: document.data() || {}}))
+        .filter(({profile}) => isSupportAppProfile(profile))
+        .map(({uid, profile}) => automaticRoutingStaff(
+            uid,
+            profile,
+            configuredByUid.get(uid) || null,
+        ));
+    const automaticUids = new Set(automatic.map((member) => member.userUid));
+    return [
+      ...automatic,
+      ...configured.filter((member) => !automaticUids.has(cleanText(member.userUid, 160))),
+    ].sort(staffSort);
   }
 
   async function listCallLogs(requestedLimit = 50, supportNumbers = undefined) {
@@ -1140,6 +1357,30 @@ function createSupportTelephonyService({
     };
   }
 
+  async function resolveCase(data = {}, authState = {}, {supportNumbers = undefined} = {}) {
+    const access = await assertCaseAccess(data.ticketId, supportNumbers);
+    const ticketRef = db.collection("supportTickets").doc(access.id);
+    const now = clock();
+    const changes = {
+      status: "resolved",
+      unread: false,
+      resolvedAt: serverTimestamp(),
+      resolvedAtIso: now.toISOString(),
+      resolvedBy: actorName(authState),
+      updatedAt: serverTimestamp(),
+      updatedAtIso: now.toISOString(),
+    };
+    await db.runTransaction(async (transaction) => {
+      const snapshot = await transaction.get(ticketRef);
+      if (!snapshot.exists) throw new Error("Support case was not found.");
+      transaction.update(ticketRef, changes);
+    });
+    return {
+      ok: true,
+      ticket: mobileCaseSummary(access.id, {...access.ticket, ...changes}),
+    };
+  }
+
   async function upsertRoutingStaff(data, authState) {
     const normalized = normalizeStaffInput(data);
     const id = staffDocumentId(data?.staffId);
@@ -1174,7 +1415,6 @@ function createSupportTelephonyService({
     if (!normalizedUid) return null;
     const staff = await listRoutingStaff();
     return staff.find((member) =>
-      member.enabled !== false &&
       member.deliveryMode === "app" &&
       member.userUid === normalizedUid &&
       member.twilioIdentity,
@@ -1215,6 +1455,16 @@ function createSupportTelephonyService({
     if (!member) throw new Error("This account is not assigned to support calling.");
     const now = clock();
     await db.collection("supportTelephonyStaff").doc(member.id).set({
+      name: member.name,
+      deliveryMode: "app",
+      userUid: member.userUid,
+      twilioIdentity: member.twilioIdentity,
+      routingGroup: member.routingGroup,
+      routingOrder: member.routingOrder,
+      enabled: member.enabled !== false,
+      accountRole: member.accountRole || "",
+      allSupportNumbers: member.allSupportNumbers === true,
+      ...(Array.isArray(member.supportNumbers) ? {supportNumbers: member.supportNumbers} : {}),
       available: available === true,
       lastSeenAt: serverTimestamp(),
       lastSeenAtIso: now.toISOString(),
@@ -1619,7 +1869,7 @@ function createSupportTelephonyService({
         sentAtIso: nowIso,
       });
       batch.update(ticketRef, {
-        status: "waiting_customer",
+        status: "in_progress",
         unread: false,
         message: body,
         replyChannel: "sms",
@@ -1688,6 +1938,7 @@ function createSupportTelephonyService({
     recordRoutingAttempt,
     recordTranscriptionEvent,
     purgeExpiredCallContent,
+    resolveCase,
     sendSmsReply,
     requestCallback,
     updateCall,
@@ -1705,11 +1956,14 @@ function createSupportTelephonyService({
 module.exports = {
   CALL_CONTENT_RETENTION_DAYS,
   MAX_SMS_BODY_LENGTH,
+  WELCOME_AUTO_REPLY_BODY,
   DELIVERY_MODES,
   ROUTING_GROUPS,
   createSupportTelephonyService,
   deliveryStatus,
   inboundMessagingChannel,
+  isSupportAppProfile,
+  memberCanReceiveSupportNumber,
   normalizeE164,
   normalizeSupportNumbers,
   normalizeCustomerAddress,
@@ -1720,8 +1974,10 @@ module.exports = {
   callTicketId,
   phoneTicketId,
   providerDocumentId,
+  profileSupportNumbers,
   staffSupportNumbers,
   supportLineForCall,
+  ticketCallSupportNumbers,
   splitRoutingStaff,
   staffSort,
   voiceIdentityFor,

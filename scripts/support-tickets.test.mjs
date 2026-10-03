@@ -11,7 +11,11 @@ import {
   supportReplySendersForCategory,
   supportTicketDisplayNumber,
   supportTicketMatchesStatusFilter,
+  shouldShowEmailCaseMatchWarning,
+  shouldShowRentalNoMatchWarning,
 } from '../src/utils/supportTickets.js';
+
+const GEORGE_EMAIL_SIGNATURE = 'George Gazelian |\u00A0Managing Director\u00A0| Chargerent\u00A0|\u00A0C:\u00A0818.996.0996';
 
 const ticket = {
   id: 'Q-test-123',
@@ -97,6 +101,36 @@ test('last-four normalization preserves leading-zero numeric records without acc
   assert.equal(normalizeCardLastFour('4242424242424242'), '');
 });
 
+test('phone cases do not show Gmail or failed last-four lookup warnings before digits are provided', () => {
+  const phoneTicket = {
+    category: 'customer_support',
+    source: 'phone',
+    channel: 'phone',
+    requestType: 'phone',
+    needsCaseMatch: true,
+    payment: {cardLastFour: ''},
+    details: {},
+  };
+
+  assert.equal(shouldShowEmailCaseMatchWarning(phoneTicket), false);
+  assert.equal(shouldShowRentalNoMatchWarning(phoneTicket, {matchCount: 0}), false);
+});
+
+test('case-match and no-rental warnings require the evidence relevant to each warning', () => {
+  assert.equal(shouldShowEmailCaseMatchWarning({
+    source: 'email',
+    needsCaseMatch: true,
+  }), true);
+  assert.equal(shouldShowRentalNoMatchWarning({
+    category: 'customer_support',
+    payment: {cardLastFour: '4242'},
+  }, {matchCount: 0}), true);
+  assert.equal(shouldShowRentalNoMatchWarning({
+    category: 'customer_support',
+    payment: {cardLastFour: '4242'},
+  }, {loading: true, matchCount: 0}), false);
+});
+
 test('long database ticket ids have a short category-specific display number', () => {
   assert.equal(supportTicketDisplayNumber({
     id: 'Q-da162054-9e41-4cec-a306-9b7dc11380fd',
@@ -146,6 +180,24 @@ test('no rental match requests the mobile-wallet last four and rejects full card
   assert.match(reply.body, /Do not send the complete card number/i);
 });
 
+test('missing last four asks for the digits without claiming supplied digits failed to match', () => {
+  const phoneTicket = {
+    id: 'CALL-test',
+    category: 'customer_support',
+    source: 'phone',
+    customer: {name: 'Phone customer', phone: '+18189960996'},
+    payment: {cardLastFour: ''},
+    details: {},
+  };
+  const englishReply = buildSupportReply(phoneTicket, null);
+  const frenchReply = buildSupportReply(phoneTicket, null, 'suggested', 'support', 'fr');
+
+  assert.match(englishReply.body, /please provide the last four digits/i);
+  assert.doesNotMatch(englishReply.body, /last four digits provided do not match/i);
+  assert.match(frenchReply.body, /transmettre les quatre derniers chiffres/i);
+  assert.doesNotMatch(frenchReply.body, /chiffres fournis ne correspondent pas/i);
+});
+
 test('an explicit template selection replaces the automatic reply', () => {
   const match = {
     rental: { documentId: 'expected', card_last4: '4242', rentalStationid: 'US0108' },
@@ -154,6 +206,21 @@ test('an explicit template selection replaces the automatic reply', () => {
   const reply = buildSupportReply(ticket, match, 'request_wallet');
   assert.match(reply.subject, /Additional payment information needed/);
   assert.match(reply.body, /Apple Pay/);
+});
+
+test('reply subjects never expose the case number', () => {
+  const ticketWithLegacyToken = {
+    ...ticket,
+    subject: 'Charge question [CS-TEST12]',
+  };
+  const replies = SUPPORT_REPLY_TEMPLATES.flatMap((template) => [
+    buildSupportReply(ticketWithLegacyToken, null, template.value, '', 'en'),
+    buildSupportReply(ticketWithLegacyToken, null, template.value, '', 'fr'),
+  ]);
+
+  replies.forEach((reply) => {
+    assert.doesNotMatch(reply.subject, /\[(?:CS|SL|PT|GN)-[A-Z0-9]{4,10}\]/i);
+  });
 });
 
 test('evidence-dependent templates are fully pre-filled without placeholders', () => {
@@ -233,7 +300,8 @@ test('sales and partnership replies use a company representative and propose a c
   assert.match(salesReply.body, /Arthur\nCharge\.rent\narthur@charge\.rent/);
   assert.doesNotMatch(salesReply.body, /support@charge\.rent/);
   assert.match(partnershipReply.body, /brief call to go over your market/i);
-  assert.match(partnershipReply.body, /George\nCharge\.rent\ngeorge@charge\.rent/);
+  assert.ok(partnershipReply.body.includes(GEORGE_EMAIL_SIGNATURE));
+  assert.doesNotMatch(partnershipReply.body, /george@charge\.rent/);
 });
 
 test('every reply template has a complete French version', () => {
@@ -281,7 +349,11 @@ test('every reply template has a complete French version', () => {
     const reply = buildSupportReply(templateTicket, matchedRental, template.value, senderKey, 'fr');
     assert.match(reply.body, /^Bonjour Taylor,/);
     assert.match(`${reply.subject}\n${reply.body}`, expectedFrenchCopy[template.value]);
-    assert.match(reply.body, /Cordialement,/);
+    if (template.value === 'partnership') {
+      assert.ok(reply.body.includes(GEORGE_EMAIL_SIGNATURE));
+    } else {
+      assert.match(reply.body, /Cordialement,/);
+    }
     assert.doesNotMatch(reply.body, /Kind regards,|Thank you for|Please reply|We matched/);
     assert.doesNotMatch(reply.body, /\[(?:LAST FOUR|RENTAL LOCATION|RETURN DATE|RETURN LOCATION|STATION ID|LOCATION|REFUND AMOUNT|REFUND DATE)\]/);
   }

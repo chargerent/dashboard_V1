@@ -107,8 +107,11 @@ test('Customer Service supports Twilio SMS replies and editable call routing', a
   assert.match(routingModal, /Calls, call history, and call cases are limited to these lines/);
   assert.match(telephonyBackend, /function splitRoutingStaff/);
   assert.match(telephonyBackend, /function staffSupportNumbers/);
+  assert.match(telephonyBackend, /function isSupportAppProfile/);
+  assert.match(telephonyBackend, /db\.collection\("users"\)\.get\(\)/);
   assert.match(telephonyBackend, /async function listActiveCases\(requestedLimit = 100, supportNumbers = undefined\)/);
-  assert.match(functionExports, /staffSupportNumbers\(member, twilioSecretValue\(TWILIO_SUPPORT_NUMBER\)\)/);
+  assert.match(functionExports, /function supportScopeForStaff/);
+  assert.match(functionExports, /memberCanReceiveSupportNumber\(member, supportNumber, defaultSupportNumber\)/);
   assert.match(functionExports, /exports\.support_twilioSms/);
   assert.match(functionExports, /exports\.support_twilioVoice/);
   assert.match(functionExports, /exports\.support_sendSmsReply/);

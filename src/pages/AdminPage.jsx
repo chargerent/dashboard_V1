@@ -208,6 +208,7 @@ function AdminPage({
     // Keep clientId uppercase
     const finalData = { ...editedClientData };
     if (finalData.clientId) finalData.clientId = String(finalData.clientId).trim().toUpperCase();
+    finalData.supportPhoneNumbers = normalizeSupportPhoneNumbers(finalData.supportPhoneNumbers);
     const nextPassword = String(finalData.password || '').trim();
     if (nextPassword && nextPassword.length < 12) {
       setSaveStatus({ state: 'error', message: 'Password must be at least 12 characters.' });
@@ -790,6 +791,11 @@ function stripUnsafeFields(client) {
 
 function hasBindingAccess(profile) {
   return profile?.features?.binding === true || profile?.commands?.binding === true;
+}
+
+function normalizeSupportPhoneNumbers(value) {
+  const entries = Array.isArray(value) ? value : String(value || '').split(/[\n,;]+/);
+  return [...new Set(entries.map((entry) => String(entry || '').trim()).filter(Boolean))];
 }
 
 function normalizeBindingClient(client) {

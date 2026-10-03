@@ -2,6 +2,7 @@
 
 import { memo, useMemo, useCallback, useEffect, useState } from 'react';
 import KioskControlPanel from './KioskControlPanel';
+import Ctf7ModulePanel from './Ctf7ModulePanel.jsx';
 import {
     getKioskPowerThreshold,
     hasNonZeroChargerId,
@@ -194,7 +195,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     const hardwareType = String(kiosk.hardware?.type || '').trim().toUpperCase();
     const isCK50Kiosk = hardwareType === 'CK50';
     const hasAnyCommands = Object.values(clientInfo.commands).some(v => v === true) || clientInfo.features.rentals;
-    const canUpdateModules = clientInfo.commands.updates && isV2Kiosk;
+    const canUpdateModules = clientInfo.commands.updates && isV2Kiosk && hardwareType !== 'CTF7';
     const showModuleFirmwareMetadata = isV2Kiosk;
     const showInlineModuleIds = ['CT3', 'CT4', 'CT8', 'CT12', 'CK24', 'CK40', 'CK48'].includes(kiosk.hardware?.type);
     const chargeReadyThreshold = getKioskPowerThreshold(kiosk);
@@ -1716,6 +1717,8 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
 
     const renderContent = () => {
         switch (hardwareType) {
+            case 'CTF7':
+                return <Ctf7ModulePanel modules={visibleModules} />;
             case 'CT3':
                 return renderCT3();
             case 'CT4':

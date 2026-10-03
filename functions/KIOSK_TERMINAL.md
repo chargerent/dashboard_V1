@@ -78,25 +78,38 @@ live Besiter status response.
 5. The existing Besiter flow revalidates the candidate, sends `popup_sn`,
    retries eligible alternatives, and writes the physical outcome to
    `rentals/<paymentIntentId>`.
-6. The backend captures only when `status: rented`, `vendState: dispensed`, and
+6. The backend confirms dispense only when `status: rented`, `vendState: dispensed`, and
    the rental contains popup-response or fresh-status absence proof. A failure
    or missing result cancels the authorization or refunds a captured payment.
+   A `FULLPRICE` authorization remains uncaptured after successful dispense.
 7. When Besiter writes `status: returned`, the Stripe return trigger uses
-   Besiter's calculated `totalCharged`, keeps that amount from the captured
-   deposit, and refunds the remainder with an idempotent Stripe refund.
+   Besiter's calculated `totalCharged`. For an uncaptured `FULLPRICE` payment,
+   it captures only that amount, or cancels a zero-charge authorization. For
+   an already captured payment, it refunds the unused amount idempotently.
 
 ## Payment safety
 
 PaymentIntents are created server-side with `payment_method_types` set to
-`card_present` and `capture_method` set to `manual`. After the Android Terminal
-SDK processes the card, the backend verifies the PaymentIntent amount,
-currency, metadata, and `requires_capture` state.
+`card_present`. A kiosk whose `hardware.gatewayoptions` is `FULLPRICE` uses
+manual capture: the buy price is authorized at the reader, stays uncaptured
+after a verified vend, and is captured for the calculated rental charge (or
+canceled when the charge is zero) when the charger is returned. If the rental
+becomes `purchased` after the existing overdue checks, the same rental trigger
+captures its calculated purchase charge from the authorization. An active
+`rented` record never triggers capture. A kiosk whose
+option is `INITIALPRICE` uses automatic capture: the configured authorization
+amount is charged at the reader, then any unused amount is refunded after the
+return. The backend verifies the PaymentIntent amount, currency, metadata, and
+the gateway-specific Stripe status before vending.
 
 The implementation does not treat payment approval, MQTT publish completion,
 or a pending rental as success. The customer sees “Take your charger” only
 after the physical proof described above.
 
 ## Local verification
+
+New FR8011 rental export behavior, delivery tracking and the legacy Amazon
+accounting limitations are documented in [AMAZON_RENTAL_EXPORT.md](AMAZON_RENTAL_EXPORT.md).
 
 ```bash
 cd functions

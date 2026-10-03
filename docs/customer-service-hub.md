@@ -55,7 +55,7 @@ Deploy the Cloud Functions and Firestore rules before switching the website to t
 
 Use `support@charge.rent` as a licensed Google Workspace user mailbox, not an individual's mailbox. Delegate access to approved support staff, require multi-factor authentication, disable catch-all behavior, and preserve retention/audit settings. The dashboard is the operational queue; the mailbox is the delivery identity and fallback record of sent/replied email.
 
-The current implementation sends only after a dashboard administrator confirms the send dialog. It includes the ticket token in the subject so customer replies can be attached to the correct ticket.
+The current implementation sends only after a dashboard administrator confirms the send dialog. Response subjects do not expose the internal case number. Gmail thread IDs attach customer replies to the correct case, while legacy ticket tokens remain supported for older conversations.
 
 Inbound replies arrive through Gmail push notifications and a periodic reconciliation. Matching priority is ticket token, Gmail thread ID, then one unambiguous open case for the sender. Messages that still look like replies but cannot be matched safely become visible email tickets marked `Needs case match`; they are never silently attached to a guessed case.
 
@@ -85,17 +85,21 @@ Allowed sources are `email`, `sms`, `phone`, `quo`, `website`, and `manual`. Pro
 The test support number is `+1 917 993 9355`. Its signed Twilio webhooks terminate at:
 
 - `support_twilioSms` for inbound text messages and outbound delivery callbacks.
-- `support_twilioVoice` for incoming calls, call screening, hunt-group routing, and voicemail callbacks.
+- `support_twilioVoice` for incoming calls, call screening, hunt-group routing, callback requests, and text-support instructions.
 
-Inbound calls and texts create or reopen one customer-support conversation per customer phone number. Administrators can answer by SMS from the same dashboard reply editor; sending still requires the review dialog.
+Inbound calls create a call-specific case. Texts create or reopen one customer-support conversation per customer phone number and called support line. Administrators can answer by SMS from the same dashboard reply editor; sending still requires the review dialog.
 
-Call routing is stored in `supportTelephonyStaff`. Administrators manage it from **Customer Service → Call routing** without changing code. Enabled members in the primary group ring simultaneously, followed by the backup group. App routing includes only enabled identities whose staff member has marked themselves available. Staff can be moved between groups, reordered, or disabled; routing records are not deleted so changes remain auditable.
+Every active dashboard account whose role is `admin` or `partner` is automatically eligible to sign in to the Chargerent Support app with the same dashboard username and password. App availability and optional primary/backup overrides are stored in `supportTelephonyStaff`; a separate support-only user account is not required. Enabled, available members in the primary group ring simultaneously, followed by the backup group.
+
+Administrators can see activity for every support line. Partners are restricted server-side to the E.164 numbers in their `users/{uid}.supportPhoneNumbers` subscription, which is edited on the dashboard account card. That scope applies to inbound routing, call logs, call cases, rental matching, text conversation lists, message threads, and outbound replies. A partner with no assigned support number can sign in but sees no customer activity and receives no routed calls. New SMS/RCS conversations are keyed by both customer number and support line so activity for two subscribed businesses cannot be combined into one case.
+
+Administrators manage manual routing overrides and personal-phone fallback from **Customer Service → Call routing** without changing code. Staff can be moved between groups, reordered, or disabled; routing records are not deleted so changes remain auditable.
 
 Every inbound call and staff-app outbound call is written to `supportCallLogs` and linked to the customer's phone conversation. **Customer Service → Call log** shows the latest 100 calls, including direction, outcome, duration, answering staff member, and callback state. Opening a row selects the linked case. Authenticated staff assigned to app calling can also read a sanitized recent-call list from the iPhone app; the shared backend remains canonical.
 
-If neither routing group answers, Twilio asks the caller to press 1 for a callback at the number they called from or press 2 to leave voicemail. Pressing 1 reopens the phone conversation as an unread, high-priority callback case and records the choice in the call log. No new phone number is collected by voice. Voicemail remains the fallback when the caller presses 2 or makes no selection.
+If neither routing group answers, Twilio asks the caller to press 1 for a callback at the number they called from and explains that they can text the support number to chat with a representative. Pressing 1 reopens the phone conversation as an unread, high-priority callback case and records the choice in the call log. No new phone number is collected by voice. Any other key or no selection repeats the text-support instruction and ends the call; voicemail is not offered or recorded.
 
-Administrators can replace the spoken call prompts from **Customer Service → Call routing → MP3 voice prompts**. The supported slots are staff screening, connecting, callback offer, callback confirmation, voicemail greeting, and voicemail confirmation. Each upload must be an MP3 no larger than 8 MB. The audio is stored privately and exposed to Twilio through the prompt-specific media endpoint; if metadata, storage, or playback is unavailable, the call flow automatically uses its built-in spoken text instead.
+Administrators can replace the spoken call prompts from **Customer Service → Call routing → MP3 voice prompts**. The supported slots are staff screening, connecting, callback-or-text options, callback confirmation, and the text-support reminder. Each upload must be an MP3 no larger than 8 MB. The audio is stored privately and exposed to Twilio through the prompt-specific media endpoint; if metadata, storage, or playback is unavailable, the call flow automatically uses its built-in spoken text instead.
 
 Create these Firebase secrets before deploying the telephony functions:
 
@@ -105,7 +109,7 @@ Create these Firebase secrets before deploying the telephony functions:
 
 After deploying the functions and Firestore rules, add the first primary routing member in the dashboard, then change the Twilio number's incoming-message and incoming-call POST webhooks to the two endpoints above. Do not replace a working legacy webhook until both new endpoints are deployed and the initial routing member is visible.
 
-For the first live test, add George at `+1 818 996 0996` to the primary group. Send a text to the support number and confirm the new case and SMS reply. Then call the support number and separately test an answered call, callback request, voicemail, and no-input timeout. A successful webhook or Twilio call status proves provider delivery only; verify the dashboard case, call-log entry, callback phone, and actual handset result as separate checks.
+For the first live test, add George at `+1 818 996 0996` to the primary group. Send a text to the support number and confirm the new case and SMS reply. Then call the support number and separately test an answered call, callback request, text-support instruction, and no-input timeout. A successful webhook or Twilio call status proves provider delivery only; verify the dashboard case, call-log entry, callback phone, and actual handset result as separate checks.
 
 ## Local verification
 

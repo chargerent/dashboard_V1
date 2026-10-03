@@ -26,6 +26,11 @@ const PAYMENT_ADMIN_OPTIONS = [
   { value: 'george', label: 'George - george@charge.rent' },
 ];
 
+const normalizeSupportPhoneNumbers = (value) => {
+  const entries = Array.isArray(value) ? value : String(value || '').split(/[\n,;]+/);
+  return [...new Set(entries.map((entry) => String(entry || '').trim()).filter(Boolean))];
+};
+
 const getEffectiveAdminFeatures = (features, featuresList, username = '') => {
   const normalizedUsername = String(username || '').trim().toLowerCase();
   const rawFeatures = features || {};
@@ -61,6 +66,7 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
     revShareModel: 'lease',
     paymentSchedule: 'monthly',
     paymentAdmin: 'george',
+    supportPhoneNumbers: '',
     active: true,
     role: 'user',
   });
@@ -256,6 +262,7 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
       paymentAdmin: showPayoutFields ? newClient.paymentAdmin : '',
       active: newClient.active !== false,
       role: newClient.role || 'user',
+      supportPhoneNumbers: isPartnerRole ? normalizeSupportPhoneNumbers(newClient.supportPhoneNumbers) : [],
       authEmail: mappedEmail || undefined
     };
 
@@ -379,6 +386,21 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
               <option value="admin">admin</option>
             </select>
           </div>
+
+          {isPartnerRole && (
+            <div className="md:col-span-2">
+              <label className="block text-sm font-medium text-gray-700">Subscribed support phone number(s)</label>
+              <input
+                type="text"
+                name="supportPhoneNumbers"
+                value={newClient.supportPhoneNumbers}
+                onChange={handleInputChange}
+                placeholder="+1 917 993 9355"
+                className="mt-1 block w-full rounded-md border border-gray-300 p-2 font-mono shadow-sm"
+              />
+              <p className="mt-1 text-xs text-gray-500">Optional. Separate multiple E.164 numbers with commas. With no assigned line, the partner can sign in but sees no customer activity and receives no routed calls.</p>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-gray-700">{t('contact_name')} (Optional)</label>

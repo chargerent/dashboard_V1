@@ -212,6 +212,12 @@ service cloud.firestore {
     // Everything else: no public read, no writes
     match /{collection}/{document=**} {
       allow read: if request.auth != null &&
+        collection != 'ctf7Bindings' &&
+        collection != 'ctf7Sessions' &&
+        collection != 'ctf7Inventory' &&
+        collection != 'ctf7Events' &&
+        collection != 'ctf7Commands' &&
+        collection != 'ctf7CommandLocks' &&
         collection != 'workspaceProvisioning' &&
         collection != 'supportTickets' &&
         collection != 'supportTelephonyStaff' &&

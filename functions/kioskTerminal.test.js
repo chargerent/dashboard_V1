@@ -64,7 +64,7 @@ function request({
   };
 }
 
-function createFakeStore() {
+function createFakeStore(kiosk = KIOSK) {
   const interactions = new Map();
   const returnSessions = new Map();
   const rentals = new Map();
@@ -88,7 +88,7 @@ function createFakeStore() {
     },
     async verifyKiosk() {
       this.kioskVerified += 1;
-      return {...KIOSK};
+      return structuredClone(kiosk);
     },
     async reserveInteraction(interaction, candidate, expiresAt) {
       const saved = {
@@ -172,6 +172,7 @@ function createFakeStripe() {
     connectionTokens: 0,
     creates: [],
     captures: [],
+    captureRequests: [],
     cancels: [],
     refunds: [],
   };
@@ -210,10 +211,11 @@ function createFakeStripe() {
         intent.status = "canceled";
         return intent;
       },
-      async capture(id) {
+      async capture(id, params = {}, options = {}) {
         calls.captures.push(id);
+        calls.captureRequests.push({id, params, options});
         intents.get(id).status = "succeeded";
-        intents.get(id).amount_received = intents.get(id).amount;
+        intents.get(id).amount_received = params.amount_to_capture ?? intents.get(id).amount;
       },
     },
     refunds: {
@@ -225,8 +227,8 @@ function createFakeStripe() {
   };
 }
 
-function createFixture() {
-  const store = createFakeStore();
+function createFixture({kiosk = KIOSK} = {}) {
+  const store = createFakeStore(kiosk);
   const stripe = createFakeStripe();
   const besiter = createFakeBesiter();
   const stripeSelections = [];
@@ -465,7 +467,7 @@ test("accepts only the approved French WisePad integrated app in live mode", () 
   }), /approved only for the French integrated kiosk app with WisePad 3/);
 });
 
-test("rental creates a kiosk-priced manual-capture card-present payment", async () => {
+test("FULLPRICE creates a buy-price manual-capture card-present authorization", async () => {
   const {service, store, stripe, besiter} = createFixture();
   const created = await service.createInteraction(request({
     path: "/v1/interactions",
@@ -481,6 +483,9 @@ test("rental creates a kiosk-priced manual-capture card-present payment", async 
   assert.equal(created.body.amountCents, 100);
   assert.equal(store.kioskVerified, 1);
   assert.equal(store.interactions.get("test-id-2").stripeAccountCountry, "US");
+  assert.equal(store.interactions.get("test-id-2").pricingSnapshot.initialperiod, 24);
+  assert.equal(store.interactions.get("test-id-2").pricingSnapshot.dailyprice, 1);
+  assert.equal(store.interactions.get("test-id-2").pricingSnapshot.currency, "US");
 
   const payment = await service.createPaymentIntent(
       request({path: "/v1/interactions/test-id-1/payment-intent"}),
@@ -503,6 +508,7 @@ test("rental creates a kiosk-priced manual-capture card-present payment", async 
     body: {paymentIntentId: "pi_test_8019"},
   }), "test-id-2");
   assert.equal(processed.status, 202);
+  assert.equal(processed.body.paymentResolution, "authorized");
   assert.equal(store.interactions.get("test-id-2").state, "vend_requested");
   assert.deepEqual(store.extended, ["test-id-2", "test-id-2"]);
   assert.equal(stripe.calls.captures.length, 0, "authorization must not be captured before a physical vend");
@@ -511,6 +517,8 @@ test("rental creates a kiosk-priced manual-capture card-present payment", async 
   assert.equal(besiter.calls.vends[0].slotid, 2);
   assert.equal(besiter.calls.vends[0].paymentIntentId, "pi_test_8019");
   assert.equal(besiter.calls.vends[0].stripeAccountCountry, "US");
+  assert.deepEqual(besiter.calls.vends[0].pricing,
+      store.interactions.get("test-id-2").pricingSnapshot);
 
   const status = await service.getInteraction(
       request({method: "GET", path: "/v1/interactions/test-id-1"}),
@@ -520,7 +528,7 @@ test("rental creates a kiosk-priced manual-capture card-present payment", async 
   assert.equal(status.body.slot, 2);
 });
 
-test("Stripe is captured only after Besiter records physical dispense proof", async () => {
+test("FULLPRICE remains authorized after Besiter records physical dispense proof", async () => {
   const {service, store, stripe} = createFixture();
   await service.createInteraction(request({
     body: {
@@ -547,8 +555,42 @@ test("Stripe is captured only after Besiter records physical dispense proof", as
 
   assert.equal(result.body.outcome, "vend_succeeded");
   assert.equal(result.body.slot, 2);
-  assert.deepEqual(stripe.calls.captures, ["pi_test_8019"]);
+  assert.equal(result.body.paymentResolution, "authorized");
+  assert.deepEqual(stripe.calls.captures, []);
   assert.deepEqual(store.released, ["test-id-2"]);
+});
+
+test("INITIALPRICE captures the configured initial amount before vending", async () => {
+  const kiosk = structuredClone(KIOSK);
+  kiosk.hardware.gatewayoptions = "INITIALPRICE";
+  kiosk.pricing.kioskmode = "LEASE";
+  kiosk.pricing.authamount = 2;
+  kiosk.pricing.buyprice = 30;
+  const {service, store, stripe} = createFixture({kiosk});
+
+  const created = await service.createInteraction(request({
+    body: {
+      stationId: "CA8019",
+      provisionId: "id-9987807816",
+      moduleId: "100049231111490591",
+      intent: "rent",
+    },
+  }));
+  assert.equal(created.body.amountCents, 200);
+  assert.equal(created.body.gatewayOption, "INITIALPRICE");
+
+  await service.createPaymentIntent(request(), "test-id-2");
+  assert.equal(stripe.calls.creates[0].params.amount, 200);
+  assert.equal(stripe.calls.creates[0].params.capture_method, "automatic");
+  stripe.intents.get("pi_test_8019").status = "succeeded";
+  stripe.intents.get("pi_test_8019").amount_received = 200;
+
+  const processed = await service.paymentProcessed(
+      request({body: {paymentIntentId: "pi_test_8019"}}),
+      "test-id-2",
+  );
+  assert.equal(processed.body.paymentResolution, "captured");
+  assert.equal(store.interactions.get("test-id-2").paymentResolution, "captured");
 });
 
 test("canceling an authorized interaction releases the slot without capture", async () => {
@@ -608,7 +650,7 @@ test("return completes only after the Besiter return writer records the charger"
   assert.equal(store.returnSessions.get(returnSessionId).chargerSn, 41807109);
 });
 
-test("a free on-time Stripe return refunds the captured kiosk deposit", async () => {
+test("an INITIALPRICE return refunds the unused captured amount", async () => {
   const store = createFakeStore();
   const stripe = createFakeStripe();
   const stripeSelections = [];
@@ -634,6 +676,7 @@ test("a free on-time Stripe return refunds the captured kiosk deposit", async ()
     stationId: "CA8019",
     stripeAccountCountry: "US",
     stripeMode: "test",
+    gatewayOption: "INITIALPRICE",
   });
 
   const result = await settleStripeReturn({
@@ -658,3 +701,171 @@ test("a free on-time Stripe return refunds the captured kiosk deposit", async ()
       "US",
   );
 });
+
+test("a free FULLPRICE return releases the authorization without capture", async () => {
+  const store = createFakeStore();
+  const stripe = createFakeStripe();
+  stripe.intents.set("pi_full_free", {
+    id: "pi_full_free",
+    status: "requires_capture",
+    amount: 3000,
+    amount_capturable: 3000,
+    currency: "usd",
+  });
+  store.interactions.set("interaction-full-free", {
+    id: "interaction-full-free",
+    paymentIntentId: "pi_full_free",
+    stripeAccountCountry: "US",
+    stripeMode: "test",
+    gatewayOption: "FULLPRICE",
+  });
+  const rental = {
+    paymentIntentId: "pi_full_free",
+    gateway: "STRIPE",
+    gatewayOption: "FULLPRICE",
+    status: "returned",
+    totalCharged: 0,
+    rentalStationid: "CA8019",
+    returnStationid: "CA8019",
+  };
+  store.rentals.set("pi_full_free", rental);
+
+  const result = await settleStripeReturn({
+    rental,
+    rentalId: "pi_full_free",
+    stripe,
+    store,
+    now: () => new Date("2026-08-15T10:15:00.000Z"),
+  });
+
+  assert.equal(result.capturedCents, 0);
+  assert.equal(result.releasedCents, 3000);
+  assert.deepEqual(stripe.calls.captures, []);
+  assert.deepEqual(stripe.calls.cancels, ["pi_full_free"]);
+  assert.equal(store.rentals.get("pi_full_free").paymentStatus, "authorization_released");
+});
+
+test("a charged FULLPRICE return captures only the calculated rental charge", async () => {
+  const store = createFakeStore();
+  const stripe = createFakeStripe();
+  stripe.intents.set("pi_full_charge", {
+    id: "pi_full_charge",
+    status: "requires_capture",
+    amount: 3000,
+    amount_capturable: 3000,
+    currency: "usd",
+  });
+  store.interactions.set("interaction-full-charge", {
+    id: "interaction-full-charge",
+    paymentIntentId: "pi_full_charge",
+    stripeAccountCountry: "US",
+    stripeMode: "test",
+    gatewayOption: "FULLPRICE",
+  });
+  const rental = {
+    paymentIntentId: "pi_full_charge",
+    gateway: "STRIPE",
+    gatewayOption: "FULLPRICE",
+    status: "returned",
+    totalCharged: 4,
+    rentalStationid: "CA8019",
+    returnStationid: "CA8019",
+  };
+  store.rentals.set("pi_full_charge", rental);
+
+  const result = await settleStripeReturn({
+    rental,
+    rentalId: "pi_full_charge",
+    stripe,
+    store,
+    now: () => new Date("2026-08-15T10:15:00.000Z"),
+  });
+
+  assert.equal(result.capturedCents, 400);
+  assert.equal(result.releasedCents, 2600);
+  assert.deepEqual(stripe.calls.captureRequests, [{
+    id: "pi_full_charge",
+    params: {amount_to_capture: 400},
+    options: {idempotencyKey: "kiosk-return-capture-pi_full_charge"},
+  }]);
+  assert.equal(stripe.calls.refunds.length, 0);
+  assert.equal(store.rentals.get("pi_full_charge").paymentStatus, "captured");
+});
+
+test("an active FULLPRICE rental never settles the authorization", async () => {
+  const store = createFakeStore();
+  const stripe = createFakeStripe();
+  const result = await settleStripeReturn({
+    rental: {gateway: "STRIPE", gatewayOption: "FULLPRICE", status: "rented", totalCharged: 2},
+    rentalId: "pi_still_rented",
+    stripe,
+    store,
+  });
+
+  assert.deepEqual(result, {handled: false});
+  assert.deepEqual(stripe.calls.captures, []);
+  assert.deepEqual(stripe.calls.cancels, []);
+  assert.deepEqual(stripe.calls.refunds, []);
+});
+
+test("an overdue FULLPRICE purchase captures the finalized charge once", async () => {
+  const store = createFakeStore();
+  const stripe = createFakeStripe();
+  stripe.intents.set("pi_full_purchase", {
+    id: "pi_full_purchase", status: "requires_capture", amount: 200,
+    amount_capturable: 200, currency: "eur",
+  });
+  store.interactions.set("interaction-purchase", {
+    paymentIntentId: "pi_full_purchase", stripeAccountCountry: "FR",
+    stripeMode: "live", gatewayOption: "FULLPRICE",
+  });
+  const rental = {
+    gateway: "STRIPE", status: "purchased", totalCharged: 2,
+    rentalStationid: "FR8011",
+  };
+  store.rentals.set("pi_full_purchase", rental);
+
+  const result = await settleStripeReturn({rental, rentalId: "pi_full_purchase", stripe, store});
+  assert.equal(result.capturedCents, 200);
+  assert.equal(result.releasedCents, 0);
+  assert.deepEqual(stripe.calls.captures, ["pi_full_purchase"]);
+  assert.equal(store.rentals.get("pi_full_purchase").stripeReturnSettlement.rentalStatus, "purchased");
+  assert.deepEqual(await settleStripeReturn({
+    rental: store.rentals.get("pi_full_purchase"), rentalId: "pi_full_purchase", stripe, store,
+  }), {handled: false});
+  assert.deepEqual(stripe.calls.captures, ["pi_full_purchase"]);
+});
+
+for (const finalCharge of [0, 4]) {
+  test(`a FULLPRICE return recovers a failed rental write after settling ${finalCharge}`, async () => {
+    const store = createFakeStore();
+    const stripe = createFakeStripe();
+    const rentalId = `pi_write_retry_${finalCharge}`;
+    stripe.intents.set(rentalId, {
+      id: rentalId, status: "requires_capture", amount: 3000,
+      amount_capturable: 3000, currency: "usd",
+    });
+    const rental = {
+      gateway: "STRIPE", gatewayOption: "FULLPRICE", status: "returned",
+      stripeAccountCountry: "US", stripeMode: "test", totalCharged: finalCharge,
+    };
+    store.rentals.set(rentalId, rental);
+    const update = store.updateBesiterRental.bind(store);
+    let writes = 0;
+    store.updateBesiterRental = async (...args) => {
+      if (++writes === 1) throw new Error("Temporary rental write failure");
+      return update(...args);
+    };
+
+    await assert.rejects(settleStripeReturn({rental, rentalId, stripe, store}),
+        /Temporary rental write failure/);
+    const result = await settleStripeReturn({rental, rentalId, stripe, store});
+
+    assert.equal(result.capturedCents, finalCharge * 100);
+    assert.equal(result.releasedCents, 3000 - finalCharge * 100);
+    assert.deepEqual(stripe.calls.captures, finalCharge ? [rentalId] : []);
+    assert.deepEqual(stripe.calls.cancels, finalCharge ? [] : [rentalId]);
+    assert.deepEqual(stripe.calls.refunds, []);
+    assert.equal(store.rentals.get(rentalId).stripeReturnSettlement.status, "completed");
+  });
+}

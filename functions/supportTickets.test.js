@@ -506,7 +506,7 @@ test("a confirmed email is recorded as sent and marks the case pending", async (
 
   const result = await service.sendReply({
     ticketId: "ticket-1",
-    subject: "More information needed",
+    subject: "More information needed [CS-TEST12]",
     body: "Please confirm the wallet last four.",
     senderKey: "support",
   }, {uid: "admin-1", profile: {username: "george"}});
@@ -514,7 +514,8 @@ test("a confirmed email is recorded as sent and marks the case pending", async (
   assert.equal(result.messageId, "gmail-message-1");
   assert.equal(sent.length, 1);
   assert.equal(store.directWrites[0].data.deliveryStatus, "sending");
-  assert.match(store.directWrites[0].data.subject, /\[CS-TEST12\]/);
+  assert.equal(store.directWrites[0].data.subject, "More information needed");
+  assert.equal(sent[0].subject, "More information needed");
   assert.equal(store.committedBatches.length, 1);
   const sentActivity = store.committedBatches[0].find((write) => write.target === "message");
   const ticketUpdate = store.committedBatches[0].find((write) => write.target === "ticket");

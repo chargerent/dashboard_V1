@@ -105,6 +105,29 @@ export const normalizeCardLastFour = (value) => {
   return digits.padStart(4, '0');
 };
 
+export const shouldShowEmailCaseMatchWarning = (ticket) => (
+  ticket?.needsCaseMatch === true && [
+    ticket?.source,
+    ticket?.channel,
+    ticket?.requestType,
+  ].some((value) => normalized(value) === 'email')
+);
+
+export const shouldShowRentalNoMatchWarning = (ticket, {
+  loading = false,
+  error = '',
+  matchCount = 0,
+} = {}) => {
+  const lastFour = normalizeCardLastFour(
+    ticket?.payment?.cardLastFour || ticket?.details?.cardLastFour,
+  );
+  return ticket?.category === 'customer_support'
+    && Boolean(lastFour)
+    && !loading
+    && !text(error)
+    && Number(matchCount) === 0;
+};
+
 const TICKET_PREFIXES = {
   customer_support: 'CS',
   sales: 'SL',
@@ -245,7 +268,10 @@ const moneyLabel = (rental) => {
 };
 
 const firstName = (ticket) => text(ticket?.customer?.name).split(/\s+/)[0] || 'there';
-const ticketToken = (ticket) => supportTicketDisplayNumber(ticket);
+const withoutCaseNumber = (value) => text(value)
+  .replace(/\s*\[(?:CS|SL|PT|GN)-[A-Z0-9]{4,10}\]\s*/gi, ' ')
+  .replace(/\s{2,}/g, ' ')
+  .trim();
 
 export const SUPPORT_REPLY_SENDERS = [
   {
@@ -284,7 +310,10 @@ const resolveSupportReplySender = (category, senderKey) => {
   return available.find((sender) => sender.value === senderKey) || available[0] || SUPPORT_REPLY_SENDERS[0];
 };
 
+const GEORGE_EMAIL_SIGNATURE = 'George Gazelian |\u00A0Managing Director\u00A0| Chargerent\u00A0|\u00A0C:\u00A0818.996.0996';
+
 const senderSignature = (sender, language = 'en') => {
+  if (sender.value === 'george') return GEORGE_EMAIL_SIGNATURE;
   if (language === 'fr') {
     return sender.value === 'support'
       ? ['Cordialement,', 'Service client Chargerent', sender.email].join('\n')
@@ -310,7 +339,7 @@ export const SUPPORT_REPLY_TEMPLATES = [
 
 export const buildSupportReply = (ticket, match, templateType = 'suggested', senderKey = '', language = 'en') => {
   const category = ticket?.category || 'general';
-  const token = ticketToken(ticket);
+  const originalSubject = withoutCaseNumber(ticket?.subject);
   const replyLanguage = language === 'fr' ? 'fr' : 'en';
   const isFrench = replyLanguage === 'fr';
   const customerFirstName = firstName(ticket);
@@ -346,7 +375,7 @@ export const buildSupportReply = (ticket, match, templateType = 'suggested', sen
   if (resolvedTemplate === 'sales') {
     if (isFrench) {
       return {
-        subject: `Re: ${ticket?.subject || 'Votre demande Chargerent'}${token ? ` [${token}]` : ''}`,
+        subject: `Re: ${originalSubject || 'Votre demande Chargerent'}`,
         body: [
           greeting,
           '',
@@ -359,7 +388,7 @@ export const buildSupportReply = (ticket, match, templateType = 'suggested', sen
       };
     }
     return {
-      subject: `Re: ${ticket?.subject || 'Your Chargerent request'}${token ? ` [${token}]` : ''}`,
+      subject: `Re: ${originalSubject || 'Your Chargerent request'}`,
       body: [
         greeting,
         '',
@@ -375,7 +404,7 @@ export const buildSupportReply = (ticket, match, templateType = 'suggested', sen
   if (resolvedTemplate === 'partnership') {
     if (isFrench) {
       return {
-        subject: `Re: ${ticket?.subject || 'Votre demande de partenariat Chargerent'}${token ? ` [${token}]` : ''}`,
+        subject: `Re: ${originalSubject || 'Votre demande de partenariat Chargerent'}`,
         body: [
           greeting,
           '',
@@ -388,7 +417,7 @@ export const buildSupportReply = (ticket, match, templateType = 'suggested', sen
       };
     }
     return {
-      subject: `Re: ${ticket?.subject || 'Your Chargerent partnership inquiry'}${token ? ` [${token}]` : ''}`,
+      subject: `Re: ${originalSubject || 'Your Chargerent partnership inquiry'}`,
       body: [
         greeting,
         '',
@@ -404,7 +433,7 @@ export const buildSupportReply = (ticket, match, templateType = 'suggested', sen
   if (resolvedTemplate === 'general') {
     if (isFrench) {
       return {
-        subject: `Re: ${ticket?.subject || 'Votre demande Chargerent'}${token ? ` [${token}]` : ''}`,
+        subject: `Re: ${originalSubject || 'Votre demande Chargerent'}`,
         body: [
           greeting,
           '',
@@ -417,7 +446,7 @@ export const buildSupportReply = (ticket, match, templateType = 'suggested', sen
       };
     }
     return {
-      subject: `Re: ${ticket?.subject || 'Your Chargerent inquiry'}${token ? ` [${token}]` : ''}`,
+      subject: `Re: ${originalSubject || 'Your Chargerent inquiry'}`,
       body: [
         greeting,
         '',
@@ -434,7 +463,7 @@ export const buildSupportReply = (ticket, match, templateType = 'suggested', sen
     const amount = rental && refundConfirmed ? moneyLabel(rental) : '';
     if (isFrench) {
       return {
-        subject: `Remboursement confirmé pour votre location Chargerent${token ? ` [${token}]` : ''}`,
+        subject: 'Remboursement confirmé pour votre location Chargerent',
         body: [
           greeting,
           '',
@@ -451,7 +480,7 @@ export const buildSupportReply = (ticket, match, templateType = 'suggested', sen
       };
     }
     return {
-      subject: `Refund confirmed for your Chargerent rental${token ? ` [${token}]` : ''}`,
+      subject: 'Refund confirmed for your Chargerent rental',
       body: [
         greeting,
         '',
@@ -473,7 +502,7 @@ export const buildSupportReply = (ticket, match, templateType = 'suggested', sen
     if (!rental) {
       if (isFrench) {
         return {
-          subject: `Statut du retour de votre location Chargerent${token ? ` [${token}]` : ''}`,
+          subject: 'Statut du retour de votre location Chargerent',
           body: [
             greeting,
             '',
@@ -484,7 +513,7 @@ export const buildSupportReply = (ticket, match, templateType = 'suggested', sen
         };
       }
       return {
-        subject: `Return status for your Chargerent rental${token ? ` [${token}]` : ''}`,
+        subject: 'Return status for your Chargerent rental',
         body: [
           greeting,
           '',
@@ -496,7 +525,7 @@ export const buildSupportReply = (ticket, match, templateType = 'suggested', sen
     }
     if (isFrench) {
       return {
-        subject: `Statut du retour de votre location Chargerent${token ? ` [${token}]` : ''}`,
+        subject: 'Statut du retour de votre location Chargerent',
         body: returnRecorded ? [
           greeting,
           '',
@@ -516,7 +545,7 @@ export const buildSupportReply = (ticket, match, templateType = 'suggested', sen
       };
     }
     return {
-      subject: `Return status for your Chargerent rental${token ? ` [${token}]` : ''}`,
+      subject: 'Return status for your Chargerent rental',
       body: returnRecorded ? [
         greeting,
         '',
@@ -539,7 +568,7 @@ export const buildSupportReply = (ticket, match, templateType = 'suggested', sen
   if (resolvedTemplate === 'return_instructions') {
     if (isFrench) {
       return {
-        subject: `Instructions de retour pour votre batterie Chargerent${token ? ` [${token}]` : ''}`,
+        subject: 'Instructions de retour pour votre batterie Chargerent',
         body: [
           greeting,
           '',
@@ -556,7 +585,7 @@ export const buildSupportReply = (ticket, match, templateType = 'suggested', sen
       };
     }
     return {
-      subject: `Return instructions for your Chargerent charger${token ? ` [${token}]` : ''}`,
+      subject: 'Return instructions for your Chargerent charger',
       body: [
         greeting,
         '',
@@ -576,7 +605,7 @@ export const buildSupportReply = (ticket, match, templateType = 'suggested', sen
   if (resolvedTemplate === 'charger_located') {
     if (isFrench) {
       return {
-        subject: `Nous avons retrouvé votre location Chargerent${token ? ` [${token}]` : ''}`,
+        subject: 'Nous avons retrouvé votre location Chargerent',
         body: [
           greeting,
           '',
@@ -588,7 +617,7 @@ export const buildSupportReply = (ticket, match, templateType = 'suggested', sen
       };
     }
     return {
-      subject: `We located your Chargerent rental${token ? ` [${token}]` : ''}`,
+      subject: 'We located your Chargerent rental',
       body: [
         greeting,
         '',
@@ -603,7 +632,7 @@ export const buildSupportReply = (ticket, match, templateType = 'suggested', sen
   if (resolvedTemplate === 'rental_found') {
     if (isFrench) {
       return {
-        subject: `Nous avons retrouvé votre location Chargerent${token ? ` [${token}]` : ''}`,
+        subject: 'Nous avons retrouvé votre location Chargerent',
         body: [
           greeting,
           '',
@@ -616,7 +645,7 @@ export const buildSupportReply = (ticket, match, templateType = 'suggested', sen
       };
     }
     return {
-      subject: `We found your Chargerent rental${token ? ` [${token}]` : ''}`,
+      subject: 'We found your Chargerent rental',
       body: [
         greeting,
         '',
@@ -632,11 +661,13 @@ export const buildSupportReply = (ticket, match, templateType = 'suggested', sen
   if (resolvedTemplate === 'request_wallet' || !rental) {
     if (isFrench) {
       return {
-        subject: `Informations de paiement supplémentaires nécessaires${token ? ` [${token}]` : ''}`,
+        subject: 'Informations de paiement supplémentaires nécessaires',
         body: [
           greeting,
           '',
-          'Merci d’avoir contacté Chargerent. Les quatre derniers chiffres fournis ne correspondent pas à une location pour le lieu et la date indiqués dans votre demande. Cela peut arriver lorsqu’Apple Pay ou Google Wallet utilise un numéro de carte propre à l’appareil ou un numéro de carte virtuelle.',
+          lastFour
+            ? 'Merci d’avoir contacté Chargerent. Les quatre derniers chiffres fournis ne correspondent pas à une location pour le lieu et la date indiqués dans votre demande. Cela peut arriver lorsqu’Apple Pay ou Google Wallet utilise un numéro de carte propre à l’appareil ou un numéro de carte virtuelle.'
+            : 'Merci d’avoir contacté Chargerent. Pour retrouver votre location, merci de nous transmettre les quatre derniers chiffres du moyen de paiement utilisé. Si vous avez payé avec Apple Pay ou Google Wallet, il peut s’agir d’un numéro propre à l’appareil ou d’un numéro de carte virtuelle.',
           '',
           'Apple Pay : ouvrez l’app Cartes, sélectionnez la carte utilisée, puis touchez le bouton Numéro de carte pour afficher les quatre derniers chiffres du numéro de compte de l’appareil.',
           '',
@@ -649,11 +680,13 @@ export const buildSupportReply = (ticket, match, templateType = 'suggested', sen
       };
     }
     return {
-      subject: `Additional payment information needed${token ? ` [${token}]` : ''}`,
+      subject: 'Additional payment information needed',
       body: [
         greeting,
         '',
-        'Thank you for contacting Chargerent. The last four digits provided do not match a rental for the location and date in your request. This can happen when Apple Pay or Google Wallet uses a device-specific or virtual card number.',
+        lastFour
+          ? 'Thank you for contacting Chargerent. The last four digits provided do not match a rental for the location and date in your request. This can happen when Apple Pay or Google Wallet uses a device-specific or virtual card number.'
+          : 'Thank you for contacting Chargerent. To locate your rental, please provide the last four digits of the payment method used. If you paid with Apple Pay or Google Wallet, this may be a device-specific or virtual card number.',
         '',
         'Apple Pay: Open Wallet, select the card used, then tap the Card Number button to find the last four digits of the Device Account Number.',
         '',

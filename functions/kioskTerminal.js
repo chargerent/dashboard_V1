@@ -179,6 +179,9 @@ function terminalPaymentCurrency(installation, configuredCurrency) {
 function resolveKioskOffer(installation, kiosk) {
   const pricing = kiosk && typeof kiosk.pricing === "object" ? kiosk.pricing : {};
   const hardware = kiosk && typeof kiosk.hardware === "object" ? kiosk.hardware : {};
+  if (hardware.type === "CTF7" || hardware.protocol === "lm-tcp-v1") {
+    fail(503, "ctf7-commissioning", "CTF7 paid rentals are awaiting hardware verification.");
+  }
   const {planCode, planLabel} = normalizePricingPlan(pricing.text);
   const configuredCurrency = normalizeKioskCurrency(pricing.currency);
   const currency = terminalPaymentCurrency(installation, configuredCurrency);
@@ -193,14 +196,13 @@ function resolveKioskOffer(installation, kiosk) {
     fail(503, "invalid-price", "The kiosk payment option is not supported by the phone terminal.");
   }
 
-  const kioskMode = cleanString(pricing.kioskmode, 40).toUpperCase();
   const initialPeriodHours = positiveInteger(pricing.initialperiod, "initial period");
   const overdueDays = positiveInteger(pricing.overdue, "overdue period");
   const initialAmountCents = majorAmountCents(pricing.authamount, "authorization amount");
   const dailyPriceCents = majorAmountCents(pricing.dailyprice, "daily price");
   const buyPriceCents = majorAmountCents(pricing.buyprice, "not-returned price");
   const paymentAmountCents = gatewayOption === "FULLPRICE" ?
-    buyPriceCents : (kioskMode === "LEASE" ? 0 : initialAmountCents);
+    buyPriceCents : initialAmountCents;
   if (paymentAmountCents < 50 || paymentAmountCents > 10000) {
     fail(503, "invalid-price", "The kiosk payment amount must be between 0.50 and 100.00.");
   }
@@ -244,8 +246,8 @@ function resolveKioskOffer(installation, kiosk) {
 
   const fullPrice = gatewayOption === "FULLPRICE";
   const paymentTerms = fullPrice ? [
-    `I accept the ${paymentAmount} deposit, applicable rental charges, and the Terms and Conditions.`,
-    "The deposit is refunded upon return, less applicable rental charges.",
+    `I accept the ${paymentAmount} temporary card authorization, applicable rental charges, and the Terms and Conditions.`,
+    "Only the final rental charge is collected; the unused authorization is released.",
   ] : [
     "I accept the applicable rental charges and the Terms and Conditions.",
     "The final charge depends on the rental duration.",
@@ -273,6 +275,10 @@ function resolveKioskOffer(installation, kiosk) {
     dailyPriceCents,
     buyPriceCents,
     overdueDays,
+    pricingSnapshot: Object.fromEntries(Object.entries({
+      ...pricing,
+      currency: kioskCurrency,
+    }).filter(([key]) => key !== "valid")),
     pricingLines,
     paymentTerms,
   };
@@ -373,7 +379,7 @@ async function settleStripeReturn({
   const existing = rental && typeof rental.stripeReturnSettlement === "object" ?
     rental.stripeReturnSettlement : {};
   const paymentIntentId = stripeIntentIdForRental(rental, rentalId);
-  if (gateway !== "STRIPE" || status !== "returned" || !paymentIntentId ||
+  if (gateway !== "STRIPE" || !new Set(["returned", "purchased"]).has(status) || !paymentIntentId ||
       existing.status === "completed") {
     return {handled: false};
   }
@@ -391,34 +397,82 @@ async function settleStripeReturn({
   ).toLowerCase();
   const stripeClient = stripe || (typeof getStripeClient === "function" ?
     getStripeClient({accountCountry: stripeAccountCountry, mode: stripeMode}) : null);
-  if (!stripeClient || !stripeClient.paymentIntents || !stripeClient.refunds) {
-    throw new TypeError("A Stripe client with refunds is required.");
+  if (!stripeClient || !stripeClient.paymentIntents) {
+    throw new TypeError("A Stripe client with PaymentIntents is required.");
   }
 
-  const totalChargedCents = majorAmountCents(rental.totalCharged || 0, "return charge", {
+  const totalChargedCents = majorAmountCents(rental.totalCharged || 0, "final charge", {
     minimum: 0,
     maximum: 1000000,
   });
+  const gatewayOption = cleanString(
+      rental.gatewayOption || rental.gatewayoptions || interaction?.gatewayOption,
+      40,
+  ).toUpperCase().replace(/[ _-]/g, "");
+  if (status === "purchased" && gatewayOption !== "FULLPRICE") {
+    return {handled: false};
+  }
   const paymentIntent = await stripeClient.paymentIntents.retrieve(paymentIntentId);
-  if (!paymentIntent || paymentIntent.status !== "succeeded") {
-    fail(409, "return-payment-not-settled", "The returned rental payment is not captured.");
-  }
-  const capturedCents = Number(paymentIntent.amount_received || paymentIntent.amount || 0);
-  if (!Number.isInteger(capturedCents) || capturedCents <= 0 || totalChargedCents > capturedCents) {
-    fail(409, "invalid-return-charge", "The returned rental charge exceeds the captured deposit.");
-  }
-  const refundCents = capturedCents - totalChargedCents;
+  const fullPriceAuthorization = gatewayOption === "FULLPRICE" &&
+    paymentIntent && paymentIntent.status === "requires_capture";
+  let capturedCents;
+  let refundCents = 0;
+  let releasedCents = 0;
   let refundId = cleanString(existing.refundId, 160) || null;
-  if (refundCents > 0) {
-    const refund = await stripeClient.refunds.create({
-      payment_intent: paymentIntentId,
-      amount: refundCents,
-      metadata: {
-        chargerent_rental_id: cleanString(rentalId, 160),
-        chargerent_station_id: cleanString(rental.returnStationid || rental.rentalStationid, 80),
-      },
-    }, {idempotencyKey: `kiosk-return-refund-${cleanString(rentalId, 120)}`});
-    refundId = cleanString(refund && refund.id, 160) || refundId;
+  let paymentStatus;
+  if (fullPriceAuthorization) {
+    const authorizedCents = Number(paymentIntent.amount_capturable || paymentIntent.amount || 0);
+    if (!Number.isInteger(authorizedCents) || authorizedCents <= 0 ||
+        totalChargedCents > authorizedCents) {
+      fail(409, "invalid-return-charge", "The final rental charge exceeds the authorized amount.");
+    }
+    capturedCents = totalChargedCents;
+    releasedCents = authorizedCents - totalChargedCents;
+    if (totalChargedCents > 0) {
+      await stripeClient.paymentIntents.capture(paymentIntentId, {
+        amount_to_capture: totalChargedCents,
+      }, {idempotencyKey: `kiosk-return-capture-${cleanString(rentalId, 120)}`});
+      paymentStatus = "captured";
+    } else {
+      await stripeClient.paymentIntents.cancel(paymentIntentId);
+      paymentStatus = "authorization_released";
+    }
+  } else if (gatewayOption === "FULLPRICE" && paymentIntent &&
+      paymentIntent.status === "canceled" && totalChargedCents === 0 &&
+      !paymentIntent.amount_received) {
+    // The cancellation may have succeeded before the rental write failed.
+    capturedCents = 0;
+    releasedCents = Number(paymentIntent.amount || 0);
+    paymentStatus = "authorization_released";
+  } else {
+    if (!paymentIntent || paymentIntent.status !== "succeeded") {
+      fail(409, "return-payment-not-settled", "The final rental payment is not settled.");
+    }
+    capturedCents = Number(paymentIntent.amount_received || paymentIntent.amount || 0);
+    if (!Number.isInteger(capturedCents) || capturedCents <= 0 ||
+        totalChargedCents > capturedCents) {
+      fail(409, "invalid-return-charge", "The final rental charge exceeds the captured amount.");
+    }
+    refundCents = capturedCents - totalChargedCents;
+    if (gatewayOption === "FULLPRICE" && refundCents === 0) {
+      // Recover a completed partial capture after a failed rental write.
+      releasedCents = Math.max(0, Number(paymentIntent.amount || capturedCents) - capturedCents);
+    }
+    if (refundCents > 0) {
+      if (!stripeClient.refunds) {
+        throw new TypeError("A Stripe client with refunds is required.");
+      }
+      const refund = await stripeClient.refunds.create({
+        payment_intent: paymentIntentId,
+        amount: refundCents,
+        metadata: {
+          chargerent_rental_id: cleanString(rentalId, 160),
+          chargerent_station_id: cleanString(rental.returnStationid || rental.rentalStationid, 80),
+        },
+      }, {idempotencyKey: `kiosk-return-refund-${cleanString(rentalId, 120)}`});
+      refundId = cleanString(refund && refund.id, 160) || refundId;
+    }
+    paymentStatus = refundCents > 0 ? "partially_or_fully_refunded" : "captured";
   }
 
   const settledAt = now();
@@ -429,18 +483,30 @@ async function settleStripeReturn({
       capturedCents,
       finalChargeCents: totalChargedCents,
       refundCents,
+      releasedCents,
       refundId,
+      gatewayOption: gatewayOption || null,
+      rentalStatus: status,
       stripeAccountCountry,
       stripeMode,
       settledAt,
     },
-    paymentStatus: refundCents > 0 ? "partially_or_fully_refunded" : "captured",
+    paymentStatus,
     lastUpdate: settledAt.toISOString(),
   });
-  return {handled: true, capturedCents, finalChargeCents: totalChargedCents, refundCents};
+  return {
+    handled: true,
+    capturedCents,
+    finalChargeCents: totalChargedCents,
+    refundCents,
+    releasedCents,
+  };
 }
 
 function validateInstallation(installation) {
+  if (String(installation?.moduleId || "").startsWith("LM-")) {
+    fail(503, "ctf7-commissioning", "CTF7 paid rentals are awaiting hardware verification.");
+  }
   if (!installation || installation.active !== true) {
     fail(403, "installation-disabled", "This kiosk installation is disabled.");
   }
@@ -908,6 +974,7 @@ function createKioskTerminalService({
         authorizationAmountCents: offer.initialAmountCents,
         pricingSource: offer.source,
         pricingPlan: offer.planCode,
+        pricingSnapshot: offer.pricingSnapshot,
         gatewayOption: offer.gatewayOption,
         availabilityRequestId: availability.requestId,
         availabilityCheckedAt: availability.checkedAt,
@@ -957,11 +1024,12 @@ function createKioskTerminalService({
         };
       }
 
+      const fullPrice = interaction.gatewayOption === "FULLPRICE";
       const paymentIntent = await client.paymentIntents.create({
         amount: interaction.amountCents,
         currency: interaction.currency,
         payment_method_types: ["card_present"],
-        capture_method: "manual",
+        capture_method: fullPrice ? "manual" : "automatic",
         description: `Chargerent ${interaction.stationId} kiosk rental`,
         metadata: {
           chargerent_interaction_id: interaction.id,
@@ -1011,14 +1079,23 @@ function createKioskTerminalService({
           paymentIntent.currency !== interaction.currency) {
         fail(409, "payment-mismatch", "Stripe returned an unexpected payment.");
       }
-      if (paymentIntent.status !== "requires_capture") {
-        fail(409, "payment-not-authorized", "The card payment is not authorized for vending.");
+      const fullPrice = interaction.gatewayOption === "FULLPRICE";
+      const expectedStatus = fullPrice ? "requires_capture" : "succeeded";
+      if (paymentIntent.status !== expectedStatus) {
+        fail(409, "payment-not-authorized", fullPrice ?
+          "The full-price card authorization is not ready for vending." :
+          "The initial-price card payment was not captured.");
       }
+      const paymentResolution = fullPrice ? "authorized" : "captured";
 
       await store.updateInteraction(interaction.id, {
-        state: "payment_authorized",
+        state: fullPrice ? "payment_authorized" : "payment_captured",
         paymentAuthorizedAt: timestamp,
-        message: "Payment authorized; sending the selected charger to Besiter.",
+        paymentCapturedAt: fullPrice ? null : timestamp,
+        paymentResolution,
+        message: fullPrice ?
+          "Full price authorized; sending the selected charger to Besiter." :
+          "Initial price captured; sending the selected charger to Besiter.",
       }, timestamp);
 
       try {
@@ -1044,6 +1121,9 @@ function createKioskTerminalService({
           symbol: interaction.symbol || null,
           buyprice: Number(interaction.buyPriceCents || 0) / 100,
           authamount: Number(interaction.authorizationAmountCents || 0) / 100,
+          gatewayOption: interaction.gatewayOption,
+          gatewayoptions: interaction.gatewayOption,
+          pricing: interaction.pricingSnapshot,
           maxVendAttempts: 3,
         });
       } catch (error) {
@@ -1066,7 +1146,10 @@ function createKioskTerminalService({
         vendRequestedAt: now(),
         message: "Besiter is releasing the selected charger.",
       }, now());
-      return {status: 202, body: {accepted: true, state: "vend_requested"}};
+      return {
+        status: 202,
+        body: {accepted: true, state: "vend_requested", paymentResolution},
+      };
     },
 
     async getInteraction(req, interactionId) {
@@ -1078,21 +1161,20 @@ function createKioskTerminalService({
         if (physical.outcome === "vend_succeeded") {
           const client = stripe(interaction, installation);
           const paymentIntent = await client.paymentIntents.retrieve(interaction.paymentIntentId);
-          if (paymentIntent.status === "requires_capture") {
-            await client.paymentIntents.capture(
-                interaction.paymentIntentId,
-                {},
-                {idempotencyKey: `kiosk-capture-${interaction.id}`},
-            );
-          } else if (paymentIntent.status !== "succeeded") {
-            fail(409, "payment-not-capturable", "The authorized payment could not be captured.");
+          const fullPrice = interaction.gatewayOption === "FULLPRICE";
+          const validStatus = fullPrice ?
+            new Set(["requires_capture", "succeeded"]) : new Set(["succeeded"]);
+          if (!validStatus.has(paymentIntent.status)) {
+            fail(409, "payment-not-settled", "The kiosk payment is not ready to complete.");
           }
+          const paymentResolution = paymentIntent.status === "requires_capture" ?
+            "authorized" : "captured";
           const completedAt = now();
           await store.updateInteraction(interaction.id, {
             outcome: "vend_succeeded",
             state: "complete",
-            paymentResolution: "captured",
-            paymentCapturedAt: completedAt,
+            paymentResolution,
+            paymentCapturedAt: paymentResolution === "captured" ? completedAt : null,
             reservedSlot: physical.slot || interaction.reservedSlot,
             moduleId: physical.moduleId || interaction.moduleId,
             chargerSn: physical.chargerSn || interaction.chargerSn,
@@ -1102,6 +1184,7 @@ function createKioskTerminalService({
           interaction = {
             ...interaction,
             outcome: "vend_succeeded",
+            paymentResolution,
             reservedSlot: physical.slot || interaction.reservedSlot,
             message: "The V2 kiosk confirmed that the charger was dispensed.",
           };
@@ -1149,6 +1232,7 @@ function createKioskTerminalService({
         body: {
           outcome: interaction.outcome || "pending",
           slot: interaction.reservedSlot || null,
+          paymentResolution: interaction.paymentResolution || null,
           message: interaction.message || null,
         },
       };

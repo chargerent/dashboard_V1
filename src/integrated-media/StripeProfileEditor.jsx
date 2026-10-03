@@ -6,7 +6,7 @@ import {floatingCheckoutGeometry} from './checkoutFlow.js';
 import {previewPaymentHeight} from './mediaLayout.js';
 import './media-studio.css';
 import {DashboardIcon as Icon} from './DashboardIcons.jsx';
-import {STRIPE_UI_LANGUAGES as STRIPE_LANGUAGES, STRIPE_UI_FIELDS, STRIPE_UI_COLORS as STRIPE_THEME_FIELDS, defaultStripeUi as createStripeUi, validateStripeUi as normalizeStripeUi, stripeText} from './stripeUi.js';
+import {STRIPE_UI_LANGUAGES as STRIPE_LANGUAGES, STRIPE_UI_FIELDS, STRIPE_UI_COLORS as STRIPE_THEME_FIELDS, defaultStripeUi as createStripeUi, stripeText, validateStripeUi as normalizeStripeUi} from './stripeUi.js';
 
 const SECTION_META = [
   {key:'start',label:'Start'}, {key:'ready',label:'Rent / Return'}, {key:'information',label:'How it works'},
@@ -45,7 +45,7 @@ const buttonClass = 'inline-flex items-center justify-center gap-2 rounded-xl bo
 function Field({label, children, hint}) {
   return <label className="block text-sm font-semibold text-slate-700">{label}{children}{hint && <span className="mt-1.5 block text-xs font-normal leading-5 text-slate-500">{hint}</span>}</label>;
 }
-const PREVIEW_OFFER = {currency:'usd', amountCents:500, depositAmountCents:500, rentalFeeCents:100, refundAmountCents:400, availableCount:4, canRent:true, reader:{status:'ready'}};
+const PREVIEW_OFFER = {currency:'usd', amountCents:500, depositAmountCents:500, rentalFeeCents:100, refundAmountCents:400, availableCount:4, canRent:true, gateway:'STRIPE', reader:{status:'ready'}};
 
 function MediaPreviewZone({zone, assets, width, height}) {
   const [index,setIndex] = useState(0);
@@ -76,7 +76,7 @@ function previewGeometry(manifest) {
   return {screenWidth,screenHeight,fraction,paymentHeight,idleWidth,idleHeight,margin,expandedWidth,detailHeight:Math.max(paymentHeight,idleHeight)+2*margin};
 }
 
-function ScaledDevicePreview({profile, language, selectedPage, group, manifest, previewStage, paymentOnly=false, previewStageChange, previewLanguageChange}) {
+function ScaledDevicePreview({profile, language, selectedPage, group, manifest, previewStationId, previewStage, previewPopupType, paymentOnly=false, previewStageChange, previewLanguageChange}) {
   const box = useRef(null), [displayWidth,setDisplayWidth] = useState(0);
   useEffect(() => {
     if (!box.current) return;
@@ -89,24 +89,27 @@ function ScaledDevicePreview({profile, language, selectedPage, group, manifest, 
   const assets = Object.fromEntries((manifest.assets || []).map(asset => [asset.id,asset]));
   const previewProfile = {...profile,enabledLanguages:[...new Set([...profile.enabledLanguages,language])]};
   const stage = selectedPage ? 'page' : previewStage || previewStageFor(group);
-  const previewCheckout = {stationId:manifest.stationId,offer:PREVIEW_OFFER, connected:true, recovering:false, interaction:{slot:7,currency:'usd',amountCents:500}};
+  const popupKey = previewPopupType === 'rental_failed' ? 'popup.failure' : 'popup.success';
+  const popupTitleKey = previewPopupType === 'rental_failed' ? 'failed.title' : 'succeeded.title';
+  const showPopup = group === 'popups' && !selectedPage && previewPopupType !== 'charger_returned' && !paymentOnly;
+  const previewCheckout = {stationId:previewStationId || manifest.stationId,offer:PREVIEW_OFFER, connected:true, recovering:false, liveTerminalEnabled:true, interaction:{slot:7,currency:'usd',amountCents:500,...(stage === 'succeeded' ? {moneyStatus:'captured'} : {})}};
   return <div ref={box} style={{position:'relative',width:'100%',height:displayWidth?canvasHeight*scale:undefined,aspectRatio:`${screenWidth} / ${canvasHeight || 1}`,overflow:'hidden',background:manifest.background || '#000'}} data-testid={paymentOnly?'stripe-payment-detail':'stripe-device-preview'} data-screen-width={screenWidth} data-screen-height={screenHeight} data-payment-fraction={fraction}>
     {displayWidth > 0 && <div data-kiosk-viewport style={{position:'absolute',top:0,left:0,width:screenWidth,height:canvasHeight,transform:`scale(${scale})`,transformOrigin:'top left','--ms-preview-pixel':'1px',fontFamily:'Roboto,Arial,sans-serif',boxSizing:'border-box'}}>
       {!paymentOnly && <div data-testid="stripe-preview-media" style={{position:'absolute',inset:0,width:screenWidth,height:screenHeight,overflow:'hidden'}}>{(manifest.zones || []).map(zone => <MediaPreviewZone key={zone.id} zone={zone} assets={assets} width={zone.width*screenWidth} height={zone.height*screenHeight}/>)}</div>}
       {paymentHeight > 0 && <div style={{position:'absolute',inset:0,zIndex:1,width:screenWidth,height:canvasHeight,overflow:'visible',pointerEvents:'none'}} data-testid="stripe-preview-payment-region">
         <CheckoutPanel checkout={previewCheckout} previewOnly stripeUi={previewProfile} height={fraction} previewStage={stage} previewPageId={selectedPage?.id} previewLanguage={language} previewStageChange={previewStageChange} previewLanguageChange={previewLanguageChange} viewportWidth={screenWidth} viewportHeight={screenHeight}/>
       </div>}
-      {!paymentOnly && stage !== 'start' && <div aria-hidden="true" style={{position:'absolute',zIndex:2,top:0,left:0,width:'100%',height:52,padding:'5px 10px 5px 14px',display:'flex',alignItems:'center',justifyContent:'space-between',background:'rgba(16,37,31,.867)',boxSizing:'border-box'}}><span style={{height:36,fontSize:11,color:'#d1fae5',paddingTop:1}}>● {stripeText(previewProfile,language,'brand')}</span><span style={{display:'grid',placeItems:'center',width:82,height:42}}><span style={{display:'grid',placeItems:'center',width:74,height:30,borderRadius:2,background:'#5a5a5c',color:'#fff',fontSize:12}}>STAFF</span></span></div>}
+      {showPopup && <div className={`ms-screen-popup ms-stripe-popup ${previewPopupType}`} style={{background:previewPopupType === 'rental_failed' ? profile.theme.danger : profile.theme.primary,color:profile.theme.buttonText}} role="status" data-testid="stripe-confirmation-popup"><strong>{stripeText(previewProfile,language,popupTitleKey,{slot:7})}</strong><p>{stripeText(previewProfile,language,popupKey,{slot:7})}</p></div>}
     </div>}
   </div>;
 }
 
-function DraftPreview({profile, language, selectedPage, group, manifest, previewStage, previewStageChange, previewLanguageChange, previewStations, previewStationId, onPreviewStationChange, previewOrientation, onPreviewOrientationChange, manifestError}) {
+function DraftPreview({profile, language, selectedPage, group, manifest, previewStage, previewPopupType, previewStageChange, previewLanguageChange, previewStations, previewStationId, onPreviewStationChange, previewOrientation, onPreviewOrientationChange, manifestError}) {
   const [zoom,setZoom] = useState(false);
   const {screenWidth:width,screenHeight:height,fraction,paymentHeight,idleWidth,idleHeight,expandedWidth,margin,detailHeight} = previewGeometry(manifest);
-  const idle = !selectedPage && (previewStage || previewStageFor(group)) === 'start';
+  const idle = !selectedPage && ['start','loading'].includes(previewStage || previewStageFor(group));
   const cardSize = `${idle?idleWidth:expandedWidth} × ${idle?idleHeight:paymentHeight}`;
-  const previewProps = {profile,language,selectedPage,group,manifest,previewStage,previewStageChange,previewLanguageChange};
+  const previewProps = {profile,language,selectedPage,group,manifest,previewStationId,previewStage,previewPopupType,previewStageChange,previewLanguageChange};
   return <aside className="rounded-2xl border border-slate-200 bg-slate-50 p-4 xl:sticky xl:top-4" aria-label="Stripe preview">
     <div className="flex items-center justify-between gap-2"><h3 className="font-bold text-slate-900">Screen preview</h3></div>
     {previewStations.length > 0 && <label className="mb-2 mt-2 block text-xs font-semibold text-slate-600">Kiosk
@@ -181,6 +184,7 @@ export default function StripeProfileEditor({value, checkout, onChange, disabled
   const [language, setLanguage] = useState('en');
   const [group, setGroup] = useState('start');
   const [returnPreviewStage, setReturnPreviewStage] = useState('returning');
+  const [previewPopupType, setPreviewPopupType] = useState('rental_dispensed');
   const [selectedPageId, setSelectedPageId] = useState('');
   const [query, setQuery] = useState('');
   const [confirmRemove, setConfirmRemove] = useState('');
@@ -233,6 +237,7 @@ export default function StripeProfileEditor({value, checkout, onChange, disabled
             <nav aria-label="Stripe text sections" className="hidden space-y-1 md:block">{groups.map(name => <button key={name} type="button" aria-pressed={group === name} onClick={() => {setGroup(name); setQuery('');}} className={`w-full rounded-lg px-3 py-2 text-left text-sm font-medium ${group === name ? 'bg-cyan-50 text-cyan-800' : 'text-slate-600 hover:bg-slate-50'}`}>{sectionLabel(name)}</button>)}</nav>
             <div className="min-w-0"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h3 className="font-bold text-slate-900">{sectionLabel(group)}</h3><input type="search" aria-label="Find Stripe text" placeholder="Find text" value={query} onChange={event => setQuery(event.target.value)} className="w-40 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-cyan-500"/></div><div className="space-y-4">
               {group === 'returning' && <div className="rounded-xl border border-cyan-100 bg-cyan-50 p-3"><div role="tablist" aria-label="Return preview state" className="flex gap-1 rounded-lg bg-white p-1">{[['returning','Instructions'],['returned','Return complete']].map(([stage,label]) => <button type="button" role="tab" aria-selected={returnPreviewStage === stage} key={stage} onClick={() => setReturnPreviewStage(stage)} className={`flex-1 rounded-md px-3 py-2 text-sm font-semibold ${returnPreviewStage === stage ? 'bg-cyan-100 text-cyan-900' : 'text-slate-500'}`}>{label}</button>)}</div><p className="mt-2 text-xs leading-5 text-cyan-900">Instructions stay on screen while the kiosk waits. A confirmed return, whether or not the customer opened this page first, uses the same completion screen with the returned slot and receipt QR.</p></div>}
+              {group === 'popups' && <div className="rounded-xl border border-cyan-100 bg-cyan-50 p-3"><div role="tablist" aria-label="Confirmation preview event" className="flex gap-1 rounded-lg bg-white p-1">{[['rental_dispensed','Released'],['charger_returned','Returned'],['rental_failed','Release failed']].map(([type,label]) => <button type="button" role="tab" aria-selected={previewPopupType === type} key={type} onClick={() => setPreviewPopupType(type)} className={`flex-1 rounded-md px-2 py-2 text-xs font-semibold ${previewPopupType === type ? 'bg-cyan-100 text-cyan-900' : 'text-slate-500'}`}>{label}</button>)}</div><p className="mt-2 text-xs leading-5 text-cyan-900">Release and failure events show a centered banner over media. Confirmed returns use the Return complete card.</p></div>}
               {group === 'returning' && <Field label="Return receipt URL" hint="The Return Complete screen uses this address for its receipt QR. Leave it blank to show the receipt-pending placeholder."><input aria-label="Stripe Return receipt URL" type="url" maxLength={1000} placeholder="https://" value={draft.links?.receipt || ''} onChange={event => update({links:{...draft.links,receipt:event.target.value}})} className={inputClass}/></Field>}
               {group === 'ready' && <Field label="Help QR URL" hint="Used by the QR code on the Rent / Return screen. Add {stationId} anywhere in the HTTPS address to insert the kiosk station ID. Leave blank to keep the Chargerent support text-message fallback."><input aria-label="Stripe Help QR URL" type="text" maxLength={1000} placeholder="https://example.com/help?station={stationId}" value={draft.links?.help || ''} onChange={event => update({links:{...draft.links,help:event.target.value}})} className={inputClass}/></Field>}
               {OPTIONAL_PAGES.filter(item => item.section === group).map(item => <label key={item.key} className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-semibold text-slate-700"><span>Show {item.label.toLowerCase()}</span><input type="checkbox" aria-label={`Show Stripe ${item.label}`} checked={draft.navigation?.[item.key] !== false} onChange={event => update({navigation:{...draft.navigation,[item.key]:event.target.checked}})} className="h-4 w-4 accent-cyan-700"/></label>)}
@@ -256,7 +261,7 @@ export default function StripeProfileEditor({value, checkout, onChange, disabled
         </>}
         {tab === 'Colors' && <><h3 className="font-bold text-slate-900">Brand colors</h3><p className="mb-5 mt-1 text-sm text-slate-500">Apply your colors to the payment section and added pages.</p><div className="grid gap-4 sm:grid-cols-2">{STRIPE_THEME_FIELDS.map(({key,label}) => <div key={key} className="rounded-2xl border border-slate-200 p-4"><div className="mb-3 flex items-center justify-between gap-3"><label htmlFor={`stripe-color-${key}`} className="text-sm font-semibold text-slate-800">{label}</label><input type="color" aria-label={`Stripe ${label} color picker`} value={/^#[0-9a-f]{6}$/i.test(draft.theme[key]) ? draft.theme[key] : '#000000'} onChange={event => update({theme:{...draft.theme,[key]:event.target.value.toUpperCase()}})} className="h-10 w-10 cursor-pointer rounded-lg border border-slate-200 bg-white p-1"/></div><input id={`stripe-color-${key}`} aria-label={`Stripe ${label} color`} value={draft.theme[key]} maxLength={7} onChange={event => update({theme:{...draft.theme,[key]:event.target.value.toUpperCase()}})} className={inputClass}/></div>)}</div></>}
       </fieldset>
-      <DraftPreview profile={draft} language={language} selectedPage={tab === 'Pages' ? page : null} group={group} manifest={manifest} previewStage={group === 'returning' ? returnPreviewStage : previewStageFor(group)} previewStageChange={changePreviewStage} previewLanguageChange={setLanguage} previewStations={stationIds} previewStationId={previewStationId} onPreviewStationChange={setPreviewStationId} previewOrientation={previewOrientation} onPreviewOrientationChange={changePreviewOrientation} manifestError={manifestError}/>
+      <DraftPreview profile={draft} language={language} selectedPage={tab === 'Pages' ? page : null} group={group} manifest={manifest} previewStage={group === 'returning' ? returnPreviewStage : group === 'popups' ? previewPopupType === 'charger_returned' ? 'returned' : previewPopupType === 'rental_failed' ? 'failed' : 'succeeded' : previewStageFor(group)} previewPopupType={previewPopupType} previewStageChange={changePreviewStage} previewLanguageChange={setLanguage} previewStations={stationIds} previewStationId={previewStationId} onPreviewStationChange={setPreviewStationId} previewOrientation={previewOrientation} onPreviewOrientationChange={changePreviewOrientation} manifestError={manifestError}/>
     </div>
   </div>;
 }
