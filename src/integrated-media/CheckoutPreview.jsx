@@ -117,6 +117,10 @@ function normalizeCheckoutVendNotice(event,timeoutMs) {
   const result=normalizeCheckoutReturnNotice({...event,type:'charger_returned'},{timeoutMs});
   return result?{...result,type:'rental_dispensed'}:null;
 }
+function ReturnInstructions({text,className=''}) {
+  return <div className={`ms-checkout-return-guidance ${className}`}><DashboardIcon name="returnSlot" className="ms-checkout-return-icon"/><div className="ms-checkout-return-copy"><p className="ms-checkout-return-instruction">{text('returnAnySlot')}</p><small className="ms-checkout-terms">{text('returnConfirmationHint')}</small></div></div>;
+}
+
 const CUSTOMER_STAGES=new Set(['start','ready','sold_out','page','review','waiting_for_card','authorizing','dispensing','succeeded','declined','cancelled','failed','returning','returned','information','terms','map','out_of_order','loading']);
 const LINK_STAGES=new Set(['terms','map']);
 const INFORMATION_STAGES=new Set(['information',...LINK_STAGES]);
@@ -279,10 +283,11 @@ export function CheckoutPanel({checkout={},previewOnly=false,previewStage,previe
   },[directTap,stage,profile,language,qrImage,link,receiptPreview,viewportWidth,viewportHeight,geometry.expandedHeight]);
   const helpStationId=String(checkout.stationId || STATION).trim().toUpperCase(),helpTemplate=profile.links?.help || '',helpLink=directTap?customerHelpTermsUrl(helpTemplate,helpStationId,offer?.planCode || offer?.pricing?.planCode,language):customerHelpUrl(helpTemplate,helpStationId);
   const tapToRent=directTap && !currentPage && ['touch_ready','waiting_for_card'].includes(stage);
-  const portraitTap=tapToRent && viewportHeight>viewportWidth;
+  const unavailableScreen=stage==='out_of_order';
+  const portraitTap=(tapToRent || directTap && unavailableScreen) && viewportHeight>viewportWidth;
   const footerKeys=directTapFooterKeys(offer?.gatewayOption || offer?.pricing?.gatewayOption);
   const freeDay=text('eventFreeDay'),freeBreak=freeDay.indexOf(' ');
-  const showHelpQr=!currentPage && (directTap?tapToRent:stage==='ready' || stage==='sold_out') && !!helpLink;
+  const showHelpQr=!currentPage && (unavailableScreen || (directTap?tapToRent:stage==='ready' || stage==='sold_out')) && !!helpLink;
   const helpInOwnColumn=!directTap && showHelpQr && checkoutUsesColumns(viewportWidth,viewportHeight,returnOnly ? .16 : height);
   useEffect(()=>{let active=true;setQrImage(null);setQrOpen(false);if(link)stripeQrDataUrl(link).then(value=>{if(active)setQrImage(value);}).catch(()=>{});return()=>{active=false;};},[link]);
   useEffect(()=>{let active=true;setHelpQrImage(null);if(helpLink)(directTap?stripeQrDataUrl(helpLink):customerHelpQrDataUrl(helpTemplate,helpStationId)).then(value=>{if(active)setHelpQrImage(value);}).catch(()=>{});return()=>{active=false;};},[helpLink,helpTemplate,helpStationId,directTap]);
@@ -353,15 +358,15 @@ export function CheckoutPanel({checkout={},previewOnly=false,previewStage,previe
   return <div className="ms-checkout-viewport" style={themeStyle}><section ref={panel} className={`ms-checkout-panel ${stage} ${directTap?'direct-tap':''} ${portraitTap?'portrait-tap':''} ${idle?'start':''} ${checkoutUsesColumns(viewportWidth,viewportHeight,stage==='information' || eventReview?geometry.expandedHeight/viewportHeight:returnOnly ? .16 : height)?'compact':''} ${helpInOwnColumn?'help-column':''}`} style={{...cardStyle,...(portraitTap?{borderRadius:px(28*geometry.scale)}:{})}} lang={language} aria-label="Floating payment card" data-receipt-transaction={link?(showingVend?vendNotice:showingReturn?returnNotice:interaction)?.transactionId:undefined} data-checkout-phase={stage} data-viewport-orientation={viewportWidth>viewportHeight?'landscape':'portrait'} data-language-enabled={!directTap && navigation.language!==false} data-floating-state={idle?'idle':'expanded'} data-inactivity-timeout-ms={activeInactivityTimeoutMs} onPointerDown={noteActivity} onKeyDown={noteActivity}>
     {idle?<div className="ms-idle-actions">{button('start',()=>selectFlow({step:'ready',pageId:null,consent:false}),{disabled:stage==='loading' || !!busy,presentationOnly:true})}{flags}</div>:<>
     {flags && <div className="ms-checkout-language-corner">{flags}</div>}
-    {tapToRent && <h2 className="ms-checkout-tap-heading">{title}</h2>}
-    <div className="ms-checkout-main" key={`copy-${stage}-${currentPage?.id || ''}`}>{!tapToRent && <h2>{title}</h2>}{stage==='returned' && <p className="ms-return-slot">{text('returnSlot')}</p>}{body && stage!=='information' && !(directTap && stage==='succeeded') && (!LINK_STAGES.has(stage) || link || mockLink) && <p className="ms-checkout-body">{body}</p>}
+    {(tapToRent || portraitTap) && <h2 className="ms-checkout-tap-heading">{title}</h2>}
+    <div className="ms-checkout-main" key={`copy-${stage}-${currentPage?.id || ''}`}>{!(tapToRent || portraitTap) && <h2>{title}</h2>}{stage==='returned' && <p className="ms-return-slot">{text('returnSlot')}</p>}{body && stage!=='information' && !(directTap && stage==='succeeded') && (!LINK_STAGES.has(stage) || link || mockLink) && <p className="ms-checkout-body">{body}</p>}
       {stage==='information' && <><div className="ms-how-it-works-steps" data-gateway-step={instructions.gateway}>{[instructions.gateway,'charge','return'].map(howItWorksStep)}</div><p className="ms-how-it-works-bank">{instructions.footer}</p></>}
       {stage==='review' && (eventReview?<div className="ms-event-simple-review">{eventReview.paragraphs.map((paragraph,index)=><p key={index} className={index===3?'ms-review-bank':undefined}>{paragraph}</p>)}</div>:<><p className="ms-checkout-pricing">{reviewPricing}</p><p className="ms-checkout-terms">{text('terms')}</p></>)}
       {tapToRent && <p className="ms-checkout-pricing">{tapPricingLines.map((line,index)=><span key={index} className={eventSimple && index===0?'ms-checkout-free-day':undefined}>{portraitTap && eventSimple && index===0 && freeBreak>0 && rentReturnPricing===undefined?<><strong className="ms-checkout-free-emphasis">{freeDay.slice(0,freeBreak)}</strong>{freeDay.slice(freeBreak)}</>:line}</span>)}</p>}
-      {portraitTap && <div className="ms-checkout-stacked-return"><p className="ms-checkout-return-instruction">{text('returnAnySlot')}</p><p className="ms-checkout-terms">{text('returnConfirmationHint')}</p></div>}
+      {portraitTap && <ReturnInstructions text={text} className="ms-checkout-stacked-return"/>}
       {directTap && !portraitTap && helpCard}
-      {directTap && stage==='succeeded' && <div className="ms-checkout-vend-return"><DashboardIcon name="returnSlot"/><p>{text('returnAnySlot')}</p><small>{text('returnConfirmationHint')}</small></div>}
-      {!directTap && stage==='sold_out' && <p className="ms-checkout-body">{text('returnAnySlot')}</p>}
+      {directTap && stage==='succeeded' && <ReturnInstructions text={text} className="ms-checkout-vend-return"/>}
+      {!directTap && stage==='sold_out' && <ReturnInstructions text={text}/>}
       {stage==='ready' && unavailable && <p className="ms-reader-caption">{text(offer?.reader?.status==='disconnected'?'readerUnavailable':'unavailable')}</p>}
       {LINK_STAGES.has(stage) && (link?(qrImage?<img className="ms-checkout-qr" src={qrImage} alt={title}/>:<p className="ms-checkout-terms">{text('connecting')}</p>):mockLink?<MockQrCode label={text('mockQr')}/>:<p className="ms-checkout-terms">{text('linkUnavailable')}</p>)}
       {!noticePresentation && !previewOnly && error && connected && <p className="ms-checkout-error" role="alert">{text(stage==='returning'?'returnPending':'errorGeneric')}</p>}
@@ -370,6 +375,6 @@ export function CheckoutPanel({checkout={},previewOnly=false,previewStage,previe
       {!directTap && !helpInOwnColumn && helpCard}
     </div>
     {(helpInOwnColumn || portraitTap) && <div className="ms-checkout-help-zone">{helpCard}</div>}
-    <div className="ms-checkout-actions" key={`actions-${stage}-${currentPage?.id || ''}`}>{directTap && !portraitTap && (tapToRent || stage==='sold_out') && <><DashboardIcon name="returnSlot" className="ms-checkout-return-icon"/><p className="ms-checkout-return-instruction">{text('returnAnySlot')}</p><p className="ms-checkout-terms">{text('returnConfirmationHint')}</p></>}{renderActions()}</div>{tapToRent && <div className={`ms-checkout-tap-footer${footerKeys.length>1?' has-upfront':''}`}>{footerKeys.map(key=><p key={key} className={key==='touchConsent'?'ms-checkout-tap-consent':'ms-checkout-tap-upfront'}>{text(key)}</p>)}</div>}</>}
+    <div className="ms-checkout-actions" key={`actions-${stage}-${currentPage?.id || ''}`}>{!portraitTap && (directTap && (tapToRent || stage==='sold_out') || unavailableScreen) && <ReturnInstructions text={text}/>}{renderActions()}</div>{tapToRent && <div className={`ms-checkout-tap-footer${footerKeys.length>1?' has-upfront':''}`}>{footerKeys.map(key=><p key={key} className={key==='touchConsent'?'ms-checkout-tap-consent':'ms-checkout-tap-upfront'}>{text(key)}</p>)}</div>}</>}
   </section>{dialog}</div>;
 }

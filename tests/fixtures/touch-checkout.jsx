@@ -12,7 +12,7 @@ const width=portrait?1080:1280,height=portrait?1920:800;
 profile.defaultLanguage=params.get('lang') || 'en';
 if(params.has('opacity'))profile.cardOpacityPercent=Number(params.get('opacity'));
 const eventPricing=params.get('terms')==='true';
-const offer={touch:false,paymentRequired:true,currency:'usd',amountCents:3000,depositAmountCents:3000,
+const offer={touch:params.get('touch')==='true',paymentRequired:true,currency:'usd',amountCents:3000,depositAmountCents:3000,
   planCode:params.get('terms')==='true'?'EVENT_SIMPLE':'PURCHASE_SIMPLE_DAILY',controllerOnline:true,availableCount:1,canRent:true,
   pricingLines:['$30.00 temporary card authorization','$2.00 if returned the same day','$30.00 if not returned'],
   paymentTerms:['Only the final rental charge is collected; the unused authorization is released.'],reader:{status:'ready'}};

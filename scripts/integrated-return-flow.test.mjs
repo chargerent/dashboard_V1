@@ -84,8 +84,8 @@ test('checkout cards omit branding and keep language in the top-right corner', (
   assert.match(editor, /!\['brand','support','receipt','receipt\.title','receipt\.body','tap','insert'/);
 });
 
-test('help is QR-only on Rent Return and omitted from every other checkout page', () => {
-  assert.match(preview, /const showHelpQr=!currentPage && \(directTap\?tapToRent:stage==='ready' \|\| stage==='sold_out'\) && !!helpLink/);
+test('help is QR-only on Rent Return, Sold out, and Out of order', () => {
+  assert.match(preview, /const showHelpQr=!currentPage && \(unavailableScreen \|\| \(directTap\?tapToRent:stage==='ready' \|\| stage==='sold_out'\)\) && !!helpLink/);
   assert.match(preview, /data-help-url=\{helpLink\}/);
   assert.match(preview, /text\(directTap\?'helpTermsTitle':'helpTitle'\)/);
   assert.match(preview, /text\('helpScan'\)/);
@@ -100,8 +100,8 @@ test('the Rent Return help QR uses the soft support card without changing action
   assert.match(styles, /\.ms-checkout-panel\.compact[^\n]+grid-template-columns:minmax\(0,1\.15fr\) minmax\(0,1fr\)[^\n]+gap:calc\(var\(--checkout-pixel\) \* 32\)/);
   assert.match(styles, /\.ms-checkout-panel\.compact \.ms-checkout-actions button[^\n]+height:calc\(var\(--checkout-pixel\) \* 80\)/);
   assert.match(styles, /\.ms-checkout-panel\.compact:not\(\.start\) \.ms-checkout-actions\{padding-top:0;justify-content:center\}/);
-  assert.match(styles, /\.ms-checkout-panel\.ready\.compact\.help-column\{grid-template-columns:minmax\(0,\.78fr\) calc\(var\(--checkout-pixel\) \* 220\) minmax\(0,1fr\)/);
-  assert.match(styles, /\.ms-checkout-panel\.ready\.compact\.help-column \.ms-checkout-help-zone \.ms-checkout-help\{position:static/);
+  assert.match(styles, /\.ms-checkout-panel\.ready\.compact\.help-column,\.ms-checkout-panel\.out_of_order\.compact\.help-column\{grid-template-columns:minmax\(0,\.78fr\) calc\(var\(--checkout-pixel\) \* 220\) minmax\(0,1fr\)/);
+  assert.match(styles, /\.ms-checkout-panel\.ready\.compact\.help-column \.ms-checkout-help-zone \.ms-checkout-help[^\n]*\{position:static/);
   assert.match(preview, /\(helpInOwnColumn \|\| portraitTap\) && <div className="ms-checkout-help-zone">\{helpCard\}<\/div>/);
   assert.match(styles, /\.ms-checkout-panel\.ready \.ms-checkout-actions>button[^\n]+width:60%/);
   assert.match(styles, /background:var\(--checkout-background\);border:[^\n]+border-radius:[^\n]+box-shadow:/);
