@@ -64,9 +64,8 @@ test('variant validation rejects billing settings, unknown plans and malformed t
   assert.equal(Object.hasOwn(validateStripeUi(defaultStripeUi()),'rentReturn'),false);
 });
 
-test('direct-tap footer replaces the hold with consent and retains upfront-payment copy only for its own mode',()=>{
-  for(const option of [undefined,'FULLPRICE','AUTH'])assert.deepEqual(directTapFooterKeys(option),['touchConsent']);
-  assert.deepEqual(directTapFooterKeys('INITIALPRICE'),['touchUpfrontPayment','touchConsent']);
+test('direct-tap footer shows only consent in every payment mode',()=>{
+  for(const option of [undefined,'FULLPRICE','AUTH','INITIALPRICE'])assert.deepEqual(directTapFooterKeys(option),['touchConsent']);
   assert.deepEqual(rentReturnEditorKeys({...howItWorksOfferFromKiosk(kiosk),gatewayOption:'INITIALPRICE'}).slice(-2),['helpScan','touchConsent']);
   const profile=defaultStripeUi();profile.locales.en.touchHold='Saved legacy hold';
   assert.equal(validateStripeUi(profile).locales.en.touchHold,'Saved legacy hold');

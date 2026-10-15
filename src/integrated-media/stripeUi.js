@@ -157,8 +157,8 @@ export const RENT_RETURN_TEXT_KEYS = ['ready.title','ready.body','rent','return'
   'touchBorrowTitle','eventFreeDay','eventLateDay','eventLateDays','eventNotReturned','returnAnySlot','returnConfirmationHint',
   'touchConsent','touchHold','touchUpfrontPayment','pricing'];
 // Preserve legacy hold fields in saved profiles; the no-touch footer shows consent.
-export function directTapFooterKeys(gatewayOption) {
-  return [...(gatewayOption==='INITIALPRICE'?['touchUpfrontPayment']:[]),'touchConsent'];
+export function directTapFooterKeys(_gatewayOption) {
+  return ['touchConsent'];
 }
 
 export const rentReturnPlanCode = value => String(value || '').trim().toUpperCase().replace(/[^A-Z0-9]+/g,'_');

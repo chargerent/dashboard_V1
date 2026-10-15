@@ -43,11 +43,12 @@ for(const orientation of ['portrait','landscape'])for(const lang of ['en','fr','
   }
  }
 });
-for(const orientation of ['portrait','landscape'])for(const lang of ['en','fr','es'])test(`${orientation} ${lang} upfront payment keeps its caption before the right-aligned consent @desktop`,async({page})=>{
+for(const orientation of ['portrait','landscape'])for(const lang of ['en','fr','es'])test(`${orientation} ${lang} upfront-payment mode shows consent without the removed caption @desktop`,async({page})=>{
  await page.goto(`/portal/tests/fixtures/touch-checkout.html?orientation=${orientation}&terms=true&gateway=INITIALPRICE&lang=${lang}&height=.15`);
  const footer=page.locator('.ms-checkout-tap-footer');
  await expect(footer.locator('.ms-checkout-tap-hold')).toHaveCount(0);
- await expect(footer.locator('.ms-checkout-tap-upfront')).toBeVisible();
+ await expect(footer.locator('.ms-checkout-tap-upfront')).toHaveCount(0);
+ await expect(footer.locator('p')).toHaveCount(1);
  await expect(footer.locator('p').last()).toHaveClass('ms-checkout-tap-consent');
  const overflow=await footer.locator('p').evaluateAll(nodes=>nodes.map(node=>node.scrollWidth-node.clientWidth));
  for(const value of overflow)expect(value).toBeLessThanOrEqual(1);
