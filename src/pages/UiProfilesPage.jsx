@@ -1,3 +1,6 @@
+import ClientCampaigns from '../components/media/ClientCampaigns.jsx';
+import ClientCampaignWorkspace from './ClientCampaignWorkspace.jsx';
+import StationBrandBackground from '../integrated-media/StationBrandBackground.jsx';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowPathIcon,
@@ -18,7 +21,8 @@ import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
 import DashboardPageActions from '../components/UI/DashboardPageActions.jsx';
 import TerminalProfileEditor from '../components/profiles/TerminalProfileEditor.jsx';
 import StripeProfileEditor from '../integrated-media/StripeProfileEditor.jsx';
-import {PROFILE_SECTIONS, getProfileDeviceTypes, getTerminalProfileCopy, isProfileSectionTarget, mergeProfileSection} from '../../functions/uiProfileSections.mjs';
+import {PROFILE_SECTIONS, getProfileDeviceTypes, getTerminalProfileCopy, hasStationScreen, isProfileSectionTarget, mergeProfileSection} from '../../functions/uiProfileSections.mjs';
+import {STATION_BRANDS, stationBrand} from '../utils/stationBrand.js';
 import {getApolloScreenFlowError} from '../../functions/apolloScreens.mjs';
 import {isProfileDeviceSectionAvailable, profileDeviceStatus, profileSectionContent} from '../utils/profileDevices.js';
 import {createProfilePreviewApi, PROFILE_PREVIEW_KIOSKS} from '../utils/profilePreview.js';
@@ -26,7 +30,8 @@ import LoadingSpinner from '../components/UI/LoadingSpinner.jsx';
 import { callFunctionWithAuth } from '../utils/callableRequest.js';
 import { formatDateTime } from '../utils/dateFormatter.js';
 import { isKioskOnline } from '../utils/helpers.js';
-import {normalizeChargerentAppProfile, readChargerentAppProfile, writeChargerentAppProfile} from '../utils/chargerentAppProfile.js';
+import {normalizeChargerentAppProfile, chargerentAppProfileForService, readChargerentAppProfile, writeChargerentAppProfile} from '../utils/chargerentAppProfile.js';
+import {receiptLogoUploadInput} from '../utils/receiptLogo.js';
 import {
   DEFAULT_KIOSK_UI,
   KIOSK_PROFILE_LANGUAGES,
@@ -511,6 +516,9 @@ export default function UiProfilesPage({
   initialClientId = '',
   initialSection = '',
   previewMode = false,
+  allowCampaignManager = false,
+  campaignApi,
+  campaignDevices,
   referenceTime,
   onCommand,
   t,
@@ -521,7 +529,11 @@ export default function UiProfilesPage({
   const draftCache = useRef(new Map());
   const [capabilities, setCapabilities] = useState({});
   const [deviceSection, setDeviceSection] = useState(initialSection);
+  const [campaignDirty, setCampaignDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [receiptLogoFiles,setReceiptLogoFiles] = useState({});
+  const [receiptLogoChecking,setReceiptLogoChecking] = useState(false);
+  const uploadedReceiptLogos = useRef(new WeakMap());
   const [apolloTesting, setApolloTesting] = useState(false);
   const [apolloTestStationId, setApolloTestStationId] = useState('');
   const [apolloTestSession, setApolloTestSession] = useState(null);
@@ -538,13 +550,31 @@ export default function UiProfilesPage({
   const [publishingStationId, setPublishingStationId] = useState('');
   const [publishingAll, setPublishingAll] = useState(false);
   const [publishedAtOverrides, setPublishedAtOverrides] = useState({});
+  const [stationBrandOverrides, setStationBrandOverrides] = useState({});
+  const [savingBrand, setSavingBrand] = useState(null);
   const requestedProfileLoadKeysRef = useRef(new Set());
   const profileLoadSequenceRef = useRef(0);
   const isDesktopViewport = useDesktopViewport();
 
+  useEffect(() => {
+    setStationBrandOverrides((previous) => {
+      const next = {...previous};
+      let changed = false;
+      for (const [stationId, override] of Object.entries(previous)) {
+        const incoming = allStationsData.find((kiosk) => kiosk.stationid === stationId);
+        if (!incoming || stationBrand(incoming.stationBrand).value !== override.base) {
+          delete next[stationId];
+          changed = true;
+        }
+      }
+      return changed ? next : previous;
+    });
+  }, [allStationsData]);
+
   const canUseUiEditor = currentUser?.isAdmin || currentUser?.username === 'chargerent' || currentUser?.features?.ui_editor === true || currentUser?.commands?.['client edit'] === true;
   const canLoadUiEditor = canUseUiEditor && isDesktopViewport;
   const isAdmin = currentUser?.isAdmin || currentUser?.role === 'admin' || currentUser?.username === 'chargerent';
+  const canManageCampaigns = allowCampaignManager || isAdmin;
   const userClientId = normalizeClientId(currentUser?.clientId);
 
   const clientOptions = useMemo(() => {
@@ -575,29 +605,34 @@ export default function UiProfilesPage({
       const kioskClientId = normalizeClientId(kiosk?.info?.client || kiosk?.info?.clientId);
       return profileClientId ? kioskClientId === profileClientId : true;
     })
+    .map((kiosk) => {
+      const override = stationBrandOverrides[kiosk.stationid];
+      return override && stationBrand(kiosk.stationBrand).value === override.base
+        ? {...kiosk, stationBrand: override.value} : kiosk;
+    })
     .map((kiosk) => integratedKioskStationIds.has(normalizeClientId(kiosk.stationid || kiosk.stationId))
       ? {...kiosk, profileCapabilities: {...kiosk.profileCapabilities, chargerentApp: true}}
       : kiosk)
-    .sort((a, b) => String(a.stationid || '').localeCompare(String(b.stationid || ''))), [allStationsData, integratedKioskStationIds, profileClientId]);
+    .sort((a, b) => String(a.stationid || '').localeCompare(String(b.stationid || ''))), [allStationsData, integratedKioskStationIds, profileClientId, stationBrandOverrides]);
 
-  const deviceSections = PROFILE_SECTIONS.filter(({key}) => (
+  const deviceSections = [...PROFILE_SECTIONS.filter(({key}) => (
     isProfileDeviceSectionAvailable(key, capabilities, matchingKiosks, savedProfile)
-  ));
+  )), ...(canManageCampaigns ? [{key:'campaigns',label:'Campaigns'}] : [])];
   const activeDevice = deviceSections.find(({key}) => key === deviceSection)?.key || deviceSections[0]?.key || '';
   const deviceLabel = deviceSections.find(({key}) => key === activeDevice)?.label || 'No compatible profile';
-  const targetKiosks = activeDevice ? matchingKiosks.filter((kiosk) => isProfileSectionTarget(kiosk, activeDevice)) : [];
+  const targetKiosks = activeDevice === 'campaigns' ? matchingKiosks : activeDevice ? matchingKiosks.filter((kiosk) => isProfileSectionTarget(kiosk, activeDevice)) : [];
   const isTerminal = ['apollo', 'p68'].includes(activeDevice);
   const isClientWide = ['apollo', 'p68', 'chargerentApp'].includes(activeDevice);
-  const busy = saving || publishingAll || Boolean(publishingStationId) || apolloTesting;
+  const busy = saving || publishingAll || Boolean(publishingStationId) || apolloTesting || Boolean(savingBrand) || receiptLogoChecking;
   const sectionAllowed = activeDevice !== 'apollo' || isAdmin;
   const apolloFlow = activeDevice === 'apollo' ? getTerminalProfileCopy(draftProfile, 'apollo').screenFlow : undefined;
   const apolloFlowError = getApolloScreenFlowError(apolloFlow);
   const screenServiceReady = apolloFlow === undefined || capabilities.apolloScreens === 1;
   const removalServiceReady = !apolloFlow?.removedEstablishedScreenIds?.length || capabilities.apolloEstablishedScreenRemoval === 1;
-  const canSave = Boolean(activeDevice) && capabilities.scopedProfiles === 1 && screenServiceReady && removalServiceReady && !loading && sectionAllowed;
+  const canSave = Boolean(activeDevice) && activeDevice !== 'campaigns' && capabilities.scopedProfiles === 1 && screenServiceReady && removalServiceReady && !loading && sectionAllowed;
   const canPublish = canSave && activeDevice !== 'apollo' && !previewMode && targetKiosks.length > 0;
   const dirty = activeDevice
-    ? JSON.stringify(profileSectionContent(draftProfile, activeDevice)) !== JSON.stringify(profileSectionContent(savedProfile, activeDevice))
+    ? activeDevice === 'chargerentApp' && Boolean(receiptLogoFiles[profileClientId]) || JSON.stringify(profileSectionContent(draftProfile, activeDevice)) !== JSON.stringify(profileSectionContent(savedProfile, activeDevice))
     : false;
   const allowedApolloTestIds = new Set((Array.isArray(capabilities.apolloTestStationIds) ? capabilities.apolloTestStationIds : []).map((stationId) => String(stationId || '').trim().toUpperCase()));
   const apolloTestKiosks = activeDevice === 'apollo' ? targetKiosks.filter((kiosk) => allowedApolloTestIds.has(String(kiosk.stationid || '').trim().toUpperCase())) : [];
@@ -618,11 +653,13 @@ export default function UiProfilesPage({
   }, [draftProfile]);
 
   const selectProfile = (id) => {
+    if (campaignDirty && !window.confirm('Discard unsaved campaign changes?')) return;
+    setCampaignDirty(false);
     const profile = profiles.find((candidate) => candidate.id === id);
     if (!profile) return;
     setSelectedProfileId(id);
     setDraftProfile(cloneProfileValue(draftCache.current.get(id) || profile));
-    setDeviceSection('');
+    setDeviceSection(deviceSection === 'campaigns' ? 'campaigns' : '');
     setApolloTestStationId('');
     setApolloTestSession(null);
     setSaveStatus(null);
@@ -720,9 +757,20 @@ export default function UiProfilesPage({
     }
     setSaving(true);
     try {
-      const profileToSave = activeDevice === 'chargerentApp'
-        ? writeChargerentAppProfile(draftProfile, normalizeChargerentAppProfile(readChargerentAppProfile(draftProfile)))
+      const logoFile=activeDevice === 'chargerentApp' && receiptLogoFiles[profileClientId];
+      let profileToSave = activeDevice === 'chargerentApp'
+        ? writeChargerentAppProfile(draftProfile, chargerentAppProfileForService(readChargerentAppProfile(draftProfile), savedProfile?.applicationProfiles?.chargerentMedia, capabilities, {hasReceiptLogoFile:Boolean(logoFile)}))
         : draftProfile;
+      if (logoFile) {
+        if (!isAdmin || previewMode) throw new Error('Logo uploads require an administrator in the live editor.');
+        let logo=uploadedReceiptLogos.current.get(logoFile);
+        if (!logo) {
+          logo=await profileRequest('admin_uploadReceiptLogo',await receiptLogoUploadInput(logoFile));
+          uploadedReceiptLogos.current.set(logoFile,logo);
+        }
+        const appProfile=readChargerentAppProfile(profileToSave);
+        profileToSave=writeChargerentAppProfile(profileToSave,normalizeChargerentAppProfile({...appProfile,receiptPage:{...appProfile.receiptPage,logo}}));
+      }
       const payload = await profileRequest('uiProfile_upsert', {profile: profileToSave, section: activeDevice});
       const saved = payload?.profile;
       if (!saved) throw new Error('Profile save did not return a profile.');
@@ -733,6 +781,7 @@ export default function UiProfilesPage({
         ...mergeProfileSection(previous, normalized, activeDevice),
         id: saved.id, version: saved.version, sectionVersions: saved.sectionVersions,
       }));
+      if (logoFile) setReceiptLogoFiles(previous=>{const next={...previous};delete next[profileClientId];return next;});
       setSaveStatus({state: 'success', message: `${deviceLabel} draft saved${previewMode ? ' in this preview' : ''}. No devices updated.`});
       return normalized;
     } catch (error) {
@@ -768,6 +817,26 @@ export default function UiProfilesPage({
     } finally {setPublishingStationId(''); setPublishingAll(false);}
   };
 
+  const changeStationBrand = async (kiosk, value) => {
+    if (busy || capabilities.stationBranding !== 1 || !hasStationScreen(kiosk)) return;
+    const brand = stationBrand(value);
+    const previous = stationBrand(kiosk.stationBrand).value;
+    if (brand.value === previous) return;
+    setSavingBrand({stationId: kiosk.stationid, value: brand.value});
+    try {
+      const payload = await profileRequest('uiProfile_setStationBrand', {
+        stationid: kiosk.stationid, stationBrand: brand.value, expectedStationBrand: previous,
+      });
+      if (payload?.kiosk?.stationid !== kiosk.stationid || payload.kiosk.stationBrand !== brand.value)
+        throw new Error('The server did not confirm this station brand. Reload before trying again.');
+      const base = stationBrand(allStationsData.find((station) => station.stationid === kiosk.stationid)?.stationBrand).value;
+      setStationBrandOverrides((current) => ({...current, [kiosk.stationid]: {value: brand.value, base}}));
+      setSaveStatus({state: 'success', message: `${kiosk.stationid} brand saved as ${brand.label}${previewMode ? ' in this preview' : '. The updated station app will refresh its owner background and Android wallpaper while connected'}.`});
+    } catch (error) {
+      setSaveStatus({state: 'error', message: error?.message || 'Could not save station brand.'});
+    } finally {setSavingBrand(null);}
+  };
+
   const startApolloTest = async () => {
     if (!canTestApollo || apolloTesting) return;
     setApolloTesting(true);
@@ -800,6 +869,8 @@ export default function UiProfilesPage({
     const query = searchQuery.trim().toLowerCase();
     return query ? fields.filter((field) => `${field.label} ${field.value}`.toLowerCase().includes(query)) : fields;
   }, [searchQuery, sectionValue, selectedSectionConfig.path]);
+
+  if (!isAdmin && canManageCampaigns && (!canUseUiEditor || activeDevice === 'campaigns')) return <ClientCampaignWorkspace {...{currentUser,allStationsData,initialClientId,onLogout,onNavigateToDashboard,onNavigateToAdmin,referenceTime,t}} request={campaignApi} listDevices={campaignDevices} onNavigateToUiEditor={canUseUiEditor && deviceSections.some(section => section.key !== 'campaigns') ? () => setDeviceSection(deviceSections.find(section => section.key !== 'campaigns').key) : undefined}/>;
 
   if (!canUseUiEditor) {
     return <div className="min-h-screen bg-slate-100 p-6"><div className="mx-auto max-w-3xl rounded-2xl border border-red-200 bg-red-50 p-6 text-red-700">UI editor access is not enabled.</div></div>;
@@ -870,6 +941,8 @@ export default function UiProfilesPage({
                 const online = isKioskOnline(kiosk, referenceTime);
                 const lastPublishedAt = publishedAtOverrides[`${activeDevice}:${kiosk.stationid}`] || kiosk.ui?.profileSections?.[activeDevice]?.appliedAt || (activeDevice === 'kiosk' ? kiosk.ui?.profileAppliedAt : '');
                 const isPublishing = publishingStationId === kiosk.stationid;
+                const brandSaving = savingBrand?.stationId === kiosk.stationid;
+                const brand = stationBrand(brandSaving ? savingBrand.value : kiosk.stationBrand);
                 return (
                   <div key={kiosk.stationid} className="rounded-xl border border-slate-100 px-3 py-2.5">
                     <div className="flex items-start justify-between gap-2">
@@ -887,7 +960,7 @@ export default function UiProfilesPage({
                         </span>
                         <span className="block truncate text-[11px] text-slate-500">{kiosk.info?.location || kiosk.info?.place || 'No location'}</span>
                       </span>
-                      {!['apollo', 'chargerentApp'].includes(activeDevice) && <button
+                      {!['apollo', 'chargerentApp', 'campaigns'].includes(activeDevice) && <button
                         type="button"
                         onClick={() => publishProfile(kiosk.stationid)}
                         disabled={busy || !canPublish}
@@ -897,6 +970,19 @@ export default function UiProfilesPage({
                         {isPublishing ? 'Publishing…' : 'Publish'}
                       </button>}
                     </div>
+                    {activeDevice !== 'campaigns' && hasStationScreen(kiosk) && <div className="mt-3 border-t border-slate-100 pt-2.5">
+                      <label className="block text-[11px] font-semibold text-slate-600" htmlFor={`station-brand-${kiosk.stationid}`}>Station owner brand</label>
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <select id={`station-brand-${kiosk.stationid}`} aria-label={`Station brand for ${kiosk.stationid}`}
+                          value={brand.value} disabled={busy || capabilities.stationBranding !== 1}
+                          onChange={(event) => changeStationBrand(kiosk, event.target.value)}
+                          className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-800 disabled:opacity-50">
+                          {STATION_BRANDS.map((choice) => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
+                        </select>
+                        <img src={`${import.meta.env.BASE_URL}${brand.logo}`} alt={`${brand.label} logo`} className="h-6 w-16 object-contain" />
+                      </div>
+                      <div className="relative mt-2 aspect-[8/5] overflow-hidden rounded border border-slate-100"><StationBrandBackground brand={brand.value}/></div><p role="status" className="mt-1 text-[10px] text-slate-500">{brandSaving ? 'Saving brand…' : capabilities.stationBranding !== 1 ? 'Brand service update required.' : 'The app background and Android wallpaper follow this owner brand.'}</p>
+                    </div>}
                     <p className="mt-2 text-xs font-medium text-slate-600">{getProfileDeviceTypes(kiosk).map((type) => PROFILE_SECTIONS.find(({key}) => key === type).label).join(' · ') || 'Hardware not specified'}</p>
                     {isClientWide && <p className="mt-1 text-xs text-cyan-800">Client-wide profile</p>}
                     <p className="mt-1 text-xs text-slate-500">{profileDeviceStatus(kiosk, activeDevice, savedProfile, publishedAtOverrides[`${activeDevice}:${kiosk.stationid}`])}</p>
@@ -915,18 +1001,18 @@ export default function UiProfilesPage({
           <div className="border-b border-slate-200 p-4 sm:p-5">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div><h2 className="text-lg font-bold text-slate-900">{profileClientId || 'Loading profile'} <span className="text-sm font-normal text-slate-500">· {deviceLabel}</span></h2>
-                <p className="mt-1 text-sm text-slate-500">{targetKiosks.length} matching kiosk{targetKiosks.length === 1 ? '' : 's'} · {dirty ? 'Unsaved changes' : 'No unsaved changes'}</p>
+                <p className="mt-1 text-sm text-slate-500">{targetKiosks.length} matching kiosk{targetKiosks.length === 1 ? '' : 's'} · {(activeDevice === 'campaigns' ? campaignDirty : dirty) ? 'Unsaved changes' : 'No unsaved changes'}</p>
               </div>
-              {activeDevice && <div className="flex flex-wrap gap-2">
+              {activeDevice && activeDevice !== 'campaigns' && <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={saveProfile} disabled={!canSave || busy || !dirty || Boolean(apolloFlowError)} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 disabled:opacity-40">{saving ? 'Saving…' : 'Save draft'}</button>
                 <button type="button" onClick={() => publishProfile()} disabled={!canPublish || busy} className="rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-40">{publishingAll || publishingStationId ? 'Publishing…' : `Publish ${deviceLabel} (${targetKiosks.length})`}</button>
               </div>}
             </div>
             {deviceSections.length > 0 && <nav className="mt-5 flex flex-wrap gap-1 rounded-xl bg-slate-100 p-1" aria-label="Profile device sections">
-              {deviceSections.map(({key, label}) => <button type="button" key={key} aria-pressed={activeDevice === key} disabled={busy} onClick={() => {setDeviceSection(key); setApolloTestStationId(''); setApolloTestSession(null); setSaveStatus(null);}} className={`rounded-lg px-4 py-2.5 text-sm font-semibold ${activeDevice === key ? 'bg-white text-cyan-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>{label}</button>)}
+              {deviceSections.map(({key, label}) => <button type="button" key={key} aria-pressed={activeDevice === key} disabled={busy} onClick={() => {if (campaignDirty && key !== activeDevice && !window.confirm('Discard unsaved campaign changes?')) return; setCampaignDirty(false); setDeviceSection(key); setApolloTestStationId(''); setApolloTestSession(null); setSaveStatus(null);}} className={`rounded-lg px-4 py-2.5 text-sm font-semibold ${activeDevice === key ? 'bg-white text-cyan-800 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>{label}</button>)}
             </nav>}
             {previewMode && <p className="mt-4 rounded-lg bg-cyan-50 px-3 py-2 text-sm text-cyan-900">Local preview · sample kiosks. Saves stay in this preview; publishing is disabled.</p>}
-            {!loading && activeDevice && !canSave && <p role="status" className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{!sectionAllowed ? 'Apollo editing requires administrator access.' : 'Preview available. Saving and publishing require the updated profile service.'}</p>}
+            {!loading && activeDevice && activeDevice !== 'campaigns' && !canSave && <p role="status" className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">{!sectionAllowed ? 'Apollo editing requires administrator access.' : 'Preview available. Saving and publishing require the updated profile service.'}</p>}
             {activeDevice === 'apollo' && <p className="mt-3 text-sm text-slate-500">This is one client-wide flow for every matching Apollo kiosk. Publishing stays unavailable until the terminal connection is validated.</p>}
             {activeDevice === 'chargerentApp' && <p className="mt-3 text-sm text-slate-500">This client-wide app profile controls the integrated Chargerent media and Stripe UI. Reader provisioning, pricing, and payment processing remain separate.</p>}
             {activeDevice === 'apollo' && <div className="mt-4 rounded-xl border border-cyan-200 bg-cyan-50 p-4">
@@ -957,6 +1043,7 @@ export default function UiProfilesPage({
             </div>}
           </div>
           <fieldset disabled={busy || !sectionAllowed || loading} className="min-w-0 p-4 sm:p-5">
+            {activeDevice === 'campaigns' && profileClientId && (previewMode && !campaignApi ? <p>Campaign preview uses local sample data. Live campaign access is disabled in this preview.</p> : <ClientCampaigns key={profileClientId} clientId={profileClientId} kiosks={matchingKiosks} referenceTime={referenceTime} onStatus={setSaveStatus} onDirtyChange={setCampaignDirty} request={campaignApi} listDevices={campaignDevices} previewMode={previewMode}/>)}
             {!loading && !activeDevice && <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center">
               <h2 className="font-bold text-slate-900">No compatible profile sections</h2>
               <p className="mt-2 text-sm text-slate-500">This client has no kiosks that match the available kiosk, Chargerent app, Apollo, P68, or Kiosk access rules.</p>
@@ -967,19 +1054,18 @@ export default function UiProfilesPage({
               return <div>
                 <div className="mb-5 rounded-xl border border-cyan-100 bg-cyan-50 p-4">
                   <h2 className="text-lg font-bold text-cyan-950">Chargerent integrated app</h2>
-                  <p className="mt-1 text-sm leading-6 text-cyan-900">Configure the client-facing checkout presentation here. Campaign Manager turns checkout on or off and assigns media to kiosks.</p>
-                  <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <p className="mt-1 text-sm leading-6 text-cyan-900">Configure the client-facing checkout presentation here. The Campaigns tab turns checkout on or off and assigns media to this client’s kiosks.</p>
+                  <div className="mt-4">
                     <div className="rounded-xl border border-cyan-200 bg-white p-3 text-sm text-slate-700">
                       <span className="font-semibold">Checkout visibility</span>
-                      <p className="mt-1 text-xs leading-5 text-slate-500">Use the Checkout toggle in Campaign Manager. This profile supplies the checkout design and sizing.</p>
+                      <p className="mt-1 text-xs leading-5 text-slate-500">Use the Checkout toggle in the Campaigns tab. This profile supplies the checkout design and sizing.</p>
                     </div>
-                    <label className="rounded-xl border border-cyan-200 bg-white p-3 text-sm font-semibold text-slate-700">
-                      <span>Expanded panel height · {Math.round(appProfile.checkout.height * 100)}%</span>
-                      <input type="range" min="10" max="50" step="1" value={Math.round(appProfile.checkout.height * 100)} onChange={(event) => updateAppProfile({...appProfile, checkout: {...appProfile.checkout, height: Number(event.target.value) / 100}})} className="mt-3 w-full accent-cyan-700" />
-                    </label>
                   </div>
                 </div>
-                <StripeProfileEditor value={appProfile.stripeUi} checkout={appProfile.checkout} previewStations={targetKiosks.map((kiosk) => String(kiosk.stationid || kiosk.stationId || '').trim().toUpperCase())} onChange={(stripeUi) => updateAppProfile({...appProfile, stripeUi})} disabled={busy || !sectionAllowed} />
+                <StripeProfileEditor value={appProfile.stripeUi} checkout={appProfile.checkout} onCheckoutChange={(checkout) => updateAppProfile({...appProfile, checkout})}
+                  receiptPage={appProfile.receiptPage} onReceiptPageChange={receiptPage=>updateAppProfile({...appProfile,receiptPage})} receiptBrandName={profileClientId}
+                  receiptPageServiceReady={capabilities.receiptPages === 1} receiptLogoFile={receiptLogoFiles[profileClientId] || null} onReceiptLogoFileChange={file=>setReceiptLogoFiles(previous=>({...previous,[profileClientId]:file}))} onReceiptLogoCheckingChange={setReceiptLogoChecking} receiptLogoUploadEnabled={isAdmin && !previewMode && capabilities.receiptPages === 1}
+                  previewStations={targetKiosks.map((kiosk) => String(kiosk.stationid || kiosk.stationId || '').trim().toUpperCase())} previewKiosks={targetKiosks} onChange={(stripeUi) => updateAppProfile({...appProfile, stripeUi})} disabled={busy || !sectionAllowed} />
               </div>;
             })()}
             {isTerminal && draftProfile && <TerminalProfileEditor profile={draftProfile} section={activeDevice} language={selectedLanguage} onLanguageChange={setSelectedLanguage} onChange={setDraftProfile} disabled={busy || !sectionAllowed} allowEstablishedScreenRemoval={capabilities.apolloEstablishedScreenRemoval === 1} />}

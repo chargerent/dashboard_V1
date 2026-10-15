@@ -148,7 +148,7 @@ test("prepares an immutable agreement from the ChargeRent template", async () =>
 
   assert.equal(result.agreement.status, "awaiting_signature");
   assert.match(result.agreement.title, /ChargeRent Revenue Share/);
-  assert.equal(result.agreement.version, "V.11.01.2024");
+  assert.equal(result.agreement.version, "V.10.07.2026");
   assert.match(result.agreement.agreementUrl, /^https:\/\/storage\.example\//);
   assert.equal(bucket.files.size, 1);
   const source = [...bucket.files.values()][0];
@@ -184,7 +184,7 @@ test("client signs with portal authentication and emailed one-time code", async 
     evidence: {ipAddress: "203.0.113.4", userAgent: "Test Browser"},
   });
 
-  assert.equal(result.agreement.status, "signed");
+  assert.equal(result.agreement.status, "client_signed");
   assert.equal(result.agreement.signerName, "Alex Venue");
   assert.equal(bucket.files.size, 2);
   const signedPath = [...bucket.files.keys()].find((path) => path.endsWith("signed.pdf"));
@@ -194,7 +194,7 @@ test("client signs with portal authentication and emailed one-time code", async 
   assert.equal(signedPdf.getPageCount(), sourcePdf.getPageCount() + 1);
   assert.equal(
       db.records.get("users/client-uid").chargedrops.onboarding.agreementStatus,
-      "signed",
+      "client_signed",
   );
   assert.equal(emails.length, 3);
   assert.match(emails[1].body, /123456/);
@@ -203,6 +203,37 @@ test("client signs with portal authentication and emailed one-time code", async 
   assert.deepEqual(
       notifications.map((notification) => notification.eventType),
       ["agreement_ready", "agreement_signed"],
+  );
+
+  const executed = await service.countersignAgreement({
+    authState: {
+      uid: "admin-uid",
+      isAdmin: true,
+      profile: {username: "george", contact: {email: "george@charge.rent"}},
+    },
+    uid: "client-uid",
+    input: {
+      signerName: "George Gazelian",
+      signerTitle: "Authorized Representative",
+      reviewedDocument: true,
+      intentToSign: true,
+    },
+    evidence: {ipAddress: "203.0.113.5", userAgent: "Admin Browser"},
+  });
+  assert.equal(executed.agreement.status, "fully_executed");
+  assert.equal(executed.agreement.countersignerName, "George Gazelian");
+  const executedPath = [...bucket.files.keys()].find((path) => path.endsWith("executed.pdf"));
+  const executedPdf = await PDFDocument.load(bucket.files.get(executedPath));
+  assert.equal(executedPdf.getPageCount(), sourcePdf.getPageCount() + 2);
+  assert.equal(
+      db.records.get("users/client-uid").chargedrops.onboarding.agreementStatus,
+      "fully_executed",
+  );
+  assert.equal(emails.length, 4);
+  assert.match(emails[3].subject, /fully executed/i);
+  assert.deepEqual(
+      notifications.map((notification) => notification.eventType),
+      ["agreement_ready", "agreement_signed", "agreement_countersigned"],
   );
 });
 

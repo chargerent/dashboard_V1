@@ -1,7 +1,8 @@
-# FR8011 Amazon rental export
+# Amazon rental export
 
-The Firebase backend forwards new, physically confirmed FR8011 live Stripe
-rentals through Amazon's existing MQTT interfaces. It does not deploy or change
+The Firebase backend forwards new, physically confirmed live Stripe rentals
+from stations explicitly enabled in the server configuration through Amazon's
+existing MQTT interfaces. It does not deploy or change
 Amazon software, restart Node-RED, or require an Android APK update.
 
 `kioskTerminalApi` freezes the complete kiosk pricing on each new interaction
@@ -11,7 +12,8 @@ older transaction.
 
 ## Delivery
 
-- `rentals_exportAmazon` handles rental writes. It requires FR8011, live Stripe,
+- `rentals_exportAmazon` handles rental writes. It requires an explicitly
+  configured station, live Stripe,
   a matching PaymentIntent/interaction, and physical vend proof. Pending,
   failed, test-mode, other-station and pre-activation rentals are excluded.
 - It creates one immutable outbox document per PaymentIntent and phase under
@@ -58,8 +60,10 @@ SQL updates.
 The server-only configuration is `accounting/amazonRentalExport`:
 
 - `enabled`: immediate pause/resume of forwarding and retry delivery.
-- `stationIds`: initially `["FR8011"]`; the code also restricts its pilot to
-  FR8011, so another station cannot be enabled by config alone.
+- `stationIds`: the explicit allowlist, initially `["FR8011"]`. Adding a station
+  here enables forwarding for that station without another code change. The
+  trigger and worker both check the allowlist; removing a station prevents
+  delivery of its pending exports.
 - `enabledAt`: fixed forward-only cutoff. Do not move it backward to replay
   old rentals; do not reset it on a routine redeploy.
 - `connectionCheckRequested`: one-time broker connection/subscription probe,

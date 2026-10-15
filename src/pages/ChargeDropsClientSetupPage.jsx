@@ -104,7 +104,8 @@ function companyRetainedPercent(clientPercent) {
 }
 
 function agreementStatusLabel(status) {
-  if (status === 'signed') return 'Client signed';
+  if (status === 'fully_executed') return 'Fully executed';
+  if (status === 'client_signed' || status === 'signed') return 'Awaiting Ocharge countersignature';
   if (status === 'awaiting_signature') return 'Awaiting client signature';
   if (status === 'voided') return 'Voided';
   return 'Not prepared';
@@ -162,6 +163,14 @@ export default function ChargeDropsClientSetupPage({
   const [agreementClientUid, setAgreementClientUid] = useState('');
   const [agreementForm, setAgreementForm] = useState(initialAgreementForm);
   const [preparingAgreement, setPreparingAgreement] = useState(false);
+  const [countersignClientUid, setCountersignClientUid] = useState('');
+  const [countersignForm, setCountersignForm] = useState({
+    signerName: '',
+    signerTitle: '',
+    reviewedDocument: false,
+    intentToSign: false,
+  });
+  const [countersigningAgreement, setCountersigningAgreement] = useState(false);
   const [milestoneClientUid, setMilestoneClientUid] = useState('');
   const [installationScheduledAt, setInstallationScheduledAt] = useState('');
   const [updatingMilestone, setUpdatingMilestone] = useState('');
@@ -572,6 +581,65 @@ export default function ChargeDropsClientSetupPage({
     }
   };
 
+  const selectCountersignClient = (client) => {
+    setCountersignClientUid(client.uid || '');
+    setCountersignForm({
+      signerName: '',
+      signerTitle: '',
+      reviewedDocument: false,
+      intentToSign: false,
+    });
+  };
+
+  const handleCountersignAgreement = async () => {
+    if (!countersignClientUid || countersigningAgreement || previewMode) return;
+    if (countersignForm.signerName.trim().length < 2 ||
+      countersignForm.signerTitle.trim().length < 2 ||
+      !countersignForm.reviewedDocument || !countersignForm.intentToSign) {
+      setMessage({
+        type: 'error',
+        text: 'Enter the Ocharge signer name and title, review the document, and confirm the intent to countersign.',
+      });
+      return;
+    }
+    setCountersigningAgreement(true);
+    setMessage(null);
+    try {
+      const result = await callFunctionWithAuth('admin_countersignChargeDropsAgreement', {
+        uid: countersignClientUid,
+        ...countersignForm,
+        signerName: countersignForm.signerName.trim(),
+        signerTitle: countersignForm.signerTitle.trim(),
+      }, {timeoutMs: 120000});
+      const agreement = result?.agreement || {status: 'fully_executed'};
+      setExistingClients((previous) => previous.map((client) => (
+        client.uid === countersignClientUid ? {
+          ...client,
+          chargedrops: {
+            ...client.chargedrops,
+            agreement: {...(client.chargedrops?.agreement || {}), ...agreement},
+            onboarding: {
+              ...client.chargedrops?.onboarding,
+              agreementStatus: 'fully_executed',
+            },
+          },
+        } : client
+      )));
+      setCountersignClientUid('');
+      setMessage({
+        type: agreement?.executedEmailStatus === 'unknown' ? 'warning' : 'success',
+        text: agreement?.executedEmailStatus === 'unknown'
+          ? 'The agreement was countersigned and payouts were unlocked, but the client email could not be confirmed.'
+          : 'The agreement is fully executed. The client was notified and Stripe payout setup is unlocked.',
+      });
+      void refreshPartnerNotifications();
+    } catch (error) {
+      setMessage({type: 'error', text: error?.message || 'The agreement could not be countersigned.'});
+    } finally {
+      setCountersigningAgreement(false);
+    }
+  };
+
   const handleRetryPartnerNotification = async (notification) => {
     if (!notification?.id || notification.status !== 'failed' || retryingNotificationId) return;
     setRetryingNotificationId(notification.id);
@@ -654,10 +722,9 @@ export default function ChargeDropsClientSetupPage({
     <div className="min-h-screen bg-slate-100 text-slate-900">
       <header className="border-b border-slate-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-3">
-            <img src={`${import.meta.env.BASE_URL}chargedrops-drop.svg`} alt="" className="h-10 w-7" />
+          <div className="flex items-center gap-4">
+            <img src={`${import.meta.env.BASE_URL}chargedrops-logo.svg`} alt="ChargeDrops" className="h-7 w-auto" />
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.22em] text-indigo-600">ChargeDrops</p>
               <h1 className="text-xl font-bold text-slate-900">Client Setup</h1>
             </div>
           </div>
@@ -850,7 +917,7 @@ export default function ChargeDropsClientSetupPage({
                       : client.regionalPartnerId || 'No partner'}
                   </p>
                   <p className="mt-1 text-xs font-medium text-indigo-700">{client.commission || 0}% · {client.paymentSchedule || 'monthly'}</p>
-                  <p className={`mt-2 text-xs font-semibold ${client.chargedrops?.onboarding?.agreementStatus === 'signed' ? 'text-emerald-700' : 'text-amber-700'}`}>
+                  <p className={`mt-2 text-xs font-semibold ${client.chargedrops?.onboarding?.agreementStatus === 'fully_executed' ? 'text-emerald-700' : 'text-amber-700'}`}>
                     Agreement · {agreementStatusLabel(client.chargedrops?.onboarding?.agreementStatus)}
                   </p>
                   <p className="mt-1 text-xs font-medium text-slate-600">
@@ -891,11 +958,15 @@ export default function ChargeDropsClientSetupPage({
                   )}
                   <button
                     type="button"
-                    onClick={() => selectAgreementClient(client)}
-                    disabled={!client.uid || preparingAgreement}
+                    onClick={() => ['client_signed', 'signed'].includes(client.chargedrops?.onboarding?.agreementStatus)
+                      ? selectCountersignClient(client)
+                      : selectAgreementClient(client)}
+                    disabled={!client.uid || preparingAgreement || countersigningAgreement}
                     className="mt-3 w-full rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {client.chargedrops?.onboarding?.agreementStatus === 'signed'
+                    {['client_signed', 'signed'].includes(client.chargedrops?.onboarding?.agreementStatus)
+                      ? 'Countersign as Ocharge'
+                      : client.chargedrops?.onboarding?.agreementStatus === 'fully_executed'
                       ? 'Prepare replacement agreement'
                       : client.chargedrops?.onboarding?.agreementStatus === 'awaiting_signature'
                         ? 'Replace agreement'
@@ -924,7 +995,7 @@ export default function ChargeDropsClientSetupPage({
               <p className="text-xs font-bold uppercase tracking-[0.18em] text-indigo-600">ChargeRent template</p>
               <h2 className="mt-1 font-bold text-slate-900">Prepare client agreement</h2>
               <p className="mt-2 text-xs leading-5 text-slate-500">
-                Generates the current ChargeRent Revenue Share Agreement V.11.01.2024 using this client&apos;s venue, contact, revenue share, payment schedule, and standard ChargeDrops rental pricing.
+                Generates the current ChargeRent Revenue Share Agreement V.10.07.2026 using this client&apos;s venue, contact, revenue share, payment schedule, and standard ChargeDrops rental pricing.
               </p>
               <div className="mt-4 space-y-4">
                 <FormField label="Legal business name" required>
@@ -967,6 +1038,68 @@ export default function ChargeDropsClientSetupPage({
                     className="rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-indigo-300"
                   >
                     {previewMode ? 'Disabled in preview' : preparingAgreement ? 'Preparing…' : 'Prepare & notify'}
+                  </button>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {countersignClientUid && (
+            <section className="rounded-2xl border border-emerald-200 bg-white p-5 shadow-sm">
+              <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-700">Ocharge approval</p>
+              <h2 className="mt-1 font-bold text-slate-900">Countersign client agreement</h2>
+              <p className="mt-2 text-xs leading-5 text-slate-500">
+                This creates the fully executed PDF and unlocks Stripe payout setup. It does not approve or send a payout.
+              </p>
+              <div className="mt-4 space-y-4">
+                <FormField label="Ocharge signer legal name" required>
+                  <input
+                    value={countersignForm.signerName}
+                    onChange={(event) => setCountersignForm((previous) => ({...previous, signerName: event.target.value}))}
+                    className={inputClass}
+                  />
+                </FormField>
+                <FormField label="Signer title" required>
+                  <input
+                    value={countersignForm.signerTitle}
+                    onChange={(event) => setCountersignForm((previous) => ({...previous, signerTitle: event.target.value}))}
+                    className={inputClass}
+                  />
+                </FormField>
+                <label className="flex items-start gap-2 text-xs leading-5 text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={countersignForm.reviewedDocument}
+                    onChange={(event) => setCountersignForm((previous) => ({...previous, reviewedDocument: event.target.checked}))}
+                    className="mt-1 rounded border-slate-300 text-emerald-600"
+                  />
+                  I reviewed the complete client-signed agreement.
+                </label>
+                <label className="flex items-start gap-2 text-xs leading-5 text-slate-600">
+                  <input
+                    type="checkbox"
+                    checked={countersignForm.intentToSign}
+                    onChange={(event) => setCountersignForm((previous) => ({...previous, intentToSign: event.target.checked}))}
+                    className="mt-1 rounded border-slate-300 text-emerald-600"
+                  />
+                  I am authorized to countersign for Ocharge LLC and intend to be legally bound.
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCountersignClientUid('')}
+                    disabled={countersigningAgreement}
+                    className="rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCountersignAgreement}
+                    disabled={countersigningAgreement || previewMode}
+                    className="rounded-xl bg-emerald-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-emerald-300"
+                  >
+                    {previewMode ? 'Disabled in preview' : countersigningAgreement ? 'Countersigning…' : 'Countersign & unlock'}
                   </button>
                 </div>
               </div>

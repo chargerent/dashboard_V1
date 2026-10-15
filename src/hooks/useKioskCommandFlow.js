@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getKioskPowerThreshold, isV2Kiosk } from '../utils/helpers';
 import { logKioskInteraction } from '../utils/kioskInteractionDebug';
+import { commandChargerId } from '../utils/ctf7';
 
 const summarizeCommandDetails = (details) => {
   if (!details) return null;
@@ -50,7 +51,7 @@ export default function useKioskCommandFlow({
     const targetKiosk = stationsRef.current.find((kiosk) => kiosk.stationid === stationid);
     const targetModule = targetKiosk?.modules?.find((module) => module.id === moduleid);
     const targetSlot = targetModule?.slots?.find((slot) => slot.position === slotid);
-    const chargerid = Number(targetSlot?.sn || 0);
+    const chargerid = commandChargerId(targetSlot?.sn, targetKiosk);
 
     logKioskInteraction('slot-eject-handler-received', {
       stationid,
@@ -59,7 +60,7 @@ export default function useKioskCommandFlow({
       foundKiosk: Boolean(targetKiosk),
       foundModule: Boolean(targetModule),
       foundSlot: Boolean(targetSlot),
-      chargerid: chargerid > 0 ? chargerid : null,
+      chargerid: chargerid || null,
       confirmationText,
     });
 
@@ -68,7 +69,7 @@ export default function useKioskCommandFlow({
       moduleid,
       slotid,
       action: 'eject specific',
-      chargerid: chargerid > 0 ? chargerid : undefined,
+      chargerid,
       confirmationText,
     });
     setCommandModalOpen(true);
@@ -136,13 +137,13 @@ export default function useKioskCommandFlow({
           return;
         }
 
-        const normalizedChargerId = Number(trackedChargerId);
+        const normalizedChargerId = commandChargerId(trackedChargerId, targetKiosk);
         slotsToEject.push({
           stationid,
           moduleid: trackedModuleId,
           slotid: normalizedSlotId,
           startedAt: ejectStartedAt,
-          ...(Number.isFinite(normalizedChargerId) && normalizedChargerId > 0
+          ...(normalizedChargerId
             ? { chargerid: normalizedChargerId }
             : {}),
         });
@@ -177,7 +178,7 @@ export default function useKioskCommandFlow({
         case 'eject full':
           targetKiosk.modules.forEach((module) => {
             module.slots.forEach((slot) => {
-              if (slot.sn && slot.sn !== 0 && slot.batteryLevel >= powerThreshold) {
+              if (slot.sn && slot.sn !== 0 && slot.batteryLevel >= powerThreshold && !slot.isLocked) {
                 trackSlotForEject(module.id, slot.position, slot.sn);
               }
             });

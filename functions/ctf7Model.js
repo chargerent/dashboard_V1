@@ -51,9 +51,9 @@ function createModule(value) {
     slots: Array.from({length: CAPACITY}, (_, index) => ({
       position: index + 1, absolutePosition: index + 1,
       sn: "", status: 0, observed: false, batteryLevel: null,
-      lock: true, lockReason: "Awaiting verified CTF7 inventory", rented: false,
+      lock: false, lockReason: "", rented: false,
     })),
-    total: 0, full: 0, empty: 0, slot: 0, lock: CAPACITY, charging: 0,
+    total: 0, full: 0, empty: 0, slot: 0, lock: 0, charging: 0,
   };
 }
 
@@ -71,5 +71,49 @@ function boundRegistry({module, stationid, provisionid, previous = {}, timestamp
   };
 }
 
+function hasBank(slot) {
+  return slot?.observed === true && Number(slot.status) === 1 &&
+    /^[\x21-\x7e]{12}$/.test(String(slot.sn || "")) && !/^0+$/.test(slot.sn);
+}
+
+function freshModule(module, now = Date.now()) {
+  const age = now - Date.parse(module?.lastInventoryAt || module?.lastUpdated);
+  return module?.connected === true && module.inventoryVerified === true &&
+    module.topologyVerified === true && Number.isFinite(age) && age >= 0 && age <= 30000;
+}
+
+// Same station -> modules -> slots contract as V2. Availability is separate from
+// the operator's lock: commissioning and disconnects must never erase that lock.
+function summarizeKiosk(kiosk, now = Date.now()) {
+  const power = Number(kiosk?.hardware?.power ?? 80);
+  const threshold = Number.isFinite(power) ? power : 80;
+  const stationEnabled = kiosk.active === true && kiosk.enabled !== false &&
+    !kiosk.disabled && kiosk.rentalsValidated === true;
+  const modules = (kiosk.modules || []).map((module) => {
+    const slots = module.slots || [];
+    const occupied = slots.filter(hasBank);
+    const full = occupied.filter((slot) => Number.isFinite(slot.batteryLevel) && slot.batteryLevel >= threshold);
+    const ready = stationEnabled && module.operationalEnabled === true &&
+      module.controlEnabled === true && freshModule(module, now);
+    return {...module, total: occupied.length, full: full.length,
+      empty: occupied.filter((slot) => Number.isFinite(slot.batteryLevel) && slot.batteryLevel < threshold).length,
+      slot: slots.filter((slot) => slot.observed === true && Number(slot.status) === 0).length,
+      lock: slots.filter((slot) => slot.lock === true).length,
+      count: ready ? full.filter((slot) => !slot.lock && !slot.abnormal && !slot.rented).length : 0,
+      charging: 0}; // The protocol does not report charging current.
+  });
+  const sum = (field) => modules.reduce((total, module) => total + Number(module[field] || 0), 0);
+  const count = sum("count");
+  return {...kiosk, active: kiosk.active === true,
+    enabled: kiosk.active === true && kiosk.enabled !== false,
+    modules, moduleIds: modules.map((module) => module.id),
+    hardware: {...kiosk.hardware, type: MODEL, protocol: PROTOCOL,
+      modules: modules.length, capacity: CAPACITY * modules.length},
+    count, chargers: count || "soldout", slotscount: CAPACITY * modules.length,
+    lockcount: sum("lock"), total: sum("total"), full: sum("full"), empty: sum("empty"),
+    slot: sum("slot"), charging: sum("charging")};
+}
+
 module.exports = {MODEL, PROTOCOL, CAPACITY, BINDINGS_COLLECTION,
-  manufacturerSerial, moduleId, isCtf7Module, validateSlotMap, createModule, boundRegistry};
+  manufacturerSerial, moduleId, isCtf7Module, validateSlotMap, createModule, boundRegistry,
+  hasBank, freshModule, summarizeKiosk};

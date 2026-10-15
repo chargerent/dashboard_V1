@@ -1,5 +1,7 @@
 /* eslint-env node */
 const crypto = require("node:crypto");
+const {CONFIG_PATH: V2_CHECKOUT_CONFIG_PATH, selectV2AmazonRoute} = require("./v2AmazonGateway");
+const ctf7Rental = require("./ctf7Rental");
 
 const INSTALLATIONS_COLLECTION = "kioskInstallations";
 const INTERACTIONS_COLLECTION = "kioskTerminalInteractions";
@@ -179,7 +181,7 @@ function terminalPaymentCurrency(installation, configuredCurrency) {
 function resolveKioskOffer(installation, kiosk) {
   const pricing = kiosk && typeof kiosk.pricing === "object" ? kiosk.pricing : {};
   const hardware = kiosk && typeof kiosk.hardware === "object" ? kiosk.hardware : {};
-  if (hardware.type === "CTF7" || hardware.protocol === "lm-tcp-v1") {
+  if ((hardware.type === "CTF7" || hardware.protocol === "lm-tcp-v1") && !ctf7Rental.stationReady(kiosk)) {
     fail(503, "ctf7-commissioning", "CTF7 paid rentals are awaiting hardware verification.");
   }
   const {planCode, planLabel} = normalizePricingPlan(pricing.text);
@@ -238,7 +240,9 @@ function resolveKioskOffer(installation, kiosk) {
       pricingLines.push(`${buyPrice} if not returned after ${overdueDays} days`);
       break;
     case "EVENT_SIMPLE":
-      pricingLines.push("Event pricing applies");
+      pricingLines.push("Free if returned by end of day (first 24 hours)");
+      pricingLines.push(`${dailyPrice} for each additional 24-hour period`);
+      pricingLines.push(`${buyPrice} if not returned after ${overdueDays} days`);
       break;
     default:
       fail(503, "invalid-price", "The kiosk pricing plan is not supported.");
@@ -291,6 +295,17 @@ function normalizeBesiterAvailability(response, installation) {
     fail(502, "invalid-availability", "Besiter returned availability for the wrong kiosk.");
   }
 
+  if (response.transport === "ctf7") {
+    if (!String(installation.moduleId || "").startsWith("LM-")) fail(502, "invalid-availability", "Unexpected CTF7 transport.");
+    const candidate = response.selected;
+    if (response.state !== "available") return {state: response.state === "offline" ? "offline" : "sold_out", availableCount: 0, selected: null};
+    if (!candidate || !/^LM-/.test(candidate.moduleId) || !/^[\x21-\x7e]{12}$/.test(candidate.chargerSn) ||
+        !Number.isInteger(candidate.slot) || candidate.slot < 1 || candidate.slot > 7 ||
+        !Number.isInteger(candidate.generation) || !candidate.sessionId || !Number.isFinite(candidate.batteryLevel)) {
+      fail(502, "invalid-availability", "CTF7 returned an invalid mapped bank.");
+    }
+    return {state: "available", availableCount: response.availableCount, selected: candidate};
+  }
   const rawStatus = response.status;
   if (!Array.isArray(rawStatus)) {
     const state = cleanString(rawStatus, 20).toLowerCase();
@@ -329,21 +344,24 @@ function normalizeBesiterAvailability(response, installation) {
   };
 }
 
-function besiterRentalOutcome(rental) {
+function besiterRentalOutcome(rental, {allowClosedVend = false} = {}) {
   if (!rental || typeof rental !== "object") return {outcome: "pending"};
   const status = cleanString(rental.status, 40).toLowerCase();
   const vendState = cleanString(rental.vendState, 40).toLowerCase();
   const attempts = Array.isArray(rental.vendAttempts) ? rental.vendAttempts : [];
   const confirmationSource = cleanString(rental.vendConfirmationSource, 80);
   const hasPhysicalProof = attempts.some((attempt) => Number(attempt && attempt.exitStatus) === 1) ||
-    confirmationSource === "popup_sn" || confirmationSource === "fresh_status_watchdog";
+    confirmationSource === "popup_sn" || confirmationSource === "fresh_status_watchdog" ||
+    (rental.transport === "ctf7" && ["ctf7_correlated_ack", "ctf7_correlated_fresh_absence"].includes(confirmationSource));
 
-  if (status === "rented" && vendState === "dispensed" && hasPhysicalProof) {
+  const vendRecorded = status === "rented" ||
+    (allowClosedVend && ["returned", "purchased"].includes(status));
+  if (vendRecorded && vendState === "dispensed" && hasPhysicalProof) {
     return {
       outcome: "vend_succeeded",
       slot: Number(rental.rentalSlotid || rental.requestedSlotid) || null,
       moduleId: cleanString(rental.rentalModuleid || rental.vendModuleid, 80) || null,
-      chargerSn: Number(rental.chargerid || rental.sn) || null,
+      chargerSn: rental.transport === "ctf7" ? String(rental.chargerid || rental.sn) : Number(rental.chargerid || rental.sn) || null,
     };
   }
   if (status === "vend_failed" || vendState === "failed") {
@@ -366,145 +384,21 @@ function stripeIntentIdForRental(rental, rentalId = "") {
   ].map((value) => cleanString(value, 160)).find((value) => /^pi_[A-Za-z0-9_]+$/.test(value)) || "";
 }
 
-async function settleStripeReturn({
-  rental,
-  rentalId,
-  stripe,
-  getStripeClient,
-  store,
-  now = () => new Date(),
-}) {
-  const gateway = cleanString(rental && rental.gateway, 40).toUpperCase();
-  const status = cleanString(rental && rental.status, 40).toLowerCase();
-  const existing = rental && typeof rental.stripeReturnSettlement === "object" ?
-    rental.stripeReturnSettlement : {};
-  const paymentIntentId = stripeIntentIdForRental(rental, rentalId);
-  if (gateway !== "STRIPE" || !new Set(["returned", "purchased"]).has(status) || !paymentIntentId ||
-      existing.status === "completed") {
-    return {handled: false};
-  }
-  if (!store || typeof store.updateBesiterRental !== "function") {
-    throw new TypeError("A rental store is required.");
-  }
-  const interaction = typeof store.getInteractionByPaymentIntentId === "function" ?
-    await store.getInteractionByPaymentIntentId(paymentIntentId) : null;
-  const stripeAccountCountry = normalizeStripeAccountCountry(
-      rental.stripeAccountCountry || interaction?.stripeAccountCountry,
-  );
-  const stripeMode = cleanString(
-      rental.stripeMode || interaction?.stripeMode || "test",
-      10,
-  ).toLowerCase();
-  const stripeClient = stripe || (typeof getStripeClient === "function" ?
-    getStripeClient({accountCountry: stripeAccountCountry, mode: stripeMode}) : null);
-  if (!stripeClient || !stripeClient.paymentIntents) {
-    throw new TypeError("A Stripe client with PaymentIntents is required.");
-  }
-
-  const totalChargedCents = majorAmountCents(rental.totalCharged || 0, "final charge", {
-    minimum: 0,
-    maximum: 1000000,
-  });
-  const gatewayOption = cleanString(
-      rental.gatewayOption || rental.gatewayoptions || interaction?.gatewayOption,
-      40,
-  ).toUpperCase().replace(/[ _-]/g, "");
-  if (status === "purchased" && gatewayOption !== "FULLPRICE") {
-    return {handled: false};
-  }
-  const paymentIntent = await stripeClient.paymentIntents.retrieve(paymentIntentId);
-  const fullPriceAuthorization = gatewayOption === "FULLPRICE" &&
-    paymentIntent && paymentIntent.status === "requires_capture";
-  let capturedCents;
-  let refundCents = 0;
-  let releasedCents = 0;
-  let refundId = cleanString(existing.refundId, 160) || null;
-  let paymentStatus;
-  if (fullPriceAuthorization) {
-    const authorizedCents = Number(paymentIntent.amount_capturable || paymentIntent.amount || 0);
-    if (!Number.isInteger(authorizedCents) || authorizedCents <= 0 ||
-        totalChargedCents > authorizedCents) {
-      fail(409, "invalid-return-charge", "The final rental charge exceeds the authorized amount.");
-    }
-    capturedCents = totalChargedCents;
-    releasedCents = authorizedCents - totalChargedCents;
-    if (totalChargedCents > 0) {
-      await stripeClient.paymentIntents.capture(paymentIntentId, {
-        amount_to_capture: totalChargedCents,
-      }, {idempotencyKey: `kiosk-return-capture-${cleanString(rentalId, 120)}`});
-      paymentStatus = "captured";
-    } else {
-      await stripeClient.paymentIntents.cancel(paymentIntentId);
-      paymentStatus = "authorization_released";
-    }
-  } else if (gatewayOption === "FULLPRICE" && paymentIntent &&
-      paymentIntent.status === "canceled" && totalChargedCents === 0 &&
-      !paymentIntent.amount_received) {
-    // The cancellation may have succeeded before the rental write failed.
-    capturedCents = 0;
-    releasedCents = Number(paymentIntent.amount || 0);
-    paymentStatus = "authorization_released";
-  } else {
-    if (!paymentIntent || paymentIntent.status !== "succeeded") {
-      fail(409, "return-payment-not-settled", "The final rental payment is not settled.");
-    }
-    capturedCents = Number(paymentIntent.amount_received || paymentIntent.amount || 0);
-    if (!Number.isInteger(capturedCents) || capturedCents <= 0 ||
-        totalChargedCents > capturedCents) {
-      fail(409, "invalid-return-charge", "The final rental charge exceeds the captured amount.");
-    }
-    refundCents = capturedCents - totalChargedCents;
-    if (gatewayOption === "FULLPRICE" && refundCents === 0) {
-      // Recover a completed partial capture after a failed rental write.
-      releasedCents = Math.max(0, Number(paymentIntent.amount || capturedCents) - capturedCents);
-    }
-    if (refundCents > 0) {
-      if (!stripeClient.refunds) {
-        throw new TypeError("A Stripe client with refunds is required.");
-      }
-      const refund = await stripeClient.refunds.create({
-        payment_intent: paymentIntentId,
-        amount: refundCents,
-        metadata: {
-          chargerent_rental_id: cleanString(rentalId, 160),
-          chargerent_station_id: cleanString(rental.returnStationid || rental.rentalStationid, 80),
-        },
-      }, {idempotencyKey: `kiosk-return-refund-${cleanString(rentalId, 120)}`});
-      refundId = cleanString(refund && refund.id, 160) || refundId;
-    }
-    paymentStatus = refundCents > 0 ? "partially_or_fully_refunded" : "captured";
-  }
-
-  const settledAt = now();
-  await store.updateBesiterRental(rentalId, {
-    stripeReturnSettlement: {
-      status: "completed",
-      paymentIntentId,
-      capturedCents,
-      finalChargeCents: totalChargedCents,
-      refundCents,
-      releasedCents,
-      refundId,
-      gatewayOption: gatewayOption || null,
-      rentalStatus: status,
-      stripeAccountCountry,
-      stripeMode,
-      settledAt,
-    },
-    paymentStatus,
-    lastUpdate: settledAt.toISOString(),
-  });
+function cardMetadata(details) {
+  const last4 = typeof details?.last4 === "string" ? details.last4 : "";
+  const brand = typeof details?.brand === "string" ? details.brand.trim().toLowerCase() : "";
   return {
-    handled: true,
-    capturedCents,
-    finalChargeCents: totalChargedCents,
-    refundCents,
-    releasedCents,
+    ...(/^\d{4}$/.test(last4) ? {card_last4: last4} : {}),
+    ...(/^[a-z][a-z0-9_ -]{0,39}$/.test(brand) ? {card_type: brand} : {}),
   };
 }
 
+function interactionCardMetadata(interaction) {
+  return cardMetadata({last4: interaction.card_last4, brand: interaction.card_type});
+}
+
 function validateInstallation(installation) {
-  if (String(installation?.moduleId || "").startsWith("LM-")) {
+  if (String(installation?.moduleId || "").startsWith("LM-") && installation.ctf7Validated !== true) {
     fail(503, "ctf7-commissioning", "CTF7 paid rentals are awaiting hardware verification.");
   }
   if (!installation || installation.active !== true) {
@@ -566,13 +460,100 @@ function assertReturnOwner(session, installation) {
   }
 }
 
+function assertManagedInstallationAuthority(installation, device) {
+  if (!device) return;
+  if (device.pendingAssignment || device.assignmentTransitionOutcome) {
+    fail(409, "assignment-pending", "This kiosk is updating its station assignment. Try again shortly.");
+  }
+  // Existing legacy installations can have a phone record without a terminal
+  // field. Once a terminal field exists, it is the authority for this token.
+  const terminal = device.terminal;
+  if (terminal && typeof terminal === "object" &&
+      (terminal.enabled !== true ||
+        cleanString(terminal.installationId, 100) !== installation.id ||
+        cleanString(device.stationId, 40).toUpperCase() !== installation.stationId)) {
+    fail(409, "installation-reassigned", "This kiosk installation is no longer assigned to this device.");
+  }
+}
+
 function createFirestoreKioskTerminalStore(db) {
   if (!db) throw new TypeError("A Firestore instance is required.");
 
   return {
+    async getV2CheckoutConfig() {
+      const snapshot = await db.doc(V2_CHECKOUT_CONFIG_PATH).get();
+      return snapshot.exists ? snapshot.data() : null;
+    },
+
+    async claimStationAvailability(stationId, requestId, now) {
+      const ref = db.collection("kioskStationDispatchLocks").doc(stationId);
+      return db.runTransaction(async (transaction) => {
+        const snapshot = await transaction.get(ref);
+        const lock = snapshot.data();
+        if (snapshot.exists && (lock.operation === "vend" ||
+            valueMillis(lock.expiresAt) > now.getTime())) {
+          fail(409, "station-operation-pending", "This station is verifying its current charger operation.");
+        }
+        transaction.set(ref, {operation: "availability", operationId: requestId,
+          expiresAt: new Date(now.getTime() + 20_000), updatedAt: now});
+      });
+    },
+
+    async claimV2VendDispatch(interaction, now) {
+      const interactionRef = db.collection(INTERACTIONS_COLLECTION).doc(interaction.id);
+      const stationRef = db.collection("kioskStationDispatchLocks").doc(interaction.stationId);
+      return db.runTransaction(async (transaction) => {
+        const [interactionSnapshot, stationSnapshot] = await Promise.all([
+          transaction.get(interactionRef), transaction.get(stationRef),
+        ]);
+        const current = interactionSnapshot.data();
+        if (!current || current.paymentIntentId !== interaction.paymentIntentId) {
+          fail(409, "payment-mismatch", "The dispatch payment changed.");
+        }
+        if (current.vendDispatchState || current.outcome !== "pending") {
+          return {claimed: false, interaction: current};
+        }
+        const lock = stationSnapshot.data();
+        if (stationSnapshot.exists && (lock.operation === "vend" ||
+            valueMillis(lock.expiresAt) > now.getTime())) {
+          fail(409, "station-operation-pending", "This station is verifying its current charger operation.");
+        }
+        transaction.set(stationRef, {operation: "vend", operationId: interaction.id, updatedAt: now});
+        transaction.set(interactionRef, {vendDispatchState: "claimed", vendDispatchClaimedAt: now,
+          vendRequestedAt: now, updatedAt: now}, {merge: true});
+        return {claimed: true};
+      });
+    },
+
+    async releaseStationOperation(stationId, operationId) {
+      const ref = db.collection("kioskStationDispatchLocks").doc(stationId);
+      await db.runTransaction(async (transaction) => {
+        const snapshot = await transaction.get(ref);
+        if (snapshot.exists && snapshot.data().operationId === operationId) transaction.delete(ref);
+      });
+    },
+
+    async finishV2VendDispatch(interactionId, patch, now) {
+      const ref = db.collection(INTERACTIONS_COLLECTION).doc(interactionId);
+      await db.runTransaction(async (transaction) => {
+        const snapshot = await transaction.get(ref);
+        if (snapshot.exists && snapshot.data().outcome === "pending") {
+          transaction.set(ref, {...patch, updatedAt: now}, {merge: true});
+        }
+      });
+    },
+
     async getInstallation(id) {
       const snapshot = await db.collection(INSTALLATIONS_COLLECTION).doc(id).get();
       return snapshot.exists ? {id: snapshot.id, ...snapshot.data()} : null;
+    },
+
+    async assertInstallationAuthority(installation) {
+      const deviceId = cleanString(installation.deviceId, 120);
+      if (!deviceId) return;
+      const deviceSnapshot = await db.collection("phoneDevices").doc(deviceId).get();
+      assertManagedInstallationAuthority(installation,
+          deviceSnapshot.exists ? deviceSnapshot.data() || {} : null);
     },
 
     async confirmInstallation(installation, report, now) {
@@ -644,8 +625,10 @@ function createFirestoreKioskTerminalStore(db) {
       return {id: snapshot.id, ...kiosk};
     },
 
-    async reserveInteraction(interaction, candidate, expiresAt, now) {
+    async reserveInteraction(interaction, candidate, expiresAt, now, deviceId) {
       const interactionRef = db.collection(INTERACTIONS_COLLECTION).doc(interaction.id);
+      const managedDeviceId = cleanString(deviceId, 120);
+      const deviceRef = managedDeviceId ? db.collection("phoneDevices").doc(managedDeviceId) : null;
       const lockRef = db.collection(RESERVATIONS_COLLECTION).doc(reservationId(
           interaction.stationId,
           candidate.moduleId,
@@ -653,10 +636,40 @@ function createFirestoreKioskTerminalStore(db) {
       ));
 
       return db.runTransaction(async (transaction) => {
-        const snapshot = await transaction.get(lockRef);
+        const [deviceSnapshot, snapshot] = await Promise.all([
+          deviceRef ? transaction.get(deviceRef) : Promise.resolve(null),
+          transaction.get(lockRef),
+        ]);
+        // Recheck inside the reservation transaction so a newly staged move
+        // cannot race the initial token authorization.
+        assertManagedInstallationAuthority({id: interaction.installationId,
+          stationId: interaction.stationId}, deviceSnapshot?.exists ? deviceSnapshot.data() || {} : null);
         const existing = snapshot.exists ? snapshot.data() : null;
         if (existing && valueMillis(existing.expiresAt) > now.getTime()) {
           fail(409, "charger-reserved", "The available V2 charger was just reserved. Please try again.");
+        }
+
+        if (String(candidate.moduleId).startsWith("LM-")) {
+          const [kioskSnap, bindingSnap, sessionSnap, leaseSnap, motorSnap, operatorSnap] = await Promise.all([
+            transaction.get(db.collection("kiosks").doc(interaction.provisionId)),
+            transaction.get(db.collection("ctf7Bindings").doc(candidate.moduleId)),
+            transaction.get(db.collection("ctf7Sessions").doc(candidate.moduleId)),
+            transaction.get(db.collection("ctf7BankRentals").doc(tokenHash(String(candidate.chargerSn)))),
+            transaction.get(db.collection("ctf7CommandLocks").doc(candidate.moduleId)),
+            transaction.get(db.collection("ctf7OperatorLocks").doc(candidate.moduleId)),
+          ]);
+          try {
+            ctf7Rental.assertCandidate({kiosk: {...kioskSnap.data(), provisionid: interaction.provisionId},
+              binding: bindingSnap.data(), session: sessionSnap.data(), moduleId: candidate.moduleId,
+              position: candidate.slot, sn: candidate.chargerSn, generation: candidate.generation,
+              sessionId: candidate.sessionId, now: now.getTime()});
+          } catch { fail(409, "charger-changed", "The CTF7 bank is no longer eligible."); }
+          if (["vend_pending", "rented", "verification_pending"].includes(leaseSnap.data()?.state) ||
+              motorSnap.data()?.unresolved || operatorSnap.data()?.unresolved) {
+            fail(409, "charger-reserved", "The CTF7 bank or module is already in use.");
+          }
+          interaction.ctf7Generation = candidate.generation;
+          interaction.ctf7SessionId = candidate.sessionId;
         }
 
         transaction.set(lockRef, {
@@ -786,7 +799,7 @@ function createFirestoreKioskTerminalStore(db) {
     },
 
     async updateBesiterRental(rentalId, patch) {
-      await db.collection("rentals").doc(rentalId).set(patch, {merge: true});
+      await db.collection("rentals").doc(rentalId).update(patch);
     },
   };
 }
@@ -795,6 +808,9 @@ function createKioskTerminalService({
   store,
   getStripeClient,
   besiterGateway,
+  ctf7Gateway = null,
+  receiptService = null,
+  v2AmazonGateway = null,
   now = () => new Date(),
   randomUUID = () => crypto.randomUUID(),
 }) {
@@ -813,7 +829,13 @@ function createKioskTerminalService({
       fail(401, "unauthorized", "A valid kiosk installation token is required.");
     }
     validateInstallation(installation);
+    if (installation.checkoutExecution === "local" || installation.billingOwner === "local_station_v1") {
+      fail(409, "local-execution", "This installation uses the local station API.");
+    }
     assertStation(req, body, installation);
+    if (typeof store.assertInstallationAuthority === "function") {
+      await store.assertInstallationAuthority(installation);
+    }
     return installation;
   }
 
@@ -828,14 +850,43 @@ function createKioskTerminalService({
     return resolveKioskOffer(installation, kiosk);
   }
 
-  async function loadAvailability(installation) {
+  async function checkoutRoute(installation, interaction = null) {
+    const config = typeof store.getV2CheckoutConfig === "function" ? await store.getV2CheckoutConfig() : null;
+    const route = selectV2AmazonRoute(config, installation);
+    if (interaction && route && (interaction.billingOwner !== "amazon_v2" ||
+        interaction.expectedStripeAccountId !== route.expectedStripeAccountId ||
+        interaction.expectedStripeLivemode !== route.expectedStripeLivemode ||
+        interaction.amazonPaymentProfile !== route.amazonPaymentProfile)) {
+      fail(409, "v2-checkout-interaction-obsolete", "Start a new checkout using the current station billing configuration.");
+    }
+    return route;
+  }
+
+  async function loadAvailability(installation, {allowBusy = false} = {}) {
     const requestId = randomUUID();
     const requestedAt = now().getTime();
-    const response = await besiterGateway.requestAvailability({
-      stationId: installation.stationId,
-      requestId,
-      requestedAt,
-    });
+    const route = await checkoutRoute(installation);
+    if (route) {
+      try {
+        await store.claimStationAvailability(installation.stationId, requestId, now());
+      } catch (error) {
+        // Configuration must stay readable while an existing vend is being
+        // reconciled. Older clients read it before polling their saved checkout.
+        // Keep the dispatch lock and exclude any new rental or status command.
+        if (!allowBusy || !(error instanceof KioskTerminalError) ||
+            error.code !== "station-operation-pending") throw error;
+        return {state: "busy", availableCount: 0, selected: null,
+          requestId, checkedAt: new Date(requestedAt).toISOString()};
+      }
+    }
+    const transport = String(installation.moduleId).startsWith("LM-") ? ctf7Gateway : besiterGateway;
+    if (!transport) fail(503, "ctf7-unavailable", "CTF7 transport is not configured.");
+    let response;
+    try {
+      response = await transport.requestAvailability({stationId: installation.stationId, requestId, requestedAt});
+    } finally {
+      if (route) await store.releaseStationOperation(installation.stationId, requestId);
+    }
     return {
       ...normalizeBesiterAvailability(response, installation),
       requestId,
@@ -914,7 +965,7 @@ function createKioskTerminalService({
       const installation = await authorize(req);
       const [offer, availability] = await Promise.all([
         loadKioskOffer(installation),
-        loadAvailability(installation),
+        loadAvailability(installation, {allowBusy: true}),
       ]);
       return {
         status: 200,
@@ -932,6 +983,10 @@ function createKioskTerminalService({
     async createConnectionToken(req) {
       const body = requestBody(req);
       const installation = await authorize(req, body);
+      const route = await checkoutRoute(installation);
+      if (route && (await stripe(installation).accounts.retrieve()).id !== route.expectedStripeAccountId) {
+        fail(503, "stripe-account-mismatch", "The payment account does not match the station billing account.");
+      }
       const token = await stripe(installation).terminal.connectionTokens.create();
       if (!token || !token.secret) {
         fail(502, "stripe-token-failed", "Stripe did not return a connection token.");
@@ -958,6 +1013,7 @@ function createKioskTerminalService({
       }
 
       const timestamp = now();
+      const route = await checkoutRoute(installation);
       const interaction = await store.reserveInteraction({
         id: randomUUID(),
         installationId: installation.id,
@@ -980,9 +1036,10 @@ function createKioskTerminalService({
         availabilityCheckedAt: availability.checkedAt,
         outcome: "pending",
         state: "reserved",
+        ...route,
       }, availability.selected, new Date(
           timestamp.getTime() + RESERVATION_TTL_MS,
-      ), timestamp);
+      ), timestamp, installation.deviceId);
 
       return {
         status: 200,
@@ -1001,6 +1058,7 @@ function createKioskTerminalService({
     async createPaymentIntent(req, interactionId) {
       const installation = await authorize(req);
       const interaction = await loadInteraction(interactionId, installation);
+      await checkoutRoute(installation, interaction);
       const client = stripe(interaction, installation);
 
       const timestamp = now();
@@ -1025,6 +1083,15 @@ function createKioskTerminalService({
       }
 
       const fullPrice = interaction.gatewayOption === "FULLPRICE";
+      let stripeAccountId = null;
+      if (client.accounts?.retrieve) {
+        const account = await client.accounts.retrieve();
+        stripeAccountId = cleanString(account?.id, 100);
+      }
+      if (interaction.billingOwner === "amazon_v2" &&
+          stripeAccountId !== interaction.expectedStripeAccountId) {
+        fail(503, "stripe-account-mismatch", "The payment account does not match the station billing account.");
+      }
       const paymentIntent = await client.paymentIntents.create({
         amount: interaction.amountCents,
         currency: interaction.currency,
@@ -1045,7 +1112,11 @@ function createKioskTerminalService({
       await store.updateInteraction(interaction.id, {
         paymentIntentId: paymentIntent.id,
         state: "payment_intent_created",
+        ...(stripeAccountId ? {stripeAccountId} : {}),
       }, now());
+      if (interaction.billingOwner === "amazon_v2" && paymentIntent.livemode !== interaction.expectedStripeLivemode) {
+        fail(503, "stripe-mode-mismatch", "The payment mode does not match the station billing mode.");
+      }
       return {
         status: 200,
         body: {paymentIntentId: paymentIntent.id, clientSecret: paymentIntent.client_secret},
@@ -1060,6 +1131,12 @@ function createKioskTerminalService({
       if (!paymentIntentId || paymentIntentId !== interaction.paymentIntentId) {
         fail(409, "payment-mismatch", "The processed payment does not match this interaction.");
       }
+
+      if (interaction.billingOwner === "amazon_v2" && interaction.vendDispatchState) {
+        return {status: 202, body: {accepted: true, state: interaction.state,
+          paymentResolution: interaction.paymentResolution || "authorized"}};
+      }
+      await checkoutRoute(installation, interaction);
 
       const timestamp = now();
       await store.extendReservation(
@@ -1088,18 +1165,74 @@ function createKioskTerminalService({
       }
       const paymentResolution = fullPrice ? "authorized" : "captured";
 
+      if (interaction.billingOwner === "amazon_v2") {
+        const client = stripe(interaction, installation);
+        const account = await client.accounts.retrieve();
+        if (account.id !== interaction.stripeAccountId || account.id !== interaction.expectedStripeAccountId) {
+          fail(503, "stripe-account-mismatch", "The payment account does not match the station billing account.");
+        }
+        if (paymentIntent.livemode !== interaction.expectedStripeLivemode) {
+          fail(503, "stripe-mode-mismatch", "The payment mode does not match the station billing mode.");
+        }
+        const paymentMethodId = typeof paymentIntent.payment_method === "string" ?
+          paymentIntent.payment_method : paymentIntent.payment_method?.id;
+        if (!paymentMethodId) fail(409, "payment-method-missing", "The approved payment has no payment method.");
+        const paymentMethod = await client.paymentMethods.retrieve(paymentMethodId);
+        if (paymentMethod?.id !== paymentMethodId) {
+          fail(409, "payment-method-mismatch", "The payment method could not be verified.");
+        }
+        const paymentCard = cardMetadata(paymentMethod.type === "card_present" ?
+          paymentMethod.card_present : paymentMethod.type === "card" ? paymentMethod.card : null);
+        await store.updateInteraction(interaction.id, {paymentMethodId, ...paymentCard}, timestamp);
+        const claim = await store.claimV2VendDispatch(interaction, timestamp);
+        if (!claim.claimed) return {status: 202, body: {accepted: true,
+          state: claim.interaction.state, paymentResolution: claim.interaction.paymentResolution || paymentResolution}};
+        await store.updateInteraction(interaction.id, {state: "vend_dispatching", paymentResolution,
+          paymentAuthorizedAt: timestamp, paymentCapturedAt: fullPrice ? null : timestamp}, timestamp);
+        let vendAccepted = false;
+        try {
+          if (!v2AmazonGateway) throw new Error("The V2 billing gateway is not configured.");
+          await v2AmazonGateway.sendVend({stationid: interaction.stationId, moduleid: interaction.moduleId,
+            chargerid: interaction.chargerSn, slotid: interaction.reservedSlot,
+            powerlevel: interaction.batteryLevel, transactionid: paymentIntentId,
+            paymentMethodId, timerequested: timestamp.getTime(),
+            ...paymentCard,
+            gatewayoptions: interaction.gatewayOption, pricing: interaction.pricingSnapshot});
+          vendAccepted = true;
+          await store.finishV2VendDispatch(interaction.id, {state: "vend_requested", vendDispatchState: "sent",
+            message: "The station is confirming the physical charger dispense."}, now());
+        } catch (error) {
+          if (vendAccepted || error.mightHaveVended === true || error.ownershipMayHaveTransferred === true) {
+            await store.finishV2VendDispatch(interaction.id, {state: "vend_verification_pending",
+              vendDispatchState: "unknown", amazonHandoffState: "ownership_transferred_or_unknown",
+              message: "The station is verifying the transaction and charger dispense."}, now());
+          } else {
+            const resolution = await cancelOrRefundPayment(client, interaction);
+            await store.updateInteraction(interaction.id, {state: "vend_request_failed", vendDispatchState: "failed",
+              outcome: resolution === "refunded" ? "refunded" : "vend_failed", paymentResolution: resolution}, now());
+            await store.releaseReservation(interaction, now());
+            await store.releaseStationOperation(interaction.stationId, interaction.id);
+            throw error;
+          }
+        }
+        return {status: 202, body: {accepted: true, state: (await store.getInteraction(interaction.id)).state,
+          paymentResolution}};
+      }
+
       await store.updateInteraction(interaction.id, {
         state: fullPrice ? "payment_authorized" : "payment_captured",
         paymentAuthorizedAt: timestamp,
         paymentCapturedAt: fullPrice ? null : timestamp,
         paymentResolution,
         message: fullPrice ?
-          "Full price authorized; sending the selected charger to Besiter." :
-          "Initial price captured; sending the selected charger to Besiter.",
+          "Full price authorized; sending the selected charger to its module." :
+          "Initial price captured; sending the selected charger to its module.",
       }, timestamp);
 
       try {
-        await besiterGateway.sendVend({
+        const transport = String(interaction.moduleId).startsWith("LM-") ? ctf7Gateway : besiterGateway;
+        if (!transport) fail(503, "ctf7-unavailable", "CTF7 transport is not configured.");
+        await transport.sendVend({
           stationid: interaction.stationId,
           moduleid: interaction.moduleId,
           chargerid: interaction.chargerSn,
@@ -1144,7 +1277,7 @@ function createKioskTerminalService({
       await store.updateInteraction(interaction.id, {
         state: "vend_requested",
         vendRequestedAt: now(),
-        message: "Besiter is releasing the selected charger.",
+        message: "The module is releasing the selected charger.",
       }, now());
       return {
         status: 202,
@@ -1157,19 +1290,35 @@ function createKioskTerminalService({
       let interaction = await loadInteraction(interactionId, installation);
       if ((interaction.outcome || "pending") === "pending" && interaction.paymentIntentId) {
         const rental = await store.getBesiterRental(interaction.paymentIntentId);
-        const physical = besiterRentalOutcome(rental);
+        const amazonOwned = interaction.billingOwner === "amazon_v2";
+        const allowClosedVend = amazonOwned &&
+          stripeIntentIdForRental(rental, interaction.paymentIntentId) === interaction.paymentIntentId &&
+          cleanString(rental?.rentalStationid, 80) === interaction.stationId;
+        const physical = besiterRentalOutcome(rental, {allowClosedVend});
         if (physical.outcome === "vend_succeeded") {
           const client = stripe(interaction, installation);
           const paymentIntent = await client.paymentIntents.retrieve(interaction.paymentIntentId);
           const fullPrice = interaction.gatewayOption === "FULLPRICE";
           const validStatus = fullPrice ?
             new Set(["requires_capture", "succeeded"]) : new Set(["succeeded"]);
-          if (!validStatus.has(paymentIntent.status)) {
+          // Amazon can release a free manual hold after an immediate return,
+          // before the kiosk first observes the retained physical dispense proof.
+          const returnedHoldReleased = allowClosedVend && fullPrice &&
+            cleanString(rental?.status, 40).toLowerCase() === "returned" &&
+            paymentIntent.capture_method === "manual" && paymentIntent.status === "canceled";
+          if (!validStatus.has(paymentIntent.status) && !returnedHoldReleased) {
             fail(409, "payment-not-settled", "The kiosk payment is not ready to complete.");
           }
-          const paymentResolution = paymentIntent.status === "requires_capture" ?
-            "authorized" : "captured";
+          const paymentResolution = returnedHoldReleased ? "canceled" :
+            paymentIntent.status === "requires_capture" ? "authorized" : "captured";
           const completedAt = now();
+          if (interaction.billingOwner === "amazon_v2") {
+            await store.updateBesiterRental(interaction.paymentIntentId, {
+              billingOwner: "amazon_v2", stripeAccountId: interaction.stripeAccountId,
+              stripeMode: interaction.stripeMode,
+              ...(allowClosedVend ? interactionCardMetadata(interaction) : {}),
+            });
+          }
           await store.updateInteraction(interaction.id, {
             outcome: "vend_succeeded",
             state: "complete",
@@ -1181,18 +1330,27 @@ function createKioskTerminalService({
             message: "The V2 kiosk confirmed that the charger was dispensed.",
           }, completedAt);
           await store.releaseReservation(interaction, completedAt);
+          if (interaction.billingOwner === "amazon_v2") {
+            await store.releaseStationOperation(interaction.stationId, interaction.id);
+          }
           interaction = {
             ...interaction,
             outcome: "vend_succeeded",
+            state: "complete",
             paymentResolution,
             reservedSlot: physical.slot || interaction.reservedSlot,
             message: "The V2 kiosk confirmed that the charger was dispensed.",
           };
         } else if (physical.outcome === "vend_failed") {
-          const paymentResolution = await cancelOrRefundPayment(
-              stripe(interaction, installation),
-              interaction,
-          );
+          let paymentResolution;
+          if (interaction.billingOwner === "amazon_v2") {
+            // Amazon owns payment cleanup after the registration handoff.
+            const intent = await stripe(interaction, installation).paymentIntents.retrieve(interaction.paymentIntentId);
+            paymentResolution = intent.status === "canceled" ? "canceled" :
+              intent.status === "requires_capture" ? "authorized" : intent.status === "succeeded" ? "captured" : "pending";
+          } else {
+            paymentResolution = await cancelOrRefundPayment(stripe(interaction, installation), interaction);
+          }
           const failedAt = now();
           await store.updateInteraction(interaction.id, {
             outcome: paymentResolution === "refunded" ? "refunded" : "vend_failed",
@@ -1201,12 +1359,17 @@ function createKioskTerminalService({
             message: physical.message,
           }, failedAt);
           await store.releaseReservation(interaction, failedAt);
+          if (interaction.billingOwner === "amazon_v2") {
+            await store.releaseStationOperation(interaction.stationId, interaction.id);
+          }
           interaction = {
             ...interaction,
             outcome: paymentResolution === "refunded" ? "refunded" : "vend_failed",
+            state: "vend_failed",
+            paymentResolution,
             message: physical.message,
           };
-        } else if (valueMillis(interaction.vendRequestedAt) > 0 &&
+        } else if (interaction.billingOwner !== "amazon_v2" && valueMillis(interaction.vendRequestedAt) > 0 &&
             now().getTime() - valueMillis(interaction.vendRequestedAt) > VEND_RESULT_TTL_MS) {
           const paymentResolution = await cancelOrRefundPayment(
               stripe(interaction, installation),
@@ -1223,17 +1386,36 @@ function createKioskTerminalService({
           interaction = {
             ...interaction,
             outcome: paymentResolution === "refunded" ? "refunded" : "vend_failed",
+            state: "vend_result_timeout",
+            paymentResolution,
             message: "The kiosk did not confirm a physical dispense. The payment was canceled.",
           };
         }
       }
+      if (interaction.billingOwner === "amazon_v2" && interaction.paymentIntentId) {
+        const metadata = interactionCardMetadata(interaction);
+        if (Object.keys(metadata).length) {
+          const rental = await store.getBesiterRental(interaction.paymentIntentId);
+          if (rental && stripeIntentIdForRental(rental, interaction.paymentIntentId) === interaction.paymentIntentId &&
+              cleanString(rental.rentalStationid, 80) === interaction.stationId &&
+              Object.entries(metadata).some(([field, value]) => rental[field] !== value)) {
+            await store.updateBesiterRental(interaction.paymentIntentId, metadata);
+          }
+        }
+      }
+      const receipt = interaction.outcome === "vend_succeeded" && receiptService ? receiptService.link({
+        rental: await store.getBesiterRental(interaction.paymentIntentId),
+        rentalId: interaction.paymentIntentId,
+      }) : null;
       return {
         status: 200,
         body: {
+          state: interaction.state || null,
           outcome: interaction.outcome || "pending",
           slot: interaction.reservedSlot || null,
           paymentResolution: interaction.paymentResolution || null,
           message: interaction.message || null,
+          ...receipt,
         },
       };
     },
@@ -1241,6 +1423,11 @@ function createKioskTerminalService({
     async cancelInteraction(req, interactionId) {
       const installation = await authorize(req);
       const interaction = await loadInteraction(interactionId, installation);
+      if (interaction.billingOwner === "amazon_v2" && interaction.vendDispatchState &&
+          interaction.vendDispatchState !== "failed") {
+        return {status: 202, body: {canceled: false, state: "vend_verification_pending",
+          paymentResolution: interaction.paymentResolution || "authorized"}};
+      }
       let paymentResolution = "not_created";
       if (interaction.paymentIntentId) {
         paymentResolution = await cancelOrRefundPayment(
@@ -1288,9 +1475,11 @@ function createKioskTerminalService({
       assertReturnOwner(session, installation);
       let outcome = session.outcome;
       let returnSlot = Number(session.returnSlot) || null;
+      let receiptRental = null;
       if (outcome === "pending") {
         const returnedRental = await store.findReturnSince(session);
         if (returnedRental) {
+          receiptRental = returnedRental;
           outcome = "received";
           returnSlot = Number(returnedRental.returnSlotid) || null;
           await store.updateReturnSession(session.id, {
@@ -1306,7 +1495,14 @@ function createKioskTerminalService({
           outcome = "failed";
         }
       }
-      return {status: 200, body: {outcome, returnSlot}};
+      if (outcome === "received" && !receiptRental && session.rentalId && receiptService) {
+        receiptRental = await store.getBesiterRental(session.rentalId);
+      }
+      const receipt = receiptRental && receiptService ? receiptService.link({
+        rental: receiptRental,
+        rentalId: receiptRental.id || session.rentalId,
+      }) : null;
+      return {status: 200, body: {outcome, returnSlot, ...receipt}};
     },
   };
 }
@@ -1380,8 +1576,9 @@ module.exports = {
   createKioskTerminalService,
   validateInstallation,
   resolveKioskOffer,
+  normalizeKioskCurrency,
+  terminalPaymentCurrency,
   normalizeBesiterAvailability,
-  settleStripeReturn,
   stripeIntentIdForRental,
   reservationId,
   tokenHash,

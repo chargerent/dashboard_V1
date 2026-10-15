@@ -72,44 +72,80 @@ live Besiter status response.
    disabled modules, and candidate ordering.
 3. The backend temporarily reserves Besiter's selected charger serial to stop
    the same phone flow from double-paying for it.
-4. Stripe authorizes with manual capture. The backend then publishes an
-   `action: vend` request with that charger serial, module, slot, request ID,
-   interaction ID, and PaymentIntent ID.
+4. Stripe authorizes with manual capture. For an explicitly enabled Amazon V2
+   station, the backend registers the original PaymentIntent and frozen pricing
+   through the existing QR service, then calls its original vend endpoint once.
+   That service publishes the existing `CSTA/get` vend request with the
+   PaymentIntent as `transactionid`. Other installations retain their existing
+   transport until configured for that handoff.
 5. The existing Besiter flow revalidates the candidate, sends `popup_sn`,
    retries eligible alternatives, and writes the physical outcome to
    `rentals/<paymentIntentId>`.
 6. The backend confirms dispense only when `status: rented`, `vendState: dispensed`, and
    the rental contains popup-response or fresh-status absence proof. A failure
-   or missing result cancels the authorization or refunds a captured payment.
+   before Amazon registration is attempted can cancel an unvended authorization
+   or refund an unvended captured payment. An uncertain Amazon handoff remains
+   pending and is not retried
+   or canceled while the physical outcome is unknown.
    A `FULLPRICE` authorization remains uncaptured after successful dispense.
-7. When Besiter writes `status: returned`, the Stripe return trigger uses
-   Besiter's calculated `totalCharged`. For an uncaptured `FULLPRICE` payment,
-   it captures only that amount, or cancels a zero-charge authorization. For
-   an already captured payment, it refunds the unused amount idempotently.
+7. The existing hardware return flow publishes `action: return` to `CSTA/post`.
+   Amazon's existing V2 service owns rental closure and return billing. Firebase
+   observes the physical return for the UI; it does not capture, cancel, or refund
+   a successfully vended rental on return. Enabling the handoff requires the app
+   and Amazon to use the same Stripe account and the same Stripe payment mode.
+
+FR8012 requires the Amazon V2 route. Missing, disabled, or unverified route
+configuration must stop a new payment before authorization; it must not fall
+back to a direct vend or the legacy rental exporter. The server-owned route
+configuration identifies the verified Amazon payment profile, account ID and
+live mode. A profile name containing `TEST` or a station `MODE` value is not
+proof of the Stripe key's mode.
+
+After rental registration has been attempted, uncertain responses do not
+transfer financial ownership back to Google. The backend observes payment and
+physical dispense results and waits for Amazon. It never repeats an uncertain
+vend. Safe cleanup of an unvended authorization remains possible before the
+registration handoff.
 
 ## Payment safety
 
 PaymentIntents are created server-side with `payment_method_types` set to
 `card_present`. A kiosk whose `hardware.gatewayoptions` is `FULLPRICE` uses
 manual capture: the buy price is authorized at the reader, stays uncaptured
-after a verified vend, and is captured for the calculated rental charge (or
-canceled when the charge is zero) when the charger is returned. If the rental
-becomes `purchased` after the existing overdue checks, the same rental trigger
-captures its calculated purchase charge from the authorization. An active
-`rented` record never triggers capture. A kiosk whose
+after a verified vend. Amazon's existing billing rules settle the authorization
+on return or purchase. The app's local return calculation is not proof of payment
+settlement. A kiosk whose
 option is `INITIALPRICE` uses automatic capture: the configured authorization
-amount is charged at the reader, then any unused amount is refunded after the
-return. The backend verifies the PaymentIntent amount, currency, metadata, and
+amount is charged at the reader. Amazon owns subsequent rental billing and
+refunds. The backend verifies the PaymentIntent amount, currency, metadata, and
 the gateway-specific Stripe status before vending.
+
+Card display metadata is read from the original Stripe PaymentMethod:
+`card_present` for reader payments and `card` for online card payments. The
+backend preserves a four digit `card_last4` and the brand in `card_type`, sends
+the last four through the existing V2 vend field, and merges these display
+fields once the matching station's existing rental is available.
+This metadata does not change the payment IDs or make a billing decision.
+Amazon's registration handler must also read `card_present` to populate its
+own `CARDNUMBER` and `CARDTYPE` columns. Replaying rental registration is not a
+metadata repair method.
 
 The implementation does not treat payment approval, MQTT publish completion,
 or a pending rental as success. The customer sees “Take your charger” only
 after the physical proof described above.
 
+Receipt reads verify the creating Stripe account and mode and read the actual
+processor state. A physical return or Google's calculated rental fee cannot
+confirm a charge, release, or refund. Unknown or unfinished billing stays
+pending. The hosted media service delegates signed receipt reads to
+`rentalReceiptApi`; it does not receive Stripe credentials.
+
 ## Local verification
 
-New FR8011 rental export behavior, delivery tracking and the legacy Amazon
-accounting limitations are documented in [AMAZON_RENTAL_EXPORT.md](AMAZON_RENTAL_EXPORT.md).
+The legacy rental export, delivery tracking and accounting limitations are
+documented in [AMAZON_RENTAL_EXPORT.md](AMAZON_RENTAL_EXPORT.md). Rentals registered
+through the normal Amazon V2 handoff must skip that legacy export to prevent a
+second SQL insertion.
 
 ```bash
 cd functions

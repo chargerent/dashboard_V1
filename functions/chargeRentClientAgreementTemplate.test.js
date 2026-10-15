@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 const {PDFDocument} = require("pdf-lib");
 const {
+  ARTICLES,
   STANDARD_PRICING,
   TEMPLATE_ID,
   TEMPLATE_VERSION,
@@ -34,6 +35,25 @@ test("generates the versioned ChargeRent revenue-share agreement", async () => {
   assert.ok(result.buffer.subarray(0, 5).toString("ascii") === "%PDF-");
   assert.ok(result.buffer.length > 10000);
   assert.ok(pdf.getPageCount() >= 4);
+});
+
+test("uses the current ChargeDrops non-return fee without a time limit", () => {
+  assert.deepEqual(STANDARD_PRICING, {
+    currency: "USD",
+    hourlyRate: 3,
+    nonReturnFee: 35,
+  });
+});
+
+test("defines client revenue as gross revenue minus refunds and taxes", () => {
+  const compensation = ARTICLES.find((article) =>
+    article.title === "ARTICLE 3 - COMPENSATION");
+  const terms = compensation.paragraphs.join(" ");
+
+  assert.match(terms, /gross rental revenue/i);
+  assert.match(terms, /less completed customer refunds/i);
+  assert.match(terms, /applicable sales or similar transaction taxes/i);
+  assert.match(terms, /credit card processing fees are not deducted/i);
 });
 
 test("requires business, location, deployment, and start-date details", async () => {

@@ -3,6 +3,7 @@ const crypto = require("node:crypto");
 const forge = require("node-forge");
 const {HttpsError} = require("firebase-functions/v2/https");
 const {resolveKioskOffer} = require("./kioskTerminal");
+const {normalizeStationBrand} = require("./stationBrand");
 
 const DEVICES_COLLECTION = "phoneDevices";
 const COMMANDS_COLLECTION = "phoneDeviceCommands";
@@ -27,6 +28,8 @@ const DEFAULT_TERMINAL_READER_BY_COUNTRY = Object.freeze({
 const PHONE_MARKETS = new Set(["US", "CA", "FR"]);
 
 const COMMAND_TTL_MS = 2 * 60 * 1000;
+const ASSIGNMENT_COMMAND_TTL_MS = 5 * 60 * 1000;
+const TERMINAL_INVENTORY_FRESH_MS = 3 * 60 * 1000;
 const ENROLLMENT_TTL_MS = 15 * 60 * 1000;
 const ENROLLMENT_ALPHABET = "0123456789";
 const ENROLLMENT_CODE_LENGTH = 6;
@@ -253,7 +256,9 @@ function availableKioskIdsForMarket(kioskSnapshots, assignmentSnapshots, market,
   const assignedStationIds = new Set((assignmentSnapshots || []).flatMap((snapshot) => {
     const assignment = snapshot.data() || {};
     const assignedDeviceId = String(assignment.deviceId || "").trim();
-    if (!assignedDeviceId || assignedDeviceId === deviceId) return [];
+    const pendingDeviceId = String(assignment.pendingDeviceId || "").trim();
+    if ((!assignedDeviceId || assignedDeviceId === deviceId) &&
+        (!pendingDeviceId || pendingDeviceId === deviceId)) return [];
     const stationId = String(assignment.stationId || snapshot.id || "").trim().toUpperCase();
     return stationId ? [stationId] : [];
   }));
@@ -731,6 +736,19 @@ async function ensureStripeTerminalLocation(config, kiosk, stripe) {
 
 function terminalConfigForKiosk(stationId, kioskSnapshot, options = {}) {
   const kiosk = kioskSnapshot.data() || {};
+  let stationBrand;
+  try { stationBrand = normalizeStationBrand(kiosk.stationBrand); }
+  catch (error) { throw new HttpsError("failed-precondition", error.message); }
+  const vendor = kiosk.hardware?.vendor || "besiter";
+  const local = kiosk.hardware?.checkoutExecution === "local";
+  if (!["lita", "besiter"].includes(vendor) || (vendor === "lita" && !local) ||
+    (local && kiosk.hardware?.billingOwner !== "local_station_v1")) {
+    throw new HttpsError("failed-precondition", "Select the station vendor and local billing owner before provisioning.");
+  }
+  if (local) {
+    try { require("./localStationBackend").localTopology(kiosk, {moduleId: kiosk.modules?.[0]?.id}); }
+    catch (error) { throw new HttpsError("failed-precondition", error.message); }
+  }
   const modules = Array.isArray(kiosk.modules) ? kiosk.modules : [];
   const module = modules.find((candidate) => (
     candidate && String(candidate.moduleid || candidate.moduleId || candidate.id || "").trim()
@@ -800,6 +818,12 @@ function terminalConfigForKiosk(stationId, kioskSnapshot, options = {}) {
     currency: offer.currency,
     pricingPlan: offer.planCode,
     gatewayOption: offer.gatewayOption,
+    hardwareVendor: kiosk.hardware?.vendor || "besiter",
+    stationBrand,
+    checkoutExecution: kiosk.hardware?.checkoutExecution || "backend",
+    serialPort: kiosk.hardware?.serialPort || (kiosk.hardware?.vendor === "lita" ? "/dev/ttyS1" : "/dev/ttySMT7"),
+    boardCount: Number(kiosk.hardware?.boardCount || (kiosk.hardware?.vendor === 'lita' ? 1 : Math.max(1, Math.ceil(slotNumbers.length / 4)))),
+    slotsPerBoard: Number(kiosk.hardware?.slotsPerBoard || (kiosk.hardware?.vendor === "lita" ? slotNumbers.length : 4)),
   };
 }
 
@@ -820,7 +844,11 @@ async function provisionTerminalConfigForKiosk(stationId, kioskSnapshot, options
   };
 }
 
-function terminalCommandArguments(config, encryptedSecrets) {
+function terminalCommandArguments(config, encryptedSecrets, {supportsStationBrand = true} = {}) {
+  const stationBrand = normalizeStationBrand(config.stationBrand);
+  if (!supportsStationBrand && stationBrand !== "chargerent") {
+    throw new HttpsError("failed-precondition", "Update the integrated kiosk app before assigning another station brand.");
+  }
   const restrictions = {
     terminal_enabled: true,
     station_id: config.stationId,
@@ -833,6 +861,12 @@ function terminalCommandArguments(config, encryptedSecrets) {
     stripe_mode: config.stripeMode,
     stripe_reader_type: config.stripeReaderType,
     stripe_location_id: config.stripeLocationId,
+    hardware_vendor: config.hardwareVendor || "besiter",
+    checkout_execution: config.checkoutExecution || "backend",
+    serial_port: config.serialPort || "/dev/ttySMT7",
+    board_count: config.boardCount || 1,
+    slots_per_board: config.slotsPerBoard || 4,
+    ...(supportsStationBrand ? {station_brand: stationBrand} : {}),
   };
   return {
     packageName: config.packageName,
@@ -1166,11 +1200,13 @@ function terminalStateAfterAppRestrictions(
 function terminalCommandResultMatches(currentTerminal, commandData, result) {
   const expected = commandData?.arguments?.restrictions;
   const reported = result?.terminal;
-  if (!expected || !reported || result?.applied !== true || reported.configured !== true) {
+  if (!expected || !reported || result?.applied !== true || reported.configured !== true ||
+      !/^[a-f0-9]{64}$/.test(String(currentTerminal?.installationId || ""))) {
     return false;
   }
   const same = (left, right) => String(left || "").trim() === String(right || "").trim();
   return same(result.packageName, currentTerminal?.packageName) &&
+    same(reported.installationId, currentTerminal?.installationId) &&
     same(reported.stationId, currentTerminal?.stationId) &&
     same(reported.stationId, commandData?.stationId) &&
     same(reported.provisionId, currentTerminal?.provisionId) &&
@@ -1183,8 +1219,15 @@ function terminalCommandResultMatches(currentTerminal, commandData, result) {
     same(String(reported.stripeAccountCountry).toUpperCase(),
         String(expected.stripe_account_country).toUpperCase()) &&
     same(reported.readerType, expected.stripe_reader_type) &&
+    (!expected.station_brand || same(reported.stationBrand, expected.station_brand)) &&
     same(reported.stripeLocationId, currentTerminal?.stripeLocationId) &&
-    same(reported.stripeLocationId, expected.stripe_location_id);
+    same(reported.stripeLocationId, expected.stripe_location_id) &&
+    (!expected.hardware_vendor || same(reported.hardwareVendor, expected.hardware_vendor) ||
+      (!reported.hardwareVendor && expected.hardware_vendor === "besiter" && expected.checkout_execution === "backend")) &&
+    (!expected.checkout_execution || same(reported.checkoutExecution, expected.checkout_execution) ||
+      (!reported.checkoutExecution && expected.checkout_execution === "backend")) &&
+    (expected.checkout_execution !== "local" || (same(reported.serialPort, expected.serial_port) &&
+      Number(reported.boardCount) === Number(expected.board_count) && Number(reported.slotsPerBoard) === Number(expected.slots_per_board)));
 }
 
 async function findKiosk(db, stationId) {
@@ -1242,12 +1285,30 @@ function safeDeviceData(snapshot) {
       stripeMode: String(terminal.stripeMode || ""),
       stripeReaderType: String(terminal.stripeReaderType || ""),
       packageName: String(terminal.packageName || ""),
+      installationId: String(terminal.installationId || ""),
       lockdownEnabled: terminal.lockdownEnabled === true,
       lockdownState: String(terminal.lockdownState ||
         (terminal.lockdownEnabled ? "pending" : "unlocked")),
       message: String(terminal.message || ""),
       updatedAt: timestampToMillis(terminal.updatedAt),
     },
+    assignmentTransition: data.pendingAssignment ? {
+      state: "pending",
+      fromStationId: String(data.pendingAssignment.fromStationId || "").trim().toUpperCase(),
+      toStationId: String(data.pendingAssignment.toStationId || "").trim().toUpperCase(),
+      startedAt: Number(data.pendingAssignment.createdAt || 0),
+    } : null,
+    assignmentError: data.assignmentError ? {
+      stationId: String(data.assignmentError.stationId || "").trim().toUpperCase(),
+      message: String(data.assignmentError.message || "Assignment could not be completed.").slice(0, 300),
+      at: timestampToMillis(data.assignmentError.at),
+    } : null,
+    assignmentTransitionOutcome: data.assignmentTransitionOutcome ? {
+      commandId: String(data.assignmentTransitionOutcome.commandId || ""),
+      state: String(data.assignmentTransitionOutcome.state || ""),
+      toStationId: String(data.assignmentTransitionOutcome.toStationId || "").trim().toUpperCase(),
+    } : null,
+    inventoryAt: timestampToMillis(data.inventoryAt),
     lastCommand: data.lastCommand && typeof data.lastCommand === "object" ? data.lastCommand : null,
     lastSeenAt: timestampToMillis(data.lastSeenAt),
     enrolledAt: timestampToMillis(data.enrolledAt),
@@ -1475,7 +1536,7 @@ async function createEnrollment(data, authState, dependencies) {
 
     const assignmentRef = db.collection(ASSIGNMENTS_COLLECTION).doc(stationId);
     const assignment = await assignmentRef.get();
-    if (assignment.exists && assignment.data()?.deviceId) {
+    if (assignment.exists && (assignment.data()?.deviceId || assignment.data()?.pendingDeviceId)) {
       throw new HttpsError(
           "already-exists",
           `${stationId} already has a managed Android device. Unassign it before enrolling another.`,
@@ -1514,6 +1575,15 @@ async function createEnrollment(data, authState, dependencies) {
   };
 }
 
+// Billing ownership is backend authority. Keep it across replacement and moves;
+// it is deliberately absent from the Android restrictions payload.
+function billingOwnershipForAssignment(stationId, device, previousInstallation) {
+  return stationId === "FR8012" || device?.billingOwner === "amazon_v2" ||
+    device?.terminal?.billingOwner === "amazon_v2" ||
+    previousInstallation?.billingOwner === "amazon_v2" ?
+    {billingOwner: "amazon_v2"} : {};
+}
+
 async function assignDevice(data, authState, dependencies) {
   const {db, admin, privateKeyPem, getStripeClient} = dependencies;
   const deviceId = normalizeDeviceId(data?.deviceId);
@@ -1536,6 +1606,13 @@ async function assignDevice(data, authState, dependencies) {
     throw new HttpsError("not-found", "Managed phone was not found.");
   }
   const initialDevice = initialDeviceSnapshot.data() || {};
+  const supportsStationBrand = initialDevice.inventory?.stripeTerminal?.supportsStationBrand === true;
+  let stationBrand;
+  try { stationBrand = normalizeStationBrand(kioskData.stationBrand); }
+  catch (error) { throw new HttpsError("failed-precondition", error.message); }
+  if (!supportsStationBrand && stationBrand !== "chargerent") {
+    throw new HttpsError("failed-precondition", "Update the integrated kiosk app before assigning another station brand.");
+  }
   const deviceKind = normalizeDeviceKind(
       initialDevice.deviceKind || reportedDeviceKind(initialDevice.inventory),
       {allowLegacy: true},
@@ -1544,7 +1621,66 @@ async function assignDevice(data, authState, dependencies) {
   const currentTerminal = initialDevice.terminal && typeof initialDevice.terminal === "object" ?
     initialDevice.terminal : {};
   const previousInstallationId = String(currentTerminal.installationId || "").trim();
-  const requiresTerminalCommand = terminalEnabled || currentTerminal.enabled === true;
+  const localTerminalEnabled = confirmedLocalTerminal(initialDevice, deviceKind, stationId);
+  const localTerminalDisabled = confirmedLocalTerminalDisabled(initialDevice, deviceKind, stationId);
+  const requiresTerminalCommand = terminalEnabled || currentTerminal.enabled !== false ||
+    previousStationId !== stationId || !localTerminalDisabled || data?.forceReprovision === true ||
+    (supportsStationBrand && initialDevice.inventory?.stripeTerminal?.stationBrand !== stationBrand);
+  if (initialDevice.inventory?.media?.checkoutBusy === true) {
+    throw new HttpsError("failed-precondition", "Finish the current checkout before changing kiosk assignment.");
+  }
+  const pendingAssignment = initialDevice.pendingAssignment;
+  if (pendingAssignment && typeof pendingAssignment === "object") {
+    if (pendingAssignment.toStationId === stationId &&
+        pendingAssignment.terminalEnabled === terminalEnabled &&
+        (!terminalEnabled || pendingAssignment.stripeMode === stripeMode)) {
+      return {
+        ok: true, pending: true, stationId, deviceId, terminalEnabled,
+        message: `Assignment to ${stationId} is waiting for device confirmation.`,
+      };
+    }
+    throw new HttpsError("failed-precondition", "Wait for the current kiosk assignment to finish.");
+  }
+  if (initialDevice.assignmentTransitionOutcome?.commandId) {
+    throw new HttpsError("failed-precondition",
+        "Wait for the Android kiosk to finish the previous assignment before saving another.");
+  }
+  const currentInstallation = previousInstallationId ?
+    await db.collection(KIOSK_INSTALLATIONS_COLLECTION).doc(previousInstallationId).get() : null;
+  if (currentTerminal.enabled === true &&
+      !previousTerminalReady(initialDevice, deviceKind, currentInstallation)) {
+    throw new HttpsError("failed-precondition",
+        "The current payment installation is not confirmed on this Android kiosk. Repair it before changing assignment.");
+  }
+  const installationReady = currentInstallation?.exists &&
+    currentInstallation.data()?.active === true &&
+    currentInstallation.data()?.confirmationState === "confirmed" &&
+    currentInstallation.data()?.deviceId === deviceId &&
+    currentInstallation.data()?.stationId === stationId;
+  const currentAssignment = previousStationId === stationId ? await targetRef.get() : null;
+  const assignmentReady = currentAssignment?.exists &&
+    currentAssignment.data()?.deviceId === deviceId &&
+    currentAssignment.data()?.stationId === stationId &&
+    !currentAssignment.data()?.pendingDeviceId;
+  if (previousStationId === stationId &&
+      assignmentReady &&
+      currentTerminal.enabled === terminalEnabled &&
+      (!supportsStationBrand || initialDevice.inventory?.stripeTerminal?.stationBrand === stationBrand) &&
+      (terminalEnabled ? (currentTerminal.state === "ready" &&
+        currentTerminal.stripeMode === stripeMode && installationReady && localTerminalEnabled) :
+        localTerminalDisabled) &&
+      data?.forceReprovision !== true) {
+    return {
+      ok: true, unchanged: true, stationId, deviceId, terminalEnabled,
+      terminalState: currentTerminal.state || "disabled",
+      message: `${stationId} is already assigned with these payment settings.`,
+    };
+  }
+  if (currentTerminal.enabled !== true &&
+      !confirmedLocalTerminalDisabled(initialDevice, deviceKind, previousStationId)) {
+    throw new HttpsError("failed-precondition",
+        "The Android kiosk payment state does not match the disabled assignment. Repair it before changing assignment.");
+  }
 
   let terminalConfig = null;
   let installationId = "";
@@ -1572,12 +1708,17 @@ async function assignDevice(data, authState, dependencies) {
           dependencies.packageName,
       ),
     });
+    if (terminalConfig.checkoutExecution === "local" &&
+        (deviceKind !== DEVICE_KIND_KIOSK || installedAgentVersionCode < 52)) {
+      throw new HttpsError("failed-precondition", "Update the integrated kiosk app before enabling local serial checkout.");
+    }
     const encryptionPublicKey = initialDevice.inventory?.commandEncryptionPublicKey;
     const installationToken = crypto.randomBytes(32).toString("base64url");
     installationId = crypto.createHash("sha256").update(installationToken).digest("hex");
     const commandArguments = terminalCommandArguments(
         terminalConfig,
         encryptCommandSecret({installationToken}, encryptionPublicKey),
+        {supportsStationBrand},
     );
     const issuedAt = Date.now();
     command = {
@@ -1586,7 +1727,7 @@ async function assignDevice(data, authState, dependencies) {
       operation: "SET_APP_RESTRICTIONS",
       arguments: commandArguments,
       issuedAt,
-      expiresAt: issuedAt + COMMAND_TTL_MS,
+      expiresAt: issuedAt + ASSIGNMENT_COMMAND_TTL_MS,
     };
     command.signature = signCommand(command, privateKeyPem);
   } else if (requiresTerminalCommand) {
@@ -1596,11 +1737,12 @@ async function assignDevice(data, authState, dependencies) {
       deviceId,
       operation: "SET_APP_RESTRICTIONS",
       arguments: {
-        packageName: String(currentTerminal.packageName || TERMINAL_PACKAGE_NAME),
-        restrictions: {terminal_enabled: false},
+        packageName: String(currentTerminal.packageName ||
+          terminalPackageForDevice(initialDevice, stripeMode, dependencies.packageName)),
+        restrictions: {terminal_enabled: false, ...(supportsStationBrand ? {station_brand: stationBrand} : {})},
       },
       issuedAt,
-      expiresAt: issuedAt + COMMAND_TTL_MS,
+      expiresAt: issuedAt + ASSIGNMENT_COMMAND_TTL_MS,
     };
     command.signature = signCommand(command, privateKeyPem);
   }
@@ -1610,6 +1752,9 @@ async function assignDevice(data, authState, dependencies) {
   const kioskRef = kioskSnapshot.ref;
   const previousInstallationRef = previousInstallationId ?
     db.collection(KIOSK_INSTALLATIONS_COLLECTION).doc(previousInstallationId) : null;
+  const reservationQuery = previousInstallationId ?
+    db.collection("kioskTerminalReservations")
+        .where("installationId", "==", previousInstallationId) : null;
   const installationRef = installationId ?
     db.collection(KIOSK_INSTALLATIONS_COLLECTION).doc(installationId) : null;
   const commandRef = command ? db.collection(COMMANDS_COLLECTION).doc(command.id) : null;
@@ -1625,6 +1770,7 @@ async function assignDevice(data, authState, dependencies) {
       previousRef ? transaction.get(previousRef) : Promise.resolve(null),
       previousInstallationRef ? transaction.get(previousInstallationRef) : Promise.resolve(null),
       activeCommandRef ? transaction.get(activeCommandRef) : Promise.resolve(null),
+      reservationQuery ? transaction.get(reservationQuery) : Promise.resolve(null),
     ]);
     const [
       deviceSnapshot,
@@ -1633,6 +1779,7 @@ async function assignDevice(data, authState, dependencies) {
       previousSnapshot,
       previousInstallationSnapshot,
       activeCommandSnapshot,
+      reservationsSnapshot,
     ] = reads;
     if (!deviceSnapshot.exists) {
       throw new HttpsError("not-found", "Managed phone was not found.");
@@ -1660,6 +1807,23 @@ async function assignDevice(data, authState, dependencies) {
       }
     }
     const transactionDevice = deviceSnapshot.data() || {};
+    if (transactionDevice.terminal?.enabled === true &&
+        !previousTerminalReady(transactionDevice, deviceKind, previousInstallationSnapshot)) {
+      throw new HttpsError("failed-precondition",
+          "The current payment installation is not confirmed on this Android kiosk. Repair it before changing assignment.");
+    }
+    if (transactionDevice.terminal?.enabled !== true &&
+        !confirmedLocalTerminalDisabled(transactionDevice, deviceKind, previousStationId)) {
+      throw new HttpsError("failed-precondition",
+          "The Android kiosk payment state does not match the disabled assignment. Repair it before changing assignment.");
+    }
+    if (transactionDevice.inventory?.media?.checkoutBusy === true ||
+        reservationsSnapshot?.docs?.some((reservation) => {
+          const expiresAt = timestampToMillis(reservation.data()?.expiresAt);
+          return expiresAt && new Date(expiresAt).getTime() > Date.now();
+        })) {
+      throw new HttpsError("failed-precondition", "Finish the current checkout before changing kiosk assignment.");
+    }
     if (String(transactionDevice.stationId || "").trim().toUpperCase() !== previousStationId ||
         String(transactionDevice.terminal?.installationId || "").trim() !== previousInstallationId ||
         String(transactionDevice.activeCommandId || "").trim() !== initialActiveCommandId) {
@@ -1669,6 +1833,20 @@ async function assignDevice(data, authState, dependencies) {
     if (existingDeviceId && existingDeviceId !== deviceId) {
       throw new HttpsError("already-exists", `${stationId} already has another managed phone.`);
     }
+    if (existingDeviceId && previousStationId !== stationId) {
+      throw new HttpsError("failed-precondition",
+          `${stationId} has an existing assignment record; resolve it before moving this phone.`);
+    }
+    if (targetSnapshot.data()?.pendingDeviceId) {
+      throw new HttpsError("failed-precondition", `${stationId} has an assignment in progress.`);
+    }
+    if (transactionDevice.pendingAssignment) {
+      throw new HttpsError("aborted", "The phone assignment changed. Try again.");
+    }
+    if (transactionDevice.assignmentTransitionOutcome?.commandId) {
+      throw new HttpsError("failed-precondition",
+          "Wait for the Android kiosk to finish the previous assignment before saving another.");
+    }
     if (command && activeCommandSnapshot &&
         ["queued", "delivered", "running"].includes(activeCommandSnapshot.data()?.status)) {
       throw new HttpsError(
@@ -1676,23 +1854,16 @@ async function assignDevice(data, authState, dependencies) {
           "Wait for the current phone command to finish before changing terminal assignment.",
       );
     }
-    if (previousRef) {
-      if (previousSnapshot.data()?.deviceId === deviceId) transaction.delete(previousRef);
-    }
-    if (previousInstallationRef && previousInstallationSnapshot?.exists) {
-      transaction.set(previousInstallationRef, {
-        active: false,
-        revokedAt: admin.firestore.FieldValue.serverTimestamp(),
-        revokedReason: "phone-terminal-reassigned",
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      }, {merge: true});
-    }
-
+    const billingOwnership = terminalEnabled && terminalConfig.checkoutExecution === "local" ? {
+      billingOwner: "local_station_v1", checkoutExecution: "local", hardwareVendor: terminalConfig.hardwareVendor,
+    } : billingOwnershipForAssignment(stationId, transactionDevice, previousInstallationSnapshot?.data());
     const terminalState = terminalEnabled ? {
+      ...billingOwnership,
       enabled: true,
       state: "provisioning",
       stationId,
       provisionId: terminalConfig.provisionId,
+      stationBrand,
       moduleId: terminalConfig.moduleId,
       stripeLocationId: terminalConfig.stripeLocationId,
       stripeAccountCountry: terminalConfig.stripeAccountCountry,
@@ -1706,16 +1877,97 @@ async function assignDevice(data, authState, dependencies) {
       message: "Terminal configuration queued for the phone.",
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     } : {
+      ...billingOwnership,
       enabled: false,
       state: "disabled",
       stationId,
-      packageName: String(currentTerminal.packageName || TERMINAL_PACKAGE_NAME),
+      stationBrand,
+      packageName: String(currentTerminal.packageName ||
+        terminalPackageForDevice(initialDevice, stripeMode, dependencies.packageName)),
       lockdownEnabled: false,
       lockdownState: command ? "unlocking" : "unlocked",
       commandId: command?.id || "",
       message: command ? "Terminal removal queued for the phone." : "Terminal is disabled.",
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
+
+    // Payment settings are confirmed asynchronously by the Android device. Keep
+    // the old station and its working installation authoritative until that ACK.
+    if (command) {
+      if (previousStationId !== stationId) {
+        transaction.set(targetRef, {
+          stationId,
+          pendingDeviceId: deviceId,
+          pendingCommandId: command.id,
+          pendingAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, {merge: true});
+      }
+      transaction.set(deviceRef, {
+        ...billingOwnership,
+        pendingAssignment: {
+          fromStationId: previousStationId,
+          toStationId: stationId,
+          commandId: command.id,
+          installationId,
+          previousInstallationId,
+          previousTerminalEnabled: currentTerminal.enabled === true,
+          terminalEnabled,
+          stripeMode,
+          terminal: terminalState,
+          createdAt: Date.now(),
+          expiresAt: command.expiresAt,
+          heartbeatAt: 0,
+        },
+        assignmentError: admin.firestore.FieldValue.delete(),
+        assignmentTransitionOutcome: admin.firestore.FieldValue.delete(),
+        activeCommandId: command.id,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, {merge: true});
+      if (installationRef) {
+        transaction.create(installationRef, {
+          ...billingOwnership,
+          active: false,
+          confirmationState: "pending",
+          deviceId,
+          stationId,
+          provisionId: terminalConfig.provisionId,
+          moduleId: terminalConfig.moduleId,
+          slotNumbers: terminalConfig.slotNumbers,
+          stripeMode: terminalConfig.stripeMode,
+          stripeAccountCountry: terminalConfig.stripeAccountCountry,
+          stripeReaderType: terminalConfig.stripeReaderType,
+          stripeLocationId: terminalConfig.stripeLocationId,
+          amountCents: terminalConfig.amountCents,
+          currency: terminalConfig.currency,
+          pricingSource: "kiosk",
+          pricingPlan: terminalConfig.pricingPlan,
+          gatewayOption: terminalConfig.gatewayOption,
+          packageName: terminalConfig.packageName,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+      transaction.create(commandRef, {
+        ...command,
+        stationId,
+        status: "queued",
+        confirmed: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdBy: authState.uid,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return;
+    }
+
+    if (previousRef && previousSnapshot.data()?.deviceId === deviceId) transaction.delete(previousRef);
+    if (previousInstallationRef && previousInstallationSnapshot?.exists) {
+      transaction.set(previousInstallationRef, {
+        active: false,
+        revokedAt: admin.firestore.FieldValue.serverTimestamp(),
+        revokedReason: "phone-terminal-reassigned",
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, {merge: true});
+    }
 
     transaction.set(targetRef, {
       stationId,
@@ -1725,7 +1977,8 @@ async function assignDevice(data, authState, dependencies) {
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedBy: authState.uid,
     });
-    transaction.set(deviceRef, {
+    transaction.update(deviceRef, {
+      ...billingOwnership,
       stationId,
       assignmentState: "assigned",
       market: normalizePhoneMarket(stationId.slice(0, 2)),
@@ -1733,7 +1986,7 @@ async function assignDevice(data, authState, dependencies) {
       activeCommandId: command?.id || transactionDevice.activeCommandId || null,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedBy: authState.uid,
-    }, {merge: true});
+    });
     if (terminalEnabled) {
       const transactionKiosk = transactionKioskSnapshot.data() || {};
       const paymentTerminal = transactionKiosk.paymentTerminal &&
@@ -1761,6 +2014,7 @@ async function assignDevice(data, authState, dependencies) {
     }
     if (installationRef) {
       transaction.create(installationRef, {
+        ...billingOwnership,
         active: true,
         confirmationState: "pending",
         deviceId,
@@ -1800,9 +2054,10 @@ async function assignDevice(data, authState, dependencies) {
     stationId,
     deviceId,
     terminalEnabled,
-    terminalState: terminalEnabled ? "provisioning" : "disabled",
-    message: terminalEnabled ?
-      `Phone assigned to ${stationId}; terminal provisioning was queued.` :
+    pending: Boolean(command),
+    terminalState: command ? "provisioning" : "disabled",
+    message: command ?
+      `Assignment to ${stationId} is pending device confirmation; the prior assignment remains active.` :
       `Phone assigned to ${stationId}; payment terminal is disabled.`,
   };
 }
@@ -1842,6 +2097,9 @@ async function assignEnrolledDeviceToKiosk(data, authState, dependencies) {
     const existingDeviceId = String(targetSnapshot.data()?.deviceId || "").trim();
     if (existingDeviceId && existingDeviceId !== deviceId) {
       throw new HttpsError("already-exists", `${stationId} already has another managed phone.`);
+    }
+    if (targetSnapshot.data()?.pendingDeviceId) {
+      throw new HttpsError("failed-precondition", `${stationId} has an assignment in progress.`);
     }
 
     const terminal = device.terminal && typeof device.terminal === "object" ?
@@ -2126,6 +2384,9 @@ async function enrollDevice(data, dependencies) {
     if (assignmentRef && assignedDeviceId && assignedDeviceId !== deviceId) {
       throw new HttpsError("already-exists", `${enrolledStationId} already has another managed phone.`);
     }
+    if (assignmentSnapshot?.data()?.pendingDeviceId) {
+      throw new HttpsError("failed-precondition", `${enrolledStationId} has an assignment in progress.`);
+    }
     if (isResume) {
       if (!deviceSnapshot.exists ||
           String(deviceSnapshot.data()?.stationId || "").trim().toUpperCase() !==
@@ -2248,13 +2509,70 @@ async function authenticateDeviceRequest(req, dependencies) {
   return {deviceId, deviceRef, device: deviceSnapshot.data() || {}};
 }
 
+function terminalInventoryMatchesAssignment(inventory, device) {
+  const reported = inventory?.stripeTerminal || inventory?.m2Terminal;
+  const terminal = device?.terminal || {};
+  if (terminal.enabled !== true) return reported?.configured === false;
+  if (reported?.configured !== true ||
+      !/^[a-f0-9]{64}$/.test(String(terminal.installationId || "")) ||
+      String(reported.installationId || "") !== String(terminal.installationId || "") ||
+      String(reported.stationId || "").trim().toUpperCase() !==
+        String(device.stationId || "").trim().toUpperCase()) return false;
+  const matches = (reportedValue, expectedValue) =>
+    !expectedValue || String(reportedValue || "") === String(expectedValue);
+  return matches(reported.provisionId, terminal.provisionId) &&
+    matches(reported.moduleId, terminal.moduleId) &&
+    matches(reported.stripeLocationId, terminal.stripeLocationId) &&
+    matches(reported.stripeMode, terminal.stripeMode) &&
+    matches(reported.readerType, terminal.stripeReaderType);
+}
+
+function confirmedLocalTerminal(device, deviceKind, stationId) {
+  return String(device?.stationId || "").trim().toUpperCase() === stationId &&
+    terminalInventoryMatchesAssignment(device?.inventory, device) &&
+    Number(timestampToMillis(device?.inventoryAt) || 0) > Date.now() - TERMINAL_INVENTORY_FRESH_MS &&
+    (deviceKind !== DEVICE_KIND_KIOSK ||
+      String(device?.inventory?.agentStationId || "").trim().toUpperCase() === stationId);
+}
+
+function confirmedLocalTerminalDisabled(device, deviceKind, stationId) {
+  const inventory = device?.inventory;
+  const reported = inventory?.stripeTerminal || inventory?.m2Terminal;
+  return reported?.configured === false &&
+    Number(timestampToMillis(device?.inventoryAt) || 0) > Date.now() - TERMINAL_INVENTORY_FRESH_MS &&
+    (deviceKind !== DEVICE_KIND_KIOSK ||
+      String(inventory?.agentStationId || "").trim().toUpperCase() === stationId);
+}
+
+function previousTerminalReady(device, deviceKind, installationSnapshot) {
+  const stationId = String(device?.stationId || "").trim().toUpperCase();
+  const installationId = String(device?.terminal?.installationId || "");
+  return Boolean(stationId) && installationSnapshot?.exists &&
+    installationSnapshot.data()?.active === true &&
+    installationSnapshot.data()?.confirmationState === "confirmed" &&
+    installationSnapshot.data()?.deviceId === device.deviceId &&
+    installationSnapshot.data()?.stationId === stationId &&
+    /^[a-f0-9]{64}$/.test(installationId) &&
+    confirmedLocalTerminal(device, deviceKind, stationId);
+}
+
+function loadedChargerentAppProfile(inventory) {
+  const media = inventory?.media;
+  if (media?.available !== true || media.identityReady !== true || media.lastError ||
+      typeof media.clientProfileId !== "string" || !media.clientProfileId.trim() ||
+      !Number.isSafeInteger(media.clientProfileVersion) || media.clientProfileVersion < 1) return null;
+  return {profileId: media.clientProfileId, profileVersion: media.clientProfileVersion};
+}
+
 async function recordHeartbeat(data, req, dependencies) {
-  const {admin} = dependencies;
+  const {admin, db} = dependencies;
   const authState = await authenticateDeviceRequest(req, dependencies);
   const inventory = cleanDevicePayload(data?.inventory || {});
+  const loadedAppProfile = loadedChargerentAppProfile(inventory);
   const reportedPhoneNumber = normalizeReportedPhoneNumber(inventory.phoneNumber);
   const heartbeatUpdate = {
     inventory,
+    inventoryAt: admin.firestore.FieldValue.serverTimestamp(),
     lastSeenAt: admin.firestore.FieldValue.serverTimestamp(),
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   };
@@ -2262,8 +2580,103 @@ async function recordHeartbeat(data, req, dependencies) {
     heartbeatUpdate.reportedPhoneNumber = reportedPhoneNumber;
     heartbeatUpdate.reportedPhoneNumberAt = admin.firestore.FieldValue.serverTimestamp();
   }
-  await authState.deviceRef.set(heartbeatUpdate, {merge: true});
-  const stationId = String(authState.device?.stationId || "").trim().toUpperCase();
+  let stationId = "";
+  let transition = null;
+  let transitionOutcome = null;
+  let stationBrandConfiguration = null;
+  await db.runTransaction(async (transaction) => {
+    const attemptUpdate = {...heartbeatUpdate};
+    transition = null;
+    transitionOutcome = null;
+    stationBrandConfiguration = null;
+    const deviceSnapshot = await transaction.get(authState.deviceRef);
+    if (!deviceSnapshot.exists || deviceSnapshot.data()?.enrollmentState !== "enrolled") {
+      throw new HttpsError("unauthenticated", "Phone is not enrolled.");
+    }
+    const current = deviceSnapshot.data() || {};
+    const pending = current.pendingAssignment;
+    stationId = String(pending?.toStationId || current.stationId || "").trim().toUpperCase();
+    if (pending?.commandId) {
+      transition = {
+        state: "pending",
+        fromStationId: String(pending.fromStationId || "").trim().toUpperCase(),
+        toStationId: stationId,
+        commandId: pending.commandId,
+      };
+      // The first heartbeat tells the app to close checkout and persist the
+      // transition marker. A later signed heartbeat must attest that marker
+      // before the pending payment command can be delivered.
+      const transitionApplied = String(inventory.agentStationId || "").trim().toUpperCase() === stationId &&
+        inventory.assignmentTransitionPending === true &&
+        inventory.assignmentTransitionCommandId === pending.commandId;
+      if (transitionApplied) {
+        attemptUpdate.pendingAssignment = {...pending, heartbeatAt: Date.now()};
+      }
+    } else if (current.assignmentTransitionOutcome?.commandId &&
+        ["committed", "rolled_back"].includes(current.assignmentTransitionOutcome.state)) {
+      const outcome = current.assignmentTransitionOutcome;
+      const resolved = inventory.assignmentTransitionPending === false &&
+        inventory.assignmentTransitionResolvedCommandId === outcome.commandId &&
+        inventory.assignmentTransitionResolvedState === outcome.state &&
+        String(inventory.agentStationId || "").trim().toUpperCase() ===
+          String(current.stationId || "").trim().toUpperCase() &&
+        terminalInventoryMatchesAssignment(inventory, current);
+      if (resolved) {
+        attemptUpdate.assignmentTransitionOutcome = admin.firestore.FieldValue.delete();
+      } else {
+        transitionOutcome = {
+          commandId: outcome.commandId,
+          state: outcome.state,
+          stationId: outcome.stationId || "",
+          terminalEnabled: outcome.terminalEnabled === true,
+          installationId: outcome.installationId || "",
+        };
+      }
+    }
+    // Device reports and cosmetic updates require the current authenticated binding.
+    // Never acknowledge a profile during an assignment or its rollback recovery.
+    if (stationId && !pending && !current.assignmentTransitionOutcome &&
+        current.deviceKind === DEVICE_KIND_KIOSK &&
+        (inventory.stripeTerminal?.supportsStationBrandRefresh === true || loadedAppProfile) &&
+        inventory.assignmentTransitionPending !== true &&
+        String(inventory.agentStationId || '').trim().toUpperCase() === stationId) {
+      const assignment = await transaction.get(db.collection(ASSIGNMENTS_COLLECTION).doc(stationId));
+      if (assignment.exists && assignment.data()?.deviceId === authState.deviceId && !assignment.data()?.pendingDeviceId) {
+        const kiosks = await transaction.get(db.collection('kiosks').where('stationid', '==', stationId).limit(2));
+        const {hasStationScreen} = await import('./uiProfileSections.mjs');
+        if (kiosks.docs.length === 1) {
+          const kiosk = kiosks.docs[0].data();
+          if (inventory.stripeTerminal?.supportsStationBrandRefresh === true && hasStationScreen(kiosk)) {
+            try {
+              stationBrandConfiguration = {stationId, brand: normalizeStationBrand(kiosk.stationBrand)};
+            } catch { /* An invalid saved brand must not stop heartbeat/assignment recovery. */ }
+          }
+          const desired = kiosk.ui?.profileSections?.chargerentApp;
+          const reported = kiosk.reportedUiProfile?.sections?.chargerentApp;
+          if (loadedAppProfile && desired?.profileId === loadedAppProfile.profileId &&
+              Number(desired.profileVersion) === loadedAppProfile.profileVersion &&
+              !(reported?.status === "applied" && reported.deviceId === authState.deviceId &&
+                reported.profileId === loadedAppProfile.profileId &&
+                reported.profileVersion === loadedAppProfile.profileVersion &&
+                reported.publicationAppliedAt === (desired.appliedAt || ""))) {
+            const reportedAt = new Date().toISOString();
+            transaction.update(kiosks.docs[0].ref, {
+              "reportedUiProfile.sections.chargerentApp": {
+                ...loadedAppProfile,
+                status: "applied",
+                deviceId: authState.deviceId,
+                source: "integrated_app_heartbeat",
+                publicationAppliedAt: desired.appliedAt || "",
+                appliedAt: reportedAt,
+                reportedAt,
+              },
+            });
+          }
+        }
+      }
+    }
+    transaction.set(authState.deviceRef, attemptUpdate, {merge: true});
+  });
   const managedPhoneNumber = resolveManagedPhoneNumber(
       reportedPhoneNumber,
       authState.device,
@@ -2272,12 +2685,105 @@ async function recordHeartbeat(data, req, dependencies) {
     ok: true,
     serverTime: Date.now(),
     stationId,
+    ...(transition ? {assignmentTransition: transition} : {}),
+    ...(transitionOutcome ? {assignmentTransitionOutcome: transitionOutcome} : {}),
+    ...(stationBrandConfiguration ? {stationBrandConfiguration} : {}),
     assignmentState: stationId ? "assigned" : "unassigned",
     market: String(authState.device?.market || stationId.slice(0, 2) || "")
         .trim().toUpperCase(),
     phoneNumber: managedPhoneNumber.phoneNumber,
     phoneNumberSource: managedPhoneNumber.source,
   };
+}
+
+async function readPendingAssignmentRecords(transaction, db, pending) {
+  const fromRef = pending.fromStationId ?
+    db.collection(ASSIGNMENTS_COLLECTION).doc(pending.fromStationId) : null;
+  const toRef = db.collection(ASSIGNMENTS_COLLECTION).doc(pending.toStationId);
+  const oldInstallationRef = pending.previousInstallationId ?
+    db.collection(KIOSK_INSTALLATIONS_COLLECTION).doc(pending.previousInstallationId) : null;
+  const newInstallationRef = pending.installationId ?
+    db.collection(KIOSK_INSTALLATIONS_COLLECTION).doc(pending.installationId) : null;
+  const [from, to, oldInstallation, newInstallation] = await Promise.all([
+    fromRef ? transaction.get(fromRef) : Promise.resolve(null),
+    transaction.get(toRef),
+    oldInstallationRef ? transaction.get(oldInstallationRef) : Promise.resolve(null),
+    newInstallationRef ? transaction.get(newInstallationRef) : Promise.resolve(null),
+  ]);
+  return {fromRef, toRef, oldInstallationRef, newInstallationRef,
+    from, to, oldInstallation, newInstallation};
+}
+
+function rollbackPendingAssignment(transaction, deviceRef, pending, records, admin, message) {
+  const at = admin.firestore.FieldValue.serverTimestamp();
+  if (pending.fromStationId !== pending.toStationId &&
+      records.to?.data()?.pendingCommandId === pending.commandId &&
+      !records.to?.data()?.deviceId) {
+    transaction.delete(records.toRef);
+  }
+  if (records.newInstallationRef && records.newInstallation?.exists) {
+    transaction.set(records.newInstallationRef, {
+      active: false,
+      confirmationState: "failed",
+      revokedAt: at,
+      revokedReason: "phone-terminal-configuration-failed",
+      updatedAt: at,
+    }, {merge: true});
+  }
+  transaction.set(deviceRef, {
+    pendingAssignment: admin.firestore.FieldValue.delete(),
+    activeCommandId: null,
+    assignmentTransitionOutcome: {
+      commandId: pending.commandId,
+      state: "rolled_back",
+      stationId: pending.fromStationId,
+      terminalEnabled: pending.previousTerminalEnabled === true,
+      installationId: pending.previousTerminalEnabled ? pending.previousInstallationId : "",
+      at,
+    },
+    assignmentError: {
+      stationId: pending.toStationId,
+      message: String(message || "The Android kiosk could not confirm its payment configuration.").slice(0, 300),
+      at,
+    },
+    updatedAt: at,
+  }, {merge: true});
+}
+
+async function expirePendingAssignments({db, admin, now = Date.now, limit = 100}) {
+  const cutoff = now();
+  const snapshot = await db.collection(DEVICES_COLLECTION)
+      .where("pendingAssignment.expiresAt", "<=", cutoff)
+      .limit(limit)
+      .get();
+  let expired = 0;
+  for (const candidate of snapshot.docs) {
+    const didExpire = await db.runTransaction(async (transaction) => {
+      const deviceRef = candidate.ref;
+      const deviceSnapshot = await transaction.get(deviceRef);
+      const pending = deviceSnapshot.data()?.pendingAssignment;
+      if (!pending?.commandId || Number(pending.expiresAt || 0) > cutoff) return false;
+      const commandRef = db.collection(COMMANDS_COLLECTION).doc(pending.commandId);
+      const [commandSnapshot, records] = await Promise.all([
+        transaction.get(commandRef),
+        readPendingAssignmentRecords(transaction, db, pending),
+      ]);
+      if (commandSnapshot.exists &&
+          ["queued", "delivered", "running"].includes(commandSnapshot.data()?.status)) {
+        transaction.set(commandRef, {
+          status: "expired",
+          arguments: safeCommandArguments(commandSnapshot.data()?.operation,
+              commandSnapshot.data()?.arguments),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, {merge: true});
+      }
+      rollbackPendingAssignment(transaction, deviceRef, pending, records, admin,
+          "Device confirmation timed out; the previous assignment was retained.");
+      return true;
+    });
+    if (didExpire) expired++;
+  }
+  return {scanned: snapshot.docs.length, expired};
 }
 
 async function pollDeviceCommand(_data, req, dependencies) {
@@ -2298,19 +2804,37 @@ async function pollDeviceCommand(_data, req, dependencies) {
     }
 
     const data = commandSnapshot.data() || {};
+    const pending = deviceSnapshot.data()?.pendingAssignment;
+    const currentPending = pending?.commandId === commandSnapshot.id ? pending : null;
     if (Number(data.expiresAt || 0) < Date.now()) {
+      const pendingRecords = currentPending ?
+        await readPendingAssignmentRecords(transaction, db, currentPending) : null;
       transaction.set(commandRef, {
         status: "expired",
         arguments: safeCommandArguments(data.operation, data.arguments),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       }, {merge: true});
-      transaction.set(authState.deviceRef, {activeCommandId: null}, {merge: true});
+      if (currentPending) {
+        rollbackPendingAssignment(transaction, authState.deviceRef, currentPending,
+            pendingRecords, admin, "Device confirmation timed out; the previous assignment was retained.");
+      } else {
+        transaction.set(authState.deviceRef, {activeCommandId: null}, {merge: true});
+      }
       return;
     }
     if (!["queued", "delivered", "running"].includes(data.status)) {
-      transaction.set(authState.deviceRef, {activeCommandId: null}, {merge: true});
+      if (currentPending) {
+        const pendingRecords = await readPendingAssignmentRecords(transaction, db, currentPending);
+        rollbackPendingAssignment(transaction, authState.deviceRef, currentPending,
+            pendingRecords, admin, "The device command ended without confirming the assignment.");
+      } else {
+        transaction.set(authState.deviceRef, {activeCommandId: null}, {merge: true});
+      }
       return;
     }
+    // A pending move must first be returned in a successful heartbeat. The
+    // Android Agent applies that heartbeat's station ID before its next poll.
+    if (currentPending && !Number(currentPending.heartbeatAt || 0)) return;
 
     command = {
       id: commandSnapshot.id,
@@ -2364,10 +2888,46 @@ async function recordCommandResult(data, req, dependencies) {
       throw new HttpsError("not-found", "Phone command was not found.");
     }
     const commandData = commandSnapshot.data() || {};
+    // An Agent can resend a stored result after a reboot. A final command
+    // cannot confirm an assignment again after it was rolled back or expired.
+    if (["completed", "failed", "rejected", "expired"].includes(commandData.status)) {
+      transaction.set(authState.deviceRef, {
+        lastSeenAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, {merge: true});
+      return true;
+    }
+    const pending = deviceSnapshot.data()?.pendingAssignment;
+    const currentPending = pending?.commandId === commandId ? pending : null;
+    const pendingRecords = currentPending ?
+      await readPendingAssignmentRecords(transaction, db, currentPending) : null;
+    const pendingMappingValid = !currentPending || (
+      (!pendingRecords.fromRef || pendingRecords.from?.data()?.deviceId === authState.deviceId) &&
+      (pending.fromStationId === pending.toStationId ?
+        pendingRecords.to?.data()?.deviceId === authState.deviceId :
+        pendingRecords.to?.data()?.pendingDeviceId === authState.deviceId &&
+        pendingRecords.to?.data()?.pendingCommandId === commandId &&
+        !pendingRecords.to?.data()?.deviceId) &&
+      (!pending.terminalEnabled || (pendingRecords.newInstallation?.exists &&
+        pendingRecords.newInstallation.data()?.deviceId === authState.deviceId &&
+        pendingRecords.newInstallation.data()?.stationId === pending.toStationId))
+    );
+    const pendingConfirmed = currentPending && pendingMappingValid && status === "completed" &&
+      Number(pending.heartbeatAt || 0) > 0 &&
+      ["delivered", "running"].includes(commandData.status) &&
+      (pending.terminalEnabled ?
+        terminalCommandResultMatches(pending.terminal, commandData, result) :
+        result?.applied === true && result?.terminal?.configured === false &&
+        result?.packageName === pending.terminal?.packageName &&
+        (!commandData.arguments?.restrictions?.station_brand ||
+          result?.terminal?.stationBrand === commandData.arguments.restrictions.station_brand));
+    const effectiveStatus = currentPending && status === "completed" && !pendingConfirmed ?
+      "failed" : status;
+    const effectiveError = effectiveStatus === "failed" && !errorMessage ?
+      "The Android kiosk did not confirm the requested payment settings." : errorMessage;
     const commandUpdate = {
-      status,
+      status: effectiveStatus,
       result,
-      error: errorMessage || null,
+      error: effectiveError || null,
       completedAt: admin.firestore.FieldValue.serverTimestamp(),
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
@@ -2378,6 +2938,79 @@ async function recordCommandResult(data, req, dependencies) {
       );
     }
     transaction.set(commandRef, commandUpdate, {merge: true});
+
+    if (currentPending) {
+      const at = admin.firestore.FieldValue.serverTimestamp();
+      if (pendingConfirmed) {
+        const terminal = terminalStateAfterAppRestrictions(pending.terminal, {
+          status: "completed",
+          requestedEnabled: pending.terminalEnabled,
+          lockdownActive: result?.lockdown?.active === true,
+          applicationConfirmed: pending.terminalEnabled,
+          updatedAt: at,
+        });
+        if (pending.terminalEnabled) terminal.confirmedAt = at;
+        if (pendingRecords.fromRef && pending.fromStationId !== pending.toStationId) {
+          transaction.delete(pendingRecords.fromRef);
+        }
+        transaction.update(pendingRecords.toRef, {
+          stationId: pending.toStationId,
+          deviceId: authState.deviceId,
+          terminalEnabled: pending.terminalEnabled,
+          terminal,
+          pendingDeviceId: admin.firestore.FieldValue.delete(),
+          pendingCommandId: admin.firestore.FieldValue.delete(),
+          pendingAt: admin.firestore.FieldValue.delete(),
+          updatedAt: at,
+          updatedBy: "device-confirmed-assignment",
+        });
+        if (pendingRecords.oldInstallationRef && pendingRecords.oldInstallation?.exists) {
+          transaction.set(pendingRecords.oldInstallationRef, {
+            active: false,
+            revokedAt: at,
+            revokedReason: "phone-terminal-reassigned",
+            updatedAt: at,
+          }, {merge: true});
+        }
+        if (pendingRecords.newInstallationRef && pendingRecords.newInstallation?.exists) {
+          transaction.set(pendingRecords.newInstallationRef, {
+            active: true,
+            confirmationState: "confirmed",
+            confirmedAt: at,
+            lastSeenAt: at,
+            updatedAt: at,
+          }, {merge: true});
+        }
+        transaction.update(authState.deviceRef, {
+          stationId: pending.toStationId,
+          assignmentState: "assigned",
+          market: normalizePhoneMarket(pending.toStationId.slice(0, 2)),
+          terminal,
+          pendingAssignment: admin.firestore.FieldValue.delete(),
+          assignmentError: admin.firestore.FieldValue.delete(),
+          assignmentTransitionOutcome: {
+            commandId,
+            state: "committed",
+            stationId: pending.toStationId,
+            terminalEnabled: pending.terminalEnabled,
+            installationId: pending.terminalEnabled ? pending.installationId : "",
+            at,
+          },
+          activeCommandId: null,
+          lastSeenAt: at,
+          updatedAt: at,
+          lastCommand: {id: commandId, operation: commandData.operation, status: "completed"},
+        });
+      } else {
+        rollbackPendingAssignment(transaction, authState.deviceRef, pending,
+            pendingRecords, admin, effectiveError || "The Android kiosk rejected the assignment.");
+        transaction.set(authState.deviceRef, {
+          lastSeenAt: at,
+          lastCommand: {id: commandId, operation: commandData.operation, status: effectiveStatus},
+        }, {merge: true});
+      }
+      return true;
+    }
 
     const deviceUpdate = {
       activeCommandId: deviceSnapshot.data()?.activeCommandId === commandId ? null :
@@ -2568,6 +3201,7 @@ module.exports = {
   encryptCommandSecret,
   enrollDevice,
   enrollmentHash,
+  expirePendingAssignments,
   getScreen,
   getIceServers,
   hasPhoneControlAccess,

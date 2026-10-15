@@ -9,6 +9,7 @@ import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage.jsx';
 import { isKioskOnline, isNewSchemaKiosk, isV2Kiosk, normalizeKioskData, normalizeKioskInfoForSchema } from './utils/helpers.js';
 import { callFunctionWithAuth } from './utils/callableRequest.js';
+import { CTF7_OPERATOR_ACTIONS, applyCtf7EjectResults } from './utils/ctf7.js';
 import { getFirestoreKioskStationId } from './utils/firestoreStationId.js';
 import { normalizePhoneDevice } from './utils/phoneControl.js';
 import {
@@ -63,6 +64,8 @@ const PayterPage = lazy(() => import('./pages/PayterPage.jsx'));
 const CustomerSupportPage = lazy(() => import('./pages/CustomerSupportPage.jsx'));
 const ChargeDropsClientSetupPage = lazy(() => import('./pages/ChargeDropsClientSetupPage.jsx'));
 const ChargeDropsClientPortalPage = lazy(() => import('./pages/ChargeDropsClientPortalPage.jsx'));
+const RegionalPartnerOnboardingAdminPage = lazy(() => import('./pages/RegionalPartnerOnboardingAdminPage.jsx'));
+const RegionalPartnerOnboardingPage = lazy(() => import('./pages/RegionalPartnerOnboardingPage.jsx'));
 
 function readActivityNavigation() {
   if (typeof window === 'undefined') return { page: 'dashboard', stationId: '', mediaTab: 'legacy' };
@@ -70,7 +73,7 @@ function readActivityNavigation() {
   const requestedPage = params.get('page');
   const requestedMediaTab = params.get('mediaTab');
   return {
-    page: import.meta.env.DEV && ['accounting-preview', 'payter-preview', 'profiles-preview', 'chargedrops-client-setup-preview', 'chargedrops-client-portal-preview'].includes(requestedPage)
+    page: import.meta.env.DEV && ['accounting-preview', 'payter-preview', 'profiles-preview', 'chargedrops-client-setup-preview', 'chargedrops-client-portal-preview', 'regional-partner-onboarding-preview', 'regional-partner-invite-preview'].includes(requestedPage)
       ? requestedPage
       : requestedPage === 'activity'
         ? 'activity'
@@ -899,6 +902,9 @@ function App() {
   );
   const [language, setLanguage] = useState('en');
   const [page, setPage] = useState(() => readActivityNavigation().page); // 'dashboard', 'activity', 'admin', 'payter', 'media', 'binding', 'templates', 'kiosk-editor', 'rentals', 'chargers', 'provision', 'reporting', 'analytics', 'testing'
+  const partnerInviteToken = useMemo(() => (
+    typeof window === 'undefined' ? '' : String(new URLSearchParams(window.location.search).get('partnerInvite') || '').trim()
+  ), []);
   const [mediaInitialTab, setMediaInitialTab] = useState(() => readActivityNavigation().mediaTab);
   const [profileNavigation, setProfileNavigation] = useState({});
   const [activityInitialStation, setActivityInitialStation] = useState(() => readActivityNavigation().stationId);
@@ -2302,6 +2308,64 @@ function App() {
       : null;
     const targetIsV2Kiosk = isV2Kiosk(targetKiosk);
     const kioskType = String(targetKiosk?.hardware?.type || '').trim();
+    if (targetKiosk?.hardware?.checkoutExecution === 'local' && (action.startsWith('eject') || action === 'check')) {
+      const requestId = createCommandRequestId(action, stationid, moduleid);
+      setCommandStatus({ state: 'sending', message: t('sending_command') });
+      try {
+        let receipt = await callFunctionWithAuth('kiosk_localStationCommand', {stationid, moduleid, action, requestId, slotid: details?.slotid});
+        const deadline = Date.now() + 180000;
+        while (['queued', 'running'].includes(receipt.state) && Date.now() < deadline) {
+          setCommandStatus({state: 'pending', message: 'Waiting for the local controller result…'});
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          receipt = await callFunctionWithAuth('kiosk_localStationCommandStatus', {requestId});
+        }
+        setCommandStatus({state: receipt.state === 'completed' ? 'success' : receipt.state === 'failed' ? 'error' : 'pending',
+          message: receipt.message || (receipt.state === 'completed' ? t('command_success') : 'Station result needs verification.')});
+      } catch (error) { setCommandStatus({state: 'error', message: error?.message || t('command_failed')}); }
+      return;
+    }
+    if (kioskType === 'CTF7' && CTF7_OPERATOR_ACTIONS.has(action)) {
+      const requestId = createCommandRequestId(action, stationid, moduleid);
+      setCommandStatus({ state: 'sending', message: t('sending_command') });
+      try {
+        let receipt = await callFunctionWithAuth('kiosk_ctf7Command', {
+          stationid, moduleid, action, requestId, slotid: details?.slotid,
+          chargerid: details?.chargerid, info: details?.info,
+        });
+        if (receipt.kiosk) {
+          const normalized = normalizeKioskData([receipt.kiosk])[0];
+          setAllStationsData((stations) => stations.map((station) => station.stationid === stationid ? normalized : station));
+        }
+        if (receipt.state === 'queued') {
+          const targets = receipt.targets.map((target) => ({...target, stationid, startedAt: Date.now()}));
+          setEjectingSlots((tracked) => [
+            ...tracked.filter((slot) => !targets.some((target) => target.moduleid === slot.moduleid &&
+              Number(target.slotid) === Number(slot.slotid) && slot.stationid === stationid)), ...targets,
+          ]);
+        }
+        const deadline = Date.now() + 120000;
+        while (['queued', 'running'].includes(receipt.state) && Date.now() < deadline) {
+          setCommandStatus({ state: 'pending', message: 'Waiting for the module result…' });
+          await new Promise((resolve) => setTimeout(resolve, 750));
+          receipt = await callFunctionWithAuth('kiosk_ctf7CommandStatus', { requestId });
+        }
+        setAllStationsData((stations) => applyCtf7EjectResults(stations, receipt));
+        for (const result of receipt.results || []) {
+          if (result.state === 'verification_pending') continue;
+          clearEjectCommandState(stationid, result.moduleId, result.position, result.sn);
+          if (result.state !== 'dispensed') flashFailedEjectSlot(stationid, result.moduleId, result.position);
+        }
+        setCommandStatus({ state: receipt.state === 'completed' ? 'success' : receipt.state === 'failed' ? 'error' : 'pending',
+          message: receipt.message || (receipt.state === 'completed' ? t('command_success') : 'The result still needs verification.') });
+      } catch (error) {
+        setCommandStatus({ state: 'error', message: error?.message || t('command_failed') });
+      }
+      return;
+    }
+    if (kioskType === 'CTF7' && !['lock slot', 'unlock slot'].includes(action) && !FIREBASE_SAVE_ACTIONS[action]) {
+      setCommandStatus({ state: 'error', message: 'This operation is not supported by the CTF7 protocol.' });
+      return;
+    }
     const shouldUseFirebaseForLock = Boolean(
       targetKiosk &&
       isNewSchemaKiosk(targetKiosk) &&
@@ -2635,7 +2699,7 @@ function App() {
         failKioskScreenshot(stationid, t('connection_lost'));
       }
     }
-  }, [armKioskScreenshotTimeout, debugEjectUi, failKioskScreenshot, getFreshCommandToken, rememberOutgoingCommandScope, showKioskScreenshotRequest, t]);
+  }, [armKioskScreenshotTimeout, clearEjectCommandState, debugEjectUi, failKioskScreenshot, flashFailedEjectSlot, getFreshCommandToken, rememberOutgoingCommandScope, showKioskScreenshotRequest, t]);
 
   // ---------------------------------------------
   // WebSocket connect (FULL HANDLER INCLUDED)
@@ -3239,6 +3303,25 @@ function App() {
   );
 
   const renderPage = () => {
+    if (partnerInviteToken) {
+      return <RegionalPartnerOnboardingPage token={partnerInviteToken} />;
+    }
+
+    if (import.meta.env.DEV && page === 'regional-partner-invite-preview') {
+      return <RegionalPartnerOnboardingPage previewMode token="preview" />;
+    }
+
+    if (import.meta.env.DEV && page === 'regional-partner-onboarding-preview') {
+      return (
+        <RegionalPartnerOnboardingAdminPage
+          previewMode
+          onLogout={() => setPage('dashboard')}
+          onNavigateToDashboard={() => setPage('dashboard')}
+          onNavigateToAdmin={() => setPage('dashboard')}
+        />
+      );
+    }
+
     if (import.meta.env.DEV && page === 'chargedrops-client-portal-preview') {
       return (
         <ChargeDropsClientPortalPage
@@ -3450,6 +3533,7 @@ function App() {
             onNavigateToAccounting={() => setPage('accounting')}
             onNavigateToPayter={() => setPage('payter')}
             onNavigateToChargeDropsClientSetup={() => setPage('chargedrops-client-setup')}
+            onNavigateToRegionalPartnerOnboarding={() => setPage('regional-partner-onboarding')}
             currentUser={clientInfo}
             t={t}
             language={language}
@@ -3463,6 +3547,18 @@ function App() {
 
         return (
           <ChargeDropsClientSetupPage
+            onLogout={handleLogout}
+            onNavigateToDashboard={() => setPage('dashboard')}
+            onNavigateToAdmin={() => setPage('admin')}
+          />
+        );
+      case 'regional-partner-onboarding':
+        if (!clientInfo.isAdmin) {
+          return dashboard;
+        }
+
+        return (
+          <RegionalPartnerOnboardingAdminPage
             onLogout={handleLogout}
             onNavigateToDashboard={() => setPage('dashboard')}
             onNavigateToAdmin={() => setPage('admin')}
@@ -3515,13 +3611,14 @@ function App() {
           />
         );
       case 'ui-profiles':
-        if (!hasUiProfilesAccess) {
+        if (!hasUiProfilesAccess && !hasCampaignManagerAccess) {
           return dashboard;
         }
 
         return (
           <UiProfilesPage
             {...profileNavigation}
+            allowCampaignManager={hasCampaignManagerAccess}
             onLogout={handleLogout}
             onNavigateToDashboard={(searchTerm = '') => {
               setDashboardSearchTerm(normalizeNavigationSearch(searchTerm));
@@ -3555,6 +3652,8 @@ function App() {
           return dashboard;
         }
 
+        if (hasCampaignManagerAccess && (mediaInitialTab === 'campaign' || !hasMediaAccess)) return <UiProfilesPage initialSection="campaigns" allowCampaignManager currentUser={clientInfo} allStationsData={dedupedStationsData} referenceTime={latestTimestamp} onCommand={onCommand} t={t} onLogout={handleLogout} onNavigateToDashboard={() => onNavigateFromMedia('dashboard')} onNavigateToAdmin={() => onNavigateFromMedia('admin')}/>;
+
         return (
           <ChargerentMediaPage
             onLogout={handleLogout}
@@ -3568,8 +3667,8 @@ function App() {
             allowLegacyMedia={hasMediaAccess}
             allowCampaignManager={hasCampaignManagerAccess}
             onNavigateToDeviceManagement={hasPhoneControlAccess ? () => onNavigateToPhoneControl('') : undefined}
-            onNavigateToUiProfiles={hasUiProfilesAccess ? () => {
-              setProfileNavigation({initialSection: 'chargerentApp'});
+            onNavigateToUiProfiles={hasCampaignManagerAccess ? () => {
+              setProfileNavigation({initialSection: 'campaigns'});
               setPage('ui-profiles');
             } : undefined}
           />

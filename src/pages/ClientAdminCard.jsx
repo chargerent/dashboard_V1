@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { EnvelopeIcon } from '@heroicons/react/24/outline';
 import MultiSwitch from '../utils/MultiSwitch';
+import ReceiptLogoField from '../components/ReceiptLogoField.jsx';
 
 const REVENUE_MODEL_OPTIONS = [
     { value: 'lease', label: 'Lease' },
@@ -60,11 +61,13 @@ const getEffectiveAdminFeatures = (account, featuresList) => {
     };
 };
 
-const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsList, t, isEditing, editedData, onEdit, onCancel, onSave, onDataChange, onDelete, currentUser, lockoutData, onUnlock, onSendLoginInvite, inviteBusy, workspaceStatusContent }) => {
+const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsList, t, isEditing, editedData, onEdit, onCancel, onSave, onDataChange, onDelete, currentUser, lockoutData, onUnlock, onSendLoginInvite, inviteBusy, workspaceStatusContent, receiptLogoFile, onReceiptLogoFileChange, saving = false }) => {
     const [openSection, setOpenSection] = useState(null);
+    const [receiptLogoChecking, setReceiptLogoChecking] = useState(false);
 
     useEffect(() => {
         setOpenSection(null); // Reset open sections when edit mode changes
+        setReceiptLogoChecking(false);
     }, [isEditing]);
 
     if (!client || !currentUser) return null; // Prevent rendering if client or currentUser is undefined
@@ -152,6 +155,7 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
 
         return (
             <div className="p-4">
+                <fieldset disabled={saving} className="min-w-0">
                     <div className="space-y-3">
                         <div>
                             <label className="block text-sm font-medium text-gray-700">Username</label>
@@ -213,6 +217,9 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
                             <label className="block text-sm font-medium text-gray-700">Contact Email</label>
                             <input type="email" value={editedData.contact?.email || ''} onChange={(e) => onDataChange('contact.email', e.target.value)} className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
                         </div>
+                        <ReceiptLogoField value={editedData.receiptLogo} file={receiptLogoFile}
+                            onFileChange={onReceiptLogoFileChange} onCheckingChange={setReceiptLogoChecking} disabled={saving}
+                            onRemove={() => { onReceiptLogoFileChange(null); onDataChange('receiptLogo', null); }} />
                         {!isAdminRole && !isPartnerRole && (
                             <div>
                                 <label className="block text-sm font-medium text-gray-700">Revenue Model</label>
@@ -306,9 +313,10 @@ const ClientAdminCard = ({ client, onPermissionChange, featuresList, commandsLis
                         )}
                     </div>
                     <div className="flex justify-end gap-2 mt-4 p-4 border-t">
-                        <button onClick={onCancel} className="bg-gray-200 text-gray-800 font-semibold py-1 px-3 rounded-md hover:bg-gray-300">Cancel</button>
-                        <button onClick={onSave} className="bg-blue-600 text-white font-semibold py-1 px-3 rounded-md hover:bg-blue-700">Save</button>
+                        <button onClick={onCancel} disabled={saving || receiptLogoChecking} className="bg-gray-200 text-gray-800 font-semibold py-1 px-3 rounded-md hover:bg-gray-300 disabled:opacity-50">Cancel</button>
+                        <button onClick={onSave} disabled={saving || receiptLogoChecking} className="bg-blue-600 text-white font-semibold py-1 px-3 rounded-md hover:bg-blue-700 disabled:opacity-50">{saving ? 'Saving…' : 'Save'}</button>
                     </div>
+                </fieldset>
             </div>
         );
     };

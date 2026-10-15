@@ -1,3 +1,4 @@
+import StationBrandBackground from '../../integrated-media/StationBrandBackground.jsx';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeftIcon,
@@ -20,6 +21,7 @@ import {
 import { useMediaAssetUrl } from '../../integrated-media/mediaAssetUrl.js';
 import { mediaAccessProblem, mediaFetch, mediaHeaders, mediaUrl } from '../../integrated-media/mediaApi.js';
 import './media-campaign-wizard.css';
+import {buildCampaignDraft, campaignClientId, campaignEditorValues, campaignReplacementAssignments} from '../../utils/mediaCampaign.js';
 
 const API = mediaUrl('/api/').replace(/\/$/, '');
 const DEFAULT_POPUP = {
@@ -31,7 +33,7 @@ const DEFAULT_POPUP = {
 const STEPS = [
   { key: 'name', label: 'Name campaign' },
   { key: 'layout', label: 'Choose layout' },
-  { key: 'type', label: 'Images or video' },
+  { key: 'type', label: 'Choose background' },
   { key: 'media', label: 'Add media' },
   { key: 'kiosks', label: 'Pick kiosks' },
 ];
@@ -120,7 +122,8 @@ function PreviewZone({
       {first && previewUrl && (isVideo(first)
         ? <video src={previewUrl} muted autoPlay loop playsInline />
         : <img src={previewUrl} alt={first.name} />)}
-      {!first && (
+      {zone.type === 'text' && <div className="cmw-preview-text" style={{background:zone.background,whiteSpace:'pre-wrap'}}>{zone.text}</div>}
+      {!first && zone.type !== 'text' && (
         <div className="cmw-preview-empty">
           {mediaType === 'video' ? <VideoCameraIcon /> : <PhotoIcon />}
           <strong>{editing ? 'Drop media here' : (zone.label || `Section ${zone.id.replaceAll('-', ' ')}`)}</strong>
@@ -128,7 +131,7 @@ function PreviewZone({
         </div>
       )}
       {first && assets.length > 1 && <span className="cmw-preview-count">+{assets.length - 1}</span>}
-      {editing && (
+      {editing && zone.type !== 'text' && (
         <div className="cmw-preview-zone-actions">
           <button type="button" onClick={() => onUpload(zone.id)} disabled={Boolean(uploading)}>
             <CloudArrowUpIcon /> {uploading ? `${uploading.percent}%` : 'Upload'}
@@ -140,7 +143,7 @@ function PreviewZone({
   );
 }
 
-function CampaignPreview({ campaignName, layout, mediaType, zoneMedia, library, editing, upload, checkoutEnabled, onDropAsset, onUpload, onRemove }) {
+function CampaignPreview({ campaignName, layout, orientation, mediaType, ownerBrand, zoneMedia, library, editing, upload, checkoutEnabled, onDropAsset, onUpload, onRemove }) {
   const assets = useMemo(() => Object.fromEntries(library.map((asset) => [asset.id, asset])), [library]);
   return (
     <aside className="cmw-preview-panel" aria-label="Live campaign preview">
@@ -149,11 +152,11 @@ function CampaignPreview({ campaignName, layout, mediaType, zoneMedia, library, 
           <span>LIVE PREVIEW</span>
           <h3>{campaignName.trim() || 'Untitled campaign'}</h3>
         </div>
-        <span className="cmw-preview-ratio">9:16</span>
+        <span className="cmw-preview-ratio">{orientation === 'landscape' ? '16:9' : '9:16'}</span>
       </div>
       <div className="cmw-screen-shell">
-        <div className="cmw-screen" data-campaign-preview="true">
-          {layout.zones.map((zone) => (
+        <div className="cmw-screen" data-campaign-preview="true" style={{aspectRatio: orientation === 'landscape' ? '16 / 9' : '9 / 16'}}>
+          {mediaType === 'brand' ? <StationBrandBackground brand={ownerBrand}/> : layout.zones.map((zone) => (
             <PreviewZone
               key={zone.id}
               zone={zone}
@@ -182,70 +185,70 @@ function CampaignPreview({ campaignName, layout, mediaType, zoneMedia, library, 
   );
 }
 
-export default function MediaCampaignWizard({ kiosks = [], referenceTime, onStatus }) {
+export default function MediaCampaignWizard({ clientId, initialCampaign = null, campaigns = [], kiosks = [], referenceTime, onStatus, onSaved, onDirtyChange, onCancel, apiRequest = api, listDevices, previewMode = false }) {
+  const api = apiRequest;
+  const [initial] = useState(() => campaignEditorValues(initialCampaign));
+  const baseDraft = initialCampaign?.draft || {};
+  const [editingId, setEditingId] = useState(initialCampaign?.id || '');
+  const [editVersion, setEditVersion] = useState(initialCampaign?.editVersion || 0);
+  const [layoutOverride, setLayoutOverride] = useState(() => baseDraft.zones?.length && baseDraft.stationBrandBackground !== true ? {id: initial.layout, label: 'Existing layout', zones: baseDraft.zones} : null);
+  const [savedFingerprint, setSavedFingerprint] = useState(() => JSON.stringify(initial));
+  const [reviewing, setReviewing] = useState(false);
   const [now] = useState(() => Number(referenceTime || Date.now()));
   const [step, setStep] = useState(0);
-  const [campaignName, setCampaignName] = useState('');
-  const [layoutId, setLayoutId] = useState('full');
-  const [checkoutEnabled, setCheckoutEnabled] = useState(true);
-  const [mediaType, setMediaType] = useState('image');
-  const [zoneMedia, setZoneMedia] = useState({});
+  const [campaignName, setCampaignName] = useState(initial.name);
+  const [layoutId, setLayoutId] = useState(initial.layout);
+  const [checkoutEnabled, setCheckoutEnabled] = useState(initial.checkoutEnabled);
+  const [mediaType, setMediaType] = useState(initial.mediaType);
+  const [zoneMedia, setZoneMedia] = useState(initial.zoneMedia);
   const [library, setLibrary] = useState([]);
   const [devices, setDevices] = useState([]);
-  const [selectedKiosks, setSelectedKiosks] = useState([]);
+  const [selectedKiosks, setSelectedKiosks] = useState(initial.stationIds);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [query, setQuery] = useState('');
   const [upload, setUpload] = useState(null);
   const [publishing, setPublishing] = useState(false);
-  const [published, setPublished] = useState(null);
+  const [published, setPublished] = useState(initialCampaign?.revision ? initialCampaign : null);
   const [deliveryByStation, setDeliveryByStation] = useState({});
   const [deliveryError, setDeliveryError] = useState('');
   const fileInput = useRef(null);
   const uploadZone = useRef('main');
-  const layout = useMemo(() => LAYOUTS.find((item) => item.id === layoutId) || LAYOUTS[0], [layoutId]);
+  const layout = useMemo(() => layoutOverride || LAYOUTS.find((item) => item.id === layoutId) || LAYOUTS[0], [layoutId, layoutOverride]);
+  const fingerprint = JSON.stringify({name:campaignName,layout:layoutId,mediaType,checkoutEnabled,stationIds:selectedKiosks,zoneMedia});
+  const dirty = fingerprint !== savedFingerprint;
+  useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+  useEffect(() => {
+    if (!dirty) return undefined;
+    const warn = event => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
 
   useEffect(() => {
     let current = true;
     Promise.all([
       api('/library'),
-      callFunctionWithAuth('phoneControl_listDevices', { deviceKind: 'integrated_kiosk' }),
-      api('/campaigns'),
-    ]).then(([media, inventory, campaigns]) => {
+      listDevices ? listDevices() : callFunctionWithAuth('phoneControl_listDevices', { deviceKind: 'integrated_kiosk' }),
+    ]).then(([media, inventory]) => {
       if (!current) return;
       setLibrary(Array.isArray(media.assets) ? media.assets : []);
       setDevices((Array.isArray(inventory?.devices) ? inventory.devices : [])
         .map((device) => normalizePhoneDevice(device, device?.id || device?.deviceId))
         .filter((device) => device.id)
         .filter((device) => isIntegratedKiosk(device) && device.stationId));
-      const latest = Array.isArray(campaigns?.campaigns) ? campaigns.campaigns[0] : null;
-      if (latest?.id) {
-        setPublished(latest);
-        setDeliveryByStation(Object.fromEntries(latest.stationIds.map((stationId) => [stationId, {
-          stationId,
-          desiredRevision: latest.revision,
-          reportedRevision: null,
-          lastSeen: null,
-          state: 'waiting',
-          label: 'Waiting for kiosk',
-        }])));
-      }
       setLoadError('');
     }).catch((error) => {
       if (!current) return;
       setLoadError(mediaAccessProblem(error) || error.message || 'Unable to load campaign tools.');
     }).finally(() => current && setLoading(false));
     return () => { current = false; };
-  }, []);
+  }, [api, listDevices]);
 
   useEffect(() => {
     const allowed = new Set(layout.zones.map((zone) => zone.id));
     setZoneMedia((current) => Object.fromEntries(Object.entries(current).filter(([id]) => allowed.has(id))));
   }, [layout]);
-
-  useEffect(() => {
-    setZoneMedia({});
-  }, [mediaType]);
 
   useEffect(() => {
     setPublished(null);
@@ -275,20 +278,22 @@ export default function MediaCampaignWizard({ kiosks = [], referenceTime, onStat
 
   const kioskDetails = useMemo(() => {
     const details = new Map(kiosks.map((kiosk) => [String(kiosk.stationid || kiosk.stationId || '').trim().toUpperCase(), kiosk]));
-    return devices.map((device) => ({ ...device, kiosk: details.get(device.stationId) || null }))
+    return devices.filter((device) => details.has(device.stationId))
+      .filter((device) => campaignClientId(details.get(device.stationId)?.info?.client || details.get(device.stationId)?.info?.clientId) === campaignClientId(clientId))
+      .map((device) => ({ ...device, kiosk: details.get(device.stationId) }))
       .sort((left, right) => left.stationId.localeCompare(right.stationId));
-  }, [devices, kiosks]);
+  }, [clientId, devices, kiosks]);
   const filteredLibrary = useMemo(() => library.filter((asset) => (
     (mediaType === 'video') === isVideo(asset)
     && (!query.trim() || asset.name.toLowerCase().includes(query.trim().toLowerCase()))
   )), [library, mediaType, query]);
-  const missingZones = useMemo(() => layout.zones.filter((zone) => !(zoneMedia[zone.id] || []).length), [layout, zoneMedia]);
+  const missingZones = useMemo(() => mediaType === 'brand' ? [] : layout.zones.filter((zone) => zone.type !== 'text' && !(zoneMedia[zone.id] || []).length), [layout, zoneMedia, mediaType]);
   const canContinue = [
     campaignName.trim().length >= 2,
     Boolean(layoutId),
     Boolean(mediaType),
     missingZones.length === 0,
-    selectedKiosks.length > 0,
+    selectedKiosks.length > 0 && selectedKiosks.every(id => kioskDetails.some(device => device.stationId === id)) && (mediaType !== 'brand' || kioskDetails.filter(device=>selectedKiosks.includes(device.stationId)).every(device=>device.inventory?.media?.supportsStationBackground === true)),
   ][step];
   const deliverySummary = useMemo(() => {
     const values = Object.values(deliveryByStation);
@@ -371,52 +376,26 @@ export default function MediaCampaignWizard({ kiosks = [], referenceTime, onStat
     }
   };
 
-  const publish = async () => {
-    if (!canContinue || publishing) return;
-    const byId = Object.fromEntries(library.map((asset) => [asset.id, asset]));
-    const zones = layout.zones.map((zone) => ({
-      ...zone,
-      type: 'playlist',
-      muted: true,
-      items: (zoneMedia[zone.id] || []).map((assetId) => ({
-        assetId,
-        durationMs: byId[assetId]?.durationMs || 10_000,
-        rotation: 0,
-        fit: 'cover',
-      })),
-    }));
+  const replacements = campaignReplacementAssignments(campaigns, selectedKiosks, editingId);
+  const canSaveDraft = campaignName.trim().length >= 2 && missingZones.length === 0 && !upload;
+  const persist = async (publishNow = false) => {
+    if (publishing || !canSaveDraft || (publishNow && (!canContinue || previewMode))) return;
+    const draft = buildCampaignDraft({clientId,id:editingId,expectedVersion:editVersion,name:campaignName,layout,mediaType,checkoutEnabled,stationIds:selectedKiosks,zoneMedia,library,baseDraft,popup:DEFAULT_POPUP});
     setPublishing(true);
-    onStatus?.({ state: 'sending', message: `Publishing ${campaignName.trim()} to ${selectedKiosks.length} kiosk${selectedKiosks.length === 1 ? '' : 's'}…` });
     try {
-      const result = await api('/campaigns/publish', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: campaignName.trim(),
-          stationIds: selectedKiosks,
-          mediaType,
-          layout: layoutId,
-          checkout: { enabled: checkoutEnabled, height: 0.16 },
-          orientation: 'portrait',
-          background: '#08120f',
-          zones,
-          popup: DEFAULT_POPUP,
-        }),
+      const result = await api(publishNow ? '/campaigns/publish' : '/campaigns/draft', {
+        method: 'POST', body: JSON.stringify({...draft,...(publishNow ? {expectedAssignments:replacements} : {})}),
       });
-      setPublished(result.campaign);
-      setDeliveryByStation(Object.fromEntries(result.campaign.stationIds.map((stationId) => [stationId, {
-        stationId,
-        desiredRevision: result.campaign.revision,
-        reportedRevision: null,
-        lastSeen: null,
-        state: 'waiting',
-        label: 'Waiting for kiosk',
-      }])));
-      onStatus?.({ state: 'success', message: `${campaignName.trim()} published to ${selectedKiosks.length} kiosk${selectedKiosks.length === 1 ? '' : 's'}.` });
+      setEditingId(result.campaign.id);
+      setEditVersion(result.campaign.editVersion);
+      setSavedFingerprint(fingerprint);
+      setReviewing(false);
+      if (publishNow) setPublished(result.campaign);
+      onSaved?.(result.campaign);
+      onStatus?.({state:'success',message:publishNow ? `${campaignName.trim()} published to ${selectedKiosks.length} kiosks.` : 'Campaign draft saved. The published campaign keeps playing.'});
     } catch (error) {
-      onStatus?.({ state: 'error', message: error.message || 'The campaign could not be published.' });
-    } finally {
-      setPublishing(false);
-    }
+      onStatus?.({state:'error',message:error.message || 'The campaign could not be saved.'});
+    } finally {setPublishing(false);}
   };
 
   const stepContent = [
@@ -426,7 +405,7 @@ export default function MediaCampaignWizard({ kiosks = [], referenceTime, onStat
       <p>Use a clear name your team will recognize later.</p>
       <label className="cmw-field">
         <span>Campaign name</span>
-        <input autoFocus value={campaignName} maxLength="80" placeholder="Example: Fall airport promotion" onChange={(event) => setCampaignName(event.target.value)} />
+        <input aria-label="Campaign name" autoFocus value={campaignName} maxLength="80" placeholder="Example: Fall airport promotion" onChange={(event) => setCampaignName(event.target.value)} />
         <small>{campaignName.trim().length}/80 characters</small>
       </label>
     </div>,
@@ -446,7 +425,7 @@ export default function MediaCampaignWizard({ kiosks = [], referenceTime, onStat
           onChange={(event) => {
             const enabled = event.target.checked;
             setCheckoutEnabled(enabled);
-            if (enabled) setLayoutId('full');
+            if (enabled && layoutId !== 'full') {setLayoutId('full'); setLayoutOverride(null);}
           }}
           aria-label="Enable checkout"
         />
@@ -458,7 +437,7 @@ export default function MediaCampaignWizard({ kiosks = [], referenceTime, onStat
             type="button"
             key={id}
             className={`${layoutId === id ? 'is-selected' : ''} ${checkoutEnabled && id === 'stack' ? 'is-disabled' : ''}`}
-            onClick={() => setLayoutId(id)}
+            onClick={() => {setLayoutId(id); setLayoutOverride(null); setZoneMedia({});}}
             disabled={checkoutEnabled && id === 'stack'}
             title={checkoutEnabled && id === 'stack' ? 'Turn checkout off to use the instruction layout.' : ''}
           >
@@ -471,19 +450,24 @@ export default function MediaCampaignWizard({ kiosks = [], referenceTime, onStat
     </div>,
     <div className="cmw-step-body" key="type">
       <span className="cmw-kicker">STEP 3 OF 5</span>
-      <h3>Choose the media type</h3>
-      <p>The library will show only files that match this campaign.</p>
+      <h3>Choose the station background</h3>
+      <p>Owner backgrounds follow each station’s brand. Images and videos use your uploaded media.</p>
       <div className="cmw-type-grid">
         {[
+          { id: 'brand', label: 'Station owner background', detail: 'ChargeDrops, Event Charging or Chargerent', icon: PhotoIcon },
           { id: 'image', label: 'Images', detail: 'JPG, PNG or WebP slides', icon: PhotoIcon },
           { id: 'video', label: 'Video', detail: 'MP4 or MOV playback', icon: FilmIcon },
         ].map(({ id, label, detail, icon: TypeIcon }) => (
-          <button type="button" key={id} className={mediaType === id ? 'is-selected' : ''} onClick={() => setMediaType(id)}>
+          <button type="button" key={id} className={mediaType === id ? 'is-selected' : ''} onClick={() => {if (id !== mediaType) setZoneMedia({}); setMediaType(id); if (id === 'brand') {setLayoutId('full'); setLayoutOverride(null);}}}>
             <TypeIcon /><strong>{label}</strong><span>{detail}</span>{mediaType === id && <CheckIcon className="cmw-choice-check" />}
           </button>
         ))}
       </div>
     </div>,
+    mediaType === 'brand' ? <div className="cmw-step-body" key="media">
+      <span className="cmw-kicker">STEP 4 OF 5</span><h3>Background follows the station owner</h3>
+      <p>Each selected station uses its saved ChargeDrops, Event Charging or Chargerent brand. Changes to that owner brand update the app background and Android home wallpaper automatically.</p>
+    </div> :
     <div className="cmw-step-body cmw-media-step" key="media">
       <span className="cmw-kicker">STEP 4 OF 5</span>
       <h3>Add media to every section</h3>
@@ -510,9 +494,11 @@ export default function MediaCampaignWizard({ kiosks = [], referenceTime, onStat
       {missingZones.length > 0 && <p className="cmw-inline-note">Fill {missingZones.length} remaining section{missingZones.length === 1 ? '' : 's'} in the preview to continue.</p>}
     </div>,
     <div className="cmw-step-body" key="kiosks">
+      {mediaType === 'brand' && selectedKiosks.some(id=>kioskDetails.find(device=>device.stationId===id)?.inventory?.media?.supportsStationBackground !== true) && <p role="status" className="cmw-inline-note">Update the selected station apps to enable automatic owner backgrounds before publishing.</p>}
       <span className="cmw-kicker">STEP 5 OF 5</span>
       <h3>Pick the kiosks</h3>
-      <p>Only enrolled Chargerent media apps appear here. Phones and Besiter players are excluded.</p>
+      <p>Only enrolled Chargerent media apps belonging to {clientId} appear here. Phones and Besiter players are excluded.</p>
+      {selectedKiosks.some(id => !kioskDetails.some(device => device.stationId === id)) && <p role="alert" className="cmw-inline-note">Some saved kiosks are no longer eligible for this client. Remove them before publishing. <button type="button" onClick={() => setSelectedKiosks(ids => ids.filter(id => kioskDetails.some(device => device.stationId === id)))}>Remove unavailable kiosks</button></p>}
       <div className="cmw-kiosk-toolbar">
         <span>{selectedKiosks.length} selected</span>
         <button type="button" onClick={() => setSelectedKiosks(kioskDetails.map((device) => device.stationId))}>Select all</button>
@@ -546,11 +532,13 @@ export default function MediaCampaignWizard({ kiosks = [], referenceTime, onStat
     </div>,
   ];
 
+  if (!campaignClientId(clientId)) return <div className="cmw-error">Select a client before creating a campaign.</div>;
   if (loading) return <div className="cmw-loading"><span /><strong>Loading campaign builder…</strong></div>;
   if (loadError) return <div className="cmw-error"><strong>Campaign builder unavailable</strong><p>{loadError}</p></div>;
 
   return (
     <div className="cmw-app" data-media-campaign-wizard="true">
+      <div className="cmw-editor-heading"><div><strong>{editingId ? 'Edit campaign' : 'New campaign'} · {clientId}</strong><p>{dirty ? 'Unsaved changes' : 'Saved'} · Changes reach kiosks only when published.</p></div><button type="button" onClick={onCancel} disabled={publishing || Boolean(upload)}>Back to campaigns</button></div>
       <input
         ref={fileInput}
         type="file"
@@ -573,6 +561,7 @@ export default function MediaCampaignWizard({ kiosks = [], referenceTime, onStat
           </button>
         ))}
       </div>
+      {reviewing && <div className="cmw-review" role="region" aria-label="Review campaign publication"><h3>Publish {campaignName} for {clientId}?</h3><p>Update {selectedKiosks.join(', ')}. {Object.keys(replacements).length ? `This replaces another campaign on ${Object.keys(replacements).join(', ')}.` : 'The selected kiosks will receive this version.'}</p><button type="button" className="cmw-next" disabled={publishing} onClick={() => persist(true)}>{publishing ? 'Publishing…' : 'Publish changes'}</button><button type="button" disabled={publishing} onClick={() => setReviewing(false)}>Keep editing</button></div>}
       <div className="cmw-workspace">
         <section className="cmw-slider-column">
           <div className="cmw-slider-window">
@@ -581,16 +570,19 @@ export default function MediaCampaignWizard({ kiosks = [], referenceTime, onStat
             </div>
           </div>
           <footer className="cmw-navigation">
-            <button type="button" className="cmw-back" disabled={step === 0 || publishing} onClick={() => setStep((current) => Math.max(0, current - 1))}><ArrowLeftIcon /> Back</button>
+            <button type="button" className="cmw-back" disabled={step === 0 || publishing || Boolean(upload)} onClick={() => setStep((current) => Math.max(0, current - 1))}><ArrowLeftIcon /> Back</button>
             {step < STEPS.length - 1
-              ? <button type="button" className="cmw-next" disabled={!canContinue || publishing} onClick={() => setStep((current) => Math.min(STEPS.length - 1, current + 1))}>Next <ArrowRightIcon /></button>
-              : <button type="button" className="cmw-next" disabled={!canContinue || publishing || Boolean(published)} onClick={publish}>{publishing ? 'Publishing…' : published ? 'Published' : 'Publish campaign'} <CloudArrowUpIcon /></button>}
+              ? <button type="button" className="cmw-next" disabled={!canContinue || publishing || Boolean(upload)} onClick={() => setStep((current) => Math.min(STEPS.length - 1, current + 1))}>Next <ArrowRightIcon /></button>
+              : <button type="button" className="cmw-next" disabled={!canContinue || publishing || Boolean(upload) || previewMode} onClick={() => setReviewing(true)}>Review &amp; publish <CloudArrowUpIcon /></button>}
+            <button type="button" className="cmw-back" disabled={!canSaveDraft || publishing || (!dirty && Boolean(editingId))} onClick={() => persist(false)}>{publishing ? 'Saving…' : 'Save draft'}</button>
           </footer>
         </section>
         <CampaignPreview
           campaignName={campaignName}
           layout={layout}
+          orientation={baseDraft.orientation || 'portrait'}
           mediaType={mediaType}
+          ownerBrand={kioskDetails.find(device=>selectedKiosks.includes(device.stationId))?.kiosk?.stationBrand || 'chargerent'}
           zoneMedia={zoneMedia}
           library={library}
           editing={step === 3}

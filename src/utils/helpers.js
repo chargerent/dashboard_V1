@@ -1,6 +1,7 @@
 // src/utils/helpers.js
 
 import { isCtf7Module } from './ctf7.js';
+import { stationBrand } from './stationBrand.js';
 
 const NEW_KIOSK_TYPES = new Set(['CT3', 'CT4', 'CT8', 'CT12', 'CK24', 'CK48', 'CTF7']);
 const ONLINE_WINDOW_MS = 10 * 60 * 1000;
@@ -275,7 +276,9 @@ export const filterProvisionedStations = (stations) => (
 );
 
 export const isModuleOnline = (module, referenceTime) => (
-    hasRecentTimestamp(module?.lastUpdated, referenceTime, ONLINE_WINDOW_MS)
+    module?.online === false ? false : isCtf7Module(module)
+        ? module.connected === true && hasRecentTimestamp(module.lastSeen || module.lastUpdated, referenceTime || Date.now(), 180000)
+        : hasRecentTimestamp(module?.lastUpdated, referenceTime, ONLINE_WINDOW_MS)
 );
 
 const normalizeWifiModuleId = (value) => (
@@ -330,6 +333,7 @@ export const normalizeKioskData = (kiosks) => {
 
         const normalizedModules = modulesSource.map(module => {
             const fanModule = isCtf7Module(module, kiosk);
+            const stringSerial = fanModule || kiosk.hardware?.vendor === 'lita' || kiosk.hardware?.checkoutExecution === 'local';
             let slots = [];
             const rawModuleFw = String(module?.FW ?? '').trim();
             const parsedModuleFw = Number(rawModuleFw);
@@ -350,7 +354,7 @@ export const normalizeKioskData = (kiosks) => {
                 // New schema: slots array with status/sn/lock/holeDetection fields
                 slots = (module.slots || []).map(slotData => {
                     const status = Number(slotData.status ?? 0);
-                    const sn = fanModule ? String(slotData.sn ?? '') : Number(slotData.sn ?? 0);
+                    const sn = stringSerial ? String(slotData.sn ?? '') : Number(slotData.sn ?? 0);
                     const chargingCurrent = Number(slotData.chargingCurrent ?? slotData.chargeCurrent ?? 0);
                     const chargingVoltage = Number(slotData.chargingVoltage ?? slotData.chargeVoltage ?? 0);
                     const chargeVoltage = Number(slotData.chargeVoltage ?? slotData.chargingVoltage ?? 0);
@@ -361,7 +365,7 @@ export const normalizeKioskData = (kiosks) => {
                     const isSstatError = holeDetection === 192;
                     return {
                         position: slotData.position,
-                        sn: hasCharger ? sn : fanModule ? '' : 0,
+                        sn: hasCharger ? sn : stringSerial ? '' : 0,
                         observed: slotData.observed,
                         observedAt: slotData.observedAt,
                         cabin: slotData.cabin,
@@ -371,6 +375,7 @@ export const normalizeKioskData = (kiosks) => {
                         functionModel: slotData.functionModel,
                         hardwareVersion: slotData.hardwareVersion,
                         batteryLevel: hasCharger ? slotData.batteryLevel : null,
+                        rented: slotData.rented === true,
                         chargingCurrent,
                         isLocked: !!slotData.lock,
                         lockReason: slotData.lockReason || '',
@@ -425,6 +430,7 @@ export const normalizeKioskData = (kiosks) => {
             const lastUpdated = module.lastUpdated || kiosk.timestamp;
             return {
                 id: module.id,
+                online: module.online,
                 model: module.model,
                 protocol: module.protocol,
                 manufacturerSerial: module.manufacturerSerial,
@@ -432,6 +438,10 @@ export const normalizeKioskData = (kiosks) => {
                 capacity: module.capacity,
                 topologyVerified: module.topologyVerified,
                 inventoryVerified: module.inventoryVerified,
+                controlEnabled: module.controlEnabled === true,
+                connected: module.connected === true,
+                lastInventoryAt: module.lastInventoryAt,
+                lastSeen: module.lastSeen,
                 reportedInfo: module.reportedInfo,
                 modtype: module?.modtype ?? module?.modType ?? null,
                 lastUpdated,
@@ -444,8 +454,8 @@ export const normalizeKioskData = (kiosks) => {
                 operationalState: module.operationalState || null,
                 chargeMetrics: module.chargeMetrics || null,
                 FW: moduleFw,
-                softwareVersion: Number.isFinite(moduleSoftwareVersion) ? moduleSoftwareVersion : 0,
-                hardwareVersion: Number.isFinite(moduleHardwareVersion) ? moduleHardwareVersion : 0,
+                softwareVersion: fanModule ? String(module.softwareVersion || module.reportedInfo?.softwareVersion || '') : Number.isFinite(moduleSoftwareVersion) ? moduleSoftwareVersion : 0,
+                hardwareVersion: fanModule ? String(module.hardwareVersion || module.reportedInfo?.hardwareVersion || '') : Number.isFinite(moduleHardwareVersion) ? moduleHardwareVersion : 0,
                 firmwareVersion: moduleFirmwareVersion,
                 fotaVersion: String(module?.fotaVersion || moduleFirmwareVersion).trim(),
                 firmwareVersionNumber: module?.firmwareVersionNumber ?? null,
@@ -471,7 +481,7 @@ export const normalizeKioskData = (kiosks) => {
         const defaultWifi = isV2Kiosk(normalizedKiosk) ? V2_DEFAULT_WIFI : DEFAULT_WIFI;
         const fullThreshold = getKioskPowerThreshold({ hardware });
         const derivedCount = normalizedModules.reduce((sum, module) => (
-            sum + (module.operationalEnabled === false ? 0 : module.slots.filter(slot => (
+            sum + (module.operationalEnabled === false || (hardware.checkoutExecution === 'local' && module.online === false) ? 0 : module.slots.filter(slot => (
                 slot.sn &&
                 slot.sn !== 0 &&
                 !slot.isLocked &&
@@ -480,12 +490,13 @@ export const normalizeKioskData = (kiosks) => {
             )).length)
         ), 0);
         const kioskCount = Number(kiosk.count);
-        const hasOperationallyDisabledModule = normalizedModules.some(module => module.operationalEnabled === false);
+        const hasOperationallyDisabledModule = hardware.checkoutExecution === 'local' || normalizedModules.some(module => module.operationalEnabled === false);
 
         const normalizedAddress = getKioskInfoAddress(kiosk.info);
 
         return {
             stationid: kiosk.stationid,
+            stationBrand: stationBrand(kiosk.stationBrand).value,
             provisionid: kiosk.provisionid,
             hardware,
             info: {
@@ -543,7 +554,9 @@ export const normalizeKioskData = (kiosks) => {
             lastUpdated,
             lastSeen: kiosk.lastSeen || null,
             active: kiosk.active !== false,
-            count: hasOperationallyDisabledModule
+            enabled: kiosk.enabled !== false,
+            rentalsValidated: kiosk.rentalsValidated === true,
+            count: hardware.type === 'CTF7' ? (kiosk.rentalsValidated === true && kiosk.active === true && kiosk.enabled !== false && !kiosk.disabled ? Number(kiosk.count || 0) : 0) : hasOperationallyDisabledModule
                 ? derivedCount
                 : Number.isFinite(kioskCount) ? kioskCount : derivedCount,
             ngrok: !!kiosk.ngrok,

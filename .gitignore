@@ -11,6 +11,11 @@ node_modules
 dist
 dist-ssr
 .codex-tmp
+.codex-backups/
+.pnpm-store/
+output/
+firestore-migration-backups/
+scripts/__pycache__/
 *.local
 tmp/hq-vm.json
 

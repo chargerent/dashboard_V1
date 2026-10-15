@@ -18,13 +18,17 @@ import {
     isAiBoothProvision,
 } from '../utils/provisioning';
 import { toGatewayOption, toStoredKioskGateway } from '../utils/kioskGateway';
+import { calculateRateArray } from '../utils/kioskPricing.js';
+import { STATION_BRANDS, stationBrand } from '../utils/stationBrand.js';
+import { hasStationScreen } from '../../functions/uiProfileSections.mjs';
 
 const initialFormData = {
     provisionid: '',
+    stationBrand: 'chargerent',
     hardware: { type: 'CT10', modversion: '2.0', mode: 'LIVE', modules: 1, hrate: '20', cpu: 'C4', gateway: 'PAYTERP68', screen: 'no screen', quarantine: { time: 0, unit: 'min' }, audio: 'on', power: '90', gatewayoptions: 'INITIALPRICE', port: '1884', server: 'chargerent.io' },
     info: { country: 'US', autoGeocode: true, account: 'OCHARGELLC', group: 'OCHARGELLC', rep: 'OCHARGELLC' },
     ui: { colors: { bcolor1: '#0000FF', bcolor2: '#008000' }, idletime: 20, defaultlanguage: 'ENGLISH', mode: 'media', reminder: {}, receipt: {}, coupons: {}, map: { active: false }, terms: { active: true }, languages: { active: true }, information: { active: true }, screensaver: { active: true } },
-    pricing: { currency: 'US', symbol: '$', kioskmode: 'LEASE', text: 'LEASE - SIMPLE DAILY', webapp: true, mobileapp: true, online: true, startpage: { active: true }, taxrate: 0 }
+    pricing: { currency: 'US', symbol: '$', kioskmode: 'LEASE', text: 'LEASE - SIMPLE DAILY', webapp: true, mobileapp: true, online: true, touch: true, startpage: { active: true }, taxrate: 0 }
 };
 
 const V2_KIOSK_TYPES = new Set(['CT3', 'CT4', 'CT8', 'CT12', 'CK24', 'CK48']);
@@ -46,51 +50,6 @@ const formatWaitTime = (startTime) => {
     
     // Add an asterisk if it's been longer than a minute
     return diffSeconds > 60 ? `${formattedTime} *` : formattedTime;
-};
-
-const calculateRateArray = (pricing) => {
-    const pricingstyle = pricing.text;
-    const initialprice = Number(pricing.authamount || 0);
-    const initialperiod = Number(pricing.initialperiod || 0); // in hours
-    const dailyprice = Number(pricing.dailyprice || 0);
-    const overdueby = Number(pricing.overdue || 0); // in days
-
-    const rentprice = [];
-    const DAY_IN_MINUTES = 1440; // 24 * 60
-
-    switch (pricingstyle) {
-        case "PURCHASE - SIMPLE DAILY":
-            for (let i = 1; i <= overdueby; i++) {
-                rentprice.push({ time: i * DAY_IN_MINUTES, price: i * dailyprice });
-            }
-            break;
-        case "PURCHASE - MIXED DAILY":
-            rentprice.push({ time: initialperiod * 60, price: initialprice });
-            for (let i = 1; i <= overdueby; i++) {
-                rentprice.push({ time: i * DAY_IN_MINUTES, price: i * dailyprice });
-            }
-            break;
-        case "PURCHASE SIMPLE 24 HRS":
-            rentprice.push({ time: DAY_IN_MINUTES, price: dailyprice });
-            break;
-        case "PURCHASE - MIXED DAY":
-            rentprice.push({ time: initialperiod * 60, price: initialprice });
-            rentprice.push({ time: DAY_IN_MINUTES, price: dailyprice });
-            break;
-        case "LEASE - SIMPLE DAILY":
-            rentprice.push({ time: DAY_IN_MINUTES, price: 0 });
-            for (let i = 1; i < overdueby; i++) {
-                rentprice.push({ time: (i + 1) * DAY_IN_MINUTES, price: i * dailyprice });
-            }
-            break;
-        case "LEASE - MIXED DAILY":
-            rentprice.push({ time: initialperiod * 60, price: 0 });
-            for (let i = 1; i <= overdueby; i++) {
-                rentprice.push({ time: i * DAY_IN_MINUTES, price: i * dailyprice });
-            }
-            break;
-    }
-    return rentprice;
 };
 
 const formatPendingStationOption = (station) => {
@@ -389,7 +348,7 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAdmin, onLogout, t, 
             }
 
             // Convert to uppercase if it's a string
-            if (typeof value === 'string') {
+            if (typeof value === 'string' && path !== 'stationBrand' && !(section === 'hardware' && ['vendor', 'checkoutExecution', 'serialPort', 'billingOwner'].includes(path))) {
                 value = value.toUpperCase();
             }
             current[keys[keys.length - 1]] = value;
@@ -409,7 +368,7 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAdmin, onLogout, t, 
                     'CK48': 12,
                     'CK50': 5
                 };
-                newFormData.hardware.modules = moduleMap[value] || newFormData.hardware.modules;
+                newFormData.hardware.modules = newFormData.hardware.vendor === 'lita' ? 1 : moduleMap[value] || newFormData.hardware.modules;
             }
 
             return newFormData;
@@ -504,6 +463,7 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAdmin, onLogout, t, 
     const confirmProvision = async () => {
         setShowConfirmation(false);
         let payload = JSON.parse(JSON.stringify(formData));
+        payload.stationBrand = stationBrand(payload.stationBrand).value;
         
         // Add rate array to pricing
         payload.pricing.rate = calculateRateArray(payload.pricing);
@@ -548,6 +508,16 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAdmin, onLogout, t, 
             return;
         }
 
+        if (payload.hardware.checkoutExecution === 'local') {
+            setCommandStatus?.({state: 'sending', message: t('sending_command')});
+            try {
+                const result = await callFunctionWithAuth('kiosk_provisionLocalStation', {provisionid: payload.provisionid, stationid: payload.stationid, kiosk: payload});
+                setCommandStatus?.({state: 'success', message: result.message});
+                setFormData(createInitialFormData());
+                setStationIdOffset(0);
+            } catch (error) { setCommandStatus?.({state: 'error', message: error.message || t('command_failed')}); }
+            return;
+        }
         onCommand(null, 'provision', null, payload.provisionid, null, { kiosk: payload });
     };
 
@@ -663,6 +633,13 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAdmin, onLogout, t, 
                             <div className="p-4 rounded-lg">
                                 <SectionTitle title="Hardware" />
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {hasStationScreen(formData) && <div>
+                                        <label htmlFor="station-brand" className="block text-sm font-medium text-gray-700 mb-1">Station Brand</label>
+                                        <select id="station-brand" value={stationBrand(formData.stationBrand).value} onChange={event => onDataChange(null, 'stationBrand', event.target.value)} className="w-full px-3 py-2 border rounded-md">
+                                            {STATION_BRANDS.map(brand => <option key={brand.value} value={brand.value}>{brand.label}</option>)}
+                                        </select>
+                                        <div className="mt-2 bg-white rounded border p-3"><img src={`${import.meta.env.BASE_URL}${stationBrand(formData.stationBrand).logo}`} alt={`${stationBrand(formData.stationBrand).label} logo`} className="h-8 max-w-full object-contain" /></div>
+                                    </div>}
                                     <FormMultiSwitch label="Type" name="type" options={['CT3', 'CT4', 'CT8', 'CT10', 'CT12', 'CA36', 'CK20', 'CK24', 'CK30', 'CK48', 'CK50']} value={formData.hardware.type} section="hardware" onDataChange={onDataChange} />
                                     <FormMultiSwitch label="Mode" name="mode" options={['AI', 'LIVE', 'TEST']} value={formData.hardware.mode} section="hardware" onDataChange={onDataChange} />
                                     <FormInput label="Modules" name="modules" type="number" value={formData.hardware.modules} section="hardware" onDataChange={onDataChange} />
@@ -676,7 +653,14 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAdmin, onLogout, t, 
                                     <FormMultiSwitch label="Gateway" name="gateway" options={GATEWAYS} value={toGatewayOption(formData.hardware.gateway)} section="hardware" onDataChange={(sec, name, val) => onDataChange(sec, name, toStoredKioskGateway(val))} />
                                     <FormInput label={selectedIsAiBooth ? 'SN (Optional)' : 'SN'} name="sn" value={formData.hardware.sn} section="hardware" onDataChange={onDataChange} isInvalid={missingFields.includes('hardware.sn')} />
                                     <FormMultiSwitch label="Gateway Options" name="gatewayoptions" options={selectedIsV2Kiosk ? V2_GATEWAY_OPTIONS : V1_GATEWAY_OPTIONS} value={{'INITIALPRICE': 'INITIAL', 'FULLPRICE':'FULL', 'OPENMODE':'OPEN', 'CLOSEDLOOP':'CLOSED', 'RESERVATION':'RES'}[formData.hardware.gatewayoptions] || formData.hardware.gatewayoptions} section="hardware" onDataChange={(sec, name, val) => handleMultiSwitchChange(sec, name, val, {'INITIAL': 'INITIALPRICE', 'FULL': 'FULLPRICE', 'OPEN': 'OPENMODE', 'CLOSED': 'CLOSEDLOOP', 'RES': 'RESERVATION'})} />
-                                    <FormMultiSwitch label="Screen" name="screen" options={['7', '10', '16', '21', '32', '49']} value={String(formData.hardware.screen || '49').toUpperCase().replace('IN', '')} section="hardware" onDataChange={onDataChange} />
+                                    <FormMultiSwitch label="Screen" name="screen" options={['NO', '7', '10', '16', '21', '32', '49']} value={hasStationScreen(formData) ? String(formData.hardware.screen).toUpperCase().replace('IN', '') : 'NO'} section="hardware" onDataChange={(sec, name, value) => onDataChange(sec, name, value === 'NO' ? 'no screen' : value)} />
+                                    <FormMultiSwitch label="Station Vendor" name="vendor" options={['besiter', 'lita']} value={formData.hardware.vendor || 'besiter'} section="hardware" onDataChange={(sec, name, val) => { onDataChange(sec, name, val); onDataChange(sec, 'serialPort', val === 'lita' ? '/dev/ttyS1' : '/dev/ttySMT7'); onDataChange(sec, 'slotsPerBoard', val === 'lita' ? 12 : 4); if (val === 'lita') { onDataChange(sec, 'checkoutExecution', 'local'); onDataChange(sec, 'billingOwner', 'local_station_v1'); onDataChange(sec, 'boardCount', 1); } }} />
+                                    <FormMultiSwitch label="Rental Controller" name="checkoutExecution" options={['backend', 'local']} value={formData.hardware.checkoutExecution || 'backend'} section="hardware" onDataChange={(sec, name, val) => { onDataChange(sec, name, val); onDataChange(sec, 'billingOwner', val === 'local' ? 'local_station_v1' : ''); }} />
+                                    {formData.hardware.checkoutExecution === 'local' && <>
+                                        <FormInput label="Serial Port" name="serialPort" value={formData.hardware.serialPort || (formData.hardware.vendor === 'lita' ? '/dev/ttyS1' : '/dev/ttySMT7')} section="hardware" onDataChange={onDataChange} />
+                                        <FormInput label="Board Count" name="boardCount" type="number" value={formData.hardware.boardCount || 1} section="hardware" onDataChange={onDataChange} />
+                                        <FormInput label="Slots per Board" name="slotsPerBoard" type="number" value={formData.hardware.slotsPerBoard || (formData.hardware.vendor === 'lita' ? 12 : 4)} section="hardware" onDataChange={onDataChange} />
+                                    </>}
                                     <FormInput label="Port" name="port" value={formData.hardware.port} section="hardware" onDataChange={onDataChange} />
                                     <FormInput label="Server" name="server" value={formData.hardware.server} section="hardware" onDataChange={onDataChange} />
                                 </div>
@@ -700,6 +684,10 @@ const ProvisionPage = ({ onNavigateToDashboard, onNavigateToAdmin, onLogout, t, 
                                 </div>
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
                                     <FormToggle label="Start Page" name="startpage.active" checked={formData.pricing.startpage?.active} section="pricing" onDataChange={onDataChange} />
+                                    {formData.hardware.gateway === 'STRIPE' && formData.hardware.checkoutExecution === 'local' && <>
+                                        <FormToggle label="Touch" name="touch" checked={formData.pricing.touch !== false} section="pricing" onDataChange={onDataChange} />
+                                        <p className="text-sm text-gray-600">On: touchscreen menu. Off: tap a card directly to rent. Card collection stops when sold out.</p>
+                                    </>}
                                     <FormToggle label="Web App" name="webapp" checked={formData.pricing.webapp} section="pricing" onDataChange={onDataChange} />
                                     <FormToggle label="Mobile App" name="mobileapp" checked={formData.pricing.mobileapp} section="pricing" onDataChange={onDataChange} />
                                     <FormToggle label="Online" name="online" checked={formData.pricing.online} section="pricing" onDataChange={onDataChange} />

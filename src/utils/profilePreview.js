@@ -1,5 +1,7 @@
 import {createDefaultKioskUiProfile, cloneProfileValue} from './kioskUiProfiles.js';
 import {mergeProfileSection} from '../../functions/uiProfileSections.mjs';
+import {hasStationScreen} from '../../functions/uiProfileSections.mjs';
+import {stationBrand} from './stationBrand.js';
 import {createYyzApolloProfileSection} from '../../functions/apolloProfileTemplate.mjs';
 
 export const PROFILE_PREVIEW_KIOSKS = [
@@ -11,6 +13,7 @@ export const PROFILE_PREVIEW_KIOSKS = [
 ];
 
 export function createProfilePreviewApi() {
+  const stationBrands = new Map();
   const apolloClients = new Set(PROFILE_PREVIEW_KIOSKS
     .filter((kiosk) => kiosk.hardware?.gateway === 'APOLLO')
     .map((kiosk) => kiosk.info.client));
@@ -23,7 +26,16 @@ export function createProfilePreviewApi() {
     return profile;
   });
   return async (name, data) => {
-    if (name === 'uiProfile_list') return {profiles: cloneProfileValue(profiles), capabilities: {scopedProfiles: 1, chargerentAppProfiles: 1, integratedKioskStationIds: ['SAMPLE-M01'], apolloScreens: 1, apolloEstablishedScreenRemoval: 1, apolloPublishing: false, apolloTestScreens: 1, apolloProfileTestsEnabled: false, apolloTestStationIds: []}};
+    if (name === 'uiProfile_list') return {profiles: cloneProfileValue(profiles), capabilities: {scopedProfiles: 1, stationBranding: 1, chargerentAppProfiles: 1, receiptPages: 1, integratedKioskStationIds: ['SAMPLE-M01'], apolloScreens: 1, apolloEstablishedScreenRemoval: 1, apolloPublishing: false, apolloTestScreens: 1, apolloProfileTestsEnabled: false, apolloTestStationIds: []}};
+    if (name === 'uiProfile_setStationBrand') {
+      const kiosk = PROFILE_PREVIEW_KIOSKS.find((candidate) => candidate.stationid === data.stationid);
+      if (!hasStationScreen(kiosk)) throw new Error('Station branding requires a screen.');
+      const current = stationBrands.get(kiosk.stationid) || stationBrand(kiosk.stationBrand).value;
+      if (current !== data.expectedStationBrand) throw new Error('The station brand changed. Reload the preview.');
+      const brand = stationBrand(data.stationBrand).value;
+      stationBrands.set(kiosk.stationid, brand);
+      return {ok: true, kiosk: {...cloneProfileValue(kiosk), stationBrand: brand}};
+    }
     if (name !== 'uiProfile_upsert') throw new Error('Publishing is disabled in the local preview.');
     const existing = profiles.find(({id}) => id === data.profile.id);
     if (existing.version !== data.profile.version) throw new Error('Profile changed. Reload the preview.');

@@ -578,6 +578,7 @@ test("does not downgrade a confirmed terminal when provisioning completes", () =
 test("accepts only an exact integrated-app terminal provisioning result", () => {
   const terminal = {
     stationId: "FR8011",
+    installationId: "a".repeat(64),
     provisionId: "id-9987807842",
     moduleId: "864253060991866",
     stripeLocationId: "tml_fr_live",
@@ -603,6 +604,7 @@ test("accepts only an exact integrated-app terminal provisioning result", () => 
     packageName: "com.chargerent.media.lab",
     terminal: {
       configured: true,
+      installationId: "a".repeat(64),
       stationId: "FR8011",
       provisionId: "id-9987807842",
       moduleId: "864253060991866",
@@ -618,6 +620,10 @@ test("accepts only an exact integrated-app terminal provisioning result", () => 
   assert.equal(terminalCommandResultMatches(terminal, command, {
     ...result,
     terminal: {...result.terminal, stripeMode: "test"},
+  }), false);
+  assert.equal(terminalCommandResultMatches(terminal, command, {
+    ...result,
+    terminal: {...result.terminal, installationId: "b".repeat(64)},
   }), false);
 });
 

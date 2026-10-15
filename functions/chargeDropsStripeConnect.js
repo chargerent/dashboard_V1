@@ -17,6 +17,8 @@ const ACCOUNT_EVENT_TYPES = new Set([
   "v2.core.account[identity].updated",
   "v2.core.account[requirements].updated",
 ]);
+const PLATFORM_CONFIG_COLLECTION = "systemConfig";
+const PLATFORM_CONFIG_DOCUMENT = "chargeDropsPayouts";
 
 function failure(code, message) {
   return Object.assign(new Error(message), {code, safe: true});
@@ -136,6 +138,7 @@ function createChargeDropsStripeConnect({
   admin,
   getStripeClient,
   dashboardBaseUrl = "https://chargerentstations.com/portal/",
+  expectedPlatformAccountId = "",
   notifyPartner = async () => ({status: "skipped"}),
   logger = console,
 }) {
@@ -168,7 +171,7 @@ function createChargeDropsStripeConnect({
     return {uid: targetUid, ref, profile};
   }
 
-  function stripeConfiguration() {
+  async function stripeConfiguration() {
     const configured = getStripeClient();
     if (!configured?.stripe || !["test", "live"].includes(configured.mode)) {
       throw failure(
@@ -176,7 +179,31 @@ function createChargeDropsStripeConnect({
           "Stripe Connect payout onboarding is not configured.",
       );
     }
+    if (expectedPlatformAccountId) {
+      const platform = await configured.stripe.accounts.retrieve(null);
+      if (text(platform?.id) !== expectedPlatformAccountId) {
+        throw failure(
+            "failed-precondition",
+            "Stripe is not connected to the approved Ocharge payment account.",
+        );
+      }
+    }
     return configured;
+  }
+
+  async function platformOnboardingReady() {
+    try {
+      const snapshot = await db.collection(PLATFORM_CONFIG_COLLECTION)
+          .doc(PLATFORM_CONFIG_DOCUMENT)
+          .get();
+      return snapshot.exists &&
+        snapshot.data()?.connectOnboardingEnabled === true;
+    } catch (error) {
+      logger.error("ChargeDrops payout readiness check failed", {
+        code: text(error?.code) || "unknown",
+      });
+      return false;
+    }
   }
 
   function payoutEventType(status) {
@@ -356,11 +383,24 @@ function createChargeDropsStripeConnect({
   async function getStatus({authState, uid = ""}) {
     return safely(async () => {
       const target = await loadTarget(authState, uid);
-      const {stripe, mode} = stripeConfiguration();
+      if (!await platformOnboardingReady()) {
+        return {
+          provider: "stripe_connect",
+          platformReady: false,
+          mode: "live",
+          status: "not_started",
+          ready: false,
+          detailsSubmitted: false,
+          payoutsEnabled: false,
+          requirementsDue: 0,
+        };
+      }
+      const {stripe, mode} = await stripeConfiguration();
       const account = await retrieveOwnedAccount(target, stripe, mode);
       if (!account) {
         return {
           provider: "stripe_connect",
+          platformReady: true,
           mode,
           status: "not_started",
           ready: false,
@@ -369,7 +409,10 @@ function createChargeDropsStripeConnect({
           requirementsDue: 0,
         };
       }
-      return saveSummary(target, account, mode, {actorUid: authState.uid});
+      return {
+        ...await saveSummary(target, account, mode, {actorUid: authState.uid}),
+        platformReady: true,
+      };
     }, uid);
   }
 
@@ -377,13 +420,19 @@ function createChargeDropsStripeConnect({
     return safely(async () => {
       const target = await loadTarget(authState, uid);
       if (text(target.profile?.chargedrops?.onboarding?.agreementStatus) !==
-          "signed") {
+          "fully_executed") {
         throw failure(
             "failed-precondition",
-            "Sign the ChargeDrops agreement before setting up payouts.",
+            "Ocharge must countersign the agreement before payout setup is unlocked.",
         );
       }
-      const {stripe, mode} = stripeConfiguration();
+      if (!await platformOnboardingReady()) {
+        throw failure(
+            "failed-precondition",
+            "Commission payout setup is still being finalized. Please try again later.",
+        );
+      }
+      const {stripe, mode} = await stripeConfiguration();
       const {account, created} = await ensureAccount(target, stripe, mode);
       const summary = await saveSummary(target, account, mode, {
         notifyPartner: false,
@@ -422,6 +471,7 @@ function createChargeDropsStripeConnect({
       );
       return {
         ...summary,
+        platformReady: true,
         partnerNotificationStatus: partnerNotification.status,
         url: link.url,
         expiresAt: Math.floor(Date.parse(link.expires_at || "") / 1000) || 0,
@@ -469,7 +519,7 @@ function createChargeDropsStripeConnect({
     if (!ACCOUNT_ID_RE.test(accountId)) {
       return {ignored: true, reason: "invalid-account"};
     }
-    const {stripe} = stripeConfiguration();
+    const {stripe} = await stripeConfiguration();
     const account = await stripe.v2.core.accounts.retrieve(accountId, {
       include: ACCOUNT_INCLUDE,
     });

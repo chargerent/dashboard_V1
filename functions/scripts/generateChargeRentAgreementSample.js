@@ -5,7 +5,10 @@ const path = require("node:path");
 const {
   generateChargeRentClientAgreement,
 } = require("../chargeRentClientAgreementTemplate");
-const {appendSignatureCertificate} = require("../chargeDropsAgreements");
+const {
+  appendCountersignatureCertificate,
+  appendSignatureCertificate,
+} = require("../chargeDropsAgreements");
 
 async function main() {
   const outputPath = path.resolve(
@@ -44,6 +47,21 @@ async function main() {
   });
   await fs.mkdir(path.dirname(signedQaPath), {recursive: true});
   await fs.writeFile(signedQaPath, signedQa);
+  const executedQaPath = path.resolve(
+      __dirname,
+      "../../tmp/pdfs/ChargeRent_ChargeDrops_Agreement_Executed_QA.pdf",
+  );
+  const executedQa = await appendCountersignatureCertificate(signedQa, {
+    title: "ChargeRent Revenue Share Agreement",
+    agreementId: "sample-agreement-id",
+    signerName: "George Gazelian",
+    signerTitle: "Authorized Representative",
+    signerEmail: "george@charge.rent",
+    signedAt: "2026-10-07T04:00:00.000Z",
+    clientSignedHash: "7a7c82c70cc560bb30acaab86f847741d234d4587285368c" +
+      "ca728a56e2ab7b21",
+  });
+  await fs.writeFile(executedQaPath, executedQa);
   process.stdout.write(`${outputPath}\n`);
 }
 

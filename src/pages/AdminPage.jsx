@@ -1,6 +1,6 @@
 // src/pages/AdminPage.jsx
 import { useState, useMemo, useEffect, useCallback } from 'react';
-import { BanknotesIcon, CalculatorIcon, CreditCardIcon, PaintBrushIcon, PhotoIcon, SparklesIcon } from '@heroicons/react/24/outline';
+import { BanknotesIcon, CalculatorIcon, CreditCardIcon, PaintBrushIcon, PhotoIcon, SparklesIcon, UserGroupIcon } from '@heroicons/react/24/outline';
 import ConfirmationModal from '../components/UI/ConfirmationModal.jsx';
 import LoadingSpinner from '../components/UI/LoadingSpinner.jsx';
 import ClientAdminCard from './ClientAdminCard.jsx';
@@ -9,6 +9,7 @@ import WorkspaceMailboxPanel from '../components/WorkspaceMailboxPanel.jsx';
 import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
 import DashboardPageActions, { DashboardLanguageToggle } from '../components/UI/DashboardPageActions.jsx';
 import { callFunctionWithAuth } from '../utils/callableRequest.js';
+import { receiptLogoUploadInput } from '../utils/receiptLogo.js';
 
 import { auth, db } from '../firebase-config';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -43,6 +44,7 @@ function AdminPage({
   onNavigateToAccounting,
   onNavigateToPayter,
   onNavigateToChargeDropsClientSetup,
+  onNavigateToRegionalPartnerOnboarding,
   currentUser,
   language,
   setLanguage,
@@ -63,6 +65,8 @@ function AdminPage({
 
   const [editingClientUid, setEditingClientUid] = useState(null);
   const [editedClientData, setEditedClientData] = useState(null);
+  const [receiptLogoFile, setReceiptLogoFile] = useState(null);
+  const [savingClient, setSavingClient] = useState(false);
 
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [clientToDelete, setClientToDelete] = useState(null);
@@ -79,7 +83,7 @@ function AdminPage({
   const isPartner = currentUser?.partner === true || currentUser?.role === 'partner';
   const canAccessCampaignManager = isAdmin || (isPartner && currentUser?.features?.campaign_manager === true);
   const canAccessMediaControl = canAccessMedia || canAccessCampaignManager;
-  const canAccessUiProfiles = isAdmin || currentUser?.features?.ui_editor === true || currentUser?.commands?.['client edit'] === true;
+  const canAccessUiProfiles = canAccessCampaignManager || isAdmin || currentUser?.features?.ui_editor === true || currentUser?.commands?.['client edit'] === true;
   const canUseAiBooths = canManageClients || canAccessMedia;
   const canUseProvisionTools = isAdmin || currentUser?.commands?.edit === true || canManageClients;
   const canViewTemplates = currentUser?.username === 'chargerent';
@@ -172,6 +176,8 @@ function AdminPage({
 
   // ---- edit mode ----
   const handleEditClick = (uid) => {
+    if (savingClient) return;
+    setReceiptLogoFile(null);
     setEditingClientUid(uid);
     const clientToEdit = clients.find(c => c.uid === uid);
     if (!clientToEdit) return;
@@ -185,8 +191,10 @@ function AdminPage({
   };
 
   const handleCancelEdit = () => {
+    if (savingClient) return;
     setEditingClientUid(null);
     setEditedClientData(null);
+    setReceiptLogoFile(null);
   };
 
   const handleClientDataChange = (key, value) => {
@@ -203,7 +211,7 @@ function AdminPage({
   };
 
   const handleUpdateClient = async () => {
-    if (!editedClientData || !canManageClients) return;
+    if (!editedClientData || !canManageClients || savingClient) return;
 
     // Keep clientId uppercase
     const finalData = { ...editedClientData };
@@ -215,15 +223,16 @@ function AdminPage({
       return;
     }
 
-    // optimistic UI
-    setClients(prev => prev.map(c => (c.uid === editingClientUid ? finalData : c)));
-    setEditingClientUid(null);
-    setEditedClientData(null);
-
+    setSavingClient(true);
     setSaveStatus({ state: 'sending', message: 'Updating client...' });
 
     try {
       await ensureSignedIn();
+      if (receiptLogoFile) {
+        setSaveStatus({ state: 'sending', message: 'Uploading receipt logo...' });
+        finalData.receiptLogo = await callFunctionWithAuth('admin_uploadReceiptLogo',
+          await receiptLogoUploadInput(receiptLogoFile, finalData.uid), {timeoutMs: 60000});
+      }
       await callFunctionWithAuth('admin_upsertUserProfile', {
         uid: finalData.uid,
         profile: stripUnsafeFields(finalData),
@@ -239,16 +248,20 @@ function AdminPage({
         state: 'success',
         message: nextPassword ? 'Client updated and login credentials sent.' : t('update_success'),
       });
+      setEditingClientUid(null);
+      setEditedClientData(null);
+      setReceiptLogoFile(null);
       await fetchClients(); // refresh from source of truth
     } catch (e) {
       console.error(e);
       setSaveStatus({ state: 'error', message: e?.message || t('update_failed') });
-      await fetchClients();
+    } finally {
+      setSavingClient(false);
     }
   };
 
   // ---- create ----
-  const handleCreateClient = async ({ username, password, clientId, profile, sendCredentials, includePartnerKit, workspaceMailbox }) => {
+  const handleCreateClient = async ({ username, password, clientId, profile, receiptLogoFile: newReceiptLogoFile, sendCredentials, includePartnerKit, workspaceMailbox }) => {
     if (!canManageClients || creatingClient) return {ok: false, message: 'Account creation is unavailable.'};
     setSaveStatus(null);
 
@@ -263,11 +276,17 @@ function AdminPage({
     setCreatingClient(true);
     try {
       await ensureSignedIn();
+      const savedProfile = stripUnsafeFields(profile);
+      if (newReceiptLogoFile) {
+        setSaveStatus({ state: 'sending', message: 'Uploading receipt logo...' });
+        savedProfile.receiptLogo = await callFunctionWithAuth('admin_uploadReceiptLogo',
+          await receiptLogoUploadInput(newReceiptLogoFile), {timeoutMs: 60000});
+      }
       const result = await callFunctionWithAuth('admin_createAuthUserAndProfile', {
         username,
         password,
         clientId,
-        profile: stripUnsafeFields(profile),
+        profile: savedProfile,
         sendCredentials: sendCredentials === true,
         includePartnerKit: profile?.role === 'partner' && includePartnerKit === true,
         ...(workspaceMailbox ? {workspaceMailbox} : {}),
@@ -581,6 +600,17 @@ function AdminPage({
             )}
 
             {isAdmin && (
+              <button
+                onClick={onNavigateToRegionalPartnerOnboarding}
+                className="flex h-10 w-10 items-center justify-center rounded-xl border border-violet-200 bg-violet-50 text-violet-700 shadow-sm transition hover:border-violet-300 hover:bg-violet-100"
+                title="Regional partner onboarding"
+                type="button"
+              >
+                <UserGroupIcon className="h-6 w-6" />
+              </button>
+            )}
+
+            {isAdmin && (
               <button onClick={onNavigateToPayouts} className="p-2 rounded-md bg-emerald-100 text-emerald-700 hover:bg-emerald-200" title="Payouts">
                 <BanknotesIcon className="h-6 w-6" />
               </button>
@@ -689,6 +719,9 @@ function AdminPage({
                           onCancel={handleCancelEdit}
                           onSave={handleUpdateClient}
                           onDataChange={handleClientDataChange}
+                          receiptLogoFile={editingClientUid === client.uid ? receiptLogoFile : null}
+                          onReceiptLogoFileChange={setReceiptLogoFile}
+                          saving={savingClient}
                           onDelete={() => handleDeleteClick(client.uid)}
                           featuresList={featuresList}
                           currentUser={currentUser}

@@ -663,7 +663,8 @@ export default function BindingPage({
       (kiosk) => normalizeStationId(kiosk?.stationid) === normalizedStationId,
     );
 
-    if (existingStation) {
+    const addingCtf7 = kioskType === 'CTF7' && existingStation?.hardware?.type === 'CTF7';
+    if (existingStation && !addingCtf7) {
       setPageError('');
       showBindingError(`${t('binding_station_exists')}: ${normalizedStationId}`, 'station');
       return;
@@ -704,6 +705,7 @@ export default function BindingPage({
         moduleId: moduleResolution.resolvedModuleId,
         kioskType,
         ...(kioskType === 'CTF7' ? {machineSN: ctf7MachineSN.trim()} : {}),
+        ...(addingCtf7 ? {addToStation: true} : {}),
       });
 
       resetBindingForm();

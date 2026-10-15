@@ -5,21 +5,60 @@ service cloud.firestore {
     function isAdmin() {
       return request.auth != null && (
         request.auth.token.role == 'admin' ||
-        request.auth.token.username == 'chargerent' ||
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.username == 'chargerent'
+        request.auth.token.username == 'chargerent'
       );
     }
 
-    // Keep users locked down: only owner can read/write their profile
+    function hasClientScope() {
+      return request.auth != null && request.auth.token.clientId is string &&
+        request.auth.token.clientId.size() > 0;
+    }
+
+    function isPartner() {
+      return request.auth != null && request.auth.token.role == 'partner';
+    }
+
+    function canReadKioskData(data) {
+      return isAdmin() || (hasClientScope() && data.info is map && (
+        (isPartner() && data.info.rep in [
+          request.auth.token.clientId,
+          request.auth.token.clientId.lower(),
+          request.auth.token.clientId.upper()
+        ]) ||
+        (!isPartner() && data.info.client in [
+          request.auth.token.clientId,
+          request.auth.token.clientId.lower(),
+          request.auth.token.clientId.upper()
+        ])
+      ));
+    }
+
+    function canReadKioskAccess(data) {
+      return isAdmin() || (hasClientScope() && data is map && (
+        (isPartner() && data.repId in [
+          request.auth.token.clientId,
+          request.auth.token.clientId.lower(),
+          request.auth.token.clientId.upper()
+        ]) ||
+        (!isPartner() && data.clientId in [
+          request.auth.token.clientId,
+          request.auth.token.clientId.lower(),
+          request.auth.token.clientId.upper()
+        ])
+      ));
+    }
+
+    function canReadStation(stationId) {
+      return canReadKioskAccess(
+        get(/databases/$(database)/documents/kioskAccess/$(stationId)).data
+      );
+    }
+
+    // Profiles are server-written. A signed-in user can only read their own
+    // profile; administrators receive their role through immutable Auth claims.
     match /users/{uid} {
-      allow read: if request.auth != null && request.auth.uid == uid;
-      // Google account state is written only by the provisioning backend.
-      allow create: if request.auth != null && request.auth.uid == uid &&
-        !request.resource.data.keys().hasAny(['workspaceMailbox']);
-      allow update: if request.auth != null && request.auth.uid == uid &&
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['workspaceMailbox']);
-      allow delete: if false;
+      allow read: if request.auth != null && (request.auth.uid == uid || isAdmin());
+      allow write: if false;
     }
 
     // Account provisioning requests and ownership markers are server-only.
@@ -87,6 +126,20 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Regional partner invitations use hashed one-time tokens. Applicants and
+    // admins access them only through validated Cloud Functions.
+    match /regionalPartnerOnboardingInvites/{inviteId} {
+      allow read, write: if false;
+    }
+
+    match /regionalPartnerAgreements/{agreementId} {
+      allow read, write: if false;
+    }
+
+    match /regionalPartnerAgreementChallenges/{inviteId} {
+      allow read, write: if false;
+    }
+
     // Financial records and bank-connection metadata are never exposed to the
     // browser SDK. Admins use Cloud Functions so access is checked and audited
     // server-side. Plaid application secrets belong in Secret Manager, and
@@ -95,14 +148,44 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // TEMP: allow the legacy site to read these without Firebase Auth
+    // Dashboard reads are authenticated and scoped to the kiosk relationship
+    // encoded in the caller's immutable clientId/role custom claims.
     match /kiosks/{docId} {
-      allow read: if true;
+      allow read: if request.auth != null && canReadKioskData(resource.data);
       allow write: if false;
     }
 
+    // Station-to-owner projections let rental documents be authorized without
+    // assuming that a kiosk document ID is the same as its station ID.
+    match /kioskAccess/{stationId} {
+      allow read, write: if false;
+    }
+
     match /rentals/{docId} {
-      allow read: if true;
+      allow read: if request.auth != null && (
+        isAdmin() ||
+        (resource.data.rentalStationid is string && canReadStation(resource.data.rentalStationid))
+      );
+      allow write: if false;
+    }
+
+    match /rentalDashboardStats/{stationId} {
+      allow read: if request.auth != null && (isAdmin() || canReadStation(stationId));
+      allow write: if false;
+    }
+
+    match /rentalDashboardMeta/{docId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /server/{docId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    match /stations/{stationId}/snapshots/{snapshotId} {
+      allow read: if request.auth != null && (isAdmin() || canReadStation(stationId));
       allow write: if false;
     }
 
@@ -209,45 +292,21 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // Everything else: no public read, no writes
+    // Everything else is administrator-readable only. Product-specific access
+    // must be granted explicitly above rather than inherited by every account.
     match /{collection}/{document=**} {
-      allow read: if request.auth != null &&
-        collection != 'ctf7Bindings' &&
-        collection != 'ctf7Sessions' &&
-        collection != 'ctf7Inventory' &&
-        collection != 'ctf7Events' &&
-        collection != 'ctf7Commands' &&
-        collection != 'ctf7CommandLocks' &&
+      allow read: if isAdmin() &&
+        !collection.matches('ctf7.*') &&
         collection != 'workspaceProvisioning' &&
-        collection != 'supportTickets' &&
-        collection != 'supportTelephonyStaff' &&
-        collection != 'supportTelephonyConfig' &&
-        collection != 'supportVoicePrompts' &&
-        collection != 'supportCallLogs' &&
         collection != 'chargeDropsAgreements' &&
         collection != 'chargeDropsAgreementChallenges' &&
         collection != 'chargeDropsPartnerNotifications' &&
+        collection != 'regionalPartnerOnboardingInvites' &&
+        collection != 'regionalPartnerAgreements' &&
+        collection != 'regionalPartnerAgreementChallenges' &&
         collection != 'accounting' &&
-        collection != 'kioskEvents' &&
-        collection != 'kioskIncidents' &&
-        collection != 'phoneDevices' &&
-        collection != 'phoneDeviceCommands' &&
-        collection != 'phoneKioskAssignments' &&
         collection != 'phoneDeviceEnrollments' &&
-        collection != 'payterTerminals' &&
-        collection != 'payterRuntime' &&
-        collection != 'payterUiConfig' &&
-        collection != 'apolloProfileTests' &&
-        collection != 'apolloProfileTestLocks' &&
-        collection != 'apolloProfileTemplates' &&
-        collection != 'apolloProfileReleases' &&
-        collection != 'apolloClientAssignments' &&
-        collection != 'apolloTerminalRegistry' &&
-        collection != 'apolloTerminalRuntime' &&
-        collection != 'apolloQrCredentials' &&
-        collection != 'apolloRuntimeEvents' &&
-        collection != 'apolloVendSessions' &&
-        collection != 'apolloLabRentals'; // signed-in only, except protected data above
+        collection != 'apolloQrCredentials';
       allow write: if false;
     }
   }

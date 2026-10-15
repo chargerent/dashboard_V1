@@ -3,20 +3,32 @@ import fs from 'node:fs';
 import test from 'node:test';
 
 import {defaultStripeUi, stripeText, validateStripeUi} from '../src/integrated-media/stripeUi.js';
-import {checkoutUsesColumns, floatingCheckoutGeometry} from '../src/integrated-media/checkoutFlow.js';
+import {checkoutUsesColumns, floatingCheckoutGeometry, directTapCheckoutGeometry, checkoutScreenTimeoutMs, checkoutInactivityTimeoutMs, refreshCheckoutNotice, normalizeCheckoutReturnNotice} from '../src/integrated-media/checkoutFlow.js';
 
 const editor = fs.readFileSync(new URL('../src/integrated-media/StripeProfileEditor.jsx', import.meta.url), 'utf8');
 const preview = fs.readFileSync(new URL('../src/integrated-media/CheckoutPreview.jsx', import.meta.url), 'utf8');
 const styles = fs.readFileSync(new URL('../src/integrated-media/media-studio.css', import.meta.url), 'utf8');
 
-test('the dashboard uses the same minimum portrait and landscape checkout heights as Android', () => {
-  assert.equal(floatingCheckoutGeometry(1920, 1080, .16).expandedHeight, 360);
-  assert.equal(floatingCheckoutGeometry(1920, 1080, .16, 1.6).expandedHeight, 420);
-  assert.equal(floatingCheckoutGeometry(1920, 1080, .40).expandedHeight, 432);
-  assert.equal(floatingCheckoutGeometry(1080, 1920, .16).expandedHeight, 384);
+test('the dashboard uses the selected height from 15% to 50% in both orientations', () => {
+  for(const [width,height] of [[1080,1920],[540,960],[1920,1080]])for(let percent=15;percent<=50;percent++){
+    const geometry=floatingCheckoutGeometry(width,height,percent/100);
+    assert.equal(geometry.expandedHeight,Math.round(height*percent/100));
+    assert.ok(geometry.contentScale>0 && geometry.contentScale<=1);
+  }
+  assert.equal(floatingCheckoutGeometry(1080,1920,.10).expandedHeight,288);
 });
 
-test('column choice uses the native effective panel height after its portrait floor', () => {
+test('no-touch panel sizing responds below 20% and scales its contents to fit',()=>{
+  for(const [width,height] of [[1080,1920],[540,960],[1920,1080]])for(const stage of ['touch_ready','returned'])for(let percent=15;percent<=50;percent++){
+    const geometry=directTapCheckoutGeometry(floatingCheckoutGeometry(width,height,percent/100),width,height,stage,true);
+    assert.equal(geometry.expandedHeight,Math.round(height*percent/100));
+    assert.ok(geometry.contentScale>0 && geometry.contentScale<=1);
+  }
+  const compact=directTapCheckoutGeometry(floatingCheckoutGeometry(1080,1920,.15),1080,1920,'touch_ready',true);
+  assert.equal(compact.contentScale,288/392);
+});
+
+test('column choice uses the native effective panel height at the selected height', () => {
   assert.equal(checkoutUsesColumns(1080, 1920, .16), true);
   assert.equal(checkoutUsesColumns(1080, 1920, .20), true);
   assert.equal(checkoutUsesColumns(1080, 1920, .30), false);
@@ -49,18 +61,13 @@ test('older saved profiles inherit the new slot and completion copy', () => {
   assert.equal(normalized.locales.fr['returned.body'], 'Texte personnalisé');
 });
 
-test('the editor merges instructions and completion into one Return section', () => {
-  assert.match(editor, /\{key:'returning',label:'Return'\}/);
-  assert.doesNotMatch(editor, /\{key:'returned',label:'Return complete'\}/);
-  assert.match(editor, /aria-label="Return preview state"/);
-  assert.match(editor, /\['returning','Instructions'\],\['returned','Return complete'\]/);
-});
-
-test('confirmation previews show a centered banner for release and failure events', () => {
-  assert.match(editor, /aria-label="Confirmation preview event"/);
-  assert.match(editor, /data-testid="stripe-confirmation-popup"/);
-  assert.match(editor, /group === 'popups' && !selectedPage && previewPopupType !== 'charger_returned' && !paymentOnly/);
-  assert.match(styles, /\.ms-stripe-popup p\{color:inherit\}/);
+test('published App Test v2 resolves to the same effective checkout text as the hosted app', () => {
+  const published = JSON.parse(fs.readFileSync(new URL('../tests/fixtures/app-test-v2-published-20261003.json', import.meta.url), 'utf8'));
+  const effective = JSON.parse(fs.readFileSync(new URL('../tests/fixtures/app-test-v2-effective-20261003.json', import.meta.url), 'utf8'));
+  assert.deepEqual(validateStripeUi(published.stripeUi), validateStripeUi(effective.stripeUi));
+  const custom = structuredClone(published.stripeUi);
+  custom.locales.en['failed.body'] = 'Ask at the front desk for help.';
+  assert.equal(validateStripeUi(custom).locales.en['failed.body'], 'Ask at the front desk for help.');
 });
 
 test('the kiosk preview waits for confirmation and shares one completed-return card', () => {
@@ -78,11 +85,11 @@ test('checkout cards omit branding and keep language in the top-right corner', (
 });
 
 test('help is QR-only on Rent Return and omitted from every other checkout page', () => {
-  assert.match(preview, /const showHelpQr=!currentPage && stage==='ready' && !!helpLink/);
+  assert.match(preview, /const showHelpQr=!currentPage && \(directTap\?tapToRent:stage==='ready' \|\| stage==='sold_out'\) && !!helpLink/);
   assert.match(preview, /data-help-url=\{helpLink\}/);
-  assert.match(preview, /text\('helpTitle'\)/);
+  assert.match(preview, /text\(directTap\?'helpTermsTitle':'helpTitle'\)/);
   assert.match(preview, /text\('helpScan'\)/);
-  assert.match(preview, /alt=\{`Help QR code for \$\{helpStationId\}`\}/);
+  assert.match(preview, /alt=\{`\$\{directTap\?'Help and rental terms':'Help'\} QR code for \$\{helpStationId\}`\}/);
   assert.doesNotMatch(preview, /<p[^>]*>\{text\('support'\)\}<\/p>/);
   assert.doesNotMatch(preview, /\['information','returning','returned','out_of_order'\]\.includes\(stage\)/);
   assert.match(editor, /!\['brand','support','receipt','receipt\.title','receipt\.body','tap','insert'/);
@@ -95,12 +102,12 @@ test('the Rent Return help QR uses the soft support card without changing action
   assert.match(styles, /\.ms-checkout-panel\.compact:not\(\.start\) \.ms-checkout-actions\{padding-top:0;justify-content:center\}/);
   assert.match(styles, /\.ms-checkout-panel\.ready\.compact\.help-column\{grid-template-columns:minmax\(0,\.78fr\) calc\(var\(--checkout-pixel\) \* 220\) minmax\(0,1fr\)/);
   assert.match(styles, /\.ms-checkout-panel\.ready\.compact\.help-column \.ms-checkout-help-zone \.ms-checkout-help\{position:static/);
-  assert.match(preview, /helpInOwnColumn && <div className="ms-checkout-help-zone">\{helpCard\}<\/div>/);
+  assert.match(preview, /\(helpInOwnColumn \|\| portraitTap\) && <div className="ms-checkout-help-zone">\{helpCard\}<\/div>/);
   assert.match(styles, /\.ms-checkout-panel\.ready \.ms-checkout-actions>button[^\n]+width:60%/);
   assert.match(styles, /background:var\(--checkout-background\);border:[^\n]+border-radius:[^\n]+box-shadow:/);
   assert.match(styles, /\.ms-checkout-panel \.ms-checkout-help-qr[^\n]+width:calc\(var\(--checkout-pixel\) \* 160\);height:calc\(var\(--checkout-pixel\) \* 160\)/);
   assert.match(preview, /ms-checkout-help-heading[^\n]+ms-checkout-help-title[^\n]+ms-checkout-help-mark/);
-  assert.match(preview, /text\('helpTitle'\)\.trim\(\)\.replace\(/);
+  assert.match(preview, /text\(directTap\?'helpTermsTitle':'helpTitle'\)\.trim\(\)\.replace\(/);
   assert.match(styles, /\.ms-checkout-panel \.ms-checkout-help-mark\{[^\n]+28\)/);
 });
 
@@ -114,12 +121,41 @@ test('the Rent Return help QR accepts an HTTPS URL with the station variable', (
   assert.throws(() => validateStripeUi(profile), /stationId/);
 });
 
-test('the standalone Receipt page is removed but Return Complete keeps receipt configuration', () => {
+test('the standalone Receipt page is removed while vend and return share transaction receipt configuration', () => {
   assert.doesNotMatch(preview, /button\('receipt'|showInformation\('receipt'\)/);
-  assert.match(preview, /if\(stage==='succeeded'\)return button\('done'/);
+  assert.match(preview, /if\(stage==='returned' \|\| stage==='succeeded'\)return .*ms-return-receipt/);
   assert.doesNotMatch(preview, /'terms','map','receipt'/);
   assert.doesNotMatch(editor, /\{key:'receipt',label:'Receipt'/);
-  assert.match(editor, /label="Return receipt URL"/);
-  assert.match(editor, /draft\.links\?\.receipt/);
+  assert.doesNotMatch(editor, /label="Return receipt URL"|draft\.links\?\.receipt/);
+  assert.match(preview, /checkoutTransactionReceipt\(vendNotice\)/);
+  assert.match(preview, /checkoutVendReceipt\(interaction\)/);
   assert.match(preview, /ms-return-receipt/);
+});
+
+
+test('profile timeout controls ordinary screens and preserves the payment safety floor', () => {
+  assert.equal(checkoutScreenTimeoutMs({}), 45000);
+  for (const seconds of [10, 30, 45, 90, 120]) {
+    const profile = {screenTimeoutSeconds: seconds};
+    for (const phase of ['idle', 'dispensing', 'succeeded', 'failed'])
+      assert.equal(checkoutInactivityTimeoutMs(profile, phase), seconds * 1000);
+    for (const phase of ['awaiting_payment', 'authorizing'])
+      assert.equal(checkoutInactivityTimeoutMs(profile, phase), Math.max(seconds * 1000, 45000));
+  }
+  for (const seconds of [0, 9, 121, '60', 30.5, NaN])
+    assert.equal(checkoutScreenTimeoutMs({screenTimeoutSeconds: seconds}), 45000);
+});
+
+test('return notice display duration is profile driven while source freshness stays independent', () => {
+  const now = 100000;
+  const event = {eventId: 'spare-return', type: 'charger_returned', stationId: 'LOCAL-KIOSK', slot: 4,
+    occurredAt: new Date(now).toISOString(), expiresAt: new Date(now + 30000).toISOString()};
+  const notice = normalizeCheckoutReturnNotice(event, {now, timeoutMs: 120000});
+  assert.equal(notice.noticeExpiresAt, now + 120000);
+  const updated = refreshCheckoutNotice(notice, now + 15000, 45000);
+  assert.equal(updated.noticeExpiresAt, now + 60000);
+  assert.equal(updated.eventId, event.eventId);
+  assert.equal(updated.slot, event.slot);
+  assert.equal(refreshCheckoutNotice(notice, now + 120000, 45000), notice);
+  assert.equal(normalizeCheckoutReturnNotice(event, {now: now + 30001, timeoutMs: 120000}), null);
 });

@@ -1,6 +1,9 @@
 import { app, auth, FUNCTIONS_REGION } from '../firebase-config';
 
 const HTTP_FUNCTION_NAME_MAP = {
+  kiosk_provisionLocalStation: 'kiosk_httpProvisionLocalStation',
+  kiosk_localStationCommand: 'kiosk_httpLocalStationCommand',
+  kiosk_localStationCommandStatus: 'kiosk_httpLocalStationCommandStatus',
   admin_listUsers: 'admin_httpListUsers',
   admin_deleteUser: 'admin_httpDeleteUser',
   admin_upsertUserProfile: 'admin_httpUpsertUserProfile',
@@ -26,10 +29,13 @@ const HTTP_FUNCTION_NAME_MAP = {
   auth_syncOwnClaims: 'auth_httpSyncOwnClaims',
   kiosk_updateSection: 'kiosk_httpUpdateSection',
   kiosk_updateSlotLock: 'kiosk_httpUpdateSlotLock',
+  kiosk_ctf7Command: 'kiosk_httpCtf7Command',
+  kiosk_ctf7CommandStatus: 'kiosk_httpCtf7CommandStatus',
   uiProfile_list: 'uiProfile_httpList',
   uiProfile_upsert: 'uiProfile_httpUpsert',
   uiProfile_delete: 'uiProfile_httpDelete',
   uiProfile_apply: 'uiProfile_httpApply',
+  uiProfile_setStationBrand: 'uiProfile_httpSetStationBrand',
   apolloProfile_testStart: 'apolloProfile_httpTestStart',
   apolloProfile_testStatus: 'apolloProfile_httpTestStatus',
   media_listAssets: 'media_httpListAssets',

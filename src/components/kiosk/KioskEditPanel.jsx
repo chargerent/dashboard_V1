@@ -11,6 +11,7 @@ import {
 } from '../forms/FormFields.jsx';
 import { getKioskPowerThreshold, isNewBoundKioskStation, isV2Kiosk, normalizeKioskInfoForSchema } from '../../utils/helpers';
 import { canEditTerminalSerial, canUseApolloScannerOnly, toGatewayOption, toStoredKioskGateway } from '../../utils/kioskGateway';
+import { calculateRateArray } from '../../utils/kioskPricing.js';
 
 const DEFAULT_WIFI = { name: 'chargerent', password: 'Charger33' };
 const V2_DEFAULT_WIFI = { name: 'powerbank', password: '123456789' };
@@ -120,6 +121,9 @@ const getInitialPricing = (kiosk) => {
     });
 
     pricing.online = normalizePricingOnline(pricing.online);
+    pricing.touch = pricing.touch !== false;
+    pricing.offline = pricing.offline === true;
+    pricing.stripeOfflinePayments = pricing.stripeOfflinePayments === true;
     if (pricing.uids != null) {
         pricing.uids = normalizePricingUids(pricing.uids);
     }
@@ -163,51 +167,6 @@ export const Section = ({ title, sectionKey, children, isOpen, onToggle, onSave,
     );
 
 // --- Main Edit Panel Component ---
-
-const calculateRateArray = (pricing) => {
-    const pricingstyle = pricing.text;
-    const initialprice = Number(pricing.authamount || 0);
-    const initialperiod = Number(pricing.initialperiod || 0); // in hours
-    const dailyprice = Number(pricing.dailyprice || 0);
-    const overdueby = Number(pricing.overdue || 0); // in days
-
-    const rentprice = [];
-    const DAY_IN_MINUTES = 1440; // 24 * 60
-
-    switch (pricingstyle) {
-        case "PURCHASE - SIMPLE DAILY":
-            for (let i = 1; i <= overdueby; i++) {
-                rentprice.push({ time: i * DAY_IN_MINUTES, price: i * dailyprice });
-            }
-            break;
-        case "PURCHASE - MIXED DAILY":
-            rentprice.push({ time: initialperiod * 60, price: initialprice });
-            for (let i = 1; i <= overdueby; i++) {
-                rentprice.push({ time: i * DAY_IN_MINUTES, price: i * dailyprice });
-            }
-            break;
-        case "PURCHASE SIMPLE 24 HRS":
-            rentprice.push({ time: DAY_IN_MINUTES, price: dailyprice });
-            break;
-        case "PURCHASE - MIXED DAY":
-            rentprice.push({ time: initialperiod * 60, price: initialprice });
-            rentprice.push({ time: DAY_IN_MINUTES, price: dailyprice });
-            break;
-        case "LEASE - SIMPLE DAILY":
-            rentprice.push({ time: DAY_IN_MINUTES, price: 0 });
-            for (let i = 1; i < overdueby; i++) {
-                rentprice.push({ time: (i + 1) * DAY_IN_MINUTES, price: i * dailyprice });
-            }
-            break;
-        case "LEASE - MIXED DAILY":
-            rentprice.push({ time: initialperiod * 60, price: 0 });
-            for (let i = 1; i <= overdueby; i++) {
-                rentprice.push({ time: i * DAY_IN_MINUTES, price: i * dailyprice });
-            }
-            break;
-    }
-    return rentprice;
-};
 
 function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVersion, _serverFlowVersion }) {
     const isNewBoundKiosk = isNewBoundKioskStation(kiosk?.stationid);
@@ -277,7 +236,7 @@ function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVe
         
         // For pricing section, convert specific fields to numbers.
         if (section === 'pricing') {
-            if (PRICING_NUMERIC_FIELDS.includes(path)) {
+            if (PRICING_NUMERIC_FIELDS.includes(path) || ['stripeOfflineMaxPayment', 'stripeOfflineMaxPending'].includes(path)) {
                 processedValue = value === '' ? '' : Number(value);
             }
         } else if (section === 'info') {
@@ -289,7 +248,7 @@ function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVe
 
         // By default, convert string values to uppercase before setting state.
         // The `process` flag can be set to false to skip this.
-        if (process && typeof processedValue === 'string' && section !== 'wifi' && section !== 'marketingoptions') {
+        if (process && !(section === 'hardware' && ['vendor', 'checkoutExecution', 'serialPort', 'billingOwner'].includes(path)) && typeof processedValue === 'string' && section !== 'wifi' && section !== 'marketingoptions') {
             processedValue = processedValue.toUpperCase();
         }
 
@@ -367,8 +326,15 @@ function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVe
     const handleSave = (section, _data) => {
         const nextFormData = {
             ...formData,
+            stationBrand: kiosk.stationBrand || 'chargerent',
             info: normalizeKioskInfoForSchema(formData.info, usesNewSchemaInfo),
         };
+        if (section === 'pricing') {
+            nextFormData.pricing = {
+                ...formData.pricing,
+                rate: calculateRateArray(formData.pricing),
+            };
+        }
         onSave(kiosk.stationid, section, nextFormData, nextFormData.info.autoGeocode);
     };
 
@@ -468,6 +434,13 @@ function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVe
                     </Section>
                 )}
                 <Section title="Hardware" sectionKey="hardware" isOpen={openSection === 'hardware'} onToggle={handleToggleSection} onSave={handleSave} data={formData.hardware} isChanged={JSON.stringify(formData.hardware) !== JSON.stringify(originalData.hardware)}>
+                    <FormMultiSwitch label="Station Vendor" name="vendor" options={['besiter', 'lita']} value={formData.hardware?.vendor || 'besiter'} section="hardware" onDataChange={(sec, name, val) => { onDataChange(sec, name, val); onDataChange(sec, 'serialPort', val === 'lita' ? '/dev/ttyS1' : '/dev/ttySMT7'); onDataChange(sec, 'slotsPerBoard', val === 'lita' ? 12 : 4); if (val === 'lita') { onDataChange(sec, 'checkoutExecution', 'local'); onDataChange(sec, 'billingOwner', 'local_station_v1'); onDataChange(sec, 'boardCount', 1); } }} />
+                    <FormMultiSwitch label="Rental Controller" name="checkoutExecution" options={['backend', 'local']} value={formData.hardware?.checkoutExecution || 'backend'} section="hardware" onDataChange={(sec, name, val) => { onDataChange(sec, name, val); onDataChange(sec, 'billingOwner', val === 'local' ? 'local_station_v1' : ''); }} />
+                    {formData.hardware?.checkoutExecution === 'local' && <>
+                        <FormInput label="Serial Port" name="serialPort" value={formData.hardware.serialPort || (formData.hardware.vendor === 'lita' ? '/dev/ttyS1' : '/dev/ttySMT7')} section="hardware" onDataChange={onDataChange} />
+                        <FormInput label="Board Count" name="boardCount" type="number" value={formData.hardware.boardCount || 1} section="hardware" onDataChange={onDataChange} />
+                        <FormInput label="Slots per Board" name="slotsPerBoard" type="number" value={formData.hardware.slotsPerBoard || (formData.hardware.vendor === 'lita' ? 12 : 4)} section="hardware" onDataChange={onDataChange} />
+                    </>}
                     <FormMultiSwitch 
                         label="Gateway" 
                         name="gateway" 
@@ -561,6 +534,31 @@ function KioskEditPanel({ kiosk, onSave, _onCommand, _clientInfo, t, _serverUiVe
                             'PURCHASE - MIXED DAY', 'LEASE - SIMPLE DAILY', 'LEASE - MIXED DAILY', 'EVENT - SIMPLE'
                         ]}
                     />
+                    {kiosk?.hardware?.checkoutExecution === 'local' && kiosk?.hardware?.billingOwner === 'local_station_v1' && (
+                        <div className="mt-4">
+                            {kiosk?.hardware?.gateway === 'STRIPE' && <div className="mb-4">
+                                <FormToggle label="Touch" name="touch" checked={formData.pricing?.touch !== false} section="pricing" onDataChange={onDataChange} disabled={formData.pricing?.offline === true} />
+                                <p className="mt-1 text-sm text-gray-600">On: use the touchscreen rental menu. Off: tap a card directly to rent. Sold out disables card collection automatically; charger returns remain available.</p>
+                                {formData.pricing?.offline === true && <p className="mt-1 text-sm text-gray-600">No-card rental mode requires Touch to be on.</p>}
+                            </div>}
+                            <FormToggle label="Offline mode (no card payment)" name="offline" checked={formData.pricing?.offline === true} section="pricing" onDataChange={(section, name, value) => { onDataChange(section, name, value); if (value) onDataChange('pricing', 'touch', true); }} />
+                            <p className="mt-1 text-sm text-gray-600">Rent immediately releases an eligible charger without payment. Rentals and returns sync when connected.</p>
+                            {kiosk?.hardware?.gateway === 'STRIPE' && (
+                                <div className="mt-4">
+                                    <FormToggle label="Stripe offline card payments" name="stripeOfflinePayments" checked={formData.pricing?.stripeOfflinePayments === true} section="pricing" onDataChange={onDataChange} />
+                                    <p className="mt-1 text-sm text-gray-600">Accept card payments during an internet outage and submit them when connected. Bank approval and deposit holds are delayed; a payment can decline after the charger is released. Turning this off stops new offline card payments after the station syncs.</p>
+                                    {formData.pricing?.offline === true && <p className="mt-1 text-sm text-gray-600">No-card rental mode takes priority. Turn it off to collect card payments.</p>}
+                                    {formData.pricing?.stripeOfflinePayments === true && (
+                                        <div className="mt-3 grid grid-cols-2 gap-4">
+                                            <FormInput label="Offline payment limit" name="stripeOfflineMaxPayment" value={formData.pricing?.stripeOfflineMaxPayment ?? 100} section="pricing" type="number" onDataChange={onDataChange} />
+                                            <FormInput label="Pending offline total limit" name="stripeOfflineMaxPending" value={formData.pricing?.stripeOfflineMaxPending ?? 500} section="pricing" type="number" onDataChange={onDataChange} />
+                                            <p className="col-span-2 text-sm text-gray-600">Limits use the station payment currency. Connect and update the reader before offline use.</p>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    )}
                     <div className="mt-4 max-w-xs">
                         <FormToggle label="Online" name="online" checked={formData.pricing?.online !== false} section="pricing" onDataChange={onDataChange} />
                     </div>

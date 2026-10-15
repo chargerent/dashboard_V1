@@ -2,6 +2,7 @@
 import { useState, useMemo, useRef } from 'react';
 import { EyeIcon, EyeSlashIcon } from '@heroicons/react/24/outline';
 import MultiSwitch from "../utils/MultiSwitch";
+import ReceiptLogoField from '../components/ReceiptLogoField.jsx';
 import {
   DEFAULT_WORKSPACE_DOMAIN,
   buildWorkspaceMailboxRequest,
@@ -81,6 +82,8 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
   const [workspaceAvailability, setWorkspaceAvailability] = useState(null);
   const [checkingWorkspaceEmail, setCheckingWorkspaceEmail] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [receiptLogoFile, setReceiptLogoFile] = useState(null);
+  const [receiptLogoChecking, setReceiptLogoChecking] = useState(false);
   const submitInFlight = useRef(false);
   const checkInFlight = useRef(false);
   const availabilityVersion = useRef(0);
@@ -100,7 +103,7 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
   const workspaceEmail = `${normalizeWorkspaceLocalPart(workspaceDetails.localPart)}@${workspaceDomain}`;
   const availabilityKey = JSON.stringify([workspaceEmail, workspaceDetails.givenName, workspaceDetails.familyName]);
   const currentAvailability = workspaceAvailability?.key === availabilityKey ? workspaceAvailability : null;
-  const busy = creating || submitting;
+  const busy = creating || submitting || receiptLogoChecking;
 
   const normalizeUsername = (u) => String(u || '').trim().toLowerCase();
   const isValidUsername = (u) => /^[a-z0-9._-]+$/.test(u);
@@ -274,6 +277,7 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
         password: newClient.password, // only sent to Cloud Function; NOT stored in Firestore
         clientId: profile.clientId,
         profile,
+        receiptLogoFile,
         sendCredentials: (emailCredentials || (isPartnerRole && includePartnerKit)) && !!profile.contact.email,
         includePartnerKit: isPartnerRole && includePartnerKit,
         ...(workspaceMailbox ? { workspaceMailbox } : {}),
@@ -320,7 +324,7 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
       <h3 className="font-bold text-xl text-gray-800 mb-4">{t('add_new_client')}</h3>
 
       <div className="bg-blue-50 border border-blue-200 text-blue-800 px-4 py-3 rounded mb-4 text-sm">
-        Create dashboard access for a client, partner, or administrator.
+        Create dashboard access for a client or administrator. New regional partners must use the invitation-based Regional Partner Onboarding flow.
       </div>
 
       {formError && <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">{formError}</div>}
@@ -382,7 +386,6 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
             <select name="role" value={newClient.role} onChange={handleInputChange}
               className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2">
               <option value="user">user</option>
-              <option value="partner">partner</option>
               <option value="admin">admin</option>
             </select>
           </div>
@@ -414,6 +417,12 @@ const CreateClientForm = ({ clients, onCreate, onCancel, t, featuresList, comman
               required maxLength={254} autoCapitalize="none" spellCheck={false} aria-describedby="contact-email-hint"
               className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2" />
             <p id="contact-email-hint" className="mt-1 text-xs text-gray-500">Use an existing email address they can already access.</p>
+          </div>
+
+          <div className="md:col-span-2">
+            <ReceiptLogoField value={null} file={receiptLogoFile} onFileChange={setReceiptLogoFile}
+              onCheckingChange={setReceiptLogoChecking} disabled={creating || submitting}
+              onRemove={() => setReceiptLogoFile(null)} />
           </div>
 
           {workspaceEligible && (

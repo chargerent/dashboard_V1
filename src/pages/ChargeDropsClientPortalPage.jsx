@@ -9,6 +9,7 @@ import {
 } from '@heroicons/react/24/outline';
 import {callFunctionWithAuth} from '../utils/callableRequest.js';
 import DashboardPageActions from '../components/UI/DashboardPageActions.jsx';
+import {rentalRevenueBasis} from '../utils/chargeDropsRevenue.js';
 
 const EXCLUDED_RENTAL_STATUSES = new Set(['purchased', 'purchase-pending', 'purchased-pending']);
 
@@ -43,7 +44,8 @@ function stationIsOnline(station) {
 }
 
 function agreementStatusLabel(status) {
-  if (status === 'signed') return 'Client signed';
+  if (status === 'fully_executed') return 'Fully executed';
+  if (status === 'client_signed' || status === 'signed') return 'Waiting for Ocharge countersignature';
   if (status === 'awaiting_signature') return 'Ready to sign';
   if (status === 'voided') return 'Voided';
   return 'Not prepared';
@@ -73,18 +75,22 @@ export default function ChargeDropsClientPortalPage({clientInfo, stations = [], 
   const city = clientInfo?.chargedrops?.city || {};
   const onboarding = clientInfo?.chargedrops?.onboarding || {};
   const qualifyingRentals = useMemo(() => rentals.filter(eligibleRental), [rentals]);
-  const grossRevenue = useMemo(
-    () => qualifyingRentals.reduce((sum, rental) => sum + (Number(rental?.totalCharged) || 0), 0),
-    [qualifyingRentals],
-  );
-  const clientShare = grossRevenue * (sharePercent / 100);
+  const revenue = useMemo(() => qualifyingRentals.reduce((totals, rental) => {
+    const basis = rentalRevenueBasis(rental);
+    totals.gross += basis.gross;
+    totals.refunds += basis.refunds;
+    totals.taxes += basis.taxes;
+    totals.qualifying += basis.qualifying;
+    return totals;
+  }, {gross: 0, refunds: 0, taxes: 0, qualifying: 0}), [qualifyingRentals]);
+  const clientShare = revenue.qualifying * (sharePercent / 100);
   const onlineCount = stations.filter(stationIsOnline).length;
   const savedPayout = clientInfo?.chargedrops?.payout || {};
   const savedAgreement = clientInfo?.chargedrops?.agreement || {};
   const [agreement, setAgreement] = useState(previewMode ? {
     id: 'preview-agreement',
     title: 'ChargeRent Revenue Share Agreement',
-    version: 'V.11.01.2024',
+    version: 'V.10.07.2026',
     status: 'awaiting_signature',
     canSign: true,
     agreementUrl: '',
@@ -106,12 +112,14 @@ export default function ChargeDropsClientPortalPage({clientInfo, stations = [], 
   const [payout, setPayout] = useState({
     status: savedPayout.status || (onboarding.payoutStatus === 'complete' ? 'complete' : 'not_started'),
     ready: savedPayout.ready === true || onboarding.payoutStatus === 'complete',
+    platformReady: savedPayout.platformReady === true,
     mode: savedPayout.mode || '',
     requirementsDue: Number(savedPayout.requirementsDue || 0),
   });
   const [payoutBusy, setPayoutBusy] = useState(false);
   const [payoutError, setPayoutError] = useState('');
-  const agreementSigned = agreement.status === 'signed';
+  const agreementClientSigned = ['client_signed', 'fully_executed', 'signed'].includes(agreement.status);
+  const agreementFullyExecuted = agreement.status === 'fully_executed';
 
   const refreshAgreementStatus = useCallback(async () => {
     if (previewMode) return null;
@@ -150,8 +158,8 @@ export default function ChargeDropsClientPortalPage({clientInfo, stations = [], 
     setAgreementError('');
     try {
       const result = await callFunctionWithAuth('chargedrops_signAgreement', signatureForm, {timeoutMs: 120000});
-      setAgreement(result?.agreement || {status: 'signed'});
-      setVerificationMessage('Your signature was recorded and a client-signed copy was emailed to you.');
+      setAgreement(result?.agreement || {status: 'client_signed'});
+      setVerificationMessage('Your signature was recorded. Ocharge must countersign before payout setup unlocks.');
       setSignatureForm((previous) => ({...previous, code: ''}));
     } catch (error) {
       setAgreementError(error?.message || 'The agreement could not be signed.');
@@ -164,6 +172,7 @@ export default function ChargeDropsClientPortalPage({clientInfo, stations = [], 
     if (previewMode) return {
       status: 'requirements_due',
       ready: false,
+      platformReady: false,
       mode: 'test',
       requirementsDue: 2,
     };
@@ -174,8 +183,12 @@ export default function ChargeDropsClientPortalPage({clientInfo, stations = [], 
 
   const openPayoutSetup = useCallback(async () => {
     if (payoutBusy || previewMode) return;
-    if (!agreementSigned) {
-      setPayoutError('Sign the ChargeDrops agreement before setting up payouts.');
+    if (!agreementFullyExecuted) {
+      setPayoutError('Ocharge must countersign the agreement before payout setup unlocks.');
+      return;
+    }
+    if (payout.platformReady !== true) {
+      setPayoutError('Commission payout setup is still being finalized. Please try again later.');
       return;
     }
     setPayoutBusy(true);
@@ -190,7 +203,7 @@ export default function ChargeDropsClientPortalPage({clientInfo, stations = [], 
       setPayoutError(error?.message || 'Stripe payout setup is temporarily unavailable.');
       setPayoutBusy(false);
     }
-  }, [agreementSigned, payoutBusy, previewMode]);
+  }, [agreementFullyExecuted, payout.platformReady, payoutBusy, previewMode]);
 
   useEffect(() => {
     let canceled = false;
@@ -215,14 +228,14 @@ export default function ChargeDropsClientPortalPage({clientInfo, stations = [], 
       setPayoutBusy(true);
       setPayoutError('');
       try {
-        if (payoutReturn === 'refresh') {
+        const status = await refreshPayoutStatus();
+        if (payoutReturn === 'refresh' && status?.platformReady === true) {
           const result = await callFunctionWithAuth('chargedrops_stripeOnboardingLink', {}, {timeoutMs: 30000});
           if (!canceled && String(result?.url || '').startsWith('https://connect.stripe.com/')) {
             window.location.assign(result.url);
             return;
           }
         }
-        const status = await refreshPayoutStatus();
         if (!canceled) setPayout(status);
         if (payoutReturn) {
           const url = new URL(window.location.href);
@@ -254,12 +267,11 @@ export default function ChargeDropsClientPortalPage({clientInfo, stations = [], 
     <div className="min-h-screen bg-slate-100 text-slate-900">
       <header className="border-b border-slate-800 bg-slate-950 text-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-3">
-            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white">
-              <img src={`${import.meta.env.BASE_URL}chargedrops-drop.svg`} alt="ChargeDrops" className="h-9 w-6" />
+          <div className="flex items-center gap-4">
+            <span className="flex rounded-xl bg-white px-3 py-2">
+              <img src={`${import.meta.env.BASE_URL}chargedrops-logo.svg`} alt="ChargeDrops" className="h-6 w-auto" />
             </span>
             <div>
-              <p className="text-xs font-bold uppercase tracking-[0.22em] text-indigo-300">ChargeDrops</p>
               <h1 className="text-lg font-bold">Client Portal</h1>
             </div>
           </div>
@@ -284,11 +296,12 @@ export default function ChargeDropsClientPortalPage({clientInfo, stations = [], 
           </div>
         </section>
 
-        <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <section className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <StatCard icon={BuildingStorefrontIcon} label="Your kiosks" value={stations.length} note={`${onlineCount} currently online`} />
-          <StatCard icon={ArrowTrendingUpIcon} label="Qualifying revenue" value={money(grossRevenue)} note="Available reporting period" accent="emerald" />
+          <StatCard icon={ArrowTrendingUpIcon} label="Gross revenue" value={money(revenue.gross)} note="Before refunds and taxes" accent="emerald" />
+          <StatCard icon={ArrowTrendingUpIcon} label="Refunds & taxes" value={money(revenue.refunds + revenue.taxes)} note={`${money(revenue.refunds)} refunds · ${money(revenue.taxes)} taxes`} accent="amber" />
+          <StatCard icon={ArrowTrendingUpIcon} label="Qualifying revenue" value={money(revenue.qualifying)} note="Gross minus refunds and taxes" accent="emerald" />
           <StatCard icon={BanknotesIcon} label="Your revenue share" value={money(clientShare)} note={`${sharePercent}% of qualifying revenue`} accent="amber" />
-          <StatCard icon={BanknotesIcon} label="Payment schedule" value={String(clientInfo?.paymentSchedule || 'monthly').replace(/^./, (letter) => letter.toUpperCase())} note={`Stripe payout account: ${payoutLabel}`} />
         </section>
 
         <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
@@ -330,7 +343,7 @@ export default function ChargeDropsClientPortalPage({clientInfo, stations = [], 
               <h2 className="font-bold text-slate-900">Onboarding</h2>
               <div className="mt-4 space-y-3 text-sm">
                 <div className="flex items-center justify-between gap-3"><span className="text-slate-600">Profile</span><span className="font-semibold text-emerald-700">Complete</span></div>
-                <div className="flex items-center justify-between gap-3"><span className="text-slate-600">Agreement</span><span className={`font-semibold ${agreementSigned ? 'text-emerald-700' : 'text-amber-700'}`}>{agreementStatusLabel(agreement.status)}</span></div>
+                <div className="flex items-center justify-between gap-3"><span className="text-slate-600">Agreement</span><span className={`font-semibold ${agreementFullyExecuted ? 'text-emerald-700' : 'text-amber-700'}`}>{agreementStatusLabel(agreement.status)}</span></div>
                 <div className="flex items-center justify-between gap-3"><span className="text-slate-600">Payout account</span><span className={`font-semibold ${payout.ready ? 'text-emerald-700' : 'text-amber-700'}`}>{payoutLabel}</span></div>
                 <div className="flex items-center justify-between gap-3"><span className="text-slate-600">Public map</span><span className="font-semibold text-indigo-700">{onboarding.publicMapStatus === 'published' ? 'Published' : 'Coming soon'}</span></div>
               </div>
@@ -355,7 +368,7 @@ export default function ChargeDropsClientPortalPage({clientInfo, stations = [], 
                     className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-sm font-bold text-indigo-700 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <ArrowDownTrayIcon className="h-4 w-4" />
-                    {agreementSigned ? 'View signed agreement' : 'Review complete agreement'}
+                    {agreementFullyExecuted ? 'View executed agreement' : agreementClientSigned ? 'View client-signed agreement' : 'Review complete agreement'}
                   </button>
                 )}
 
@@ -447,11 +460,21 @@ export default function ChargeDropsClientPortalPage({clientInfo, stations = [], 
                 <button
                   type="button"
                   onClick={openPayoutSetup}
-                  disabled={payoutBusy || previewMode || !agreementSigned}
+                  disabled={payoutBusy || previewMode || !agreementFullyExecuted || payout.platformReady !== true}
                   className="w-full rounded-xl bg-indigo-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:bg-indigo-300"
                 >
-                  {!agreementSigned ? 'Available after agreement signing' : previewMode ? 'Stripe action disabled in preview' : payoutBusy ? 'Opening Stripe…' : payout.ready ? 'Manage payout account' : payout.status === 'not_started' ? 'Set up commission payouts' : 'Continue Stripe setup'}
+                  {payoutBusy ? 'Opening Stripe…' : payout.ready ? 'Manage payout account' : payout.status === 'not_started' ? 'Set up commission payouts' : 'Continue Stripe setup'}
                 </button>
+                {!agreementFullyExecuted && (
+                  <p className="mt-2 text-xs font-semibold leading-5 text-amber-700">
+                    Payout setup will be available once the agreement is fully signed.
+                  </p>
+                )}
+                {agreementFullyExecuted && payout.platformReady !== true && (
+                  <p className="mt-2 text-xs font-semibold leading-5 text-amber-700">
+                    Commission payout setup is being finalized and will be available soon.
+                  </p>
+                )}
                 <p className="mt-2 text-xs leading-5 text-slate-500">Bank details are entered directly on Stripe&apos;s secure site and are never stored by ChargeDrops.</p>
                 {payout.requirementsDue > 0 && <p className="mt-2 text-xs font-semibold text-amber-700">Stripe still needs {payout.requirementsDue} item{payout.requirementsDue === 1 ? '' : 's'}.</p>}
                 {payoutError && <p className="mt-2 text-xs font-semibold text-rose-700">{payoutError}</p>}

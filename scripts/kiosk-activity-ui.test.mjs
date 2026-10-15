@@ -82,8 +82,7 @@ test('dashboard activity navigation uses a distinct purple activity control', as
     assert.match(rules, /function isAdmin\(\)/);
     assert.match(rules, /match \/kioskEvents\/\{docId\}[\s\S]*allow read: if isAdmin\(\)/);
     assert.match(rules, /match \/kioskIncidents\/\{docId\}[\s\S]*allow read: if isAdmin\(\)/);
-    assert.match(rules, /collection != 'kioskEvents'/);
-    assert.match(rules, /collection != 'kioskIncidents'/);
+    assert.match(rules, /match \/\{collection\}\/\{document=\*\*\}\s*\{\s*allow read: if isAdmin\(\) &&/);
 });
 
 test('activity page loads and virtualizes the complete selected history range', async () => {
@@ -101,7 +100,7 @@ test('activity page loads and virtualizes the complete selected history range', 
     assert.match(activityPage, /onClick=\{\(\) => onSelectStation\(incident\.stationId\)\}/);
     assert.match(activityPage, /onClick=\{\(\) => onNavigateToDashboard\(incident\.stationId\)\}/);
     assert.match(activityPage, /onClick=\{\(\) => onNavigateToDashboard\(event\.stationId\)\}/);
-    assert.match(activityPage, /onClick=\{\(\) => onNavigateToDashboard\(\)\}/);
+    assert.match(activityPage, /<DashboardPageActions[\s\S]*onNavigateToDashboard=\{onNavigateToDashboard\}/);
     assert.match(app, /setDashboardSearchTerm\(normalized\)/);
     assert.doesNotMatch(app, /window\.history\.state\?\.dashboardActivityNavigation[\s\S]*window\.history\.back\(\)/);
     assert.match(activityPage, /type: 'kiosk_offline'/);
@@ -159,7 +158,7 @@ test('activity page loads and virtualizes the complete selected history range', 
     assert.match(activityPage, /event\?\.type !== 'payment_declined'/);
     assert.match(activityPage, /if \(event\?\.type === 'payment_declined'\) return false/);
     assert.match(activityPage, /declined \? 'Declined'/);
-    assert.match(activityPage, /aria-label="Home"/);
+    assert.match(activityPage, /import DashboardPageActions/);
     assert.match(activityPage, /SEEN_STORAGE_KEY/);
     assert.match(activityPage, /Unseen activity/);
     assert.doesNotMatch(activityPage, /\['errors', 'Errors'\]/);

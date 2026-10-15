@@ -3,6 +3,7 @@
 import { memo, useMemo, useCallback, useEffect, useState } from 'react';
 import KioskControlPanel from './KioskControlPanel';
 import Ctf7ModulePanel from './Ctf7ModulePanel.jsx';
+import { ctf7EjectDisabledReason } from '../../utils/ctf7';
 import {
     getKioskPowerThreshold,
     hasNonZeroChargerId,
@@ -344,11 +345,13 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
             ? orderedModules
                 .map((module) => {
                     const moduleId = String(module?.id || '').trim();
-                    const firmwareVersion = formatModuleFirmwareVersion(
+                    const firmwareVersion = hardwareType === 'CTF7' ? module.softwareVersion || 'Awaiting report' : formatModuleFirmwareVersion(
                         module?.softwareVersion,
                         module?.hardwareVersion
                     );
-                    const fotaVersion = formatFotaVersion(module);
+                    const fotaVersion = hardwareType === 'CTF7'
+                        ? { label: `HW ${module.hardwareVersion || 'Awaiting report'}`, title: 'Reported CTF7 hardware version' }
+                        : formatFotaVersion(module);
                     return {
                         moduleId,
                         moduleOnline: isModuleOnline(module, mockNow),
@@ -361,7 +364,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                 })
                 .filter((entry) => entry.moduleId)
             : []
-    ), [formatFotaVersion, kiosk, mockNow, orderedModules, t]);
+    ), [formatFotaVersion, hardwareType, kiosk, mockNow, orderedModules, t]);
     const moduleIds = useMemo(() => (
         moduleEntries.map((entry) => entry.moduleId)
     ), [moduleEntries]);
@@ -434,10 +437,12 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         onCommand(kiosk.stationid, 'update module', moduleId);
     }, [kiosk.stationid, onCommand]);
     const renderModuleQuickActions = (moduleId) => {
+        const module = orderedModules.find((entry) => entry.id === moduleId);
+        const ctf7Reason = hardwareType === 'CTF7' ? ctf7EjectDisabledReason(module, chargeTimeoutNow) : '';
         const actions = [
             {
                 action: 'reboot module',
-                enabled: clientInfo.commands.reboot,
+                enabled: clientInfo.commands.reboot && hardwareType !== 'CTF7',
                 label: `Reboot module ${moduleId}`,
                 className: 'hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700',
                 icon: (
@@ -446,7 +451,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
             },
             {
                 action: 'eject module',
-                enabled: clientInfo.commands.eject,
+                enabled: clientInfo.commands.eject && hardwareType !== 'CTF7',
                 label: `Eject all chargers from module ${moduleId}`,
                 className: 'hover:border-amber-300 hover:bg-amber-50 hover:text-amber-700',
                 icon: <path strokeLinecap="round" strokeLinejoin="round" d="M7 11l5-5m0 0l5 5m-5-5v12M5 21h14" />,
@@ -475,7 +480,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                             }, event);
                             onCommand(stationId, item.action, moduleId);
                         }}
-                        disabled={!isOnline}
+                        disabled={!isOnline || Boolean(ctf7Reason)}
                         className={`flex h-6 w-6 items-center justify-center rounded border border-gray-200 bg-white text-gray-500 transition disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-300 ${item.className}`}
                     >
                         <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
@@ -609,6 +614,9 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         if (slot.isLocked) {
             return { className: getLockedSlotClasses(slot), glow: false };
         }
+        if (module.protocol === 'lm-tcp-v1' && slot.abnormal && slot.sn) {
+            return { className: 'border-red-500 bg-red-100 text-red-800', glow: false };
+        }
         if (slotLooksEmpty) {
             return { className: 'border-gray-300 bg-gray-100 text-gray-400', glow: false };
         }
@@ -728,6 +736,63 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         );
     };
     
+    const renderCtf7ModuleControls = (module) => {
+        const canLock = clientInfo.commands.lock;
+        const canEject = clientInfo.commands.eject;
+        if (!canLock && !canEject) return null;
+
+        const moduleOnline = module.connected === true && isModuleOnline(module, mockNow);
+        const allLocked = module.slots.length > 0 && module.slots.every((slot) => slot.isLocked);
+        const lockAction = allLocked ? 'unlock module' : 'lock module';
+        const lockLabel = allLocked ? 'Unlock module' : 'Lock module';
+        const ejectLabel = t('eject_all_from_module');
+        const ejectDisabledReason = !moduleOnline ? 'Module offline' : ctf7EjectDisabledReason(module, chargeTimeoutNow);
+        const buttonClass = 'p-1 flex-1 rounded flex justify-center items-center disabled:cursor-not-allowed disabled:text-gray-300 disabled:hover:bg-transparent';
+
+        return (
+            <div className="flex items-center gap-1 mt-1 pt-1 border-t border-gray-200" data-kiosk-module-controls={module.id}>
+                {canLock && (
+                    <button type="button" title={lockLabel} aria-label={lockLabel}
+                        data-kiosk-action={lockAction} data-kiosk-stationid={stationId} data-kiosk-moduleid={module.id}
+                        data-kiosk-disabled-reason={!moduleOnline ? 'offline' : ''}
+                        disabled={!moduleOnline}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            logKioskInteraction('module-lock-click-handler', {stationId, moduleId: module.id, action: lockAction}, event);
+                            onCommand(stationId, lockAction, module.id);
+                        }}
+                        className={`${buttonClass} ${allLocked ? 'text-red-600 hover:bg-red-100' : 'text-gray-500 hover:bg-gray-100'}`}>
+                        {allLocked ? (
+                            <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                            </svg>
+                        ) : (
+                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+                            </svg>
+                        )}
+                    </button>
+                )}
+                {canEject && (
+                    <button type="button" title={ejectDisabledReason || ejectLabel} aria-label={ejectLabel}
+                        data-kiosk-action="eject module" data-kiosk-stationid={stationId} data-kiosk-moduleid={module.id}
+                        data-kiosk-disabled-reason={ejectDisabledReason}
+                        disabled={Boolean(ejectDisabledReason)}
+                        onClick={(event) => {
+                            event.stopPropagation();
+                            logKioskInteraction('module-eject-click-handler', {stationId, moduleId: module.id}, event);
+                            onCommand(stationId, 'eject module', module.id);
+                        }}
+                        className={`${buttonClass} text-gray-500 hover:bg-gray-100`}>
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M7 11l5-5m0 0l5 5m-5-5v12" />
+                        </svg>
+                    </button>
+                )}
+            </div>
+        );
+    };
+
     const renderSlotButton = (slot, module, style, key) => {
         const canEject = clientInfo.commands.eject;
         const canLock = clientInfo.commands.lock;
@@ -1153,13 +1218,16 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
         const isChargeTimedOut = isSlotInChargeTimeout(module, slot, chargeTimeoutNow);
         const canEject = clientInfo.commands.eject;
         const canLock = clientInfo.commands.lock;
-        const ejectDisabledReason = !canEject ? 'permission' : !isOnline ? 'offline' : '';
-        const lockDisabledReason = !isOnline ? 'offline' : '';
+        const fanModule = hardwareType === 'CTF7';
+        const moduleOnline = fanModule ? module.connected === true && isModuleOnline(module, mockNow) : isOnline;
+        const ejectDisabledReason = !canEject ? 'permission' : !moduleOnline ? 'offline' : fanModule
+            ? ctf7EjectDisabledReason(module, chargeTimeoutNow) || (!hasCharger ? 'CTF7 requires a reported charger serial' : '') : '';
+        const lockDisabledReason = !moduleOnline ? 'offline' : '';
 
         return (
             <div
                 key={key}
-                className={`relative ${isCK4xCompactSlot ? 'min-h-[68px]' : 'min-h-[52px]'} rounded-md border p-0.5 text-left transition-colors duration-200 ${style.className} ${style.glow ? 'slot-charging-glow' : ''}`}
+                className={`relative ${fanModule ? 'min-h-28' : isCK4xCompactSlot ? 'min-h-[68px]' : 'min-h-[52px]'} rounded-md border p-0.5 text-left transition-colors duration-200 ${style.className} ${style.glow ? 'slot-charging-glow' : ''}`}
                 data-kiosk-slot-debug="true"
                 data-kiosk-stationid={kiosk.stationid}
                 data-kiosk-moduleid={module.id}
@@ -1184,11 +1252,11 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                 hasCharger,
                                 disabledReason: ejectDisabledReason,
                             }, event);
-                            if (canEject && isOnline) {
+                            if (!ejectDisabledReason) {
                                 onSlotClick(kiosk.stationid, module.id, slot.position);
                             }
                         }}
-                        disabled={!canEject || !isOnline}
+                        disabled={Boolean(ejectDisabledReason)}
                         className={`grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-1.5 text-left disabled:cursor-not-allowed ${isCK4xCompactSlot ? 'min-h-[36px]' : ''}`}
                         title={hasCharger ? `SN ${slot.sn}` : `Slot ${displayPosition || slot.position}`}
                     >
@@ -1206,6 +1274,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                             {isChargeTimedOut && <ChargeTimeoutIndicator />}
                         </div>
                     </button>
+                    {fanModule && slot.observed !== true && <span className="mt-2 text-[10px] text-gray-500">Awaiting inventory</span>}
                     {hasCharger && (
                         <button
                             type="button"
@@ -1249,7 +1318,8 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                             }, event);
                             onLockSlot(kiosk.stationid, module.id, slot.position, slot.isLocked);
                         }}
-                        disabled={!isOnline}
+                        disabled={Boolean(lockDisabledReason)}
+                        aria-label={`${slot.isLocked ? 'Unlock' : 'Lock'} slot ${slot.position} on ${module.id}`}
                         className={`absolute right-1 ${isCK4xCompactSlot ? 'top-5' : 'bottom-1'} flex h-[18px] w-[18px] items-center justify-center rounded-md bg-white/75 shadow-sm hover:bg-white disabled:cursor-not-allowed`}
                         title={getLockButtonTitle(slot)}
                     >
@@ -1718,7 +1788,9 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
     const renderContent = () => {
         switch (hardwareType) {
             case 'CTF7':
-                return <Ctf7ModulePanel modules={visibleModules} />;
+                return <Ctf7ModulePanel modules={visibleModules}
+                    renderSlot={(module, slot) => renderCompactGridSlot({ module, slot, displayPosition: slot.position }, `${module.id}-${slot.position}`)}
+                    renderModuleActions={renderCtf7ModuleControls} />;
             case 'CT3':
                 return renderCT3();
             case 'CT4':
@@ -1788,7 +1860,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                             <span className="min-w-0 truncate font-mono text-xs text-gray-700">{entry.moduleId}</span>
                                             {renderModuleQuickActions(entry.moduleId)}
                                         </div>
-                                        <ModuleWifiStatus moduleId={entry.moduleId} status={entry.wifiStatus} />
+                                        {hardwareType === 'CTF7' ? <span className="text-[10px] text-gray-500">4G cellular</span> : <ModuleWifiStatus moduleId={entry.moduleId} status={entry.wifiStatus} />}
                                         {hasMultipleModules && (
                                             <div className="flex gap-1">
                                                 <button
@@ -1863,7 +1935,7 @@ function KioskDetailPanel({ kiosk, isVisible, onSlotClick, onLockSlot, pendingSl
                                             <span className="min-w-0 truncate">{entry.moduleId}</span>
                                             {renderModuleQuickActions(entry.moduleId)}
                                         </div>
-                                        <ModuleWifiStatus moduleId={entry.moduleId} status={entry.wifiStatus} />
+                                        {hardwareType === 'CTF7' ? <span className="text-[10px] text-gray-500">4G cellular</span> : <ModuleWifiStatus moduleId={entry.moduleId} status={entry.wifiStatus} />}
                                         {showModuleFirmwareMetadata && (
                                             <>
                                                 <span className="text-[10px] text-gray-500">{entry.firmwareLabel}</span>

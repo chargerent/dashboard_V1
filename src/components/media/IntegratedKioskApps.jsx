@@ -5,12 +5,16 @@ import {
   PlusIcon,
 } from '@heroicons/react/24/outline';
 
+import KioskAppUpdate from './KioskAppUpdate.jsx';
+
 import { callFunctionWithAuth } from '../../utils/callableRequest.js';
 import {
   formatPhoneRelativeTime,
   getPhoneConnectionState,
   getPhoneStationCountryCode,
   isIntegratedKiosk,
+  isPhoneTerminalDisabledConfirmed,
+  isPhoneTerminalEnabledConfirmed,
   normalizePhoneDevice,
 } from '../../utils/phoneControl.js';
 
@@ -70,6 +74,7 @@ function KioskAppCard({
   occupiedStationIds,
   now,
   canUseLivePayments,
+  canUpdate,
   onRefresh,
   onStatus,
 }) {
@@ -96,11 +101,17 @@ function KioskAppCard({
   const savedStripeMode = device.terminal?.stripeMode === 'live' ? 'live' : 'test';
   const assignmentChanged = Boolean(stationId) && (
     stationId !== device.stationId || terminalEnabled !== (device.terminal?.enabled === true) ||
-    (terminalEnabled && stripeMode !== savedStripeMode)
+    (terminalEnabled && stripeMode !== savedStripeMode) ||
+    (terminalEnabled && !isPhoneTerminalEnabledConfirmed(device, stationId, now)) ||
+    (!terminalEnabled && !isPhoneTerminalDisabledConfirmed(device, stationId, now))
   );
+  const transition = device.assignmentTransition;
+  const finalizing = device.assignmentTransitionOutcome;
+  const assignmentLocked = Boolean(transition || finalizing);
 
   const saveAssignment = async () => {
-    if (!stationId || !assignmentChanged || saving || (stripeMode === 'live' && !liveConfirmed)) return;
+    if (!stationId || !assignmentChanged || saving || assignmentLocked ||
+      (terminalEnabled && stripeMode === 'live' && !liveConfirmed)) return;
     setSaving(true);
     onStatus({
       state: 'sending',
@@ -114,7 +125,7 @@ function KioskAppCard({
         stripeMode,
       });
       onStatus({
-        state: 'success',
+        state: result?.pending ? 'pending' : 'success',
         message: result?.message || `${stationId} is assigned to the integrated kiosk app.`,
       });
       await onRefresh(false);
@@ -160,11 +171,13 @@ function KioskAppCard({
           <span className="mb-1 block text-[10px] font-black uppercase tracking-wider text-slate-500">Assigned station</span>
           <select
             value={stationId}
+            disabled={assignmentLocked}
             onChange={(event) => {
               const nextStationId = event.target.value;
               const nextKiosk = kiosks.find((kiosk) => stationIdOf(kiosk) === nextStationId);
               setStationId(nextStationId);
-              setStripeMode(nextKiosk?.paymentTerminal?.stripeMode === 'live' ? 'live' : 'test');
+              setStripeMode(nextStationId === device.stationId ? savedStripeMode :
+                (nextKiosk?.paymentTerminal?.stripeMode === 'live' ? 'live' : 'test'));
               setLiveConfirmed(false);
             }}
             className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900"
@@ -186,6 +199,7 @@ function KioskAppCard({
           <input
             type="checkbox"
             checked={terminalEnabled}
+            disabled={assignmentLocked}
             onChange={(event) => setTerminalEnabled(event.target.checked)}
             className="h-4 w-4 rounded border-violet-300 text-violet-600 focus:ring-violet-500"
           />
@@ -196,7 +210,7 @@ function KioskAppCard({
           <span className="mb-1 block text-[10px] font-black uppercase tracking-wider text-slate-500">Stripe mode</span>
           <select
             value={stripeMode}
-            disabled={!terminalEnabled}
+            disabled={!terminalEnabled || assignmentLocked}
             onChange={(event) => {
               setStripeMode(event.target.value === 'live' ? 'live' : 'test');
               setLiveConfirmed(false);
@@ -211,12 +225,37 @@ function KioskAppCard({
         <button
           type="button"
           onClick={saveAssignment}
-          disabled={!assignmentChanged || saving || (stripeMode === 'live' && !liveConfirmed)}
+          disabled={!assignmentChanged || saving || assignmentLocked ||
+            (terminalEnabled && stripeMode === 'live' && !liveConfirmed)}
           className="rounded-lg bg-slate-900 px-4 py-2.5 text-xs font-bold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {saving ? 'Saving…' : 'Save assignment'}
         </button>
       </div>
+      {transition && (
+        <p role="status" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
+          {transition.fromStationId === transition.toStationId
+            ? `Updating payment settings for ${transition.toStationId}`
+            : `Moving from ${transition.fromStationId || 'unassigned'} to ${transition.toStationId}`} — waiting for the Android kiosk to confirm. New rentals are paused.
+        </p>
+      )}
+      {finalizing && (
+        <p role="status" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
+          {finalizing.state === 'rolled_back' ? 'Restoring the previous kiosk settings' : 'Finishing the kiosk settings update'} on the Android device. Another assignment can be saved after its confirmation.
+        </p>
+      )}
+      {!transition && device.assignmentError && (
+        <p role="alert" className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800">
+          Assignment to {device.assignmentError.stationId} failed. {device.assignmentError.message} The prior station remains assigned; check the kiosk before taking payments.
+        </p>
+      )}
+      {!transition && !finalizing && terminalEnabled && device.terminal?.state === 'ready' &&
+        (Number(device.inventoryAtMs || 0) < now - 3 * 60 * 1000 ||
+          !device.inventory?.media?.identityReady || !device.inventory?.media?.stationLinkReady) && (
+        <p role="status" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
+          Payment settings are confirmed. Waiting for the Android kiosk to report its station link ready before return notices are verified.
+        </p>
+      )}
       {terminalEnabled && stripeMode === 'live' && (
         <label className="mt-3 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold leading-5 text-red-900">
           <input
@@ -228,6 +267,7 @@ function KioskAppCard({
           I understand that {stationId} will use the French live Stripe account and real cards can be charged.
         </label>
       )}
+      {canUpdate && <KioskAppUpdate device={device} onStatus={onStatus} onRefresh={onRefresh}/>}
     </article>
   );
 }
@@ -290,7 +330,7 @@ export default function IntegratedKioskApps({
     .sort((left, right) => stationIdOf(left).localeCompare(stationIdOf(right))), [kiosks]);
   const integratedDevices = useMemo(() => allDevices.filter(isIntegratedKiosk), [allDevices]);
   const occupiedStationIds = useMemo(() => new Set(
-    allDevices.map((device) => device.stationId).filter(Boolean),
+    allDevices.flatMap((device) => [device.stationId, device.assignmentTransition?.toStationId]).filter(Boolean),
   ), [allDevices]);
   const availableEnrollmentKiosks = useMemo(() => normalizedKiosks.filter((kiosk) => {
     const stationId = stationIdOf(kiosk);
@@ -455,7 +495,8 @@ export default function IntegratedKioskApps({
             kiosks={normalizedKiosks}
             occupiedStationIds={occupiedStationIds}
             now={now}
-            canUseLivePayments={isAdmin}
+            canUpdate={isAdmin}
+              canUseLivePayments={isAdmin}
             onRefresh={loadDevices}
             onStatus={onStatus}
           />

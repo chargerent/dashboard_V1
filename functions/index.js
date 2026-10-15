@@ -1,3 +1,4 @@
+const {createCtf7Checkout, createCtf7CheckoutHandler} = require("./ctf7Checkout");
 /* eslint-env node */
 const {onCall, onRequest, HttpsError} = require("firebase-functions/v2/https");
 const {onSchedule} = require("firebase-functions/v2/scheduler");
@@ -5,6 +6,7 @@ const {onDocumentWritten} = require("firebase-functions/v2/firestore");
 const {onMessagePublished} = require("firebase-functions/v2/pubsub");
 const {defineSecret} = require("firebase-functions/params");
 const crypto = require("node:crypto");
+const {setStationBrand} = require("./stationBranding");
 const admin = require("firebase-admin");
 const Stripe = require("stripe");
 const twilio = require("twilio");
@@ -43,6 +45,12 @@ const {preparePartnerKit} = require("./partnerKit");
 const {createChargeDropsAgreementService} = require("./chargeDropsAgreements");
 const {createChargeDropsStripeConnect} = require("./chargeDropsStripeConnect");
 const {
+  createChargeDropsPayoutTransfers,
+} = require("./chargeDropsPayoutTransfers");
+const {
+  createRegionalPartnerOnboarding,
+} = require("./regionalPartnerOnboarding");
+const {
   createChargeDropsPartnerNotifications,
   NOTIFICATIONS_COLLECTION: CHARGEDROPS_PARTNER_NOTIFICATIONS_COLLECTION,
 } = require("./chargeDropsPartnerNotifications");
@@ -50,7 +58,10 @@ const {
   COMPANY_MANAGED_PARTNER_TYPE,
   HOUSE_REGIONAL_PARTNER_ID,
   buildCompanyManagedRevenueAllocation,
+  centsToMoney,
   isCompanyManagedChargeDrops,
+  rentalRevenueBasis,
+  REVENUE_BASIS_VERSION,
   shouldCreatePartnerPayout,
 } = require("./chargeDropsRevenue");
 const {rbcOpenApi} = require("./rbcOpenRouting/api");
@@ -59,11 +70,15 @@ const {
   createFirestoreKioskTerminalStore,
   createKioskTerminalHandler,
   createKioskTerminalService,
-  settleStripeReturn,
 } = require("./kioskTerminal");
 const {createMqttBesiterGateway} = require("./besiterGateway");
+const {createReceiptService, createFirestoreReceiptStore, createStripeReceiptObserver} = require("./rentalReceipt");
+const {createStripeReceiptClientResolver} = require("./stripeReceiptClientResolver");
+const {uploadReceiptLogo, ReceiptLogoError} = require("./receiptLogo");
 const {createAmazonExportService, createAmazonTransport} = require("./amazonRentalExport");
 const ctf7 = require("./ctf7Model");
+const {createCtf7Gateway} = require("./ctf7Rental");
+const {createOperatorApi: createCtf7OperatorApi} = require("./ctf7Operator");
 const {
   DASHBOARD_STATS_SCHEMA_VERSION,
   applyRentalProjection,
@@ -77,6 +92,7 @@ const {
   pruneOperationalHistory,
   runWatchdog: runKioskOperationalWatchdog,
 } = require("./kioskOperationalEvents");
+const {syncKioskAccessFromWrite} = require("./kioskAccessScope");
 const {
   buildPublicAssetId,
   buildPublicAssetStoragePath,
@@ -91,6 +107,7 @@ const {
   assignDevice: assignPhoneDevice,
   createEnrollment: createPhoneEnrollment,
   enrollDevice: enrollPhoneDevice,
+  expirePendingAssignments: expirePendingPhoneAssignments,
   getIceServers: getPhoneIceServers,
   getScreen: getPhoneScreen,
   listCommands: listPhoneCommands,
@@ -103,6 +120,7 @@ const {
   sendCommand: sendPhoneCommand,
   setManualPhoneNumber: setPhoneManualPhoneNumber,
 } = require("./phoneControl");
+const {createV2AmazonGateway} = require("./v2AmazonGateway");
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -165,6 +183,7 @@ const CHARGEDROPS_AGREEMENT_OTP_SECRET = defineSecret(
 );
 const BESITER_MQTT_CREDENTIALS = defineSecret("BESITER_MQTT_CREDENTIALS");
 const AMAZON_RENTAL_MQTT_CREDENTIALS = defineSecret("AMAZON_RENTAL_MQTT_CREDENTIALS");
+const RENTAL_RECEIPT_SIGNING_KEY = defineSecret("RENTAL_RECEIPT_SIGNING_KEY");
 const PAYTER_CPS_API_KEY = defineSecret("PAYTER_CPS_API_KEY");
 const STORAGE_BUCKET = "node-red-alerts.firebasestorage.app";
 const STORAGE_BUCKET_CANDIDATES = Array.from(new Set([
@@ -176,7 +195,10 @@ const STORAGE_BUCKET_CANDIDATES = Array.from(new Set([
 const AUTH_MAPPING_DOMAIN = "auth.charge.rent";
 const CHARGEDROPS_PROJECT_ID = "chargedrops-dev";
 const CHARGEDROPS_APP_NAME = "chargedrops-client-onboarding";
+const CHARGEDROPS_ONBOARDING_SERVICE_ACCOUNT =
+  "chargedrops-onboarding@node-red-alerts.iam.gserviceaccount.com";
 const DEFAULT_DASHBOARD_LOGIN_URL = "https://chargerentstations.com/portal/";
+const CHARGEDROPS_STRIPE_PLATFORM_ACCOUNT_ID = "acct_1BGtrxCUzeellHd0";
 const TWILIO_SMS_WEBHOOK_URL =
   "https://us-central1-node-red-alerts.cloudfunctions.net/support_twilioSms";
 const TWILIO_VOICE_WEBHOOK_URL =
@@ -200,8 +222,15 @@ const chargeDropsStripeConnect = createChargeDropsStripeConnect({
   admin,
   getStripeClient: getStripeConnectClient,
   dashboardBaseUrl: DEFAULT_DASHBOARD_LOGIN_URL,
+  expectedPlatformAccountId: CHARGEDROPS_STRIPE_PLATFORM_ACCOUNT_ID,
   notifyPartner: (notification) =>
     chargeDropsPartnerNotifications.notify(notification),
+});
+const chargeDropsPayoutTransfers = createChargeDropsPayoutTransfers({
+  db,
+  admin,
+  getStripeClient: getStripeConnectClient,
+  expectedPlatformAccountId: CHARGEDROPS_STRIPE_PLATFORM_ACCOUNT_ID,
 });
 const chargeDropsAgreements = createChargeDropsAgreementService({
   db,
@@ -214,6 +243,17 @@ const chargeDropsAgreements = createChargeDropsAgreementService({
     getLoginInviteCcEmail(profile, contactEmail),
   notifyPartner: (notification) =>
     chargeDropsPartnerNotifications.notify(notification),
+});
+const regionalPartnerOnboarding = createRegionalPartnerOnboarding({
+  db,
+  admin,
+  bucket: getStorageBucket(),
+  sendEmail: sendLoginInviteEmail,
+  getOtpSecret: () => CHARGEDROPS_AGREEMENT_OTP_SECRET.value(),
+  dashboardBaseUrl: DEFAULT_DASHBOARD_LOGIN_URL,
+  // Production invitations were approved for this release. Test invitations
+  // remain separately identified and do not activate a production account.
+  isAgreementApproved: () => true,
 });
 const LOGIN_INVITE_CC_ADMINS = {
   arthur: "arthur@charge.rent",
@@ -796,10 +836,23 @@ const besiterTerminalGatewayProxy = {
 };
 
 const kioskTerminalStore = createFirestoreKioskTerminalStore(db);
+const getStripeReceiptClientForAccount = createStripeReceiptClientResolver({sources: [
+  {mode: "test", getClient: () => getStripeTerminalClient({accountCountry: "US", mode: "test"})},
+  {mode: "live", getClient: () => getStripeTerminalClient({accountCountry: "FR", mode: "live"})},
+]});
+const rentalReceiptService = createReceiptService({
+  store: createFirestoreReceiptStore(db),
+  signingKey: () => RENTAL_RECEIPT_SIGNING_KEY.value(),
+  publicBaseUrl: "https://chargerentstations.com/media-kiosk",
+  observePayment: createStripeReceiptObserver({getStripeClientForAccount: getStripeReceiptClientForAccount}),
+});
 const kioskTerminalService = createKioskTerminalService({
   store: kioskTerminalStore,
   getStripeClient: getStripeTerminalClient,
   besiterGateway: besiterTerminalGatewayProxy,
+  ctf7Gateway: createCtf7Gateway({db}),
+  receiptService: rentalReceiptService,
+  v2AmazonGateway: createV2AmazonGateway(),
 });
 const kioskTerminalHandler = createKioskTerminalHandler(kioskTerminalService);
 const amazonRentalExportService = createAmazonExportService({
@@ -828,6 +881,7 @@ function getRequestData(req) {
 
 async function getAuthorizedProfileFromRequest(req, data) {
   let uid = "";
+  let tokenClaims = {};
   const authorization = String(req.headers.authorization || "").trim();
 
   if (authorization.startsWith("Bearer ")) {
@@ -836,6 +890,7 @@ async function getAuthorizedProfileFromRequest(req, data) {
     try {
       const decodedToken = await admin.auth().verifyIdToken(idToken);
       uid = String(decodedToken?.uid || "").trim();
+      tokenClaims = decodedToken || {};
     } catch {
       uid = "";
     }
@@ -848,6 +903,7 @@ async function getAuthorizedProfileFromRequest(req, data) {
       try {
         const decodedToken = await admin.auth().verifyIdToken(idToken);
         uid = String(decodedToken?.uid || "").trim();
+        tokenClaims = decodedToken || {};
       } catch {
         uid = "";
       }
@@ -865,9 +921,12 @@ async function getAuthorizedProfileFromRequest(req, data) {
   }
 
   const profile = snap.data() || {};
-  const isAdmin = profile.role === "admin" || profile.username === "chargerent";
+  const tokenRole = String(tokenClaims.role || "").trim().toLowerCase();
+  const tokenUsername = normalizeUsername(tokenClaims.username);
+  const isAdmin = (tokenRole === "admin" && profile.role === "admin") ||
+    (tokenUsername === "chargerent" && profile.username === "chargerent");
 
-  return {uid, profile, isAdmin};
+  return {uid, profile, isAdmin, tokenClaims};
 }
 
 async function getAuthorizedProfileFromContext(context) {
@@ -883,27 +942,33 @@ async function getAuthorizedProfileFromContext(context) {
   }
 
   const profile = snap.data() || {};
-  const isAdmin = profile.role === "admin" || profile.username === "chargerent";
+  const tokenClaims = context.auth.token || {};
+  const tokenRole = String(tokenClaims.role || "").trim().toLowerCase();
+  const tokenUsername = normalizeUsername(tokenClaims.username);
+  const isAdmin = (tokenRole === "admin" && profile.role === "admin") ||
+    (tokenUsername === "chargerent" && profile.username === "chargerent");
 
-  return {uid, profile, isAdmin};
+  return {uid, profile, isAdmin, tokenClaims};
 }
 
 async function assertAdmin(req, data) {
-  const {uid, profile, isAdmin} = await getAuthorizedProfileFromRequest(req, data);
+  const {uid, profile, isAdmin, tokenClaims} =
+    await getAuthorizedProfileFromRequest(req, data);
   if (!isAdmin) {
     throw new functions.https.HttpsError("permission-denied", "Not admin");
   }
 
-  return {uid, profile};
+  return {uid, profile, isAdmin: true, tokenClaims};
 }
 
 async function assertAdminFromContext(context) {
-  const {uid, profile, isAdmin} = await getAuthorizedProfileFromContext(context);
+  const {uid, profile, isAdmin, tokenClaims} =
+    await getAuthorizedProfileFromContext(context);
   if (!isAdmin) {
     throw new functions.https.HttpsError("permission-denied", "Not admin");
   }
 
-  return {uid, profile};
+  return {uid, profile, isAdmin: true, tokenClaims};
 }
 
 async function assertCanManageBindings(req, data) {
@@ -2973,8 +3038,9 @@ function recalculateKioskTotals(kiosk) {
   if (fanStation) {
     nextKiosk.hardware = {...nextKiosk.hardware, modules: normalizedModules.length,
       capacity: ctf7.CAPACITY * normalizedModules.length, protocol: ctf7.PROTOCOL};
-    nextKiosk.count = 0;
-    nextKiosk.chargers = "soldout";
+    const summary = ctf7.summarizeKiosk(nextKiosk);
+    summary.hardware = syncModuleOrder(summary.hardware, moduleIds);
+    return summary;
   }
   if (moduleIds.length > 0) {
     nextKiosk.moduleIds = moduleIds;
@@ -8655,6 +8721,7 @@ async function uiProfileListImpl(authState) {
     profiles: [...profilesByClient.values()],
     capabilities: {
       scopedProfiles: 1,
+      stationBranding: 1,
       apolloScreens: 1,
       apolloEstablishedScreenRemoval: 1,
       apolloPublishing: false,
@@ -8662,6 +8729,7 @@ async function uiProfileListImpl(authState) {
       apolloProfileTestsEnabled: runtime.apolloProfileTestsEnabled === true,
       apolloTestStationIds,
       chargerentAppProfiles: 1,
+      receiptPages: 1,
       integratedKioskStationIds: [...new Set(integratedKioskStationIds)].sort(),
     },
   };
@@ -9281,6 +9349,23 @@ function chargeDropsAgreementRequestEvidence(req) {
   };
 }
 
+function regionalPartnerOnboardingHttpsError(error) {
+  const codes = new Set([
+    "unauthenticated",
+    "invalid-argument",
+    "permission-denied",
+    "failed-precondition",
+    "not-found",
+    "already-exists",
+    "resource-exhausted",
+    "unavailable",
+  ]);
+  const code = codes.has(error?.code) ? error.code : "unavailable";
+  const message = error?.safe === true ? error.message :
+    "Regional partner onboarding is temporarily unavailable.";
+  return new functions.https.HttpsError(code, message);
+}
+
 function assertWorkspaceProvisioner(authState) {
   if (!workspaceProvisioning.canProvision(authState?.uid)) {
     throw new functions.https.HttpsError("permission-denied", "Company email creation is not enabled for your dashboard account.");
@@ -9440,7 +9525,7 @@ function buildLoginInviteMessage({
       "<div style=\"font-family:Inter,Arial,sans-serif;background:#eef2f7;padding:32px;\">",
       "<div style=\"max-width:600px;margin:0 auto;background:#fff;border-radius:16px;overflow:hidden;border:1px solid #dbe3ef;\">",
       "<div style=\"background:#312e81;padding:28px 32px;color:#fff;\">",
-      "<div style=\"font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#c7d2fe;\">ChargeDrops</div>",
+      "<img src=\"https://chargerentstations.com/portal/chargedrops-logo.svg\" alt=\"ChargeDrops\" style=\"display:block;width:174px;height:auto;background:#fff;border-radius:8px;padding:8px 10px;\">",
       "<h1 style=\"margin:8px 0 0;font-size:24px;\">Welcome to your Client Portal</h1>",
       "</div><div style=\"padding:32px;\">",
       `<p style="color:#334155;font-size:15px;line-height:1.6;">Hi ${escapeHtml(displayName)},</p>`,
@@ -9846,6 +9931,8 @@ function serializePayoutReport(docSnap) {
     generatedAt: serializePayoutTimestamp(data.generatedAt),
     sentAt: serializePayoutTimestamp(data.sentAt),
     approvedAt: serializePayoutTimestamp(data.approvedAt),
+    approvalStartedAt: serializePayoutTimestamp(data.approvalStartedAt),
+    transferredAt: serializePayoutTimestamp(data.transferredAt),
     paidAt: serializePayoutTimestamp(data.paidAt),
   };
 }
@@ -9996,7 +10083,12 @@ function buildAdminApprovalEmail(report) {
   const rows = [
     {label: "Period", value: report.period.label},
     {label: "Client", value: report.client?.name || report.client?.clientId || ""},
-    {label: "Total revenue", value: formatMoney(report.totals.totalRevenue)},
+    ...(report.model === "chargedrops" ? [
+      {label: "Gross revenue", value: formatMoney(report.totals.grossRevenue)},
+      {label: "Refunds", value: formatMoney(report.totals.refunds)},
+      {label: "Taxes", value: formatMoney(report.totals.taxes)},
+      {label: "Qualifying revenue", value: formatMoney(report.totals.qualifyingRevenue)},
+    ] : [{label: "Total revenue", value: formatMoney(report.totals.totalRevenue)}]),
     {label: "Client share", value: formatMoney(report.totals.clientShare)},
     {label: "Partner share", value: formatMoney(partnerShare)},
     {label: "Rentals", value: String(report.totals.rentalCount || 0)},
@@ -10016,7 +10108,12 @@ function buildAdminApprovalEmail(report) {
 function buildApprovedClientEmail(report) {
   const rows = [
     {label: "Period", value: report.period.label},
-    {label: "Total revenue", value: formatMoney(report.totals.totalRevenue)},
+    ...(report.model === "chargedrops" ? [
+      {label: "Gross revenue", value: formatMoney(report.totals.grossRevenue)},
+      {label: "Refunds", value: formatMoney(report.totals.refunds)},
+      {label: "Taxes", value: formatMoney(report.totals.taxes)},
+      {label: "Qualifying revenue", value: formatMoney(report.totals.qualifyingRevenue)},
+    ] : [{label: "Total revenue", value: formatMoney(report.totals.totalRevenue)}]),
     {label: "Your share", value: formatMoney(report.totals.clientShare)},
     {label: "Rentals", value: String(report.totals.rentalCount || 0)},
   ];
@@ -10024,8 +10121,11 @@ function buildApprovedClientEmail(report) {
     subject: `Chargerent revenue share report - ${report.period.label}`,
     body: rows.map((row) => `${row.label}: ${row.value}`).join("\n"),
     html: buildPayoutEmailHtml({
-      title: "Revenue share is on the way",
-      intro: `Hi ${getPayoutContactName(report.client) || "there"}, your revenue share report has been approved.`,
+      title: report.model === "chargedrops" ?
+        "Revenue share transferred" : "Revenue share is on the way",
+      intro: report.model === "chargedrops" ?
+        `Hi ${getPayoutContactName(report.client) || "there"}, your revenue share was approved and transferred to your Stripe payout account.` :
+        `Hi ${getPayoutContactName(report.client) || "there"}, your revenue share report has been approved.`,
       rows,
     }),
   };
@@ -10175,8 +10275,16 @@ async function createPurchaseApprovalReports({users, kiosks, referenceDate, incl
       purchaseKiosks,
       stationIds,
       totalRevenue: 0,
+      grossRevenue: 0,
+      refunds: 0,
+      taxes: 0,
+      qualifyingRevenue: 0,
+      currencies: new Set(),
       rentalCount: 0,
       revenueByStation: new Map(),
+      grossByStation: new Map(),
+      refundsByStation: new Map(),
+      taxesByStation: new Map(),
       rentalCountByStation: new Map(),
     };
     group.seeds.push(seed);
@@ -10194,8 +10302,43 @@ async function createPurchaseApprovalReports({users, kiosks, referenceDate, incl
 
       const revenue = Number(rental.totalCharged) || 0;
       seed.totalRevenue += revenue;
+      if (seed.model === "chargedrops") {
+        const country = String(
+            seed.client?.chargedrops?.location?.countryCode ||
+            seed.client?.chargedrops?.city?.countryCode || "US",
+        ).toUpperCase();
+        const basis = rentalRevenueBasis(rental, {
+          fallbackCurrency: country === "CA" ? "cad" : "usd",
+        });
+        const gross = centsToMoney(basis.grossCents);
+        const refunds = centsToMoney(basis.refundCents);
+        const taxes = centsToMoney(basis.taxCents);
+        const qualifying = centsToMoney(basis.qualifyingCents);
+        seed.grossRevenue += gross;
+        seed.refunds += refunds;
+        seed.taxes += taxes;
+        seed.qualifyingRevenue += qualifying;
+        if (basis.currency) seed.currencies.add(basis.currency);
+        seed.revenueByStation.set(
+            stationid,
+            (seed.revenueByStation.get(stationid) || 0) + qualifying,
+        );
+        seed.grossByStation.set(
+            stationid,
+            (seed.grossByStation.get(stationid) || 0) + gross,
+        );
+        seed.refundsByStation.set(
+            stationid,
+            (seed.refundsByStation.get(stationid) || 0) + refunds,
+        );
+        seed.taxesByStation.set(
+            stationid,
+            (seed.taxesByStation.get(stationid) || 0) + taxes,
+        );
+      } else {
+        seed.revenueByStation.set(stationid, (seed.revenueByStation.get(stationid) || 0) + revenue);
+      }
       seed.rentalCount += 1;
-      seed.revenueByStation.set(stationid, (seed.revenueByStation.get(stationid) || 0) + revenue);
       seed.rentalCountByStation.set(stationid, (seed.rentalCountByStation.get(stationid) || 0) + 1);
     });
   }
@@ -10203,7 +10346,8 @@ async function createPurchaseApprovalReports({users, kiosks, referenceDate, incl
   const reports = [];
   for (const group of reportGroups.values()) {
     group.seeds.forEach((seed) => {
-      const totalRevenue = cents(seed.totalRevenue);
+      const isChargeDrops = seed.model === "chargedrops";
+      const totalRevenue = cents(isChargeDrops ? seed.qualifyingRevenue : seed.totalRevenue);
       if (totalRevenue <= 0 && seed.rentalCount === 0) return;
 
       const profileClientPercent = Number(seed.client.revShare ?? seed.client.commission) || 0;
@@ -10264,6 +10408,12 @@ async function createPurchaseApprovalReports({users, kiosks, referenceDate, incl
           stationCount: seed.purchaseKiosks.length,
           rentalCount: seed.rentalCount,
           totalRevenue,
+          ...(isChargeDrops ? {
+            grossRevenue: cents(seed.grossRevenue),
+            refunds: cents(seed.refunds),
+            taxes: cents(seed.taxes),
+            qualifyingRevenue: cents(seed.qualifyingRevenue),
+          } : {}),
           clientShare: cents(clientShare),
           ...(companyManaged ? {
             companyRetained: cents(totalRevenue - clientShare),
@@ -10271,6 +10421,11 @@ async function createPurchaseApprovalReports({users, kiosks, referenceDate, incl
         },
         partnerBreakdown: Array.from(partnerMap.values()).filter((partner) => partner.share > 0),
         stationids: Array.from(seed.stationIds),
+        ...(isChargeDrops ? {
+          revenueBasis: REVENUE_BASIS_VERSION,
+          currency: seed.currencies.size === 1 ? [...seed.currencies][0] :
+            seed.currencies.size === 0 ? "" : "mixed",
+        } : {}),
       });
     });
   }
@@ -10282,7 +10437,9 @@ async function saveAndNotifyPayoutReport(report, {autoSendLease = true, notifyAd
   const ref = db.collection(PAYOUT_REPORTS_COLLECTION).doc(report.id);
   const existingSnap = await ref.get();
   const existing = existingSnap.exists ? existingSnap.data() || {} : {};
-  if (["sent", "approved", "paid"].includes(existing.status)) {
+  if (["sent", "approved", "processing", "transferred", "paid"].includes(
+      existing.status,
+  )) {
     return {id: report.id, status: existing.status, skipped: true};
   }
   const now = admin.firestore.FieldValue.serverTimestamp();
@@ -10380,6 +10537,77 @@ async function approvePayoutReportImpl(data, authState) {
   const snap = await ref.get();
   if (!snap.exists) throw new functions.https.HttpsError("not-found", "Payout report not found");
   const report = snap.data() || {};
+  if (report.model === "chargedrops" && report.type === "purchase_approval") {
+    const transferResult = await chargeDropsPayoutTransfers.approve({
+      reportId,
+      authState: {...authState, isAdmin: true},
+    });
+    const updatedSnapshot = await ref.get();
+    const updatedReport = updatedSnapshot.data() || report;
+    const sends = Array.isArray(updatedReport.sends) ? [...updatedReport.sends] : [];
+    let clientNotice = updatedReport.clientNotice || {};
+    if (!new Set(["sent", "unknown"]).has(clientNotice.status) &&
+        isValidEmail(updatedReport.client?.email)) {
+      const message = buildApprovedClientEmail(updatedReport);
+      try {
+        const result = await sendChargerentEmail({
+          to: updatedReport.client.email,
+          cc: updatedReport.adminEmail || getPayoutAdminEmail(updatedReport.paymentAdmin),
+          subject: message.subject,
+          body: message.body,
+          html: message.html,
+        });
+        const sent = {
+          type: "client",
+          to: updatedReport.client.email,
+          messageId: String(result?.messageId || ""),
+        };
+        sends.push(sent);
+        clientNotice = {
+          status: "sent",
+          messageId: sent.messageId,
+          sentAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+      } catch (error) {
+        clientNotice = {
+          status: error?.notificationBeforeSend === true ? "failed" : "unknown",
+          errorCode: String(error?.code || "unknown").slice(0, 80),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+      }
+    }
+    let partnerNotification = updatedReport.partnerNotification || {};
+    if (!new Set(["sent", "unknown", "skipped"]).has(partnerNotification.status)) {
+      const clientSnapshot = await db.collection("users")
+          .doc(String(updatedReport.client?.uid || ""))
+          .get();
+      if (clientSnapshot.exists) {
+        partnerNotification = await chargeDropsPartnerNotifications.notify({
+          clientUid: clientSnapshot.id,
+          clientProfile: clientSnapshot.data() || {},
+          eventType: "client_payout_approved",
+          eventKey: reportId,
+          actorUid: authState?.uid || "",
+          details: {
+            period: updatedReport.period?.label || "",
+            clientShare: updatedReport.totals?.clientShare || 0,
+          },
+        });
+      }
+    }
+    await ref.set({
+      sends,
+      clientNotice,
+      partnerNotification,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, {merge: true});
+    return {
+      ...transferResult,
+      sends,
+      clientNoticeStatus: clientNotice.status || "skipped",
+      partnerNotificationStatus: partnerNotification.status || "skipped",
+    };
+  }
   if (!["pending_approval", "ready_to_send"].includes(report.status)) {
     throw new functions.https.HttpsError("failed-precondition", "Only pending reports can be sent");
   }
@@ -10449,8 +10677,22 @@ async function approvePayoutReportImpl(data, authState) {
 async function markPayoutPaidImpl(data, authState) {
   const reportId = String(data?.reportId || "").trim();
   if (!reportId) throw new functions.https.HttpsError("invalid-argument", "reportId required");
+  const ref = db.collection(PAYOUT_REPORTS_COLLECTION).doc(reportId);
+  const snapshot = await ref.get();
+  if (!snapshot.exists) {
+    throw new functions.https.HttpsError("not-found", "Payout report not found");
+  }
+  const report = snapshot.data() || {};
+  if (report.model === "chargedrops" &&
+      (report.status !== "transferred" ||
+      !/^tr_[A-Za-z0-9]{8,}$/.test(String(report?.transfer?.id || "")))) {
+    throw new functions.https.HttpsError(
+        "failed-precondition",
+        "A verified Stripe transfer is required before this ChargeDrops payout can be reconciled.",
+    );
+  }
   const now = admin.firestore.FieldValue.serverTimestamp();
-  await db.collection(PAYOUT_REPORTS_COLLECTION).doc(reportId).set({
+  await ref.set({
     status: "paid",
     paidAt: now,
     paidByUid: authState?.uid || "",
@@ -10700,7 +10942,7 @@ async function stationBindingBindModuleImpl(data, authState) {
       reservedStationIds,
       {kioskType: requestedKioskType},
   );
-  const provisionid = findNextProvisionId(snapshot.docs);
+  let provisionid = findNextProvisionId(snapshot.docs);
   const stationid = requestedStationId || nextStationid;
 
   if (!isBindingStationId(stationid, country)) {
@@ -10725,12 +10967,15 @@ async function stationBindingBindModuleImpl(data, authState) {
       (docSnap) => extractStationId(docSnap) === stationid,
   );
 
-  if (existingStationDoc) {
+  const addingCtf7 = isCtf7 && data?.addToStation === true && existingStationDoc;
+  if (existingStationDoc && !addingCtf7) {
     throw new functions.https.HttpsError(
         "already-exists",
         `Station ${stationid} already exists.`,
     );
   }
+
+  if (addingCtf7) provisionid = extractProvisionId(existingStationDoc);
 
   const duplicateModuleDoc = snapshot.docs.find((docSnap) => {
     const kiosk = docSnap.data() || {};
@@ -10769,21 +11014,21 @@ async function stationBindingBindModuleImpl(data, authState) {
       }
     }
 
-    if (!existingStationSnap.empty) {
+    if (!existingStationSnap.empty && !addingCtf7) {
       throw new functions.https.HttpsError(
           "already-exists",
           `Station ${stationid} already exists.`,
       );
     }
 
-    if (stationSnap.exists) {
+    if (stationSnap.exists && !addingCtf7) {
       throw new functions.https.HttpsError(
           "aborted",
           `Provision ${provisionid} already exists. Retry binding.`,
       );
     }
 
-    const boundKiosk = createBoundKioskDocument({
+    let boundKiosk = createBoundKioskDocument({
             provisionid,
             stationid,
             moduleId,
@@ -10793,7 +11038,18 @@ async function stationBindingBindModuleImpl(data, authState) {
           });
     if (isCtf7) {
       boundKiosk.modules[0].machineSN = wireSerial || ctf7Snap?.data()?.machineSN || "";
-      transaction.set(ctf7Ref, ctf7.boundRegistry({module: boundKiosk.modules[0],
+      if (addingCtf7) {
+        const live = stationSnap.data();
+        if (!stationSnap.exists || live.stationid !== stationid || live.hardware?.type !== ctf7.MODEL) {
+          throw new functions.https.HttpsError("failed-precondition", "CTF7 modules can only be added to the selected CTF7 station.");
+        }
+        if ((live.modules || []).some((module) => moduleIdsMatch(module.id, moduleId))) {
+          throw new functions.https.HttpsError("already-exists", "This module is already assigned to the station.");
+        }
+        boundKiosk = recalculateKioskTotals({...live, modules: [...(live.modules || []), boundKiosk.modules[0]]});
+      }
+      const registeredModule = boundKiosk.modules.find((module) => module.id === moduleId);
+      transaction.set(ctf7Ref, ctf7.boundRegistry({module: registeredModule,
         stationid, provisionid, previous: ctf7Snap?.data() || {},
         timestamp: admin.firestore.FieldValue.serverTimestamp(), actorUid: authState.uid}));
       if (wireSerial && ctf7.moduleId(wireSerial) !== moduleId) {
@@ -10913,7 +11169,8 @@ async function stationBindingUnbindModuleImpl(data, authState) {
         throw new functions.https.HttpsError("failed-precondition", "CTF7 assignment changed. Refresh before unbinding.");
       }
       const lockSnap = await transaction.get(db.collection("ctf7CommandLocks").doc(moduleId));
-      if (lockSnap.data()?.unresolved) {
+      const operatorLock = await transaction.get(db.collection("ctf7OperatorLocks").doc(moduleId));
+      if (lockSnap.data()?.unresolved || operatorLock.data()?.unresolved) {
         throw new functions.https.HttpsError("failed-precondition", "Resolve the pending CTF7 dispense before unbinding.");
       }
     }
@@ -11169,7 +11426,8 @@ async function stationBindingMoveModuleImpl(data, authState) {
         throw new functions.https.HttpsError("failed-precondition", "CTF7 assignment changed. Refresh before moving.");
       }
       const lockSnap = await transaction.get(db.collection("ctf7CommandLocks").doc(moduleId));
-      if (lockSnap.data()?.unresolved) {
+      const operatorLock = await transaction.get(db.collection("ctf7OperatorLocks").doc(moduleId));
+      if (lockSnap.data()?.unresolved || operatorLock.data()?.unresolved) {
         throw new functions.https.HttpsError("failed-precondition", "Resolve the pending CTF7 dispense before moving this module.");
       }
     }
@@ -11194,6 +11452,13 @@ async function stationBindingMoveModuleImpl(data, authState) {
           "not-found",
           `Module ${moduleId} is no longer attached to ${sourceStationid}.`,
       );
+    }
+
+    if (isCtf7) {
+      movedModule.controlEnabled = false;
+      movedModule.connected = false;
+      movedModule.inventoryVerified = false;
+      movedModule.operationalEnabled = false;
     }
 
     const remainingModules = liveSourceModules.filter(
@@ -12382,6 +12647,7 @@ exports.admin_createAuthUserAndProfile = functions.runWith({
 
 exports.admin_createChargeDropsClient = functions.runWith({
   secrets: [GMAIL_APP_PASSWORD],
+  serviceAccount: CHARGEDROPS_ONBOARDING_SERVICE_ACCOUNT,
   timeoutSeconds: 180,
 }).https.onCall(async (data, context) => {
   const authState = await assertAdminFromContext(context);
@@ -12426,9 +12692,99 @@ exports.admin_getChargeDropsPlace = functions.runWith({
   return getChargeDropsPlaceImpl(data);
 });
 
-exports.admin_syncChargeDropsVenue = functions.https.onCall(async (data, context) => {
+exports.admin_syncChargeDropsVenue = functions.runWith({
+  serviceAccount: CHARGEDROPS_ONBOARDING_SERVICE_ACCOUNT,
+}).https.onCall(async (data, context) => {
   const authState = await assertAdminFromContext(context);
   return syncChargeDropsVenueImpl(data, authState);
+});
+
+exports.admin_createRegionalPartnerInvite = functions.runWith({
+  secrets: [GMAIL_APP_PASSWORD],
+  timeoutSeconds: 120,
+}).https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  try {
+    return await regionalPartnerOnboarding.createInvite({authState, input: data});
+  } catch (error) {
+    throw regionalPartnerOnboardingHttpsError(error);
+  }
+});
+
+exports.admin_listRegionalPartnerInvites = functions.https.onCall(
+    async (_data, context) => {
+      const authState = await assertAdminFromContext(context);
+      try {
+        return await regionalPartnerOnboarding.listInvites({authState});
+      } catch (error) {
+        throw regionalPartnerOnboardingHttpsError(error);
+      }
+    },
+);
+
+exports.admin_activateRegionalPartner = functions.runWith({
+  secrets: [GMAIL_APP_PASSWORD],
+  timeoutSeconds: 120,
+}).https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  try {
+    return await regionalPartnerOnboarding.activate({
+      authState,
+      inviteId: data?.inviteId,
+    });
+  } catch (error) {
+    throw regionalPartnerOnboardingHttpsError(error);
+  }
+});
+
+exports.partnerOnboarding_status = functions.https.onCall(async (data) => {
+  try {
+    return await regionalPartnerOnboarding.getStatus({token: data?.token});
+  } catch (error) {
+    throw regionalPartnerOnboardingHttpsError(error);
+  }
+});
+
+exports.partnerOnboarding_submitProfile = functions.runWith({
+  timeoutSeconds: 120,
+  memory: "512MiB",
+}).https.onCall(async (data) => {
+  try {
+    return await regionalPartnerOnboarding.submitProfile({
+      token: data?.token,
+      input: data,
+    });
+  } catch (error) {
+    throw regionalPartnerOnboardingHttpsError(error);
+  }
+});
+
+exports.partnerOnboarding_requestAgreementCode = functions.runWith({
+  secrets: [GMAIL_APP_PASSWORD, CHARGEDROPS_AGREEMENT_OTP_SECRET],
+}).https.onCall(async (data) => {
+  try {
+    return await regionalPartnerOnboarding.requestAgreementCode({
+      token: data?.token,
+    });
+  } catch (error) {
+    throw regionalPartnerOnboardingHttpsError(error);
+  }
+});
+
+exports.partnerOnboarding_signAgreement = functions.runWith({
+  secrets: [GMAIL_APP_PASSWORD, CHARGEDROPS_AGREEMENT_OTP_SECRET],
+  timeoutSeconds: 120,
+  memory: "512MiB",
+}).https.onCall(async (data, context) => {
+  try {
+    return await regionalPartnerOnboarding.signAgreement({
+      token: data?.token,
+      input: data,
+      evidence: chargeDropsAgreementRequestEvidence(context?.rawRequest),
+    });
+  } catch (error) {
+    throw regionalPartnerOnboardingHttpsError(error);
+  }
 });
 
 exports.admin_prepareChargeDropsAgreement = functions.runWith({
@@ -12480,6 +12836,24 @@ exports.chargedrops_signAgreement = functions.runWith({
   try {
     return await chargeDropsAgreements.signAgreement({
       authState,
+      input: data,
+      evidence: chargeDropsAgreementRequestEvidence(context?.rawRequest),
+    });
+  } catch (error) {
+    throw chargeDropsAgreementHttpsError(error);
+  }
+});
+
+exports.admin_countersignChargeDropsAgreement = functions.runWith({
+  secrets: [GMAIL_APP_PASSWORD],
+  timeoutSeconds: 120,
+  memory: "512MiB",
+}).https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  try {
+    return await chargeDropsAgreements.countersignAgreement({
+      authState,
+      uid: data?.uid,
       input: data,
       evidence: chargeDropsAgreementRequestEvidence(context?.rawRequest),
     });
@@ -13036,6 +13410,15 @@ exports.phoneControl_deviceScreen = handleHttpFunction(async (data, req) => (
   recordPhoneScreenUpdate(data, req, {db, admin})
 ));
 
+exports.phoneControl_expirePendingAssignments = onSchedule({
+  schedule: "every 1 minutes",
+  timeZone: "UTC",
+  region: "us-central1",
+}, async () => {
+  const result = await expirePendingPhoneAssignments({db, admin});
+  if (result.expired) console.log("Expired pending phone assignments", result);
+});
+
 exports.payouts_generateMonthlyReports = functions.runWith(PAYOUT_GENERATOR_RUNTIME).https.onCall(async (data, context) => {
   const authState = await assertAdminFromContext(context);
   return generatePayoutReportsImpl(data, authState);
@@ -13047,7 +13430,7 @@ exports.payouts_listReports = functions.https.onCall(async (data, context) => {
 });
 
 exports.payouts_approveAndSend = functions.runWith({
-  secrets: [GMAIL_APP_PASSWORD],
+  secrets: [GMAIL_APP_PASSWORD, STRIPE_CONNECT_SECRET_KEY],
 }).https.onCall(async (data, context) => {
   const authState = await assertAdminFromContext(context);
   return approvePayoutReportImpl(data, authState);
@@ -13213,6 +13596,22 @@ exports.kiosks_recordOperationalEvents = onDocumentWritten(
     },
 );
 
+exports.kiosks_syncAccessScope = onDocumentWritten(
+    "kiosks/{provisionId}",
+    async (event) => {
+      const result = await syncKioskAccessFromWrite({
+        before: event.data.before.exists ? event.data.before.data() : null,
+        after: event.data.after.exists ? event.data.after.data() : null,
+        kioskDocId: event.params.provisionId,
+        db,
+        serverTimestamp: () => admin.firestore.FieldValue.serverTimestamp(),
+      });
+      if (result.changed) {
+        console.log("Synchronized kiosk access scope", {stationId: result.stationId});
+      }
+    },
+);
+
 exports.kiosks_seedApolloClientProfile = onDocumentWritten(
     "kiosks/{provisionId}",
     async (event) => {
@@ -13270,6 +13669,22 @@ exports.uiProfile_delete = functions.https.onCall(async (data, context) => {
 exports.uiProfile_apply = functions.https.onCall(async (data, context) => {
   const authState = await assertCanManageUiProfilesFromContext(context);
   return uiProfileApplyImpl(data, authState);
+});
+
+function setStationBrandImpl(data, authState) {
+  return setStationBrand(data, authState, {
+    db, admin, HttpsError: functions.https.HttpsError,
+    canManageStation: (auth, kiosk) => canManageUiProfileForKiosk(auth, kiosk)
+      && canManageUiProfileClient(auth, kiosk.info?.client || kiosk.info?.clientId),
+  });
+}
+
+exports.uiProfile_setStationBrand = functions.https.onCall(async (data, context) => {
+  return setStationBrandImpl(data, await assertCanManageUiProfilesFromContext(context));
+});
+
+exports.uiProfile_httpSetStationBrand = handleHttpFunction(async (data, req) => {
+  return setStationBrandImpl(data, await assertCanManageUiProfiles(req, data));
 });
 
 exports.uiProfile_httpList = handleHttpFunction(async (data, req) => {
@@ -13787,7 +14202,7 @@ exports.payouts_httpApproveAndSend = handleHttpFunction(
       const authState = await assertAdmin(req, data);
       return approvePayoutReportImpl(data, authState);
     },
-    {secrets: [GMAIL_APP_PASSWORD]},
+    {secrets: [GMAIL_APP_PASSWORD, STRIPE_CONNECT_SECRET_KEY]},
 );
 
 exports.payouts_httpMarkPaid = handleHttpFunction(async (data, req) => {
@@ -13835,6 +14250,16 @@ exports.kiosk_httpUpdateSlotLock = handleHttpFunction(async (data, req) => {
   const authState = await getAuthorizedProfileFromRequest(req, data);
   return kioskUpdateSlotLockImpl(data, authState);
 });
+
+const ctf7OperatorApi = createCtf7OperatorApi({db, HttpsError: functions.https.HttpsError});
+exports.kiosk_ctf7Command = functions.https.onCall(async (data, context) =>
+  ctf7OperatorApi.execute(data, await getAuthorizedProfileFromContext(context)));
+exports.kiosk_httpCtf7Command = handleHttpFunction(async (data, req) =>
+  ctf7OperatorApi.execute(data, await getAuthorizedProfileFromRequest(req, data)));
+exports.kiosk_ctf7CommandStatus = functions.https.onCall(async (data, context) =>
+  ctf7OperatorApi.status(data, await getAuthorizedProfileFromContext(context)));
+exports.kiosk_httpCtf7CommandStatus = handleHttpFunction(async (data, req) =>
+  ctf7OperatorApi.status(data, await getAuthorizedProfileFromRequest(req, data)));
 
 exports.stationBinding_getNextStation = functions.https.onCall(async (data, context) => {
   await assertCanManageBindingsFromContext(context);
@@ -13897,21 +14322,47 @@ exports.stationBinding_httpMoveModule = handleHttpFunction(async (data, req) => 
 });
 
 exports.kioskTerminalApi = functions.runWith({
-  secrets: [STRIPE_TEST_SECRET_KEY, STRIPE_FR_LIVE_SECRET_KEY, BESITER_MQTT_CREDENTIALS],
+  secrets: [STRIPE_TEST_SECRET_KEY, STRIPE_FR_LIVE_SECRET_KEY, BESITER_MQTT_CREDENTIALS,
+    RENTAL_RECEIPT_SIGNING_KEY],
 }).https.onRequest(kioskTerminalHandler);
 
-exports.kioskTerminal_settleStripeReturn = onDocumentWritten({
-  document: "rentals/{rentalId}",
-  secrets: [STRIPE_TEST_SECRET_KEY, STRIPE_FR_LIVE_SECRET_KEY],
-}, async (event) => {
-  if (!event.data.after.exists) return;
-  const rentalId = event.params.rentalId;
-  await settleStripeReturn({
-    rental: event.data.after.data() || {},
-    rentalId,
-    getStripeClient: getStripeTerminalClient,
-    store: kioskTerminalStore,
-  });
+exports.rentalReceiptApi = functions.runWith({
+  secrets: [RENTAL_RECEIPT_SIGNING_KEY, STRIPE_TEST_SECRET_KEY, STRIPE_FR_LIVE_SECRET_KEY],
+}).https.onRequest(async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  res.set("Referrer-Policy", "no-referrer");
+  res.set("X-Content-Type-Options", "nosniff");
+  res.set("X-Robots-Tag", "noindex, nofollow");
+  const url = new URL(req.originalUrl || req.url, "https://receipt.invalid");
+  const match = url.pathname.match(/\/(?:api\/receipts|receipt)\/([^/]{1,600})$/);
+  if (req.method !== "GET" || !match) {
+    res.status(404).json({error: "This receipt is not available."});
+    return;
+  }
+  try {
+    let transactionId;
+    try { transactionId = decodeURIComponent(match[1]); } catch {
+      res.status(404).json({error: "This receipt is not available."}); return;
+    }
+    res.status(200).json(await rentalReceiptService.read(transactionId, url.searchParams.get("key")));
+  } catch (error) {
+    if (error.status !== 404) console.error("Receipt projection failed.");
+    res.status(error.status === 404 ? 404 : 503).json({error: "This receipt is not available."});
+  }
+});
+
+exports.admin_uploadReceiptLogo = functions.runWith({
+  timeoutSeconds: 60, memory: "256MiB",
+}).https.onCall(async (data, context) => {
+  const authState = await assertAdminFromContext(context);
+  try {
+    return await uploadReceiptLogo({input: data, authState, bucket: getStorageBucket(), db});
+  } catch (error) {
+    if (error instanceof ReceiptLogoError) {
+      throw new functions.https.HttpsError(error.code, error.message);
+    }
+    throw error;
+  }
 });
 
 exports.rbcOpenApi = rbcOpenApi;
@@ -13934,3 +14385,41 @@ exports.rentals_retryAmazonExports = onSchedule({
 }, async () => {
   await amazonRentalExportService.retryPending();
 });
+
+const ctf7CheckoutService = createCtf7Checkout({db, gateway: createCtf7Gateway({db}),
+  getStripeClient: getStripeTerminalClient, receiptService: rentalReceiptService});
+exports.ctf7CheckoutApi = functions.runWith({timeoutSeconds: 60,
+  secrets: [STRIPE_TEST_SECRET_KEY, STRIPE_FR_LIVE_SECRET_KEY, RENTAL_RECEIPT_SIGNING_KEY],
+}).https.onRequest(createCtf7CheckoutHandler(ctf7CheckoutService));
+exports.ctf7Checkout_reconcile = onSchedule({schedule: "every 1 minutes", timeoutSeconds: 120,
+  secrets: [STRIPE_TEST_SECRET_KEY, STRIPE_FR_LIVE_SECRET_KEY, RENTAL_RECEIPT_SIGNING_KEY],
+}, async () => {
+  const result = await ctf7CheckoutService.tick();
+  if (result.failed) console.warn("CTF7 checkout reconciliation needs retry", result);
+});
+
+// Local-first stations use a separate API and settlement worker in the same Firebase project.
+const {createLocalStationBackend, createLocalStationHandler} = require("./localStationBackend");
+const localStationService = createLocalStationBackend({db, getStripeClient: getStripeTerminalClient,
+  receiptService: rentalReceiptService});
+const localStationProvision = require("./localStationProvisioning").createLocalStationProvisioner({db});
+exports.kiosk_provisionLocalStation = functions.https.onCall(async (data, context) => {
+  return localStationProvision(data, await assertAdminFromContext(context)); });
+exports.kiosk_httpProvisionLocalStation = handleHttpFunction(async (data, req) => {
+  return localStationProvision(data, await assertAdmin(req, data)); });
+exports.localStationApi = functions.runWith({timeoutSeconds: 60,
+  secrets: [STRIPE_TEST_SECRET_KEY, STRIPE_FR_LIVE_SECRET_KEY, RENTAL_RECEIPT_SIGNING_KEY],
+}).https.onRequest(createLocalStationHandler(localStationService));
+exports.localStation_reconcile = onSchedule({schedule: "every 1 minutes", timeoutSeconds: 360,
+  secrets: [STRIPE_TEST_SECRET_KEY, STRIPE_FR_LIVE_SECRET_KEY],
+}, async () => { const result = await localStationService.tick();
+  if (result.failed) console.warn("Local station settlement requires reconciliation", result); });
+
+exports.kiosk_localStationCommand = functions.https.onCall(async (data, context) => {
+  return localStationService.commands.queue(data, await getAuthorizedProfileFromContext(context)); });
+exports.kiosk_localStationCommandStatus = functions.https.onCall(async (data, context) => {
+  return localStationService.commands.status(data.requestId, await getAuthorizedProfileFromContext(context)); });
+exports.kiosk_httpLocalStationCommand = handleHttpFunction(async (data, req) => {
+  return localStationService.commands.queue(data, await getAuthorizedProfileFromRequest(req, data)); });
+exports.kiosk_httpLocalStationCommandStatus = handleHttpFunction(async (data, req) => {
+  return localStationService.commands.status(data.requestId, await getAuthorizedProfileFromRequest(req, data)); });

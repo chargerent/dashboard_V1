@@ -1,3 +1,4 @@
+import {stripeOfflineRefundId, stripeOfflineAmountPending} from '../utils/stripeOfflinePayments.js';
 // src/pages/RentalsPage.jsx
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -145,7 +146,7 @@ const buildSearchValues = (searchTerm) => {
 };
 
 const resolveRefundTransactionId = (rental) => (
-    String(
+    rental?.stripeOffline === true ? stripeOfflineRefundId(rental) : String(
         rental?.orderid ||
         rental?.transactionid ||
         rental?.transactionId ||
@@ -1432,6 +1433,12 @@ export const RentalCard = ({ rental, t, onRefund, refundDisabled = false, onMatc
                     </div>
                 </div>
             </div>
+            {rental.stripeOffline === true && (
+                <p className={`mt-2 rounded px-2 py-1 text-xs ${rental.paymentResolution === 'declined' ? 'bg-red-50 text-red-800' : 'bg-amber-50 text-amber-900'}`}>
+                    {rental.paymentResolution === 'declined' ? 'Offline card payment declined after dispensing' :
+                        rental.paymentResolution === 'pending' ? 'Offline card payment awaiting bank approval' : 'Card payment collected offline'}
+                </p>
+            )}
             <div className="mt-4 grid grid-cols-3 gap-x-4 gap-y-2 text-xs">
                 <div>
                     <p className="text-gray-500">{t('order_id')}</p>
@@ -1506,7 +1513,7 @@ export const RentalCard = ({ rental, t, onRefund, refundDisabled = false, onMatc
                     <p className="text-gray-500">{t('amount')}</p>
                     <p className="font-mono text-base font-bold text-gray-800">
                         {(isReturnedRentalStatus(rental.status) || rentalStatusKey === 'purchased')
-                            ? formatRentalChargeAmount(rental)
+                            ? stripeOfflineAmountPending(rental) ? rental.paymentResolution === 'declined' ? 'Declined' : 'Pending' : formatRentalChargeAmount(rental)
                             : ''}
                     </p>
                 </div>
@@ -1567,7 +1574,7 @@ export const RentalCard = ({ rental, t, onRefund, refundDisabled = false, onMatc
                         <button
                             type="button"
                             onClick={() => onRefund(rental)}
-                            disabled={refundDisabled}
+                            disabled={refundDisabled || rental.stripeOffline === true && !stripeOfflineRefundId(rental)}
                             className="text-xs bg-blue-500 hover:bg-blue-600 disabled:cursor-not-allowed disabled:bg-blue-300 text-white font-semibold py-1 px-3 rounded-md"
                         >
                             {t('refund')}
@@ -2165,6 +2172,7 @@ export default function RentalsPage({ onNavigateToDashboard, onNavigateToAdmin, 
             const station = allStationsData.find(s => s.stationid === rentalToRefund.rentalStationid);
             const gateway = resolveRefundGateway(rentalToRefund, station);
             const transactionid = resolveRefundTransactionId(rentalToRefund);
+            if (!transactionid) return;
             // The onCommand function expects a different structure for refunds.
             // The 6th argument is used for the refund payload, which includes the transactionid.
             onCommand(rentalToRefund.rentalStationid, 'refund', null, null, null, { transactionid, orderId: transactionid, amount, gateway });

@@ -1,16 +1,50 @@
+import {checkoutReturnedReceipt} from './checkoutReceipt.js';
+import {checkoutTermsUrl} from './checkoutTerms.js';
+import {PAYMENT_MIN_HEIGHT,PAYMENT_MAX_HEIGHT} from './mediaLayout.js';
 export const IDLE_CHECKOUT_FLOW={step:'start',pageId:null,consent:false};
-export const RETURN_NOTICE_MS=20000;
-export function normalizeCheckoutReturnNotice(event,{stationId='LOCAL-KIOSK',now=Date.now()}={}) {
+export const CHECKOUT_INACTIVITY_MS=45000;
+export const CHECKOUT_PAYMENT_TIMEOUT_MS=45000;
+export const RETURN_NOTICE_MS=CHECKOUT_INACTIVITY_MS;
+export function checkoutInactivityAction({stage='start',phase='idle',busy=false,previewOnly=false,returnOnly=false,suppressed=false}={}) {
+  if(returnOnly || suppressed || stage==='start' || ['loading','recovering','out_of_order'].includes(stage))return 'none';
+  if(previewOnly)return 'start';
+  if(['awaiting_payment','authorizing'].includes(phase))return 'cancel';
+  if(busy)return 'wait';
+  if(phase==='dispensing')return 'wait';
+  if(['succeeded','declined','cancelled','failed'].includes(phase))return 'finish';
+  return 'start';
+}
+
+export function checkoutScreenTimeoutMs(profile) {
+  const seconds=profile?.screenTimeoutSeconds;
+  return Number.isInteger(seconds) && seconds>=10 && seconds<=120?seconds*1000:CHECKOUT_INACTIVITY_MS;
+}
+export function checkoutInactivityTimeoutMs(profile,phase='idle',overrideMs) {
+  const timeout=Number.isFinite(overrideMs) && overrideMs>0?overrideMs:checkoutScreenTimeoutMs(profile);
+  return ['awaiting_payment','authorizing'].includes(phase)?Math.max(timeout,CHECKOUT_PAYMENT_TIMEOUT_MS):timeout;
+}
+export function refreshCheckoutNotice(notice,now,timeoutMs) {
+  if(!notice || notice.noticeExpiresAt<=now)return notice;
+  return {...notice,noticeExpiresAt:now+timeoutMs};
+}
+export function normalizeCheckoutReturnNotice(event,{stationId='LOCAL-KIOSK',now=Date.now(),timeoutMs=RETURN_NOTICE_MS}={}) {
   if(event?.type!=='charger_returned' || event.stationId!==stationId || typeof event.eventId!=='string' || !event.eventId || event.eventId.length>160 || !Number.isSafeInteger(event.slot) || event.slot<=0)return null;
   const occurredAt=Date.parse(event.occurredAt),sourceExpiry=Date.parse(event.expiresAt);
-  const noticeExpiresAt=Math.min(Math.min(occurredAt,now)+RETURN_NOTICE_MS,Number.isFinite(sourceExpiry)?sourceExpiry:Infinity);
-  if(!Number.isFinite(occurredAt) || occurredAt<=0 || occurredAt>now+5000 || noticeExpiresAt<=now)return null;
+  const noticeExpiresAt=now+timeoutMs;
+  if(!Number.isFinite(occurredAt) || occurredAt<=0 || occurredAt>now+5000 || now-occurredAt>30000 || (event.source==='live' && !Number.isFinite(sourceExpiry)) || Number.isFinite(sourceExpiry) && sourceExpiry<=now)return null;
   return {...event,noticeExpiresAt};
 }
 export function canPresentCheckoutReturn({flow=IDLE_CHECKOUT_FLOW,phase='idle',busy=false,recovering=false,suppressed=false}={}) {
   if(busy || recovering || suppressed)return false;
   if(['succeeded','declined','cancelled','failed'].includes(phase))return true;
   return phase==='idle' && ['start','ready','returning','returned','out_of_order'].includes(flow.step);
+}
+export function canPreviewCheckoutReturn({directTap=false,phase='idle',paymentProgress,interaction,recovering=false,includeCancellation=false}={}) {
+  if(!directTap || recovering || interaction?.moneyStatus!=='pending')return false;
+  const progress=String(paymentProgress || '').toLowerCase();
+  if(phase==='awaiting_payment')return ['', 'preparing', 'preparing_payment', 'waiting_for_input', 'waiting_for_card'].includes(progress);
+  return phase==='authorizing' && (['preparing','preparing_payment','waiting_for_input','waiting_for_card'].includes(progress) ||
+    includeCancellation && ['cancelling','cancelling_payment'].includes(progress));
 }
 export function checkoutReturnContext({flow=IDLE_CHECKOUT_FLOW,phase='idle',interaction,returnEvent}={}) {
   const ownReturn=phase==='succeeded' && returnEvent?.interactionId===interaction?.id && !!interaction?.id && returnEvent.stationId===interaction.stationId;
@@ -24,16 +58,24 @@ export function returnReceiptSizing(panelHeight,scale=1) {
   return {padding,done,gap,qr};
 }
 export function checkoutReturnReceiptUrl(profile,event,interaction) {
-  const matched=event?.interactionId && event.interactionId===interaction?.id && event.stationId===interaction.stationId?interaction:null;
-  return checkoutLinkUrl(profile,'receipt',matched);
+  return checkoutReturnedReceipt(event,interaction)?.url || null;
 }
 export function floatingCheckoutGeometry(width=1080,height=1920,fraction=.16,fontScale=1) {
   const scale=Math.min(width,height)/1080;
   const minimum=height>width?384*scale:(360+Math.max(0,fontScale-1)*100)*scale;
-  return {scale,idleWidth:560*scale,idleHeight:128*scale,expandedWidth:width-64*scale,expandedHeight:Math.min(height,Math.round(Math.max(height*fraction,minimum))),bottom:32*scale,radius:40*scale};
+  const expandedHeight=Math.round(height*Math.max(PAYMENT_MIN_HEIGHT,Math.min(PAYMENT_MAX_HEIGHT,Number.isFinite(fraction)?fraction:.32)));
+  return {scale,contentScale:Math.min(1,expandedHeight/minimum),idleWidth:560*scale,idleHeight:128*scale,expandedWidth:width-64*scale,expandedHeight,bottom:32*scale,radius:40*scale};
 }
-export function checkoutLinkUrl(profile,stage,interaction) {
-  for(const candidate of [stage==='receipt'?interaction?.receiptUrl:null,profile?.links?.[stage]]){
+export function directTapCheckoutGeometry(geometry,width,height,stage,directTap=false) {
+  if(!directTap)return geometry;
+  const tapToRent=['touch_ready','waiting_for_card'].includes(stage);
+  const minimum=(height>width?(tapToRent?392:384):520)*geometry.scale;
+  return {...geometry,contentScale:Math.min(geometry.contentScale ?? 1,geometry.expandedHeight/minimum)};
+}
+export function checkoutLinkUrl(profile,stage,interaction,checkout={},language='en') {
+  if(stage==='terms')return checkoutTermsUrl(checkout,language,profile?.links?.terms);
+  if(stage==='receipt')return checkoutReturnedReceipt(null,interaction)?.url || null;
+  for(const candidate of [profile?.links?.[stage]]){
     if(typeof candidate!=='string' || !candidate.trim())continue;
     try{const url=new URL(candidate);if(url.protocol==='https:' && !url.username && !url.password)return url.href;}catch{/* Invalid links are omitted from the kiosk preview. */}
   }

@@ -1,36 +1,45 @@
+import VariableTextField from './VariableTextField.jsx';
+import {CHECKOUT_VARIABLES,PRICING_VARIABLES,HELP_URL_VARIABLES} from './templateVariables.js';
+import StationBrandBackground from './StationBrandBackground.jsx';
 import {useMediaAssetUrl} from './mediaAssetUrl.js';
 import {mediaFetch} from './mediaApi.js';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {CheckoutPanel} from './CheckoutPreview.jsx';
-import {floatingCheckoutGeometry} from './checkoutFlow.js';
+import ScreenTimeoutField from './ScreenTimeoutField.jsx';
+import {ReceiptPageFields,ReceiptPagePreview} from './ReceiptPageEditor.jsx';
+import {floatingCheckoutGeometry,directTapCheckoutGeometry} from './checkoutFlow.js';
 import {previewPaymentHeight} from './mediaLayout.js';
+import {howItWorksOfferFromKiosk,checkoutHowItWorksGeometry} from './howItWorks.js';
+import {editorPreviewOffer,editorPreviewStage,editorPreviewSections,rentReturnEditorKeys} from './checkoutEditorPreview.js';
 import './media-studio.css';
 import {DashboardIcon as Icon} from './DashboardIcons.jsx';
-import {STRIPE_UI_LANGUAGES as STRIPE_LANGUAGES, STRIPE_UI_FIELDS, STRIPE_UI_COLORS as STRIPE_THEME_FIELDS, defaultStripeUi as createStripeUi, stripeText, validateStripeUi as normalizeStripeUi} from './stripeUi.js';
+import {STRIPE_UI_LANGUAGES as STRIPE_LANGUAGES, STRIPE_UI_FIELDS, STRIPE_UI_COLORS as STRIPE_THEME_FIELDS, RENT_RETURN_PLANS, rentReturnOverrides, defaultStripeUi as createStripeUi, validateStripeUi as normalizeStripeUi} from './stripeUi.js';
 
 const SECTION_META = [
-  {key:'start',label:'Start'}, {key:'ready',label:'Rent / Return'}, {key:'information',label:'How it works'},
-  {key:'returning',label:'Return'}, {key:'review',label:'Rental review'}, {key:'waiting_for_card',label:'Payment'},
-  {key:'wait',label:'Please wait',previewStage:'authorizing'}, {key:'succeeded',label:'Rental complete'},
+  {key:'start',label:'Start'}, {key:'ready',label:'Rent / Return'}, {key:'sold_out',label:'Sold out'}, {key:'information',label:'How it works'},
+  {key:'returning',label:'Return instructions'}, {key:'returned',label:'Return complete'},
+  {key:'review',label:'Rental review'}, {key:'waiting_for_card',label:'Payment'},
+  {key:'loading',label:'Loading'}, {key:'authorizing',label:'Authorizing'},
+  {key:'dispensing',label:'Releasing charger'}, {key:'succeeded',label:'Rental complete'},
   {key:'terms',label:'Terms'}, {key:'map',label:'Map'},
-  {key:'failed',label:'Transaction error'}, {key:'declined',label:'Card declined'}, {key:'out_of_order',label:'Out of order'},
-  {key:'popups',label:'Confirmation messages',previewStage:'succeeded'}, {key:'shared',label:'Shared buttons',previewStage:'start'},
+  {key:'failed',label:'Release failed'}, {key:'declined',label:'Card declined'}, {key:'cancelled',label:'Cancelled'}, {key:'out_of_order',label:'Out of order'},
+  {key:'popups',label:'Confirmation messages',previewStage:'start'}, {key:'shared',label:'Shared buttons',previewStage:'start'},
 ];
 const COMMON_SECTIONS = {
   brand:'ready',start:'start',language:'start',pricing:'review',information:'information',support:'information',helpTitle:'ready',helpScan:'ready',
+  helpTermsTitle:'ready',touchBorrowTitle:'ready',eventFreeDay:'ready',eventLateDay:'ready',eventLateDays:'ready',eventNotReturned:'ready',
+  touchConsent:'ready',touchHold:'ready',touchUpfrontPayment:'ready',returnAnySlot:'succeeded',returnConfirmationHint:'succeeded',eventBorrowTitle:'waiting_for_card',
   rent:'ready',return:'ready',availability:'ready',availabilityUnavailable:'ready',unavailable:'out_of_order',returnPending:'returning',continue:'review',consent:'review',terms:'terms',termsButton:'terms',
   readerReady:'waiting_for_card',readerUnavailable:'waiting_for_card',cancel:'waiting_for_card',
-  connecting:'wait',connectionLost:'wait',starting:'wait',waitingSlot:'wait',
-  settlementRefunded:'returning',returnConfirmed:'returning',returnSlot:'returning',receiptScan:'returning',receiptPending:'returning',settlementVoided:'failed',settlementCaptured:'succeeded',settlementAuthorized:'wait',
+  connecting:'loading',connectionLost:'shared',starting:'loading',waitingSlot:'dispensing',
+  settlementRefunded:'returned',returnConfirmed:'returned',returnSlot:'returned',receiptScan:'returned',receiptPending:'returned',settlementVoided:'cancelled',settlementCaptured:'succeeded',settlementAuthorized:'dispensing',
   errorGeneric:'failed',offerChanged:'review',map:'map',retry:'failed',done:'succeeded',back:'shared',openLink:'shared',linkUnavailable:'shared',
 };
-const WAIT_STAGES = new Set(['loading','authorizing','dispensing','recovering']);
-const STRIPE_FIELDS = STRIPE_UI_FIELDS.filter(field => !['brand','support','receipt','receipt.title','receipt.body','tap','insert','start.title','start.body','settlementRefunded','returnConfirmed'].includes(field.key)).map(field => {
+const AUTO_HOW_IT_WORKS_FIELDS=/^information\.(rent|card|scanner|phone|return)(Title|Body)$|^information\.body$/;
+const STRIPE_FIELDS = STRIPE_UI_FIELDS.filter(field => !field.key.startsWith('recovering.') && !AUTO_HOW_IT_WORKS_FIELDS.test(field.key) && !['brand','support','receipt','receipt.title','receipt.body','tap','insert','demoTap','demoScan','demoNotice','start.title','start.body','settlementRefunded','returnConfirmed','popup.return','popup.failure','touchUpfrontPayment'].includes(field.key)).map(field => {
   const prefix = field.key.split('.')[0];
-  const group = COMMON_SECTIONS[field.key] || (prefix === 'popup' ? 'popups' : prefix === 'returning' || prefix === 'returned' ? 'returning' : WAIT_STAGES.has(prefix) ? 'wait' : prefix === 'cancelled' ? 'failed' : SECTION_META.some(section => section.key === prefix) ? prefix : 'shared');
-  const labelPrefix = prefix === 'returning' ? 'Instructions' : prefix === 'returned' ? 'Completed' : WAIT_STAGES.has(prefix) || prefix === 'cancelled' ? prefix.charAt(0).toUpperCase()+prefix.slice(1) : '';
-  const label = labelPrefix ? `${labelPrefix} · ${field.label}` : field.label;
-  return {...field,group,label};
+  const group = COMMON_SECTIONS[field.key] || (prefix === 'popup' ? 'popups' : SECTION_META.some(section => section.key === prefix) ? prefix : 'shared');
+  return {...field,group};
 });
 const sectionLabel = key => SECTION_META.find(section => section.key === key)?.label || key;
 const previewStageFor = key => SECTION_META.find(section => section.key === key)?.previewStage || key;
@@ -68,48 +77,46 @@ function MediaPreviewZone({zone, assets, width, height}) {
   </div>;
 }
 
-function previewGeometry(manifest) {
+function previewGeometry(manifest,stage,offer={}) {
   const landscape = manifest?.orientation === 'landscape';
   const screenWidth = landscape ? 1920 : 1080, screenHeight = landscape ? 1080 : 1920;
   const fraction = previewPaymentHeight(manifest?.checkout);
-  const {expandedHeight:paymentHeight,idleWidth,idleHeight,bottom:margin,expandedWidth} = floatingCheckoutGeometry(screenWidth,screenHeight,fraction);
+  const base=checkoutHowItWorksGeometry(floatingCheckoutGeometry(screenWidth,screenHeight,fraction),screenWidth,screenHeight,stage);
+  const {expandedHeight:paymentHeight,idleWidth,idleHeight,bottom:margin,expandedWidth}=directTapCheckoutGeometry(base,screenWidth,screenHeight,stage,offer.touch===false && offer.paymentRequired!==false);
   return {screenWidth,screenHeight,fraction,paymentHeight,idleWidth,idleHeight,margin,expandedWidth,detailHeight:Math.max(paymentHeight,idleHeight)+2*margin};
 }
 
-function ScaledDevicePreview({profile, language, selectedPage, group, manifest, previewStationId, previewStage, previewPopupType, paymentOnly=false, previewStageChange, previewLanguageChange}) {
+function ScaledDevicePreview({profile, language, selectedPage, group, manifest, previewStationId, previewStage, previewOffer=PREVIEW_OFFER, paymentOnly=false, previewStageChange, previewLanguageChange}) {
   const box = useRef(null), [displayWidth,setDisplayWidth] = useState(0);
   useEffect(() => {
     if (!box.current) return;
     const observer = new ResizeObserver(([entry]) => setDisplayWidth(entry.contentRect.width));
     observer.observe(box.current); return () => observer.disconnect();
   }, []);
-  const {screenWidth,screenHeight,fraction,paymentHeight,detailHeight} = previewGeometry(manifest);
+  const stage = selectedPage ? 'page' : editorPreviewStage(previewStage || previewStageFor(group),previewOffer);
+  const {screenWidth,screenHeight,fraction,paymentHeight,detailHeight} = previewGeometry(manifest,stage==='ready' && previewOffer.touch===false?'touch_ready':stage,previewOffer);
   const canvasHeight = paymentOnly ? detailHeight : screenHeight;
   const scale = displayWidth / screenWidth;
   const assets = Object.fromEntries((manifest.assets || []).map(asset => [asset.id,asset]));
   const previewProfile = {...profile,enabledLanguages:[...new Set([...profile.enabledLanguages,language])]};
-  const stage = selectedPage ? 'page' : previewStage || previewStageFor(group);
-  const popupKey = previewPopupType === 'rental_failed' ? 'popup.failure' : 'popup.success';
-  const popupTitleKey = previewPopupType === 'rental_failed' ? 'failed.title' : 'succeeded.title';
-  const showPopup = group === 'popups' && !selectedPage && previewPopupType !== 'charger_returned' && !paymentOnly;
-  const previewCheckout = {stationId:previewStationId || manifest.stationId,offer:PREVIEW_OFFER, connected:true, recovering:false, liveTerminalEnabled:true, interaction:{slot:7,currency:'usd',amountCents:500,...(stage === 'succeeded' ? {moneyStatus:'captured'} : {})}};
+  const previewCheckout = {receiptPreview:['succeeded','returned'].includes(stage),stationId:previewStationId || manifest.stationId,offer:previewOffer, connected:true, recovering:false, liveTerminalEnabled:true, interaction:{slot:7,currency:previewOffer.currency || 'usd',amountCents:previewOffer.amountCents,...(stage === 'succeeded' ? {moneyStatus:'captured'} : {})}};
   return <div ref={box} style={{position:'relative',width:'100%',height:displayWidth?canvasHeight*scale:undefined,aspectRatio:`${screenWidth} / ${canvasHeight || 1}`,overflow:'hidden',background:manifest.background || '#000'}} data-testid={paymentOnly?'stripe-payment-detail':'stripe-device-preview'} data-screen-width={screenWidth} data-screen-height={screenHeight} data-payment-fraction={fraction}>
     {displayWidth > 0 && <div data-kiosk-viewport style={{position:'absolute',top:0,left:0,width:screenWidth,height:canvasHeight,transform:`scale(${scale})`,transformOrigin:'top left','--ms-preview-pixel':'1px',fontFamily:'Roboto,Arial,sans-serif',boxSizing:'border-box'}}>
-      {!paymentOnly && <div data-testid="stripe-preview-media" style={{position:'absolute',inset:0,width:screenWidth,height:screenHeight,overflow:'hidden'}}>{(manifest.zones || []).map(zone => <MediaPreviewZone key={zone.id} zone={zone} assets={assets} width={zone.width*screenWidth} height={zone.height*screenHeight}/>)}</div>}
+      {!paymentOnly && <div data-testid="stripe-preview-media" style={{position:'absolute',inset:0,width:screenWidth,height:screenHeight,overflow:'hidden'}}>{manifest.stationBrandBackground !== false ? <StationBrandBackground brand={manifest.stationBrand || 'chargerent'}/> : (manifest.zones || []).map(zone => <MediaPreviewZone key={zone.id} zone={zone} assets={assets} width={zone.width*screenWidth} height={zone.height*screenHeight}/>)}</div>}
       {paymentHeight > 0 && <div style={{position:'absolute',inset:0,zIndex:1,width:screenWidth,height:canvasHeight,overflow:'visible',pointerEvents:'none'}} data-testid="stripe-preview-payment-region">
         <CheckoutPanel checkout={previewCheckout} previewOnly stripeUi={previewProfile} height={fraction} previewStage={stage} previewPageId={selectedPage?.id} previewLanguage={language} previewStageChange={previewStageChange} previewLanguageChange={previewLanguageChange} viewportWidth={screenWidth} viewportHeight={screenHeight}/>
       </div>}
-      {showPopup && <div className={`ms-screen-popup ms-stripe-popup ${previewPopupType}`} style={{background:previewPopupType === 'rental_failed' ? profile.theme.danger : profile.theme.primary,color:profile.theme.buttonText}} role="status" data-testid="stripe-confirmation-popup"><strong>{stripeText(previewProfile,language,popupTitleKey,{slot:7})}</strong><p>{stripeText(previewProfile,language,popupKey,{slot:7})}</p></div>}
     </div>}
   </div>;
 }
 
-function DraftPreview({profile, language, selectedPage, group, manifest, previewStage, previewPopupType, previewStageChange, previewLanguageChange, previewStations, previewStationId, onPreviewStationChange, previewOrientation, onPreviewOrientationChange, manifestError}) {
+function DraftPreview({profile, language, selectedPage, group, manifest, previewStage, previewPopupType, previewOffer, previewStageChange, previewLanguageChange, previewStations, previewStationId, onPreviewStationChange, previewOrientation, onPreviewOrientationChange, previewMode, onPreviewModeChange, kioskTouch, manifestError}) {
   const [zoom,setZoom] = useState(false);
-  const {screenWidth:width,screenHeight:height,fraction,paymentHeight,idleWidth,idleHeight,expandedWidth,margin,detailHeight} = previewGeometry(manifest);
-  const idle = !selectedPage && ['start','loading'].includes(previewStage || previewStageFor(group));
+  const stage=selectedPage?'page':editorPreviewStage(previewStage || previewStageFor(group),previewOffer);
+  const {screenWidth:width,screenHeight:height,fraction,paymentHeight,idleWidth,idleHeight,expandedWidth,margin,detailHeight} = previewGeometry(manifest,stage==='ready' && previewOffer.touch===false?'touch_ready':stage,previewOffer);
+  const idle = !selectedPage && ['start','loading'].includes(stage);
   const cardSize = `${idle?idleWidth:expandedWidth} × ${idle?idleHeight:paymentHeight}`;
-  const previewProps = {profile,language,selectedPage,group,manifest,previewStationId,previewStage,previewPopupType,previewStageChange,previewLanguageChange};
+  const previewProps = {profile,language,selectedPage,group,manifest,previewStationId,previewStage,previewPopupType,previewOffer,previewStageChange,previewLanguageChange};
   return <aside className="rounded-2xl border border-slate-200 bg-slate-50 p-4 xl:sticky xl:top-4" aria-label="Stripe preview">
     <div className="flex items-center justify-between gap-2"><h3 className="font-bold text-slate-900">Screen preview</h3></div>
     {previewStations.length > 0 && <label className="mb-2 mt-2 block text-xs font-semibold text-slate-600">Kiosk
@@ -118,6 +125,12 @@ function DraftPreview({profile, language, selectedPage, group, manifest, preview
     {previewStations.length > 0 && <label className="mb-2 block text-xs font-semibold text-slate-600">Screen orientation
       <select aria-label="Preview screen orientation" value={previewOrientation} onChange={event => onPreviewOrientationChange(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800"><option value="auto">Campaign setting</option><option value="landscape">Landscape display</option><option value="portrait">Portrait display</option></select>
     </label>}
+    <label className="mb-2 block text-xs font-semibold text-slate-600">Interaction
+      <select aria-label="Preview interaction mode" value={previewMode} onChange={event=>onPreviewModeChange(event.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-800"><option value="auto">Kiosk setting · {kioskTouch?'Touch':'No touch'}</option><option value="touch">Touch</option><option value="noTouch" disabled={previewOffer.paymentRequired===false}>No touch</option></select>
+    </label>
+    <p className="mb-2 text-xs leading-5 text-slate-600">{previewOffer.touch===false?'No touch · card reader, no screen buttons':'Touch · on-screen buttons'} · {RENT_RETURN_PLANS.find(({key})=>key===previewOffer.planCode)?.label || 'Station pricing'}</p>
+    {previewMode!=='auto' && <p className="mb-2 text-xs text-slate-500">Preview setting. The kiosk’s Touch setting is unchanged.</p>}
+    {previewOffer.previewExample && <p className="mb-2 text-xs text-amber-800">Example amounts for this rate tab. The selected kiosk uses a different pricing mode.</p>}
     {previewOrientation !== 'auto' && <p className="mb-2 text-xs text-slate-500">Preview-only display setting; the kiosk campaign is unchanged.</p>}
     {manifestError && <p role="status" className="mb-2 text-xs text-amber-700">{manifestError}</p>}
     <p className="mb-3 mt-1 text-xs text-slate-500">{STRIPE_LANGUAGES.find(item => item.key === language)?.label} · {selectedPage?.name || sectionLabel(group)}</p>
@@ -128,12 +141,12 @@ function DraftPreview({profile, language, selectedPage, group, manifest, preview
       <p className="mt-1 text-xs leading-5 text-slate-500">Client profile preview. Text and colors use your current draft.</p>
       {fraction > 0 ? <button type="button" onClick={() => setZoom(true)} className={`${buttonClass} mt-3 w-full`}><Icon name="display" size={16}/>Enlarge floating card</button> : <p className="mt-3 text-xs leading-5 text-slate-500">The checkout card is disabled in the published media layout.</p>}
     </>
-    <p className="mt-3 text-xs leading-5 text-slate-500">Press Start to preview the expanded card, or select Start above to collapse it. Preview uses example amounts and slot. Use Expanded panel height above to change its size.</p>
+    <p className="mt-3 text-xs leading-5 text-slate-500">{previewOffer.touch===false?'The no-touch screen opens directly at the card reader instructions.':'Press Start to preview the expanded card, or select Start above to collapse it.'} Available count, reader connection, and slot are examples. Use Expanded panel height in the screen settings to change card size.</p>
     {zoom && manifest && <div role="dialog" aria-modal="true" aria-label="Enlarged payment preview" className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 p-4" onClick={() => setZoom(false)}><div className="w-full max-w-4xl rounded-2xl bg-white p-5 shadow-xl" onClick={event => event.stopPropagation()}><div className="mb-4 flex items-start justify-between gap-4"><div><h3 className="font-bold text-slate-900">Floating card · enlarged</h3><p className="mt-1 text-xs text-slate-500">{cardSize} px card, scaled with its {width} × {detailHeight} px bottom frame. Media is hidden in this detail view.</p></div><button type="button" className={buttonClass} onClick={() => setZoom(false)} aria-label="Close enlarged payment preview"><Icon name="close" size={18}/></button></div><div className="overflow-hidden rounded-lg border border-slate-200"><ScaledDevicePreview {...previewProps} paymentOnly/></div></div></div>}
   </aside>;
 }
 
-export default function StripeProfileEditor({value, checkout, onChange, disabled = false, manifest: providedManifest, previewStations = []}) {
+export default function StripeProfileEditor({value, checkout, onCheckoutChange, onChange, receiptPage, onReceiptPageChange, receiptPageServiceReady = true, receiptLogoFile, onReceiptLogoFileChange, onReceiptLogoCheckingChange, receiptLogoUploadEnabled, receiptBrandName, disabled = false, manifest: providedManifest, previewStations = [], previewKiosks = [], previewOffer}) {
   const draft = useMemo(() => {
     try { return normalizeStripeUi(value || createStripeUi()); }
     catch { return value || createStripeUi(); }
@@ -141,6 +154,12 @@ export default function StripeProfileEditor({value, checkout, onChange, disabled
   const stationIds = previewStations.filter(id => typeof id === 'string' && /^[A-Z0-9][A-Z0-9_-]{1,39}$/.test(id));
   const stationKey = stationIds.join(',');
   const [previewStationId, setPreviewStationId] = useState(stationIds[0] || '');
+  const selectedKiosk=previewKiosks.find(kiosk=>String(kiosk.stationid || kiosk.stationId || '').trim().toUpperCase()===previewStationId);
+  const kioskOffer=previewOffer || (selectedKiosk?howItWorksOfferFromKiosk(selectedKiosk):{...PREVIEW_OFFER,gateway:'',reader:{status:'ready'}});
+  const [previewMode,setPreviewMode]=useState('auto'),[previewPlan,setPreviewPlan]=useState('auto');
+  const currentPreviewOffer=editorPreviewOffer(kioskOffer,{mode:previewMode,plan:previewPlan});
+  const directTap=currentPreviewOffer.touch===false && currentPreviewOffer.paymentRequired!==false;
+  const currentPlan=currentPreviewOffer.planCode;
   const [previewOrientation, setPreviewOrientation] = useState('auto');
   const [stationManifest, setStationManifest] = useState(null);
   const [manifestError, setManifestError] = useState('');
@@ -179,31 +198,38 @@ export default function StripeProfileEditor({value, checkout, onChange, disabled
     background: '#000000',
     assets: [],
     zones: [],
-  }), ...(previewOrientation === 'auto' ? {} : {orientation: previewOrientation}), checkout: {...(providedManifest || stationManifest)?.checkout, ...checkout, enabled: true}}), [checkout, providedManifest, stationManifest, previewOrientation]);
+  }), ...(selectedKiosk ? {stationBrand: selectedKiosk.stationBrand || 'chargerent'} : {}), ...(previewOrientation === 'auto' ? {} : {orientation: previewOrientation}), checkout: {...(providedManifest || stationManifest)?.checkout, ...checkout, enabled: true}}), [checkout, providedManifest, stationManifest, previewOrientation, selectedKiosk?.stationBrand]);
   const [tab, setTab] = useState('Text');
   const [language, setLanguage] = useState('en');
   const [group, setGroup] = useState('start');
-  const [returnPreviewStage, setReturnPreviewStage] = useState('returning');
-  const [previewPopupType, setPreviewPopupType] = useState('rental_dispensed');
+  const [previewPopupType, setPreviewPopupType] = useState('rental_complete');
   const [selectedPageId, setSelectedPageId] = useState('');
   const [query, setQuery] = useState('');
   const [confirmRemove, setConfirmRemove] = useState('');
-  const groups = SECTION_META.filter(section => STRIPE_FIELDS.some(field => field.group === section.key)).map(section => section.key);
+  const groups = editorPreviewSections(SECTION_META,currentPreviewOffer).filter(section => section.key==='ready' || STRIPE_FIELDS.some(field => field.group === section.key)).map(section => section.key);
+  useEffect(()=>{if(!groups.includes(group))setGroup('ready');},[directTap,group]);
   const validation = useMemo(() => {if (!draft) return ''; try {normalizeStripeUi(draft); return '';} catch (failure) {return failure.message;}}, [draft]);
   const page = draft?.pages.find(item => item.id === selectedPageId) || draft?.pages[0];
-  const visibleFields = STRIPE_FIELDS.filter(field => field.group === group && (!query || `${field.label} ${draft?.locales?.[language]?.[field.key] || ''}`.toLowerCase().includes(query.toLowerCase())));
+  const rateCopy=rentReturnOverrides(draft,language,currentPlan,!directTap);
+  const fieldValue=key=>group==='ready'?(rateCopy[key] ?? (key==='pricing'?'{rateSummary}':draft.locales[language]?.[key]) ?? ''):draft.locales[language]?.[key] || '';
+  const readyFields=rentReturnEditorKeys(currentPreviewOffer,draft.navigation).map(key=>({...STRIPE_UI_FIELDS.find(field=>field.key===key),...(key==='pricing'?{label:'Pricing summary',hint:'Use {rateSummary} for the configured rates, {deposit} for the card amount, or {eventCharge} for the non-return price. Amounts follow station pricing.'}:{})}));
+  const visibleFields = (group==='ready'?readyFields:STRIPE_FIELDS.filter(field => field.group === group && group !== 'popups')).filter(field=>!query || `${field.label} ${fieldValue(field.key)}`.toLowerCase().includes(query.toLowerCase()));
 
   const update = change => onChange?.({...draft, ...change});
-  const updateText = (key, value) => update({locales: {...draft.locales, [language]: {...draft.locales[language], [key]: value}}});
+  const updateText = (key, value) => {
+    if(group==='ready' && RENT_RETURN_PLANS.some(({key})=>key===currentPlan)){
+      const plan=draft.rentReturn?.[currentPlan] || {},mode=directTap?'noTouch':'touch';
+      update({rentReturn:{...draft.rentReturn,[currentPlan]:{...plan,[mode]:{...plan[mode],[language]:{...rateCopy,[key]:value}}}}});
+    }else update({locales: {...draft.locales, [language]: {...draft.locales[language], [key]: value}}});
+  };
   const updatePage = next => update({pages: draft.pages.map(item => item.id === next.id ? next : item)});
   const updatePageText = (key, value) => updatePage({...page, locales: {...page.locales, [language]: {...page.locales[language], [key]: value}}});
   function changePreviewStage(nextStage, nextPageId) {
     if (nextStage === 'page' && draft.pages.some(item => item.id === nextPageId)) {
       setSelectedPageId(nextPageId); setTab('Pages'); setQuery(''); return;
     }
-    const nextGroup = nextStage === 'returning' || nextStage === 'returned' ? 'returning' : WAIT_STAGES.has(nextStage) ? 'wait' : nextStage === 'cancelled' ? 'failed' : nextStage;
+    const nextGroup = nextStage;
     if (!SECTION_META.some(section => section.key === nextGroup)) return;
-    if (nextGroup === 'returning') setReturnPreviewStage(nextStage === 'returned' ? 'returned' : 'returning');
     setGroup(nextGroup); setTab('Text'); setQuery('');
   }
   function addPage() {
@@ -222,46 +248,82 @@ export default function StripeProfileEditor({value, checkout, onChange, disabled
     </div>
     <div className="mb-5 rounded-xl border border-cyan-100 bg-cyan-50 px-4 py-3 text-sm leading-5 text-cyan-900">These settings control the checkout screens inside the Chargerent integrated Android app. Reader provisioning and payment processing are managed separately.</div>
     {validation && <p role="alert" className="mb-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">{validation}</p>}
-    <nav aria-label="Stripe settings" className="mb-5 flex gap-1 border-b border-slate-100 pb-3">{['Text', 'Pages', 'Colors'].map(name => <button key={name} type="button" aria-pressed={tab === name} onClick={() => setTab(name)} className={`rounded-lg px-4 py-2 text-sm font-semibold ${tab === name ? 'bg-cyan-50 text-cyan-800' : 'text-slate-500 hover:bg-slate-50'}`}>{name}</button>)}</nav>
-    <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_280px]">
+    <fieldset disabled={disabled} className="mb-5 grid min-w-0 gap-4 lg:grid-cols-2 disabled:opacity-60" aria-label="Checkout screen settings">
+      <section className="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-4" aria-label="Language settings">
+        <Field label="Default language"><select aria-label="Stripe default language" value={draft.defaultLanguage} onChange={event => update({defaultLanguage: event.target.value})} className={inputClass}>{STRIPE_LANGUAGES.filter(({key}) => draft.enabledLanguages.includes(key)).map(({key,label}) => <option key={key} value={key}>{label}</option>)}</select></Field>
+        <div className="mt-4 flex flex-wrap gap-4">{STRIPE_LANGUAGES.map(({key,label}) => <label key={key} className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={draft.enabledLanguages.includes(key)} disabled={key === draft.defaultLanguage} onChange={event => update({enabledLanguages: event.target.checked ? STRIPE_LANGUAGES.map(item => item.key).filter(value => value === key || draft.enabledLanguages.includes(value)) : draft.enabledLanguages.filter(value => value !== key)})} className="h-4 w-4 rounded border-slate-300 accent-cyan-700"/>{label}</label>)}</div>
+        <p className="mt-3 text-xs leading-5 text-slate-500">All translations stay editable. Each language has its own text. Clear a field to hide its text.</p>
+      </section>
+      <ScreenTimeoutField value={draft.screenTimeoutSeconds} onChange={value=>update({screenTimeoutSeconds:value})} disabled={disabled}/>
+      {onCheckoutChange && <label className="block min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 lg:col-start-2 lg:row-start-2">
+        <span className="flex items-center justify-between gap-4 font-semibold"><span>Expanded panel height</span><output>{Math.round(checkout.height * 100)}%</output></span>
+        <input type="range" aria-label="Expanded panel height" min="15" max="50" step="1" value={Math.round(checkout.height * 100)} disabled={disabled} onChange={event=>onCheckoutChange({...checkout,height:Number(event.target.value)/100})} className="mt-3 w-full accent-cyan-700 disabled:opacity-50"/>
+        <span className="mt-2 block text-xs leading-5 text-slate-500">Uses 15% to 50% of the screen. Text and controls scale to fit smaller cards.</span>
+      </label>}
+      <label className="block min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700 lg:col-start-1 lg:row-start-2">
+        <span className="flex items-center justify-between gap-4 font-semibold"><span>Card opacity</span><output aria-label="Selected card opacity">{draft.cardOpacityPercent}%</output></span>
+        <input type="range" aria-label="Card opacity" min={0} max={100} step={1} value={draft.cardOpacityPercent} disabled={disabled} onChange={event=>update({cardOpacityPercent:Number(event.target.value)})} className="mt-3 w-full accent-cyan-700 disabled:opacity-50"/>
+        <span className="mt-1 flex justify-between text-xs text-slate-500"><span>Transparent</span><span>Solid</span></span>
+        <span className="mt-2 block text-xs leading-5 text-slate-500">Lower the opacity to show more of the background image. Text, buttons, and QR codes stay clear.</span>
+      </label>
+      <section className="min-w-0 rounded-xl border border-slate-200 bg-slate-50 p-4 lg:col-span-2" aria-label="Boot setup settings">
+        <label className="flex items-center justify-between gap-4 text-sm font-semibold text-slate-700"><span>Wi-Fi setup on boot</span><input type="checkbox" role="switch" aria-label="Wi-Fi setup on boot" checked={draft.bootWifiSetup === true} onChange={event => update({bootWifiSetup:event.target.checked})} className="h-5 w-5 accent-cyan-700"/></label>
+        <p className="mt-2 text-xs leading-5 text-slate-500">At each boot, ask whether to connect to Wi-Fi. Clients can choose a network, enter its password, and complete a venue sign-in page, or choose No to open the main screen. Applies after the unit receives the published setting. Requires app version 79 or later.</p>
+      </section>
+    </fieldset>
+    <nav aria-label="Stripe settings" className="mb-5 flex flex-wrap gap-1 border-b border-slate-100 pb-3">{['Text', 'Pages', ...(onReceiptPageChange?['Receipt page']:[]), 'Colors'].map(name => <button key={name} type="button" aria-pressed={tab === name} onClick={() => setTab(name)} className={`rounded-lg px-4 py-2 text-sm font-semibold ${tab === name ? 'bg-cyan-50 text-cyan-800' : 'text-slate-500 hover:bg-slate-50'}`}>{name}</button>)}</nav>
+    <div className={`grid items-start gap-6 ${tab==='Receipt page'?'xl:grid-cols-[minmax(0,1fr)_384px]':'xl:grid-cols-[minmax(0,1fr)_280px]'}`}>
       <fieldset disabled={disabled} className="min-w-0 disabled:opacity-60">
         {tab !== 'Colors' && <div role="tablist" aria-label="Stripe language" className="mb-5 flex gap-1 rounded-xl bg-slate-100 p-1">{STRIPE_LANGUAGES.map(({key, label}) => <button type="button" role="tab" aria-selected={language === key} key={key} onClick={() => setLanguage(key)} className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold ${language === key ? 'bg-white text-cyan-800 shadow-sm' : 'text-slate-500'}`}>{label}</button>)}</div>}
+        {tab === 'Receipt page' && <>{!receiptPageServiceReady && <p role="status" className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900">Receipt editing is available to preview. Publishing receipt text and logos requires an update to the profile service. Unchanged receipt defaults do not affect checkout publishing.</p>}<ReceiptPageFields value={receiptPage} onChange={onReceiptPageChange} language={language} logoFile={receiptLogoFile} onLogoFileChange={onReceiptLogoFileChange} onLogoCheckingChange={onReceiptLogoCheckingChange} logoUploadEnabled={receiptLogoUploadEnabled}/></>}
         {tab === 'Text' && <>
-          <div className="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
-            <Field label="Default language"><select aria-label="Stripe default language" value={draft.defaultLanguage} onChange={event => update({defaultLanguage: event.target.value})} className={inputClass}>{STRIPE_LANGUAGES.filter(({key}) => draft.enabledLanguages.includes(key)).map(({key,label}) => <option key={key} value={key}>{label}</option>)}</select></Field>
-            <div className="mt-4 flex flex-wrap gap-4">{STRIPE_LANGUAGES.map(({key,label}) => <label key={key} className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={draft.enabledLanguages.includes(key)} disabled={key === draft.defaultLanguage} onChange={event => update({enabledLanguages: event.target.checked ? STRIPE_LANGUAGES.map(item => item.key).filter(value => value === key || draft.enabledLanguages.includes(value)) : draft.enabledLanguages.filter(value => value !== key)})} className="h-4 w-4 rounded border-slate-300 accent-cyan-700"/>{label}</label>)}</div>
-            <p className="mt-3 text-xs leading-5 text-slate-500">All translations stay editable. Each language has its own text. Clear a field to hide its text.</p>
-          </div>
           <div className="grid gap-5 md:grid-cols-[150px_minmax(0,1fr)]">
             <label className="block text-sm font-semibold text-slate-700 md:hidden">Text section<select aria-label="Stripe text section" value={group} onChange={event => {setGroup(event.target.value); setQuery('');}} className={inputClass}>{groups.map(name => <option key={name} value={name}>{sectionLabel(name)}</option>)}</select></label>
             <nav aria-label="Stripe text sections" className="hidden space-y-1 md:block">{groups.map(name => <button key={name} type="button" aria-pressed={group === name} onClick={() => {setGroup(name); setQuery('');}} className={`w-full rounded-lg px-3 py-2 text-left text-sm font-medium ${group === name ? 'bg-cyan-50 text-cyan-800' : 'text-slate-600 hover:bg-slate-50'}`}>{sectionLabel(name)}</button>)}</nav>
-            <div className="min-w-0"><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h3 className="font-bold text-slate-900">{sectionLabel(group)}</h3><input type="search" aria-label="Find Stripe text" placeholder="Find text" value={query} onChange={event => setQuery(event.target.value)} className="w-40 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-cyan-500"/></div><div className="space-y-4">
-              {group === 'returning' && <div className="rounded-xl border border-cyan-100 bg-cyan-50 p-3"><div role="tablist" aria-label="Return preview state" className="flex gap-1 rounded-lg bg-white p-1">{[['returning','Instructions'],['returned','Return complete']].map(([stage,label]) => <button type="button" role="tab" aria-selected={returnPreviewStage === stage} key={stage} onClick={() => setReturnPreviewStage(stage)} className={`flex-1 rounded-md px-3 py-2 text-sm font-semibold ${returnPreviewStage === stage ? 'bg-cyan-100 text-cyan-900' : 'text-slate-500'}`}>{label}</button>)}</div><p className="mt-2 text-xs leading-5 text-cyan-900">Instructions stay on screen while the kiosk waits. A confirmed return, whether or not the customer opened this page first, uses the same completion screen with the returned slot and receipt QR.</p></div>}
-              {group === 'popups' && <div className="rounded-xl border border-cyan-100 bg-cyan-50 p-3"><div role="tablist" aria-label="Confirmation preview event" className="flex gap-1 rounded-lg bg-white p-1">{[['rental_dispensed','Released'],['charger_returned','Returned'],['rental_failed','Release failed']].map(([type,label]) => <button type="button" role="tab" aria-selected={previewPopupType === type} key={type} onClick={() => setPreviewPopupType(type)} className={`flex-1 rounded-md px-2 py-2 text-xs font-semibold ${previewPopupType === type ? 'bg-cyan-100 text-cyan-900' : 'text-slate-500'}`}>{label}</button>)}</div><p className="mt-2 text-xs leading-5 text-cyan-900">Release and failure events show a centered banner over media. Confirmed returns use the Return complete card.</p></div>}
-              {group === 'returning' && <Field label="Return receipt URL" hint="The Return Complete screen uses this address for its receipt QR. Leave it blank to show the receipt-pending placeholder."><input aria-label="Stripe Return receipt URL" type="url" maxLength={1000} placeholder="https://" value={draft.links?.receipt || ''} onChange={event => update({links:{...draft.links,receipt:event.target.value}})} className={inputClass}/></Field>}
-              {group === 'ready' && <Field label="Help QR URL" hint="Used by the QR code on the Rent / Return screen. Add {stationId} anywhere in the HTTPS address to insert the kiosk station ID. Leave blank to keep the Chargerent support text-message fallback."><input aria-label="Stripe Help QR URL" type="text" maxLength={1000} placeholder="https://example.com/help?station={stationId}" value={draft.links?.help || ''} onChange={event => update({links:{...draft.links,help:event.target.value}})} className={inputClass}/></Field>}
+            <div className="min-w-0"><p className="mb-3 text-xs leading-5 text-slate-500">Type {'{'} in a text field to choose a variable.</p><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h3 className="font-bold text-slate-900">{sectionLabel(group)}</h3><input type="search" aria-label="Find Stripe text" placeholder="Find text" value={query} onChange={event => setQuery(event.target.value)} className="w-40 rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-cyan-500"/></div><div className="space-y-4">
+              {group === 'returning' && <p className="rounded-xl border border-cyan-100 bg-cyan-50 p-3 text-xs leading-5 text-cyan-900">The kiosk waits for a confirmed charger return on this screen. Cancel goes back to Rent / Return.</p>}
+              {group === 'returned' && <p className="rounded-xl border border-cyan-100 bg-cyan-50 p-3 text-xs leading-5 text-cyan-900">A confirmed return shows the returned slot and receipt QR on this completion card.</p>}
+              {group === 'review' && <p className="rounded-xl border border-cyan-100 bg-cyan-50 p-3 text-xs leading-5 text-cyan-900">Live review uses the current station offer for its amount and pricing lines. The preview uses the selected kiosk’s configured amount; slot and availability are examples. The Pricing text below is a fallback when no offer lines are available.</p>}
+              {group === 'authorizing' && <p className="rounded-xl border border-cyan-100 bg-cyan-50 p-3 text-xs leading-5 text-cyan-900">With the FR8011 card reader, Authorizing keeps the Payment title and instructions while authorization runs. These Authorizing text fields apply when live terminal mode is off.</p>}
+              {group === 'loading' && <p className="rounded-xl border border-cyan-100 bg-cyan-50 p-3 text-xs leading-5 text-cyan-900">During startup the FR8011 card stays compact and Start is disabled. Loading title and body are not visible in that compact state.</p>}
+              {group === 'popups' && <div className="rounded-xl border border-cyan-100 bg-cyan-50 p-3">
+                <div role="tablist" aria-label="Confirmation preview scenario" className="flex gap-1 rounded-lg bg-white p-1">
+                  {[["rental_complete","Rental complete"],["rental_failed","Release failed"],["charger_returned","Return complete"]].map(([type,label]) => <button type="button" role="tab" aria-selected={previewPopupType === type} key={type} onClick={() => setPreviewPopupType(type)} className={`flex-1 rounded-md px-2 py-2 text-xs font-semibold ${previewPopupType === type ? 'bg-cyan-100 text-cyan-900' : 'text-slate-500'}`}>{label}</button>)}
+                </div>
+                <p className="mt-2 text-xs leading-5 text-cyan-900">Rental complete, Release failed, and Return complete use the current checkout cards. Edit each card’s text below. Legacy popup text remains in saved profiles for compatibility.</p>
+                <button type="button" onClick={() => {setGroup(previewPopupType === 'rental_complete' ? 'succeeded' : previewPopupType === 'rental_failed' ? 'failed' : 'returned');setQuery('');}} className={`${buttonClass} mt-3 w-full`}>Edit {previewPopupType === 'rental_complete' ? 'Rental complete' : previewPopupType === 'rental_failed' ? 'Release failed' : 'Return complete'} card text</button>
+              </div>}
+              {['returned','succeeded'].includes(group) && <p className="rounded-xl border border-cyan-100 bg-cyan-50 p-3 text-xs leading-5 text-cyan-900">The receipt QR is generated for the successful transaction and updates after return.</p>}
+              {group === 'ready' && <>
+                <div role="tablist" aria-label="Rent / Return pricing modes" className="flex flex-wrap gap-1 rounded-xl bg-slate-100 p-1">{RENT_RETURN_PLANS.map(({key,label})=><button key={key} type="button" role="tab" aria-selected={currentPlan===key} onClick={()=>{setPreviewPlan(key);setQuery('');}} className={`rounded-lg px-3 py-2 text-xs font-semibold ${currentPlan===key?'bg-white text-cyan-800 shadow-sm':'text-slate-600'}`}>{label}</button>)}</div>
+                <p className="rounded-xl border border-cyan-100 bg-cyan-50 p-3 text-xs leading-5 text-cyan-900">Edit {RENT_RETURN_PLANS.find(({key})=>key===currentPlan)?.label || 'station pricing'} · {directTap?'No touch':'Touch'} · {STRIPE_LANGUAGES.find(({key})=>key===language)?.label}. Each pricing mode and interaction type saves its own text. Changing tabs previews that layout and keeps station rates unchanged. Independent text requires kiosk app version 85 or later.</p>
+                {Object.keys(rateCopy).length>0 && <button type="button" className={buttonClass} onClick={()=>{const plan=draft.rentReturn[currentPlan],mode=directTap?'noTouch':'touch',locales={...plan[mode]};delete locales[language];update({rentReturn:{...draft.rentReturn,[currentPlan]:{...plan,[mode]:locales}}});}}>Use shared text for this tab</button>}
+                <Field label="Help QR URL" hint="Shared across pricing modes. Add {stationId} anywhere in the HTTPS address to insert the kiosk station ID. Leave blank to keep the Chargerent support fallback."><VariableTextField variables={HELP_URL_VARIABLES} aria-label="Stripe Help QR URL" type="text" maxLength={1000} placeholder="https://example.com/help?station={stationId}" value={draft.links?.help || ''} onChange={value => update({links:{...draft.links,help:value}})} className={inputClass}/></Field>
+              </>}
               {OPTIONAL_PAGES.filter(item => item.section === group).map(item => <label key={item.key} className="flex items-center justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-semibold text-slate-700"><span>Show {item.label.toLowerCase()}</span><input type="checkbox" aria-label={`Show Stripe ${item.label}`} checked={draft.navigation?.[item.key] !== false} onChange={event => update({navigation:{...draft.navigation,[item.key]:event.target.checked}})} className="h-4 w-4 accent-cyan-700"/></label>)}
               {['terms','map'].includes(group) && <Field label={`${sectionLabel(group)} URL`} hint="Use an HTTPS page. Leave blank to show an unavailable message until a real destination is configured."><input aria-label={`Stripe ${sectionLabel(group)} URL`} type="url" maxLength={1000} placeholder="https://" value={draft.links?.[group] || ''} onChange={event => update({links:{...draft.links,[group]:event.target.value}})} className={inputClass}/></Field>}
-              {visibleFields.map(field => <Field key={field.key} label={field.label} hint={field.hint}><textarea aria-label={`Stripe ${field.label}`} value={draft.locales[language]?.[field.key] || ''}  maxLength={2000} rows={/body|terms|pricing|message/i.test(field.key) ? 3 : 2} onChange={event => updateText(field.key, event.target.value)} className={`${inputClass} resize-y leading-6`}/></Field>)}{!visibleFields.length && <p className="py-6 text-center text-sm text-slate-500">No matching text.</p>}</div></div>
+              {group === 'information' && <p className="rounded-xl border border-cyan-100 bg-cyan-50 p-3 text-xs leading-5 text-cyan-900">The first step, rental amounts, return instructions, and bank timing follow the kiosk gateway and pricing automatically. Edit the heading and charging instructions below.</p>}
+              {visibleFields.map(field => <Field key={field.key} label={field.label} hint={field.hint}><VariableTextField as={['touchConsent','helpScan'].includes(field.key)?'input':'textarea'} variables={group==='ready' && field.key==='pricing'?PRICING_VARIABLES:CHECKOUT_VARIABLES} aria-label={`Stripe ${field.label}`} value={fieldValue(field.key)} maxLength={2000} rows={['touchConsent','helpScan'].includes(field.key)?undefined:/body|terms|pricing|message/i.test(field.key) ? 3 : 2} onChange={value => updateText(field.key, value)} className={`${inputClass} resize-y leading-6`}/></Field>)}{!visibleFields.length && group !== 'popups' && <p className="py-6 text-center text-sm text-slate-500">No matching text.</p>}</div></div>
           </div>
         </>}
-        {tab === 'Pages' && <>
+        {tab === 'Pages' && directTap && <p className="rounded-xl bg-cyan-50 p-4 text-sm leading-6 text-cyan-900">No-touch kiosks use the card reader directly. On-screen navigation buttons and pages before payment are available in the Touch preview.</p>}
+        {tab === 'Pages' && !directTap && <>
           <div className="mb-6 rounded-2xl border border-slate-200 p-4"><h3 className="font-bold text-slate-900">Kiosk pages and buttons</h3><p className="mt-1 text-sm leading-5 text-slate-500">Choose the same optional pages available in Kiosk screen. Start and transaction pages remain in the customer flow.</p><div className="mt-4 space-y-3">{OPTIONAL_PAGES.map(item => <div key={item.key} className="flex items-center justify-between gap-3"><label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" aria-label={`Enable Stripe ${item.label}`} checked={draft.navigation?.[item.key] !== false} onChange={event => update({navigation:{...draft.navigation,[item.key]:event.target.checked}})} className="h-4 w-4 accent-cyan-700"/>{item.label}</label><button type="button" onClick={() => {setTab('Text');setGroup(item.section);setQuery('');}} className="text-xs font-semibold text-cyan-700 hover:underline">Edit text</button></div>)}</div></div>
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-bold text-slate-900">Pages before payment</h3><p className="mt-1 max-w-lg text-sm leading-5 text-slate-500">Add welcome, instructions, or venue messages. Pages appear in this order after Rent.</p></div><button type="button" onClick={addPage} disabled={draft.pages.length >= 12} className={buttonClass}><Icon name="plus" size={16}/>Add page</button></div>
           <div className="mb-5 space-y-2">{draft.pages.map((item,index) => <div key={item.id} className={`flex items-center gap-2 rounded-xl border p-2 ${page?.id === item.id ? 'border-cyan-300 bg-cyan-50' : 'border-slate-200'}`}><button type="button" onClick={() => {setSelectedPageId(item.id); setConfirmRemove('');}} className="min-w-0 flex-1 truncate px-2 py-1 text-left text-sm font-semibold text-slate-800">{index + 1}. {item.name || 'Untitled page'}{!item.enabled && <span className="ml-2 text-xs font-normal text-slate-500">Hidden</span>}</button><button type="button" aria-label={`Move ${item.name} up`} disabled={index === 0} onClick={() => movePage(item.id,-1)} className="rounded-lg p-2 text-slate-500 hover:bg-white disabled:opacity-30"><Icon name="swipeUp" size={16}/></button><button type="button" aria-label={`Move ${item.name} down`} disabled={index === draft.pages.length - 1} onClick={() => movePage(item.id,1)} className="rounded-lg p-2 text-slate-500 hover:bg-white disabled:opacity-30"><Icon name="swipeDown" size={16}/></button></div>)}</div>
           {!page ? <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center"><Icon name="text" className="mx-auto text-slate-400" size={28}/><h4 className="mt-3 font-semibold text-slate-700">Go straight to rental review</h4><p className="mt-1 text-sm text-slate-500">Add a page when customers need more information.</p></div> : <div className="space-y-4 rounded-2xl border border-slate-200 p-4">
             <div className="flex items-center justify-between gap-4"><h4 className="font-bold text-slate-900">{page.name}</h4><label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={page.enabled} onChange={event => updatePage({...page,enabled:event.target.checked})} className="h-4 w-4 accent-cyan-700"/>Show page</label></div>
             <Field label="Page name" hint="For your dashboard only."><input aria-label="Stripe page name" maxLength={80} value={page.name} onChange={event => updatePage({...page,name:event.target.value})} className={inputClass}/></Field>
-            <Field label="Title"><input aria-label="Stripe page title" maxLength={200} value={page.locales[language]?.title || ''} placeholder={page.locales[draft.defaultLanguage]?.title || page.locales.en?.title || ''} onChange={event => updatePageText('title',event.target.value)} className={inputClass}/></Field>
-            <Field label="Message"><textarea aria-label="Stripe page message" rows={4} maxLength={2000} value={page.locales[language]?.body || ''} placeholder={page.locales[draft.defaultLanguage]?.body || page.locales.en?.body || ''} onChange={event => updatePageText('body',event.target.value)} className={inputClass}/></Field>
-            <Field label="Continue button"><input aria-label="Stripe page continue button" maxLength={80} value={page.locales[language]?.nextLabel || ''} placeholder={page.locales[draft.defaultLanguage]?.nextLabel || page.locales.en?.nextLabel || ''} onChange={event => updatePageText('nextLabel',event.target.value)} className={inputClass}/></Field>
+            <Field label="Title"><VariableTextField variables={CHECKOUT_VARIABLES} aria-label="Stripe page title" maxLength={200} value={page.locales[language]?.title || ''} placeholder={page.locales[draft.defaultLanguage]?.title || page.locales.en?.title || ''} onChange={value => updatePageText('title',value)} className={inputClass}/></Field>
+            <Field label="Message"><VariableTextField as="textarea" variables={CHECKOUT_VARIABLES} aria-label="Stripe page message" rows={4} maxLength={2000} value={page.locales[language]?.body || ''} placeholder={page.locales[draft.defaultLanguage]?.body || page.locales.en?.body || ''} onChange={value => updatePageText('body',value)} className={inputClass}/></Field>
+            <Field label="Continue button"><VariableTextField variables={CHECKOUT_VARIABLES} aria-label="Stripe page continue button" maxLength={80} value={page.locales[language]?.nextLabel || ''} placeholder={page.locales[draft.defaultLanguage]?.nextLabel || page.locales.en?.nextLabel || ''} onChange={value => updatePageText('nextLabel',value)} className={inputClass}/></Field>
             {confirmRemove === page.id ? <div className="rounded-xl bg-red-50 p-3 text-sm text-red-900"><p>Remove “{page.name}” from this draft?</p><div className="mt-3 flex gap-2"><button type="button" onClick={() => {update({pages:draft.pages.filter(item => item.id !== page.id)});setSelectedPageId('');setConfirmRemove('');}} className={buttonClass}>Remove page</button><button type="button" onClick={() => setConfirmRemove('')} className={buttonClass}>Keep page</button></div></div> : <button type="button" onClick={() => setConfirmRemove(page.id)} className={`${buttonClass} text-red-700`}><Icon name="trash" size={16}/>Delete page</button>}
           </div>}
           <p className="mt-4 text-xs leading-5 text-slate-500">Rental review, consent, payment, and dispensing stay in the checkout flow. Edit their text under Text.</p>
         </>}
         {tab === 'Colors' && <><h3 className="font-bold text-slate-900">Brand colors</h3><p className="mb-5 mt-1 text-sm text-slate-500">Apply your colors to the payment section and added pages.</p><div className="grid gap-4 sm:grid-cols-2">{STRIPE_THEME_FIELDS.map(({key,label}) => <div key={key} className="rounded-2xl border border-slate-200 p-4"><div className="mb-3 flex items-center justify-between gap-3"><label htmlFor={`stripe-color-${key}`} className="text-sm font-semibold text-slate-800">{label}</label><input type="color" aria-label={`Stripe ${label} color picker`} value={/^#[0-9a-f]{6}$/i.test(draft.theme[key]) ? draft.theme[key] : '#000000'} onChange={event => update({theme:{...draft.theme,[key]:event.target.value.toUpperCase()}})} className="h-10 w-10 cursor-pointer rounded-lg border border-slate-200 bg-white p-1"/></div><input id={`stripe-color-${key}`} aria-label={`Stripe ${label} color`} value={draft.theme[key]} maxLength={7} onChange={event => update({theme:{...draft.theme,[key]:event.target.value.toUpperCase()}})} className={inputClass}/></div>)}</div></>}
       </fieldset>
-      <DraftPreview profile={draft} language={language} selectedPage={tab === 'Pages' ? page : null} group={group} manifest={manifest} previewStage={group === 'returning' ? returnPreviewStage : group === 'popups' ? previewPopupType === 'charger_returned' ? 'returned' : previewPopupType === 'rental_failed' ? 'failed' : 'succeeded' : previewStageFor(group)} previewPopupType={previewPopupType} previewStageChange={changePreviewStage} previewLanguageChange={setLanguage} previewStations={stationIds} previewStationId={previewStationId} onPreviewStationChange={setPreviewStationId} previewOrientation={previewOrientation} onPreviewOrientationChange={changePreviewOrientation} manifestError={manifestError}/>
+      {tab==='Receipt page'?<ReceiptPagePreview value={receiptPage} language={language} logoFile={receiptLogoFile} brandName={receiptBrandName}/>:<DraftPreview profile={draft} language={language} selectedPage={tab === 'Pages' && !directTap ? page : null} group={group} manifest={manifest} previewStage={group === 'popups' ? previewPopupType === 'rental_complete' ? 'succeeded' : previewPopupType === 'charger_returned' ? 'returned' : 'failed' : previewStageFor(group)} previewPopupType={previewPopupType} previewOffer={currentPreviewOffer} previewStageChange={changePreviewStage} previewLanguageChange={setLanguage} previewStations={stationIds} previewStationId={previewStationId} onPreviewStationChange={id=>{setPreviewStationId(id);setPreviewPlan('auto');setPreviewMode('auto');}} previewMode={previewMode} onPreviewModeChange={setPreviewMode} kioskTouch={kioskOffer.touch!==false || kioskOffer.paymentRequired===false} previewOrientation={previewOrientation} onPreviewOrientationChange={changePreviewOrientation} manifestError={manifestError}/>}
     </div>
   </div>;
 }

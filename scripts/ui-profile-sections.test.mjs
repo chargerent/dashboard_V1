@@ -42,11 +42,13 @@ test('Chargerent app profile is client-wide and saves independently from kiosk a
   const source = structuredClone(original);
   source.applicationProfiles.chargerentMedia.checkout.height = .41;
   source.applicationProfiles.chargerentMedia.stripeUi.theme.primary = '#123456';
+  source.applicationProfiles.chargerentMedia.stripeUi.cardOpacityPercent = 65;
   source.ui.mode = 'wrong';
   source.languages.locales.en.screens.start.startButton = 'wrong';
   const result = mergeProfileSection(original, source, 'chargerentApp');
   assert.equal(getChargerentAppProfile(result).checkout.height, .41);
   assert.equal(getChargerentAppProfile(result).stripeUi.theme.primary, '#123456');
+  assert.equal(getChargerentAppProfile(result).stripeUi.cardOpacityPercent, 65);
   assert.deepEqual(result.ui, original.ui);
   assert.deepEqual(result.languages, original.languages);
   assert.throws(() => mergeProfileSection(original, source, 'chargerentApp', 'FR8011'), /client-wide/);
@@ -212,4 +214,44 @@ test('the local preview saves only the selected section and cannot publish', asy
   assert.equal(saved.profile.ui.mode, 'UI');
   assert.equal(saved.profile.languages.locales.en.terminals.PAYTERP68.start, 'Preview only');
   await assert.rejects(request('uiProfile_apply', {}), /disabled/);
+});
+
+
+test('Chargerent app opacity rejects invalid saved values',()=>{
+ for(const value of [-1,101,50.5,'92',null,true]){
+  const source=profile();source.applicationProfiles.chargerentMedia.stripeUi.cardOpacityPercent=value;
+  assert.throws(()=>mergeProfileSection(profile(),source,'chargerentApp'),/Card opacity/);
+ }
+});
+
+test('client app save preserves rate variants without changing other profile sections',()=>{
+  const original=profile(),source=structuredClone(original);
+  const variants={EVENT_SIMPLE:{noTouch:{en:{touchBorrowTitle:'Event desk'}}},PURCHASE_SIMPLE_DAILY:{touch:{fr:{rent:'Emprunter ici'}}}};
+  source.applicationProfiles.chargerentMedia.stripeUi.rentReturn=variants;
+  const saved=mergeProfileSection(original,source,'chargerentApp');
+  assert.deepEqual(saved.applicationProfiles.chargerentMedia.stripeUi.rentReturn,variants);
+  assert.deepEqual(saved.languages,original.languages);
+  for(const invalid of [null,[],{UNKNOWN:{}},{EVENT_SIMPLE:{touch:{en:{amountCents:100}}}},{EVENT_SIMPLE:{noTouch:{en:{rent:42}}}}]){
+    source.applicationProfiles.chargerentMedia.stripeUi.rentReturn=invalid;
+    assert.throws(()=>mergeProfileSection(original,source,'chargerentApp'),/Rent \/ Return/);
+  }
+});
+
+test('client app saves enforce a 15% minimum and older drafts open at that minimum', async()=>{
+  const {defaultChargerentAppProfile,normalizeChargerentAppProfile,readChargerentAppProfile}=await import('../src/utils/chargerentAppProfile.js');
+  for(const height of [.15,.16,.20,.50]){
+    const original=profile(), source=structuredClone(original);
+    source.applicationProfiles.chargerentMedia.checkout.height=height;
+    assert.equal(getChargerentAppProfile(mergeProfileSection(original,source,'chargerentApp')).checkout.height,height);
+    assert.equal(normalizeChargerentAppProfile({...defaultChargerentAppProfile(),checkout:{enabled:true,height}}).checkout.height,height);
+  }
+  for(const height of [.10,.149,.501]){
+    const original=profile(), source=structuredClone(original);
+    source.applicationProfiles.chargerentMedia.checkout.height=height;
+    assert.throws(()=>mergeProfileSection(original,source,'chargerentApp'),/15% to 50%/);
+    assert.throws(()=>normalizeChargerentAppProfile({...defaultChargerentAppProfile(),checkout:{enabled:true,height}}),/15% to 50%/);
+  }
+  const legacy=profile();legacy.applicationProfiles.chargerentMedia.checkout.height=.10;
+  assert.equal(readChargerentAppProfile(legacy).checkout.height,.15);
+  assert.equal(legacy.applicationProfiles.chargerentMedia.checkout.height,.10);
 });

@@ -160,6 +160,22 @@ test("moving into another CTF7 station retains seven slots per physical module",
   assert.equal(kiosk.modules.length, 2); assert.equal(kiosk.hardware.capacity, 14);
   assert.equal(kiosk.hardware.modules, 2); assert.equal(kiosk.modules[0].slots.length, 7);
 });
+test("adding a second unbound unit retains one station/provision and fourteen slots", async () => {
+  const {db, bind} = harness(); const first = await bind(request);
+  const second = await bind({...request, moduleId: "OTHER000007", addToStation: true});
+  assert.equal(first.provisionid, second.provisionid);
+  const kiosk = db.rows.get(`kiosks/${first.provisionid}`);
+  assert.equal(kiosk.modules.length, 2); assert.equal(kiosk.hardware.capacity, 14);
+  assert.equal(db.rows.get(`ctf7Bindings/${second.moduleId}`).provisionid, first.provisionid);
+  assert.equal(db.rows.get(`ctf7Bindings/${second.moduleId}`).controlEnabled, false);
+});
+test("a queued operator command also blocks moving and unbinding", async () => {
+  const {db, bind, unbind, move} = harness(); const result = await bind(request);
+  db.rows.set(`ctf7OperatorLocks/${result.moduleId}`, {unresolved: true});
+  await assert.rejects(unbind({stationid: request.stationid, moduleId: result.moduleId}), /pending CTF7/);
+  await assert.rejects(move({sourceStationid: request.stationid, moduleId: result.moduleId,
+    createNewStation: true, destinationCountry: "US", destinationStationid: "US8997", kioskType: "CTF7"}), /pending CTF7/);
+});
 test("move rejects protocol mismatch, unresolved vends, and stale assignments", async () => {
   const {db, bind, move} = harness(); const result = await bind(request);
   await assert.rejects(move({sourceStationid: request.stationid, moduleId: result.moduleId,

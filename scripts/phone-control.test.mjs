@@ -67,12 +67,13 @@ test('separates Chargerent app enrollment from Besiter media management', () => 
   assert.match(mediaPageSource, />Besiter Media</);
   assert.match(mediaPageSource, /isNewSchemaKiosk\(kiosk\).*V2_MEDIA_CONFIGURABLE_KIOSK_TYPES\.has/s);
   assert.match(chargerentMediaPageSource, /Legacy media player/);
-  assert.match(chargerentMediaPageSource, /Campaign manager/);
+  assert.match(chargerentMediaPageSource, /Client campaigns → UI Editor/);
   assert.match(chargerentMediaPageSource, /<MediaPage[\s\S]*?embedded/);
   assert.doesNotMatch(chargerentMediaPageSource, /IntegratedKioskApps|Apps & enrollment/);
-  assert.match(chargerentMediaPageSource, /<MediaCampaignWizard/);
+  assert.doesNotMatch(chargerentMediaPageSource, /<MediaCampaignWizard/);
+  assert.match(uiProfilesPageSource, /<ClientCampaigns/);
   assert.doesNotMatch(chargerentMediaPageSource, /<StripeProfileEditor/);
-  assert.match(chargerentMediaPageSource, /Open Client Profiles → Chargerent app/);
+  assert.match(chargerentMediaPageSource, /onClick=\{onNavigateToUiProfiles\}/);
   assert.match(uiProfilesPageSource, /<StripeProfileEditor/);
   assert.match(chargerentMediaPageSource, /data-chargerent-media-page="true"/);
   assert.doesNotMatch(chargerentMediaPageSource, /media-lab|kiosk-control-lab|ui-profiles-lab/);
@@ -675,4 +676,12 @@ test('accepts only short-lived ICE configuration from the Chargerent relay', () 
     }),
     /Secure live connection is unavailable/,
   );
+});
+
+
+test('campaign device capability survives inventory normalization without trusting truthy strings',()=>{
+  const normalize=flag=>normalizePhoneDevice({deviceKind:'integrated_kiosk',inventory:{media:{supportsStationBackground:flag}}});
+  assert.equal(normalize(true).inventory.media.supportsStationBackground,true);
+  assert.equal(normalize('true').inventory.media.supportsStationBackground,false);
+  assert.equal(normalize(undefined).inventory.media.supportsStationBackground,false);
 });

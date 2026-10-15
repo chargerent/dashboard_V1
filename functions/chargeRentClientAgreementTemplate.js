@@ -1,14 +1,14 @@
 /* eslint-env node */
 
 const {PDFDocument, StandardFonts, rgb} = require("pdf-lib");
+const {drawChargeDropsLogo} = require("./chargeDropsPdfBrand");
 
 const TEMPLATE_ID = "chargerent-revenue-share";
-const TEMPLATE_VERSION = "V.11.01.2024";
+const TEMPLATE_VERSION = "V.10.07.2026";
 const STANDARD_PRICING = {
   currency: "USD",
   hourlyRate: 3,
   nonReturnFee: 35,
-  returnDeadlineHours: 72,
 };
 
 const RECITALS = [
@@ -53,11 +53,12 @@ const ARTICLES = [
         "page 1 to provide Powerbanks for the rental period and fees stated on " +
         "page 1.",
       "Proprietor shall receive the profit share percentage stated on page 1 " +
-        "of all Gross Revenues (after all transaction costs associated with " +
-        "credit card processing are deducted) from the vending machine(s) at " +
-        "the Proprietor's location. Gross Revenues include all daily rental " +
-        "fees and all additional overages collected from late returns and no " +
-        "returns.",
+        "of Qualifying Revenue from the vending machine(s) at the Proprietor's " +
+        "location. Qualifying Revenue equals all gross rental revenue collected, " +
+        "including daily rental fees and additional overages collected from late " +
+        "returns and no returns, less completed customer refunds and applicable " +
+        "sales or similar transaction taxes. Credit card processing fees are not " +
+        "deducted.",
     ],
   },
   {
@@ -266,7 +267,7 @@ function createPageRenderer(pdf, regular, bold) {
     page = pdf.addPage([612, 792]);
     pageNumber += 1;
     y = 728;
-    page.drawText("Ocharge LLC", {x: 44, y, size: 15, font: bold, color: dark});
+    drawChargeDropsLogo(page, {x: 44, y: y + 5, width: 145});
     const headerTitle = "CHARGERENT REVENUE SHARE AGREEMENT";
     page.drawText(headerTitle, {
       x: 568 - bold.widthOfTextAtSize(headerTitle, 8),
@@ -414,8 +415,7 @@ async function generateChargeRentClientAgreement(input) {
   );
   renderer.detail(
       "Non-return fee",
-      `$${STANDARD_PRICING.nonReturnFee.toFixed(2)} after ` +
-        `${STANDARD_PRICING.returnDeadlineHours} hours`,
+      `Up to $${STANDARD_PRICING.nonReturnFee.toFixed(2)} if not returned`,
   );
   renderer.divider();
 

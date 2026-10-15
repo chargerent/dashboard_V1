@@ -30,7 +30,17 @@ const EVENT_DEFINITIONS = {
   agreement_signed: {
     stage: "Agreement signed",
     summary: "The client completed the electronic agreement-signing step.",
+    nextStep: "Ocharge reviews and countersigns the agreement.",
+  },
+  agreement_countersigned: {
+    stage: "Agreement fully executed",
+    summary: "Ocharge countersigned the client agreement.",
     nextStep: "The client completes commission payout setup through Stripe.",
+  },
+  client_payout_approved: {
+    stage: "Client payout approved",
+    summary: "An administrator approved and transferred the client's revenue share.",
+    nextStep: "Stripe sends the client funds according to its payout schedule.",
   },
   payout_started: {
     stage: "Payout setup started",
@@ -177,7 +187,7 @@ function buildPartnerMessage({
     "<div style=\"font-family:Inter,Arial,sans-serif;padding:28px 16px;\">",
     "<div style=\"max-width:640px;margin:0 auto;background:#fff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;\">",
     "<div style=\"background:#312e81;padding:24px;color:#fff;\">",
-    "<div style=\"font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#c7d2fe;\">ChargeDrops</div>",
+    "<img src=\"https://chargerentstations.com/portal/chargedrops-logo.svg\" alt=\"ChargeDrops\" style=\"display:block;width:174px;height:auto;background:#fff;border-radius:8px;padding:8px 10px;\">",
     `<h1 style="font-size:22px;margin:8px 0 0;">${escapeHtml(definition.stage)}</h1>`,
     "</div><div style=\"padding:24px;\">",
     `<p style="color:#334155;font-size:15px;line-height:1.6;margin:0 0 12px;">Hi ${escapeHtml(partnerName)},</p>`,

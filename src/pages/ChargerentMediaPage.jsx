@@ -1,14 +1,9 @@
-import { useMemo, useState } from 'react';
-import {
-  FilmIcon,
-  PhotoIcon,
-} from '@heroicons/react/24/outline';
+import { useState } from 'react';
+import {FilmIcon,PhotoIcon} from '@heroicons/react/24/outline';
 
 import CommandStatusToast from '../components/UI/CommandStatusToast.jsx';
 import DashboardPageActions from '../components/UI/DashboardPageActions.jsx';
-import MediaCampaignWizard from '../components/media/MediaCampaignWizard.jsx';
 import MediaPage from './MediaPage.jsx';
-import { filterStationsForClient } from '../utils/helpers.js';
 
 export default function ChargerentMediaPage({
   onLogout,
@@ -18,20 +13,15 @@ export default function ChargerentMediaPage({
   allStationsData = [],
   referenceTime,
   t,
-  initialTab = 'legacy',
   allowLegacyMedia = true,
   allowCampaignManager = true,
   onNavigateToUiProfiles,
-  onNavigateToDeviceManagement,
 }) {
   const [mediaTab, setMediaTab] = useState(
-    allowCampaignManager && (initialTab === 'campaign' || !allowLegacyMedia) ? 'campaign' : 'legacy',
+    'legacy',
   );
   const [status, setStatus] = useState(null);
-  const visibleStations = useMemo(
-    () => filterStationsForClient(allStationsData, currentUser),
-    [allStationsData, currentUser],
-  );
+
 
   return (
     <div
@@ -44,7 +34,7 @@ export default function ChargerentMediaPage({
         <div className="mx-auto flex max-w-screen-2xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
           <div className="min-w-0">
             <h1 className="truncate text-2xl font-black text-slate-900">Media Control</h1>
-            <p className="mt-1 text-sm text-slate-500">Manage legacy players and Chargerent campaigns from one place.</p>
+            <p className="mt-1 text-sm text-slate-500">Manage legacy players. Client campaigns are in the UI Editor.</p>
           </div>
           <DashboardPageActions
             onNavigateToDashboard={onNavigateToDashboard}
@@ -82,11 +72,7 @@ export default function ChargerentMediaPage({
           {allowCampaignManager && (
             <button
               type="button"
-              role="tab"
-              id="media-tab-campaign"
-              aria-controls="media-panel-campaign"
-              aria-selected={mediaTab === 'campaign'}
-              onClick={() => setMediaTab('campaign')}
+              onClick={onNavigateToUiProfiles}
               className={`inline-flex min-h-12 items-center justify-center gap-2 rounded-lg px-4 py-3 text-sm font-black transition ${
                 mediaTab === 'campaign'
                   ? 'bg-violet-600 text-white shadow-sm'
@@ -94,7 +80,7 @@ export default function ChargerentMediaPage({
               }`}
             >
               <FilmIcon className="h-5 w-5" />
-              Campaign manager
+              Client campaigns → UI Editor
             </button>
           )}
         </nav>
@@ -118,29 +104,6 @@ export default function ChargerentMediaPage({
           </section>
         )}
 
-        {mediaTab === 'campaign' && allowCampaignManager && (
-          <section
-            id="media-panel-campaign"
-            role="tabpanel"
-            aria-labelledby="media-tab-campaign"
-            className="space-y-5"
-          >
-            <div className="rounded-xl border border-violet-200 bg-violet-50 px-4 py-3 text-sm leading-6 text-violet-950">
-              Campaign Manager controls only the Chargerent integrated Android kiosk application. Enroll kiosk apps in Device Management, then create and assign their campaigns here. Checkout presentation is part of each client profile.
-              {onNavigateToDeviceManagement && <button type="button" onClick={onNavigateToDeviceManagement} className="ml-2 font-black text-violet-800 underline underline-offset-2 hover:text-violet-950">Open Device Management → App</button>}
-              {onNavigateToUiProfiles && <button type="button" onClick={onNavigateToUiProfiles} className="ml-2 font-black text-violet-800 underline underline-offset-2 hover:text-violet-950">Open Client Profiles → Chargerent app</button>}
-            </div>
-
-            <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-              <div className="border-b border-slate-200 px-5 py-4">
-                <h2 className="text-lg font-black text-slate-900">Campaign builder</h2>
-                <p className="mt-1 text-sm text-slate-500">Build a campaign step by step, preview it live, then choose the enrolled kiosks that should receive it.</p>
-              </div>
-              <MediaCampaignWizard kiosks={visibleStations} referenceTime={referenceTime} onStatus={setStatus} />
-            </section>
-
-          </section>
-        )}
       </main>
     </div>
   );

@@ -9,6 +9,8 @@ const STATUS_LABELS = {
   pending_approval: 'Pending approval',
   ready_to_send: 'Ready',
   sent: 'Sent',
+  processing: 'Processing',
+  transferred: 'Transferred',
   paid: 'Paid',
 };
 
@@ -43,7 +45,7 @@ function getPartnerShare(report) {
 function StatusPill({ status }) {
   const tone = status === 'paid'
     ? 'bg-emerald-100 text-emerald-700 border-emerald-200'
-    : status === 'sent'
+    : ['sent', 'transferred'].includes(status)
       ? 'bg-blue-100 text-blue-700 border-blue-200'
       : 'bg-amber-100 text-amber-700 border-amber-200';
   return (
@@ -79,7 +81,7 @@ export default function PayoutsPage({ onNavigateToDashboard, onNavigateToAdmin, 
 
   const summary = useMemo(() => ({
     pending: reports.filter((report) => report.status === 'pending_approval').length,
-    sent: reports.filter((report) => report.status === 'sent').length,
+    sent: reports.filter((report) => ['sent', 'transferred'].includes(report.status)).length,
     paid: reports.filter((report) => report.status === 'paid').length,
   }), [reports]);
 
@@ -104,10 +106,15 @@ export default function PayoutsPage({ onNavigateToDashboard, onNavigateToAdmin, 
 
   const handleApprove = async (reportId) => {
     setBusyId(reportId);
-    setToast({ state: 'sending', message: 'Approving and sending payout emails...' });
+    const report = reports.find((entry) => entry.id === reportId);
+    setToast({state: 'sending', message: report?.model === 'chargedrops'
+      ? 'Approving and creating the Stripe transfer...'
+      : 'Approving and sending payout emails...'});
     try {
-      await callFunctionWithAuth('payouts_approveAndSend', { reportId });
-      setToast({ state: 'success', message: 'Payout emails sent.' });
+      const result = await callFunctionWithAuth('payouts_approveAndSend', { reportId });
+      setToast({state: 'success', message: report?.model === 'chargedrops'
+        ? `Client payout transferred${result?.transfer?.id ? ` (${result.transfer.id})` : ''}.`
+        : 'Payout emails sent.'});
       await fetchReports();
     } catch (error) {
       console.error(error);
@@ -159,7 +166,7 @@ export default function PayoutsPage({ onNavigateToDashboard, onNavigateToAdmin, 
             <p className="mt-1 text-3xl font-bold text-amber-900">{summary.pending}</p>
           </div>
           <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-            <p className="text-sm font-semibold text-blue-700">Sent</p>
+            <p className="text-sm font-semibold text-blue-700">Sent / transferred</p>
             <p className="mt-1 text-3xl font-bold text-blue-900">{summary.sent}</p>
           </div>
           <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
@@ -174,6 +181,7 @@ export default function PayoutsPage({ onNavigateToDashboard, onNavigateToAdmin, 
               ['', 'All'],
               ['pending_approval', 'Pending'],
               ['sent', 'Sent'],
+              ['transferred', 'Transferred'],
               ['paid', 'Paid'],
             ].map(([value, label]) => (
               <button
@@ -247,7 +255,16 @@ export default function PayoutsPage({ onNavigateToDashboard, onNavigateToAdmin, 
                         <p className="text-xs text-gray-400">{formatDate(report.generatedAt)}</p>
                       </td>
                       <td className="px-4 py-4 text-sm text-gray-700">{report.adminEmail || '-'}</td>
-                      <td className="px-4 py-4 text-right text-sm font-semibold text-gray-900">{formatMoney(report.totals?.totalRevenue || report.totals?.leaseTotal)}</td>
+                      <td className="px-4 py-4 text-right text-sm font-semibold text-gray-900">
+                        {formatMoney(report.model === 'chargedrops'
+                          ? report.totals?.qualifyingRevenue
+                          : report.totals?.totalRevenue || report.totals?.leaseTotal)}
+                        {report.model === 'chargedrops' && (
+                          <p className="mt-1 text-[11px] font-normal text-gray-400">
+                            Gross {formatMoney(report.totals?.grossRevenue)} · refunds {formatMoney(report.totals?.refunds)} · taxes {formatMoney(report.totals?.taxes)}
+                          </p>
+                        )}
+                      </td>
                       <td className="px-4 py-4 text-right text-sm text-gray-700">{formatMoney(report.totals?.clientShare)}</td>
                       <td className="px-4 py-4 text-right text-sm text-gray-700">{formatMoney(getPartnerShare(report))}</td>
                       <td className="px-4 py-4"><StatusPill status={report.status} /></td>
@@ -261,10 +278,10 @@ export default function PayoutsPage({ onNavigateToDashboard, onNavigateToAdmin, 
                               type="button"
                             >
                               <PaperAirplaneIcon className="h-4 w-4" />
-                              {report.status === 'ready_to_send' ? 'Send' : 'Approve'}
+                              {report.status === 'ready_to_send' ? 'Send' : report.model === 'chargedrops' ? 'Approve & transfer' : 'Approve'}
                             </button>
                           )}
-                          {report.status === 'sent' && (
+                          {(report.status === 'sent' || (report.model === 'chargedrops' && report.status === 'transferred')) && (
                             <button
                               onClick={() => handleMarkPaid(report.id)}
                               disabled={busyId === report.id}
@@ -272,7 +289,7 @@ export default function PayoutsPage({ onNavigateToDashboard, onNavigateToAdmin, 
                               type="button"
                             >
                               <CheckCircleIcon className="h-4 w-4" />
-                              Paid
+                              {report.model === 'chargedrops' ? 'Reconcile' : 'Paid'}
                             </button>
                           )}
                         </div>

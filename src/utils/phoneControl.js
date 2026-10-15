@@ -314,7 +314,14 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
     enrollmentState: String(safeDevice.enrollmentState || safeDevice.status || 'pending').toLowerCase(),
     lastSeenAtMs,
     lastSeenAt: safeDevice.lastSeenAt || safeDevice.heartbeatAt || null,
+    inventoryAtMs: phoneTimestampToMillis(safeDevice.inventoryAt),
     lastCommand: safeDevice.lastCommand || null,
+    assignmentTransition: safeDevice.assignmentTransition && typeof safeDevice.assignmentTransition === 'object'
+      ? safeDevice.assignmentTransition : null,
+    assignmentError: safeDevice.assignmentError && typeof safeDevice.assignmentError === 'object'
+      ? safeDevice.assignmentError : null,
+    assignmentTransitionOutcome: safeDevice.assignmentTransitionOutcome && typeof safeDevice.assignmentTransitionOutcome === 'object'
+      ? safeDevice.assignmentTransitionOutcome : null,
     phoneLine: {
       number: effectivePhoneNumber,
       key: phoneLineNumberKey(effectivePhoneNumber),
@@ -336,6 +343,7 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
       stripeMode: String(rawTerminal.stripeMode || '').trim().toLowerCase(),
       stripeReaderType: String(rawTerminal.stripeReaderType || '').trim().toLowerCase(),
       packageName: String(rawTerminal.packageName || '').trim(),
+      installationId: String(rawTerminal.installationId || '').trim(),
       lockdownEnabled: rawTerminal.lockdownEnabled === true,
       lockdownState: String(rawTerminal.lockdownState ||
         (rawTerminal.lockdownEnabled ? 'pending' : 'unlocked')).trim().toLowerCase(),
@@ -456,8 +464,17 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
       isDeviceOwner: inventory.isDeviceOwner === true,
       deviceKind: String(inventory.deviceKind || '').trim().toLowerCase(),
       packageName: String(inventory.packageName || safeDevice.packageName || '').trim(),
+      agentStationId: String(inventory.agentStationId || '').trim().toUpperCase(),
+      terminalReportPresent: typeof rawM2Terminal.configured === 'boolean',
+      media: {
+        identityReady: inventory.media?.identityReady === true,
+        stationLinkReady: inventory.media?.stationLinkReady === true,
+        stationLinkConnected: inventory.media?.stationLinkConnected === true,
+        supportsStationBackground: inventory.media?.supportsStationBackground === true,
+      },
       m2Terminal: {
         configured: rawM2Terminal.configured === true,
+        installationId: String(rawM2Terminal.installationId || '').trim(),
         stationId: String(rawM2Terminal.stationId || '').trim().toUpperCase(),
         provisionId: String(rawM2Terminal.provisionId || '').trim(),
         moduleId: String(rawM2Terminal.moduleId || '').trim(),
@@ -475,6 +492,24 @@ export function normalizePhoneDevice(rawDevice = {}, documentId = '') {
     },
     raw: safeDevice,
   };
+}
+
+export function isPhoneTerminalDisabledConfirmed(device, stationId, now = Date.now()) {
+  const inventory = device?.inventory || {};
+  return inventory.terminalReportPresent === true && inventory.m2Terminal?.configured === false &&
+    Number(device?.inventoryAtMs || 0) > now - 3 * 60 * 1000 &&
+    (!isIntegratedKiosk(device) || inventory.agentStationId === stationId);
+}
+
+export function isPhoneTerminalEnabledConfirmed(device, stationId, now = Date.now()) {
+  const inventory = device?.inventory || {};
+  const installationId = String(device?.terminal?.installationId || '');
+  return inventory.terminalReportPresent === true && inventory.m2Terminal?.configured === true &&
+    /^[a-f0-9]{64}$/.test(installationId) &&
+    inventory.m2Terminal.installationId === installationId &&
+    inventory.m2Terminal.stationId === stationId &&
+    Number(device?.inventoryAtMs || 0) > now - 3 * 60 * 1000 &&
+    (!isIntegratedKiosk(device) || inventory.agentStationId === stationId);
 }
 
 export function getPhoneConnectionState(device, now = Date.now()) {

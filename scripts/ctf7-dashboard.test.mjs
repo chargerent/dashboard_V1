@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCtf7ModuleId } from '../src/utils/ctf7.js';
+import { parseCtf7ModuleId, commandChargerId, applyCtf7EjectResults } from '../src/utils/ctf7.js';
 import { normalizeKioskData, isNewSchemaKiosk } from '../src/utils/helpers.js';
 import model from '../functions/ctf7Model.js';
 import terminal from '../functions/kioskTerminal.js';
@@ -36,6 +36,19 @@ test('existing Besiter normalization stays numeric', () => {
   const [kiosk] = normalizeKioskData([{hardware: {type: 'CT4'}, modules: [{id: '867652077000000',
     slots: [{position: 1, status: 1, sn: '12345678', batteryLevel: 90}]}]}]);
   assert.equal(kiosk.modules[0].slots[0].sn, 12345678);
+});
+test('operator confirmation retains the ASCII serial and partial batch results clear only confirmed slots', () => {
+  assert.equal(commandChargerId('000ABC000001', {hardware: {type: 'CTF7'}}), '000ABC000001');
+  assert.equal(commandChargerId('12345678', {hardware: {type: 'CT4'}}), 12345678);
+  const stations = [{stationid: 'FR4000', modules: ['a', 'b'].map(id => ({id, slots: [
+    {position: 1, sn: '000ABC000001', status: 1, isLocked: true},
+  ]}))}];
+  const [result] = applyCtf7EjectResults(stations, {stationid: 'FR4000', results: [
+    {moduleId: 'a', position: 1, sn: '000ABC000001', state: 'dispensed'},
+    {moduleId: 'b', position: 1, sn: '000ABC000001', state: 'verification_pending'},
+  ]});
+  assert.equal(result.modules[0].slots[0].sn, ''); assert.equal(result.modules[0].slots[0].isLocked, true);
+  assert.equal(result.modules[1].slots[0].sn, '000ABC000001');
 });
 test('CTF7 cannot enter the Besiter payment or installation path', () => {
   assert.throws(() => terminal.resolveKioskOffer({}, {hardware: {type: 'CTF7'}}), error => error.code === 'ctf7-commissioning');

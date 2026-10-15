@@ -20,16 +20,18 @@ export const FormInput = ({ label, name, value, section, type = "text", onDataCh
     </div>
 );
 
-export const FormToggle = ({ label, name, checked, section, onDataChange }) => (
+export const FormToggle = ({ label, name, checked, section, onDataChange, disabled = false }) => (
     <div className="flex items-center justify-between">
         <span className="block text-sm font-medium text-gray-700">{label}</span>
-        <label htmlFor={name} className="relative inline-flex items-center cursor-pointer">
+        <label htmlFor={name} className={`relative inline-flex items-center ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>
             <input
                 type="checkbox"
                 id={name}
+                aria-label={label}
                 name={name}
                 className="sr-only"
                 checked={checked || false}
+                disabled={disabled}
                 onChange={e => onDataChange(section, name, e.target.checked)}
             />
             <div className={`block w-10 h-6 rounded-full transition ${checked ? 'bg-blue-600' : 'bg-gray-300'}`}></div>

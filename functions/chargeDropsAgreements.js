@@ -5,6 +5,7 @@ const {PDFDocument, StandardFonts, rgb} = require("pdf-lib");
 const {
   generateChargeRentClientAgreement,
 } = require("./chargeRentClientAgreementTemplate");
+const {drawChargeDropsLogo} = require("./chargeDropsPdfBrand");
 
 const AGREEMENTS_COLLECTION = "chargeDropsAgreements";
 const CHALLENGES_COLLECTION = "chargeDropsAgreementChallenges";
@@ -117,17 +118,20 @@ function splitLines(font, value, size, maxWidth) {
   return lines.length ? lines : [""];
 }
 
+function groupedHash(value) {
+  return String(value || "").match(/.{1,32}/g)?.join(" ") || "";
+}
+
 async function appendSignatureCertificate(sourcePdf, certificate) {
   const pdf = await PDFDocument.load(sourcePdf, {ignoreEncryption: false});
   const regular = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const page = pdf.addPage([612, 792]);
   const dark = rgb(0.06, 0.09, 0.16);
-  const indigo = rgb(0.25, 0.29, 0.82);
   const gray = rgb(0.34, 0.4, 0.49);
   let y = 728;
 
-  page.drawText("ChargeDrops", {x: 48, y, size: 24, font: bold, color: indigo});
+  drawChargeDropsLogo(page, {x: 48, y: y + 5, width: 150});
   y -= 38;
   page.drawText("Certificate of Electronic Signature", {
     x: 48, y, size: 18, font: bold, color: dark,
@@ -150,7 +154,7 @@ async function appendSignatureCertificate(sourcePdf, certificate) {
     ["Signer email", certificate.signerEmail],
     ["Signed at", certificate.signedAt],
     ["Authentication", "ChargeDrops portal login plus emailed one-time code"],
-    ["Source document SHA-256", certificate.sourceHash],
+    ["Source document SHA-256", groupedHash(certificate.sourceHash)],
   ];
 
   for (const [label, value] of rows) {
@@ -176,7 +180,7 @@ async function appendSignatureCertificate(sourcePdf, certificate) {
     color: dark,
   });
   y -= 24;
-  page.drawText(`/s/ ${certificate.signerName}`, {
+  page.drawText(certificate.signerName, {
     x: 48, y, size: 18, font: bold, color: dark,
   });
   y -= 18;
@@ -202,6 +206,65 @@ async function appendSignatureCertificate(sourcePdf, certificate) {
   return Buffer.from(await pdf.save({useObjectStreams: false}));
 }
 
+async function appendCountersignatureCertificate(clientSignedPdf, certificate) {
+  const pdf = await PDFDocument.load(clientSignedPdf, {ignoreEncryption: false});
+  const regular = await pdf.embedFont(StandardFonts.Helvetica);
+  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  const page = pdf.addPage([612, 792]);
+  const dark = rgb(0.06, 0.09, 0.16);
+  const gray = rgb(0.34, 0.4, 0.49);
+  let y = 728;
+
+  drawChargeDropsLogo(page, {x: 48, y: y + 5, width: 150});
+  y -= 38;
+  page.drawText("Ocharge Countersignature Certificate", {
+    x: 48, y, size: 18, font: bold, color: dark,
+  });
+  y -= 28;
+  page.drawText("This countersignature makes the client agreement fully executed.", {
+    x: 48, y, size: 10, font: regular, color: gray,
+  });
+  y -= 40;
+
+  const rows = [
+    ["Agreement", certificate.title],
+    ["Agreement ID", certificate.agreementId],
+    ["Ocharge signer", certificate.signerName],
+    ["Signer title", certificate.signerTitle],
+    ["Signer email", certificate.signerEmail],
+    ["Countersigned at", certificate.signedAt],
+    ["Authentication", "Authenticated Chargerent administrator session"],
+    [
+      "Client-signed document SHA-256",
+      groupedHash(certificate.clientSignedHash),
+    ],
+  ];
+  for (const [label, value] of rows) {
+    page.drawText(label, {x: 48, y, size: 9, font: bold, color: gray});
+    const lines = splitLines(regular, value || "Not provided", 10, 310);
+    lines.forEach((line, index) => page.drawText(line, {
+      x: 220,
+      y: y - (index * 13),
+      size: 10,
+      font: regular,
+      color: dark,
+    }));
+    y -= Math.max(27, (lines.length * 13) + 8);
+  }
+  y -= 12;
+  page.drawLine({start: {x: 48, y}, end: {x: 420, y}, thickness: 1, color: dark});
+  y -= 24;
+  page.drawText(certificate.signerName, {
+    x: 48, y, size: 18, font: bold, color: dark,
+  });
+  y -= 18;
+  page.drawText("Electronic countersignature for Ocharge LLC", {
+    x: 48, y, size: 9, font: regular, color: gray,
+  });
+
+  return Buffer.from(await pdf.save({useObjectStreams: false}));
+}
+
 function createChargeDropsAgreementService({
   db,
   admin,
@@ -213,6 +276,7 @@ function createChargeDropsAgreementService({
   now = () => new Date(),
   generateCode = () => String(crypto.randomInt(0, 1000000)).padStart(6, "0"),
   signPdf = appendSignatureCertificate,
+  countersignPdf = appendCountersignatureCertificate,
   notifyPartner = async () => ({status: "skipped"}),
   logger = console,
 }) {
@@ -298,6 +362,9 @@ function createChargeDropsAgreementService({
         status,
         preparedAt: agreement.preparedAt || timestamp,
         ...(agreement.signedAt ? {signedAt: agreement.signedAt} : {}),
+        ...(agreement.countersignedAt ? {
+          countersignedAt: agreement.countersignedAt,
+        } : {}),
       },
       onboarding: {
         ...(target.profile?.chargedrops?.onboarding || {}),
@@ -310,11 +377,17 @@ function createChargeDropsAgreementService({
   }
 
   async function agreementReadUrl(agreement) {
-    const storagePath = agreement.status === "signed" && agreement.signedStoragePath ?
-      agreement.signedStoragePath : agreement.sourceStoragePath;
+    const storagePath = agreement.status === "fully_executed" &&
+      agreement.executedStoragePath ? agreement.executedStoragePath :
+      ["client_signed", "signed"].includes(agreement.status) &&
+      agreement.signedStoragePath ? agreement.signedStoragePath :
+      agreement.sourceStoragePath;
     if (!storagePath) return "";
-    const fileName = agreement.status === "signed" ?
-      `signed-${safeFileName(agreement.fileName)}` : safeFileName(agreement.fileName);
+    const fileName = agreement.status === "fully_executed" ?
+      `executed-${safeFileName(agreement.fileName)}` :
+      ["client_signed", "signed"].includes(agreement.status) ?
+        `client-signed-${safeFileName(agreement.fileName)}` :
+        safeFileName(agreement.fileName);
     const [url] = await bucket.file(storagePath).getSignedUrl({
       version: "v4",
       action: "read",
@@ -339,11 +412,15 @@ function createChargeDropsAgreementService({
       canSign: agreement.status === "awaiting_signature",
       preparedAt: timestampIso(agreement.preparedAt),
       signedAt: timestampIso(agreement.signedAt),
+      countersignedAt: timestampIso(agreement.countersignedAt),
       signerName: text(agreement.signer?.name, 160),
       signerTitle: text(agreement.signer?.title, 120),
+      countersignerName: text(agreement.countersigner?.name, 160),
+      countersignerTitle: text(agreement.countersigner?.title, 120),
       sourceHash: text(agreement.sourceHash, 64),
       notificationStatus: text(agreement.notificationStatus, 40),
       completionEmailStatus: text(agreement.completionEmailStatus, 40),
+      executedEmailStatus: text(agreement.executedEmailStatus, 40),
       agreementUrl: await agreementReadUrl(agreement),
       urlExpiresInSeconds: 15 * 60,
     };
@@ -364,8 +441,8 @@ function createChargeDropsAgreementService({
       "Sign in to review the complete PDF and sign it securely:",
       dashboardBaseUrl,
       "",
-      "After the agreement is signed, you can continue to Stripe to set up " +
-        "commission payouts.",
+      "After you sign, Ocharge will review and countersign the agreement. " +
+        "Stripe payout setup unlocks after both signatures are complete.",
       "",
       "ChargeDrops",
     ].join("\n");
@@ -428,7 +505,7 @@ function createChargeDropsAgreementService({
     });
 
     const existing = await currentAgreement(target);
-    if (existing && existing.agreement.status !== "signed") {
+    if (existing && existing.agreement.status !== "fully_executed") {
       await existing.ref.set({
         status: "voided",
         voidedAt: serverTimestamp(),
@@ -627,7 +704,9 @@ function createChargeDropsAgreementService({
     if (!record) {
       throw failure("failed-precondition", "There is no agreement ready to sign.");
     }
-    if (record.agreement.status === "signed") {
+    if (["client_signed", "fully_executed", "signed"].includes(
+        record.agreement.status,
+    )) {
       return {ok: true, agreement: await serializeAgreement(record)};
     }
     if (record.agreement.status !== "awaiting_signature") {
@@ -737,7 +816,7 @@ function createChargeDropsAgreementService({
 
     const signedAgreement = {
       ...record.agreement,
-      status: "signed",
+      status: "client_signed",
       signedAt,
       signedStoragePath,
       signedHash,
@@ -761,7 +840,7 @@ function createChargeDropsAgreementService({
       usedAt: serverTimestamp(),
       attempts,
     }, {merge: true});
-    await addEvent(record.ref, "signed", authState, {
+    await addEvent(record.ref, "client_signed", authState, {
       signerName,
       signerTitle,
       signerEmail,
@@ -770,7 +849,7 @@ function createChargeDropsAgreementService({
       signedHash,
       ...requestEvidence,
     });
-    await updateProfileAgreement(target, signedAgreement, "signed");
+    await updateProfileAgreement(target, signedAgreement, "client_signed");
 
     let completionEmailStatus = "sent";
     try {
@@ -812,16 +891,179 @@ function createChargeDropsAgreementService({
     };
   }
 
+  async function sendExecutedEmail(target, agreement, executedPdf) {
+    const email = emailForProfile(target.profile);
+    const name = text(target.profile?.contact?.name, 160) || "there";
+    await sendEmail({
+      to: email,
+      cc: adminCopyEmail(target.profile, email),
+      fromName: "ChargeDrops",
+      subject: "Your fully executed ChargeDrops agreement",
+      body: [
+        `Hi ${name},`,
+        "",
+        "Ocharge LLC countersigned your ChargeDrops agreement.",
+        `Agreement: ${agreement.title}`,
+        `Version: ${agreement.version}`,
+        "",
+        "The fully executed agreement is attached and available in your Client Portal. " +
+          "Commission payout setup is now unlocked.",
+        "",
+        "ChargeDrops",
+      ].join("\n"),
+      attachments: [{
+        filename: `executed-${safeFileName(agreement.fileName)}`,
+        content: executedPdf,
+        contentType: "application/pdf",
+      }],
+    });
+  }
+
+  async function countersignAgreement({authState, uid, input, evidence}) {
+    const target = await loadTarget(authState, uid, true);
+    const record = await currentAgreement(target);
+    if (!record) {
+      throw failure("failed-precondition", "There is no client-signed agreement to countersign.");
+    }
+    if (record.agreement.status === "fully_executed") {
+      return {ok: true, agreement: await serializeAgreement(record)};
+    }
+    if (!["client_signed", "signed"].includes(record.agreement.status) ||
+        !record.agreement.signedStoragePath || !record.agreement.signedHash) {
+      throw failure(
+          "failed-precondition",
+          "The client must sign the agreement before Ocharge countersigns it.",
+      );
+    }
+    const signerName = text(input?.signerName, 160);
+    const signerTitle = text(input?.signerTitle, 120);
+    if (signerName.length < 2 || signerTitle.length < 2) {
+      throw failure("invalid-argument", "Enter the Ocharge signer's legal name and title.");
+    }
+    if (input?.reviewedDocument !== true || input?.intentToSign !== true) {
+      throw failure(
+          "invalid-argument",
+          "Review the client-signed agreement and confirm the countersignature intent.",
+      );
+    }
+
+    const [clientSignedPdf] = await bucket.file(
+        record.agreement.signedStoragePath,
+    ).download();
+    if (sha256(clientSignedPdf) !== record.agreement.signedHash) {
+      throw failure(
+          "failed-precondition",
+          "The client-signed agreement could not be verified.",
+      );
+    }
+    const countersignedAt = now();
+    const requestEvidence = normalizeRequestEvidence(evidence);
+    const signerEmail = text(authState?.profile?.contact?.email, 254).toLowerCase() ||
+      text(authState?.profile?.email, 254).toLowerCase() ||
+      text(authState?.profile?.username, 160);
+    const executedPdf = await countersignPdf(clientSignedPdf, {
+      title: record.agreement.title,
+      agreementId: record.id,
+      signerName,
+      signerTitle,
+      signerEmail,
+      signedAt: countersignedAt.toISOString(),
+      clientSignedHash: record.agreement.signedHash,
+    });
+    const executedStoragePath =
+      `chargedrops/agreements/${target.uid}/${record.id}/executed.pdf`;
+    const executedHash = sha256(executedPdf);
+    await bucket.file(executedStoragePath).save(executedPdf, {
+      resumable: false,
+      metadata: {
+        contentType: "application/pdf",
+        cacheControl: "private, no-store",
+        metadata: {
+          agreementId: record.id,
+          clientUid: target.uid,
+          signedHash: record.agreement.signedHash,
+          executedHash,
+        },
+      },
+      preconditionOpts: {ifGenerationMatch: 0},
+    });
+    const executedAgreement = {
+      ...record.agreement,
+      status: "fully_executed",
+      countersignedAt,
+      executedStoragePath,
+      executedHash,
+      executedSize: executedPdf.length,
+      countersigner: {
+        name: signerName,
+        title: signerTitle,
+        email: signerEmail,
+        authMethod: "chargerent_admin_session",
+        ...requestEvidence,
+      },
+      countersignConsent: {reviewedDocument: true, intentToSign: true},
+      executedEmailStatus: "pending",
+    };
+    await record.ref.set(executedAgreement, {merge: true});
+    await addEvent(record.ref, "fully_executed", authState, {
+      signerName,
+      signerTitle,
+      signerEmail,
+      signedHash: record.agreement.signedHash,
+      executedHash,
+      ...requestEvidence,
+    });
+    await updateProfileAgreement(target, executedAgreement, "fully_executed");
+
+    let executedEmailStatus = "sent";
+    try {
+      await sendExecutedEmail(target, executedAgreement, executedPdf);
+    } catch (error) {
+      executedEmailStatus = "unknown";
+      logger.error("ChargeDrops executed agreement email failed", {
+        agreementId: record.id,
+        clientUid: target.uid,
+        code: text(error?.code, 80) || "unknown",
+      });
+    }
+    const partnerNotification = await notifyPartnerSafely(
+        target,
+        "agreement_countersigned",
+        record.id,
+        authState.uid,
+    );
+    await record.ref.set({
+      executedEmailStatus,
+      executedEmailUpdatedAt: serverTimestamp(),
+      partnerNotifications: {
+        agreementCountersigned: {
+          status: partnerNotification.status,
+          notificationId: text(partnerNotification.id, 160),
+          updatedAt: serverTimestamp(),
+        },
+      },
+    }, {merge: true});
+    return {
+      ok: true,
+      agreement: await serializeAgreement({
+        ...record,
+        agreement: {...executedAgreement, executedEmailStatus},
+      }),
+    };
+  }
+
   return {
     getStatus,
     prepareAgreement,
     requestCode,
     signAgreement,
+    countersignAgreement,
   };
 }
 
 module.exports = {
   appendSignatureCertificate,
+  appendCountersignatureCertificate,
   createChargeDropsAgreementService,
   maskEmail,
   otpHash,

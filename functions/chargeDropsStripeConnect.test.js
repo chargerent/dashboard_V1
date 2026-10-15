@@ -7,6 +7,8 @@ const {
   summarizeAccount,
 } = require("./chargeDropsStripeConnect");
 
+const PLATFORM_ACCOUNT_ID = "acct_1BGtrxCUzeellHd0";
+
 const PROFILE = {
   username: "hudson",
   clientId: "HUDSON",
@@ -21,12 +23,15 @@ const PROFILE = {
       countryCode: "US",
       website: "https://example.com",
     },
-    onboarding: {agreementStatus: "signed", payoutStatus: "not_started"},
+    onboarding: {agreementStatus: "fully_executed", payoutStatus: "not_started"},
   },
 };
 
-function fakeDb(profile = PROFILE) {
-  const records = new Map([["users/client-uid", structuredClone(profile)]]);
+function fakeDb(profile = PROFILE, platformOnboardingEnabled = true) {
+  const records = new Map([
+    ["users/client-uid", structuredClone(profile)],
+    ["systemConfig/chargeDropsPayouts", {connectOnboardingEnabled: platformOnboardingEnabled}],
+  ]);
   const writes = [];
   return {
     records,
@@ -72,8 +77,13 @@ function fakeAdmin() {
   };
 }
 
-function setup({profile = PROFILE, stripeOverrides = {}} = {}) {
-  const db = fakeDb(profile);
+function setup({
+  profile = PROFILE,
+  stripeOverrides = {},
+  platformAccountId = PLATFORM_ACCOUNT_ID,
+  platformOnboardingEnabled = true,
+} = {}) {
+  const db = fakeDb(profile, platformOnboardingEnabled);
   const calls = [];
   const notifications = [];
   const account = {
@@ -104,6 +114,12 @@ function setup({profile = PROFILE, stripeOverrides = {}} = {}) {
     },
   };
   const stripe = {
+    accounts: {
+      async retrieve(id) {
+        calls.push({operation: "platform.retrieve", id});
+        return {id: platformAccountId};
+      },
+    },
     v2: {
       core: {
         accounts: {
@@ -133,6 +149,7 @@ function setup({profile = PROFILE, stripeOverrides = {}} = {}) {
     db,
     admin: fakeAdmin(),
     getStripeClient: () => ({stripe, mode: "test"}),
+    expectedPlatformAccountId: PLATFORM_ACCOUNT_ID,
     notifyPartner: async (notification) => {
       notifications.push(notification);
       return {id: `notice-${notifications.length}`, status: "sent"};
@@ -176,6 +193,7 @@ test("hosted onboarding creates an Express account without bank fields", async (
   });
 
   assert.equal(result.url, "https://connect.stripe.com/setup/c/test-link");
+  assert.equal(result.platformReady, true);
   assert.equal(result.status, "requirements_due");
   const createCall = calls.find((call) => call.operation === "accounts.create");
   assert.equal(createCall.params.dashboard, "express");
@@ -199,6 +217,25 @@ test("hosted onboarding creates an Express account without bank fields", async (
   );
   assert.equal(notifications.length, 1);
   assert.equal(notifications[0].eventType, "payout_started");
+});
+
+test("platform readiness gate hides Stripe until Connect activation is complete", async () => {
+  const {service, calls} = setup({platformOnboardingEnabled: false});
+  const status = await service.getStatus({
+    authState: {uid: "client-uid", isAdmin: false},
+  });
+  assert.equal(status.platformReady, false);
+  assert.equal(status.status, "not_started");
+  assert.equal(calls.length, 0);
+
+  await assert.rejects(
+      service.createOnboardingLink({
+        authState: {uid: "client-uid", isAdmin: false},
+      }),
+      (error) => error.code === "failed-precondition" &&
+        /being finalized/i.test(error.message),
+  );
+  assert.equal(calls.length, 0);
 });
 
 test("Stripe account updates notify the partner on a status transition", async () => {
@@ -325,7 +362,15 @@ test("non-ChargeDrops profiles cannot start payout onboarding", async () => {
   );
 });
 
-test("payout onboarding remains locked until the agreement is signed", async () => {
+test("payout onboarding rejects a key from the wrong Stripe account", async () => {
+  const {service} = setup({platformAccountId: "acct_wrong123456"});
+  await assert.rejects(
+      service.getStatus({authState: {uid: "client-uid", isAdmin: false}}),
+      (error) => error.code === "failed-precondition" && /approved Ocharge/i.test(error.message),
+  );
+});
+
+test("payout onboarding remains locked until Ocharge countersigns", async () => {
   const profile = structuredClone(PROFILE);
   profile.chargedrops.onboarding.agreementStatus = "awaiting_signature";
   const {service, calls} = setup({profile});
@@ -334,7 +379,7 @@ test("payout onboarding remains locked until the agreement is signed", async () 
         authState: {uid: "client-uid", isAdmin: false},
       }),
       (error) => error.code === "failed-precondition" &&
-        /agreement/i.test(error.message),
+        /countersign/i.test(error.message),
   );
   assert.equal(calls.length, 0);
 });

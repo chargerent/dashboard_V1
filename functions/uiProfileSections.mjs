@@ -1,4 +1,5 @@
 import {validateApolloScreenFlow} from './apolloScreens.mjs';
+import {normalizeReceiptPage} from './receiptPageProfile.mjs';
 
 // Shared by the dashboard and Functions so device targeting cannot disagree.
 export const PROFILE_SECTIONS = [
@@ -21,12 +22,16 @@ const clean = (value) => String(value ?? '').trim().toUpperCase();
 const legacyKeys = {takeCharger: 'takecharger', soldOut: 'soldout'};
 const APOLLO_QR_DEFAULT = {enabled: false, provider: 'chargerent-issued', promptTitle: 'Borrow a charger', promptMessage: 'Scan your QR code'};
 
+export function hasStationScreen(kiosk = {}) {
+  const match = /^(?:E)?(\d+(?:\.\d+)?)(?:IN|INCH|INCHES|")?$/.exec(clean(kiosk.hardware?.screen));
+  return Boolean(match && Number(match[1]) > 0);
+}
+
 export function getProfileDeviceTypes(kiosk = {}) {
   const gateway = clean(kiosk.hardware?.gateway);
-  const screen = clean(kiosk.hardware?.screen);
   const screenMode = clean(kiosk.screen?.mode);
   // Missing hardware data is unknown, not permission to publish a screen.
-  const hasScreen = /^(?:E)?\d+(?:\.\d+)?(?:IN|INCH|INCHES|")?$/.test(screen);
+  const hasScreen = hasStationScreen(kiosk);
   const hasChargerentApp = kiosk?.profileCapabilities?.chargerentApp === true;
   const hasApolloGateway = gateway === 'APOLLO';
   const hasP68Gateway = gateway === 'PAYTERP68' && screenMode !== 'UI';
@@ -84,17 +89,46 @@ export function getChargerentAppProfile(profile) {
 function validateChargerentAppProfile(copy) {
   if (!copy || typeof copy !== 'object' || Array.isArray(copy)) throw new Error('Chargerent app settings are required.');
   if (JSON.stringify(copy).length > 500000) throw new Error('Chargerent app settings are too large.');
-  if (Object.keys(copy).some((key) => !['checkout', 'stripeUi'].includes(key))) throw new Error('Chargerent app settings contain an unsupported field.');
+  if (Object.keys(copy).some((key) => !['checkout', 'stripeUi', 'receiptPage'].includes(key))) throw new Error('Chargerent app settings contain an unsupported field.');
+  if (copy.receiptPage !== undefined) normalizeReceiptPage(copy.receiptPage);
   const checkout = copy.checkout;
   if (!checkout || typeof checkout !== 'object' || Array.isArray(checkout) ||
       Object.keys(checkout).some((key) => !['enabled', 'height'].includes(key)) ||
       typeof checkout.enabled !== 'boolean' || !Number.isFinite(Number(checkout.height)) ||
-      Number(checkout.height) < 0.10 || Number(checkout.height) > 0.50) {
-    throw new Error('The Chargerent checkout panel must be enabled or disabled and use 10% to 50% of the screen.');
+      Number(checkout.height) < 0.15 || Number(checkout.height) > 0.50) {
+    throw new Error('The Chargerent checkout panel must be enabled or disabled and use 15% to 50% of the screen.');
   }
   const stripeUi = copy.stripeUi;
   if (!stripeUi || typeof stripeUi !== 'object' || Array.isArray(stripeUi) || stripeUi.schemaVersion !== 1) {
     throw new Error('A supported Chargerent checkout UI is required.');
+  }
+  if (stripeUi.bootWifiSetup !== undefined && typeof stripeUi.bootWifiSetup !== 'boolean') {
+    throw new Error('Boot Wi-Fi setup must be enabled or disabled.');
+  }
+  if (stripeUi.screenTimeoutSeconds !== undefined &&
+      (!Number.isInteger(stripeUi.screenTimeoutSeconds) || stripeUi.screenTimeoutSeconds < 10 || stripeUi.screenTimeoutSeconds > 120)) {
+    throw new Error('The Chargerent app screen timeout must be a whole number from 10 to 120 seconds.');
+  }
+  if (stripeUi.cardOpacityPercent !== undefined &&
+      (!Number.isInteger(stripeUi.cardOpacityPercent) || stripeUi.cardOpacityPercent < 0 || stripeUi.cardOpacityPercent > 100)) {
+    throw new Error('Card opacity must be a whole number from 0 to 100 percent.');
+  }
+  if (stripeUi.rentReturn !== undefined) {
+    const plans = ['EVENT_SIMPLE','PURCHASE_SIMPLE_DAILY','PURCHASE_MIXED_DAILY','PURCHASE_SIMPLE_24_HRS','PURCHASE_MIXED_DAY','LEASE_SIMPLE_DAILY','LEASE_MIXED_DAILY'];
+    const textKeys = ['ready.title','ready.body','rent','return','cancel','map','termsButton','information','helpTitle','helpTermsTitle','helpScan','touchBorrowTitle','eventFreeDay','eventLateDay','eventLateDays','eventNotReturned','returnAnySlot','returnConfirmationHint','touchConsent','touchHold','touchUpfrontPayment','pricing'];
+    const object = (value, keys) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !keys.includes(key))) throw new Error('Rent / Return text contains an unsupported setting.');
+      return Object.entries(value);
+    };
+    for (const [,modes] of object(stripeUi.rentReturn, plans)) {
+      for (const [,locales] of object(modes, ['touch','noTouch'])) {
+        for (const [,fields] of object(locales, ['en','fr','es'])) {
+          for (const [,text] of object(fields, textKeys)) {
+            if (typeof text !== 'string' || text.length > 2000) throw new Error('Rent / Return text must contain at most 2000 characters per field.');
+          }
+        }
+      }
+    }
   }
   const visit = (node, depth = 0) => {
     if (typeof node === 'string') {

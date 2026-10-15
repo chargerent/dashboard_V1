@@ -27,6 +27,9 @@ account references for each mode.
 
 1. A ChargeDrops client signs in to the branded portal.
 2. `chargedrops_stripeStatus` reads the client's own Stripe Connect readiness.
+   The server-owned `systemConfig/chargeDropsPayouts` document must have
+   `connectOnboardingEnabled: true`; otherwise the portal keeps the real payout
+   button disabled without exposing a Stripe activation error to the client.
 3. **Set up commission payouts** calls
    `chargedrops_stripeOnboardingLink`.
 4. The server creates or reuses an idempotent Accounts v2 recipient with the
@@ -67,6 +70,11 @@ Before deploying these functions:
    profile contains only provider IDs and readiness metadata.
 6. Repeat with the approved live key and a controlled real venue before opening
    onboarding broadly.
+
+Keep `systemConfig/chargeDropsPayouts.connectOnboardingEnabled` set to `false`
+until the Stripe Dashboard shows the platform identity verification and final
+Connect review as complete. The flag is fail-closed: a missing document, a
+failed read, or any value other than boolean `true` keeps onboarding disabled.
 
 The Express configuration sets `fees_collector` and `losses_collector` to the
 platform application, as Stripe requires. That makes the platform responsible

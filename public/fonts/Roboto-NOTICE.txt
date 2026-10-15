@@ -1,0 +1,4 @@
+Copyright 2011 Google Inc. All Rights Reserved.
+
+Roboto fonts copied without modification from the Android 11 local test system image.
+Licensed under Apache License 2.0; see Roboto-LICENSE.txt.

@@ -7,7 +7,6 @@ const {parseCredentials} = require("./besiterGateway");
 // the legacy public rentals collection or changing Firestore rules.
 const CONFIG_PATH = "accounting/amazonRentalExport";
 const OUTBOX_PATH = `${CONFIG_PATH}/outbox`;
-const SUPPORTED_STATIONS = new Set(["FR8011"]);
 const MAX_IMPORT_DELAY_MS = 120_000;
 const LEASE_MS = 90_000;
 
@@ -29,6 +28,13 @@ function text(value) {
   return String(value || "").trim();
 }
 
+function enabledStation(config, stationId) {
+  const normalized = text(stationId).toUpperCase();
+  return Boolean(normalized && config?.enabled === true &&
+    Array.isArray(config.stationIds) &&
+    config.stationIds.some((value) => text(value).toUpperCase() === normalized));
+}
+
 function number(value, name, minimum = 0) {
   if (value === null || value === undefined || value === "") throw new ExportError(`missing-${name}`);
   const result = Number(value);
@@ -37,9 +43,11 @@ function number(value, name, minimum = 0) {
 }
 
 function prepareExport({rental, rentalId, interaction, config, now = new Date()}) {
+  // Normal V2 checkout already created the Amazon rental before its sole vend.
+  if (["amazon_v2", "local_station_v1"].includes(rental?.billingOwner) ||
+    ["amazon_v2", "local_station_v1"].includes(interaction?.billingOwner)) return null;
   const stationId = text(rental.rentalStationid).toUpperCase();
-  if (!config || config.enabled !== true || !SUPPORTED_STATIONS.has(stationId) ||
-      !Array.isArray(config.stationIds) || !config.stationIds.includes(stationId) ||
+  if (!enabledStation(config, stationId) ||
       text(rental.gateway).toUpperCase() !== "STRIPE") return null;
   const enabledAt = millis(config.enabledAt);
   const startedAt = millis(rental.rentalTime);
@@ -182,14 +190,16 @@ function createAmazonExportService({db, getTransport, now = () => new Date()}) {
   const configRef = db.doc(CONFIG_PATH);
   const outbox = db.collection(OUTBOX_PATH);
   async function enqueue(rental, rentalId) {
-    if (!SUPPORTED_STATIONS.has(text(rental.rentalStationid).toUpperCase()) || rental.gateway !== "STRIPE") return null;
+    if (["amazon_v2", "local_station_v1"].includes(rental?.billingOwner)) return null;
+    if (text(rental.gateway).toUpperCase() !== "STRIPE") return null;
     const config = (await configRef.get()).data();
-    if (!config?.enabled || millis(rental.rentalTime) < millis(config.enabledAt)) return null;
+    if (!enabledStation(config, rental.rentalStationid) ||
+        millis(rental.rentalTime) < millis(config.enabledAt)) return null;
     if (besiterRentalOutcome(rental).outcome !== "vend_succeeded" &&
         rental.stripeReturnSettlement?.status !== "completed") return null;
     let interaction;
     if (rental.interactionId) interaction = (await db.doc(`kioskTerminalInteractions/${rental.interactionId}`).get()).data();
-    else {
+    if (!interaction) {
       const found = await db.collection("kioskTerminalInteractions")
           .where("paymentIntentId", "==", stripeIntentIdForRental(rental, rentalId)).limit(1).get();
       interaction = found.empty ? null : found.docs[0].data();
@@ -223,7 +233,7 @@ function createAmazonExportService({db, getTransport, now = () => new Date()}) {
     const claimed = await db.runTransaction(async (tx) => {
       const snap = await tx.get(ref);
       const row = snap.data();
-      if (!row || !config.stationIds?.includes(row.stationId) || !SUPPORTED_STATIONS.has(row.stationId) ||
+      if (!row || !enabledStation(config, row.stationId) ||
           ["delivered", "blocked"].includes(row.status) || millis(row.leaseUntil) > timestamp.getTime() ||
           millis(row.nextAttemptAt) > timestamp.getTime()) return null;
       // After a rental ACK, only the accurate audit event remains to be retried.

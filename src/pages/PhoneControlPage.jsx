@@ -44,6 +44,8 @@ import {
   getPhoneConnectionState,
   isPhoneAgentUpdateAvailable,
   isIntegratedKiosk,
+  isPhoneTerminalDisabledConfirmed,
+  isPhoneTerminalEnabledConfirmed,
   isPhoneWebRtcActive,
   isPhoneRemoteInputAvailable,
   normalizeAgentRelease,
@@ -2218,7 +2220,7 @@ export default function PhoneControlPage({
   ), [accessibleKiosks]);
 
   const assignedStationIds = useMemo(() => new Set(
-    devices.map((device) => device.stationId).filter(Boolean),
+    devices.flatMap((device) => [device.stationId, device.assignmentTransition?.toStationId]).filter(Boolean),
   ), [devices]);
 
   const kioskOptions = useMemo(() => accessibleKiosks
@@ -2267,7 +2269,10 @@ export default function PhoneControlPage({
   const selectedTerminalLocked = selectedDevice?.inventory?.terminalLockdownActive === true ||
     selectedDevice?.terminal?.lockdownEnabled === true;
   const assignmentUnchanged = assignmentStationId === selectedDevice?.stationId &&
-    assignmentTerminalEnabled === (selectedDevice?.terminal?.enabled === true);
+    assignmentTerminalEnabled === (selectedDevice?.terminal?.enabled === true) &&
+    (assignmentTerminalEnabled
+      ? isPhoneTerminalEnabledConfirmed(selectedDevice, assignmentStationId, now)
+      : isPhoneTerminalDisabledConfirmed(selectedDevice, assignmentStationId, now));
   const canControlSelected = hasPhoneControlAccess && selectedConnection === 'online' && selectedDevice?.enrollmentState === 'enrolled';
   const selectedRemoteInputAvailable = isPhoneRemoteInputAvailable(selectedDevice, now);
   const selectedModelCohort = useMemo(() => {
@@ -2477,7 +2482,7 @@ export default function PhoneControlPage({
         stationId: assignmentStationId,
         terminalEnabled: assignmentTerminalEnabled,
       });
-      setCommandStatus({ state: 'success', message: result?.message || `Phone assigned to ${assignmentStationId}.` });
+      setCommandStatus({ state: result?.pending ? 'pending' : 'success', message: result?.message || `Phone assigned to ${assignmentStationId}.` });
       await loadDevices(false);
     } catch (error) {
       setCommandStatus({ state: 'error', message: error?.message || 'Phone assignment failed.' });
@@ -2493,9 +2498,10 @@ export default function PhoneControlPage({
         deviceId: selectedDevice.id,
         stationId,
         terminalEnabled: true,
+        forceReprovision: true,
       });
       setCommandStatus({
-        state: 'success',
+        state: result?.pending ? 'pending' : 'success',
         message: result?.message || `Terminal reprovisioning queued for ${stationId}.`,
       });
       await loadDevices(false);
@@ -2838,18 +2844,18 @@ export default function PhoneControlPage({
                               </button>
                             ))}
                           </div>
-                          <select value={assignmentStationId} onChange={(event) => setAssignmentStationId(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
+                          <select value={assignmentStationId} disabled={Boolean(selectedDevice.assignmentTransition || selectedDevice.assignmentTransitionOutcome)} onChange={(event) => setAssignmentStationId(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
                             <option value="">Assign to {assignmentCountry} kiosk</option>
                             {assignmentKioskOptions.map((kiosk) => <option key={kiosk.stationId} value={kiosk.stationId} disabled={assignedStationIds.has(kiosk.stationId) && kiosk.stationId !== selectedDevice.stationId}>{kiosk.stationId}</option>)}
                           </select>
-                          <button type="button" onClick={assignSelectedPhone} disabled={!assignmentStationId || assignmentUnchanged} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40">Save</button>
+                          <button type="button" onClick={assignSelectedPhone} disabled={!assignmentStationId || assignmentUnchanged || Boolean(selectedDevice.assignmentTransition || selectedDevice.assignmentTransitionOutcome)} className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-bold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-40">Save</button>
                         </div>
                         <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
                           <input
                             type="checkbox"
                             checked={assignmentTerminalEnabled}
                             onChange={(event) => setAssignmentTerminalEnabled(event.target.checked)}
-                            disabled={(!selectedDevice.inventory.commandEncryptionReady || !selectedTerminalAgentReady) && !selectedDevice.terminal.enabled}
+                            disabled={Boolean(selectedDevice.assignmentTransition || selectedDevice.assignmentTransitionOutcome) || ((!selectedDevice.inventory.commandEncryptionReady || !selectedTerminalAgentReady) && !selectedDevice.terminal.enabled)}
                             className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600"
                           />
                           <span className="min-w-0">
@@ -2861,6 +2867,9 @@ export default function PhoneControlPage({
                             </span>
                           </span>
                         </label>
+                        {selectedDevice.assignmentTransition && <p role="status" className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">{selectedDevice.assignmentTransition.fromStationId === selectedDevice.assignmentTransition.toStationId ? `Updating settings for ${selectedDevice.assignmentTransition.toStationId}` : `Moving to ${selectedDevice.assignmentTransition.toStationId}`}. Waiting for device confirmation; new rentals are paused.</p>}
+                        {selectedDevice.assignmentTransitionOutcome && <p role="status" className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">Waiting for the Android device to finish {selectedDevice.assignmentTransitionOutcome.state === 'rolled_back' ? 'restoring its previous settings' : 'its confirmed settings update'} before another assignment.</p>}
+                        {!selectedDevice.assignmentTransition && selectedDevice.assignmentError && <p role="alert" className="mt-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-800">Assignment to {selectedDevice.assignmentError.stationId} failed. {selectedDevice.assignmentError.message}</p>}
                       </div>}
                     </div>
 

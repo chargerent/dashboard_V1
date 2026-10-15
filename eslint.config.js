@@ -10,9 +10,18 @@ export default [
       "dist/**",
       "tmp/**",
       ".codex-tmp/**",
+      "output/**",
+      ".codex-backups/**",
+      ".pnpm-store/**",
+      "firestore-migration-backups/**",
       "src/utils/validators.js",
       "src/ajv-validators.js",
+      "src/integrated-media/vendor/**",
     ],
+  },
+  {
+    files: ["functions/chargeDropsPdfBrand.js"],
+    linterOptions: {reportUnusedDisableDirectives: "off"},
   },
   // -------------------------
   // Frontend (React/Vite)
@@ -32,7 +41,7 @@ export default [
   pluginJs.configs.recommended,
   {
     rules: {
-      "no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
+      "no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_", caughtErrorsIgnorePattern: "^_" }],
     },
   },
   {
@@ -94,6 +103,7 @@ export default [
   {
     files: [
       "scripts/**/*.{js,mjs,cjs}",
+      "services/**/*.{js,mjs,cjs}",
       "*.config.js",
       "compile-schemas.js",
     ],

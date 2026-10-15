@@ -15,6 +15,14 @@ const adminAuth = {isAdmin: true, uid: 'test', profile: {username: 'test-admin'}
 const clientAuth = {isAdmin: false, profile: {username: 'client', clientId: 'CLIENT'}};
 const clone = (value) => structuredClone(value);
 const get = (value, path) => path.split('.').reduce((parent, key) => parent?.[key], value);
+const merge = (existing, incoming) => {
+  const next = clone(existing);
+  for (const [key, value] of Object.entries(incoming)) {
+    next[key] = value && typeof value === 'object' && !Array.isArray(value) && next[key] && typeof next[key] === 'object'
+      ? merge(next[key], value) : clone(value);
+  }
+  return next;
+};
 
 function harness() {
   const saved = {...createDefaultKioskUiProfile('CLIENT'), version: 3};
@@ -25,6 +33,9 @@ function harness() {
     ['kiosks/k3', {stationid: 'K3', info: {client: 'CLIENT'}, hardware: {gateway: 'PAYTERP68', screen: 'no screen'}, screen: {mode: 'UI'}, ui: {mode: 'media'}}],
     ['kiosks/a1', {stationid: 'A1', info: {client: 'CLIENT'}, hardware: {gateway: 'APOLLO', screen: 'no screen'}}],
     ['kiosks/u1', {stationid: 'U1', info: {client: 'CLIENT'}, hardware: {gateway: 'OTHER', screen: '7in'}, ui: {mode: 'UI'}, admin: {userpassword: '12345', adminpassword: '23451'}}],
+    ['kiosks/fr8012', {stationid: 'FR8012', info: {client: 'CLIENT'}, hardware: {gateway: 'APOLLO', screen: '32in'}, ui: {mode: 'media'}}],
+    ['phoneKioskAssignments/FR8012', {stationId: 'FR8012', deviceId: 'integrated-device'}],
+    ['phoneDevices/integrated-device', {stationId: 'FR8012', deviceKind: 'integrated_kiosk'}],
   ]);
   const ref = (path) => ({path, id: path.split('/').at(-1), get: async () => ({id: path.split('/').at(-1), ref: ref(path), exists: records.has(path), data: () => clone(records.get(path))})});
   const collection = (name, filters = []) => ({
@@ -41,8 +52,12 @@ function harness() {
   });
   const db = {collection, runTransaction: async (callback) => {
     const pending = [];
-    const result = await callback({get: (target) => target.get(), set: (target, value) => pending.push({target, value}), update: (target, value) => pending.push({target, value, update: true})});
-    for (const {target, value, update} of pending) {
+    const result = await callback({get: (target) => target.get(), set: (target, value, options) => pending.push({target, value, mergeExisting: options?.merge === true}), update: (target, value) => pending.push({target, value, update: true})});
+    for (const {target, value, update, mergeExisting} of pending) {
+      if (mergeExisting) {
+        records.set(target.path, merge(records.get(target.path) || {}, value));
+        continue;
+      }
       const next = update ? clone(records.get(target.path)) : {};
       for (const [path, child] of Object.entries(value)) {
         const keys = path.split('.'); let parent = next;
@@ -60,6 +75,7 @@ function harness() {
     normalizeStationId: (value) => String(value || '').trim().toUpperCase(),
     normalizeUsername: (value) => String(value || '').trim().toLowerCase(),
     normalizeUiProfileId: (value) => String(value || '').trim().toLowerCase(),
+    cleanUiProfileName: (value) => String(value || '').trim(),
     normalizeUiProfilePin: (value) => String(value || ''),
     canManageUiProfileClient: (auth, client) => auth.isAdmin || auth.profile.clientId === client,
     canManageUiProfileForKiosk: (auth, kiosk) => auth.isAdmin || auth.profile.clientId === kiosk.info.client,
@@ -74,6 +90,62 @@ function harness() {
   const handlers = new Function(...Object.keys(deps), `${handlerSource}; return {save: uiProfileUpsertSectionImpl, apply: uiProfileApplySectionImpl};`)(...Object.values(deps));
   return {records, ...handlers, saved};
 }
+
+test('boot Wi-Fi setup saves in the client app draft and rejects non-boolean values', async () => {
+  const {records, save, saved} = harness();
+  saved.applicationProfiles.chargerentMedia.stripeUi.bootWifiSetup = true;
+  const {profile} = await save({profile: saved, section: 'chargerentApp'}, clientAuth);
+  assert.equal(profile.applicationProfiles.chargerentMedia.stripeUi.bootWifiSetup, true);
+  assert.equal(records.get('uiProfiles/client').publishedSections?.chargerentApp, undefined);
+  for (const invalid of ['true', 1, null]) {
+    const fixture = harness();
+    fixture.saved.applicationProfiles.chargerentMedia.stripeUi.bootWifiSetup = invalid;
+    await assert.rejects(fixture.save({profile: fixture.saved, section: 'chargerentApp'}, clientAuth), /Boot Wi-Fi setup/);
+  }
+});
+
+test('app timeout remains a draft until Publish and is retained when the published profile is read again', async () => {
+  const {records, save, apply, saved} = harness();
+  saved.applicationProfiles.chargerentMedia.stripeUi.screenTimeoutSeconds = 85;
+  const beforeKiosk = clone(records.get('kiosks/fr8012'));
+  const {profile} = await save({profile: saved, section: 'chargerentApp'}, clientAuth);
+  assert.equal(profile.applicationProfiles.chargerentMedia.stripeUi.screenTimeoutSeconds, 85);
+  assert.equal(records.get('uiProfiles/client').publishedSections?.chargerentApp, undefined);
+  assert.deepEqual(records.get('kiosks/fr8012'), beforeKiosk);
+  await apply({profileId: 'client', expectedVersion: profile.version, section: 'chargerentApp', stationids: ['FR8012']}, clientAuth);
+  const published = records.get('uiProfiles/client');
+  assert.equal(published.applicationProfiles.chargerentMedia.stripeUi.screenTimeoutSeconds, 85);
+  assert.equal(published.publishedSections.chargerentApp.value.stripeUi.screenTimeoutSeconds, 85);
+  assert.equal(published.publishedSections.chargerentApp.profileVersion, profile.sectionVersions.chargerentApp);
+  assert.deepEqual(published.ui, saved.ui);
+  assert.deepEqual(published.languages, saved.languages);
+  assert.deepEqual(published.admin, saved.admin);
+});
+
+test('invalid app timeouts are rejected before saving any profile or kiosk changes', async () => {
+  const {records, save, saved} = harness();
+  const before = clone(records);
+  for (const timeout of [null, '30', false, 9, 121, 30.5]) {
+    saved.applicationProfiles.chargerentMedia.stripeUi.screenTimeoutSeconds = timeout;
+    await assert.rejects(save({profile: saved, section: 'chargerentApp'}, clientAuth), {code: 'invalid-argument'});
+    assert.deepEqual(records, before);
+  }
+});
+
+test('receipt page copy and logo stay in the client draft until its app profile is published',async()=>{
+  const {defaultReceiptPage}=await import('../functions/receiptPageProfile.mjs');
+  const {records,save,apply,saved}=harness();
+  const receiptPage=defaultReceiptPage();
+  receiptPage.locales.en.returnedTitle='Thank you, Client';
+  receiptPage.logo={url:'https://example.com/client.png',contentType:'image/png'};
+  saved.applicationProfiles.chargerentMedia.receiptPage=receiptPage;
+  const {profile}=await save({profile:saved,section:'chargerentApp'},clientAuth);
+  assert.deepEqual(profile.applicationProfiles.chargerentMedia.receiptPage,receiptPage);
+  assert.equal(records.get('uiProfiles/client').publishedSections?.chargerentApp,undefined);
+  await apply({profileId:'client',expectedVersion:profile.version,section:'chargerentApp',stationids:['FR8012']},clientAuth);
+  assert.deepEqual(records.get('uiProfiles/client').publishedSections.chargerentApp.value.receiptPage,receiptPage);
+  assert.deepEqual(records.get('uiProfiles/client').admin,saved.admin);
+});
 
 test('scoped save rejects a stale version without changing the profile', async () => {
   const {records, save, saved} = harness();
@@ -109,10 +181,10 @@ test('Apollo station-level overrides are rejected because the flow is client-wid
   assert.equal(records.get('uiProfiles/client').version, 3);
 });
 
-test('overrides reject foreign kiosks, incompatible gateways and P68 UI-mode screens', async () => {
+test('P68 station overrides reject all kiosk targets because the profile is client-wide', async () => {
   const {save, saved, records} = harness();
   for (const stationid of ['K2', 'K3', 'A1', 'MISSING']) {
-    await assert.rejects(save({profile: saved, section: 'p68', stationid}, adminAuth), {code: 'permission-denied'});
+    await assert.rejects(save({profile: saved, section: 'p68', stationid}, adminAuth), {code: 'invalid-argument'});
   }
   assert.equal(records.get('uiProfiles/client').version, 3);
 });
@@ -162,6 +234,17 @@ test('P68 publication preserves kiosk identity, hardware, installed UI and PINs'
   for (const key of ['mode', 'version', 'created']) assert.equal(after.ui[key], before.ui[key]);
   assert.equal(after.ui.profileSections.p68.profileId, 'client');
   assert.equal(result.kiosks[0].ui.profileSections.p68.profileId, 'client');
+});
+
+test('publishing one shared layout preserves each station brand and never copies a profile brand', async () => {
+  const {apply, records} = harness();
+  records.get('kiosks/k1').stationBrand = 'chargedrops';
+  records.get('kiosks/u1').stationBrand = 'eventcharging';
+  records.get('uiProfiles/client').stationBrand = 'chargerent';
+  const result = await apply({profileId: 'client', expectedVersion: 3, section: 'kiosk', stationids: ['K1', 'U1']}, clientAuth);
+  assert.equal(records.get('kiosks/k1').stationBrand, 'chargedrops');
+  assert.equal(records.get('kiosks/u1').stationBrand, 'eventcharging');
+  assert.deepEqual(result.kiosks.map((kiosk) => kiosk.stationBrand).sort(), ['chargedrops', 'eventcharging']);
 });
 
 test('Kiosk access publication targets only UI-mode kiosks', async () => {

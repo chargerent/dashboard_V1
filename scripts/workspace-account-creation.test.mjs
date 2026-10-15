@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
+import supportTelephonyModule from '../functions/supportTelephony.js';
 import workspaceModule from '../functions/workspaceProvisioning.js';
 import workspaceNotificationModule from '../functions/workspaceNotification.js';
 
@@ -145,7 +146,7 @@ function harness(options = {}) {
     return authState;
   };
   const deps = {
-    db, admin, workspaceProvisioning, AUTH_MAPPING_DOMAIN: 'dashboard.test',
+    db, admin, workspaceProvisioning, normalizeSupportNumbers: supportTelephonyModule.normalizeSupportNumbers, AUTH_MAPPING_DOMAIN: 'dashboard.test',
     isValidWorkspaceContactEmail: workspaceNotificationModule.isValidWorkspaceContactEmail,
     preparePartnerKit: async ({includePartnerKit, role}) => {
       if (!includePartnerKit) return null;
@@ -160,6 +161,7 @@ function harness(options = {}) {
     exports: {}, functions: {https, runWith: () => ({https})},
     GMAIL_APP_PASSWORD: {}, GOOGLE_MAPS_SECRET: 'GOOGLE_MAPS_API_KEY',
     CHARGEDROPS_AGREEMENT_OTP_SECRET: {}, STRIPE_CONNECT_SECRET_KEY: {},
+    CHARGEDROPS_ONBOARDING_SERVICE_ACCOUNT: "onboarding-test@dashboard.test",
     STRIPE_CONNECT_WEBHOOK_SECRET: {}, STRIPE_TEST_SECRET_KEY: {},
     ELEVENLABS_API_KEY: {}, EVENT_INTAKE_SECRET: {}, SLASH_GOLF_RAPIDAPI_KEY: {},
     PHONE_CONTROL_SIGNING_PRIVATE_KEY: {}, TURN_SHARED_SECRET: {},

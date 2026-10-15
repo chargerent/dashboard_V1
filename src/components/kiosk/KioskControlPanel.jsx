@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { CameraIcon, SpeakerXMarkIcon } from '@heroicons/react/24/outline';
 import { getKioskPowerThreshold } from '../../utils/helpers';
 import { logKioskInteraction } from '../../utils/kioskInteractionDebug';
+import { ctf7EjectDisabledReason } from '../../utils/ctf7';
 
 const EjectIcon = ({ className = 'h-5 w-5' }) => (
     <svg xmlns="http://www.w3.org/2000/svg" className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
@@ -150,7 +151,7 @@ const V2AudioControl = ({ kiosk, t, onCommand, disabled }) => {
 };
 
 function KioskControlPanel({ kiosk, t, onCommand, serverUiVersion, serverFlowVersion, clientInfo, _isOnline, disabled = false }) {
-    const isV2 = V2_TYPES.includes(kiosk.hardware?.type);
+    const isV2 = V2_TYPES.includes(kiosk.hardware?.type) || kiosk.hardware?.type === 'CTF7';
     const canControlAudio = isV2 && clientInfo.commands.audio;
     const persistentSshUnavailable = !String(kiosk.provisionid || '').trim();
     const debugContext = { stationid: kiosk.stationid, source: 'KioskControlPanel' };
@@ -220,8 +221,47 @@ function KioskControlPanel({ kiosk, t, onCommand, serverUiVersion, serverFlowVer
         };
     }, [kiosk]);
 
-    if (kiosk.hardware?.type === 'CTF7') {
-        return <div className="rounded-lg bg-blue-50 p-4 text-sm text-blue-900">CTF7 commissioning: device controls will be available after the test unit and slot mapping are verified.</div>;
+    const isCtf7 = kiosk.hardware?.type === 'CTF7';
+    const ejectDisabled = disabled || (isCtf7 && kiosk.modules.some((module) => Boolean(ctf7EjectDisabledReason(module))));
+    const renderEjectControls = () => (
+                (clientInfo.commands.eject || clientInfo.commands.eject_multiple || (clientInfo.commands.eject_0e && !isV2)) && (
+                    <div className="col-span-2 grid grid-cols-3 gap-2" data-kiosk-eject-controls="true">
+                        {clientInfo.commands.eject && (
+                            <>
+                                <ControlButton horizontal icon={<EjectIcon />} debugAction="eject all" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject all')} disabled={ejectDisabled} label={`${t('all')} (${ejectCounts.total})`} className="bg-green-100 hover:bg-green-200 text-green-800" />
+                                <ControlButton horizontal icon={<EjectIcon />} debugAction="eject full" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject full')} disabled={ejectDisabled} label={`${t('full')} (${ejectCounts.full})`} className="bg-green-100 hover:bg-green-200 text-green-800" />
+                                <ControlButton horizontal icon={<EjectIcon />} debugAction="eject empty" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject empty')} disabled={ejectDisabled} label={`${t('empty')} (${ejectCounts.empty})`} className="bg-green-100 hover:bg-green-200 text-green-800" />
+                                <ControlButton horizontal icon={<EjectIcon />} debugAction="eject locked manual" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject locked manual', null, null, null, { targets: ejectCounts.manuallyLockedTargets })} disabled={ejectDisabled || ejectCounts.manuallyLocked === 0} label={`${t('locked_manual')} (${ejectCounts.manuallyLocked})`} className="bg-green-100 hover:bg-green-200 text-green-800" />
+                                <ControlButton horizontal icon={<EjectIcon />} debugAction="eject locked auto" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject locked auto', null, null, null, { targets: ejectCounts.automaticallyLockedTargets })} disabled={ejectDisabled || ejectCounts.automaticallyLocked === 0} label={`${t('locked_auto')} (${ejectCounts.automaticallyLocked})`} className="bg-purple-100 hover:bg-purple-200 text-purple-800" />
+                            </>
+                        )}
+                        {clientInfo.commands.eject_0e && !isV2 && (
+                            <ControlButton horizontal icon={<EjectIcon />} debugAction="eject 0e" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject 0e', null, null, null, { targets: ejectCounts.status0ETargets })} disabled={ejectDisabled || ejectCounts.status0E === 0} label={`0E (${ejectCounts.status0E})`} className="bg-amber-100 hover:bg-amber-200 text-amber-800" />
+                        )}
+                        {clientInfo.commands.eject_multiple && (
+                            <>
+                                <ControlButton horizontal icon={<EjectIcon />} debugAction="eject count 5" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject count', null, null, null, { slotid: 5 })} disabled={ejectDisabled} label="5" className="bg-green-100 hover:bg-green-200 text-green-800" />
+                                <ControlButton horizontal icon={<EjectIcon />} debugAction="eject count 10" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject count', null, null, null, { slotid: 10 })} disabled={ejectDisabled} label="10" className="bg-green-100 hover:bg-green-200 text-green-800" />
+                            </>
+                        )}
+                    </div>
+                )
+    );
+
+    if (isCtf7) {
+        return <div className="bg-white p-3 rounded-lg shadow-inner" data-kiosk-control-panel="true" data-kiosk-stationid={kiosk.stationid}>
+            <div className="grid grid-cols-2 gap-2">
+                {clientInfo.commands.disable && <ControlButton
+                    onClick={() => onCommand(kiosk.stationid, kiosk.disabled ? 'enable' : 'disable')}
+                    debugAction={kiosk.disabled ? 'enable' : 'disable'} debugContext={debugContext}
+                    disabled={Boolean(kiosk.disabled) && kiosk.rentalsValidated !== true}
+                    label={kiosk.disabled ? t('enable') : t('disable')}
+                    className="col-span-2 bg-red-100 hover:bg-red-200 text-red-800" />}
+                {renderEjectControls()}
+                {clientInfo.features.rentals && <ControlButton debugAction="rent" debugContext={debugContext}
+                    disabled label={t('rent')} className="col-span-2 bg-sky-100 text-sky-800" />}
+            </div>
+        </div>;
     }
 
     return (
@@ -266,28 +306,7 @@ function KioskControlPanel({ kiosk, t, onCommand, serverUiVersion, serverFlowVer
                         <ControlButton debugAction="rent" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'rent')} disabled={disabled} label={t('rent')} className="col-span-2 bg-sky-100 hover:bg-sky-200 text-sky-800" />
                 )}
 
-                {(clientInfo.commands.eject || clientInfo.commands.eject_multiple || (clientInfo.commands.eject_0e && !isV2)) && (
-                    <div className="col-span-2 grid grid-cols-3 gap-2" data-kiosk-eject-controls="true">
-                        {clientInfo.commands.eject && (
-                            <>
-                                <ControlButton horizontal icon={<EjectIcon />} debugAction="eject all" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject all')} disabled={disabled} label={`${t('all')} (${ejectCounts.total})`} className="bg-green-100 hover:bg-green-200 text-green-800" />
-                                <ControlButton horizontal icon={<EjectIcon />} debugAction="eject full" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject full')} disabled={disabled} label={`${t('full')} (${ejectCounts.full})`} className="bg-green-100 hover:bg-green-200 text-green-800" />
-                                <ControlButton horizontal icon={<EjectIcon />} debugAction="eject empty" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject empty')} disabled={disabled} label={`${t('empty')} (${ejectCounts.empty})`} className="bg-green-100 hover:bg-green-200 text-green-800" />
-                                <ControlButton horizontal icon={<EjectIcon />} debugAction="eject locked manual" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject locked manual', null, null, null, { targets: ejectCounts.manuallyLockedTargets })} disabled={disabled || ejectCounts.manuallyLocked === 0} label={`${t('locked_manual')} (${ejectCounts.manuallyLocked})`} className="bg-green-100 hover:bg-green-200 text-green-800" />
-                                <ControlButton horizontal icon={<EjectIcon />} debugAction="eject locked auto" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject locked auto', null, null, null, { targets: ejectCounts.automaticallyLockedTargets })} disabled={disabled || ejectCounts.automaticallyLocked === 0} label={`${t('locked_auto')} (${ejectCounts.automaticallyLocked})`} className="bg-purple-100 hover:bg-purple-200 text-purple-800" />
-                            </>
-                        )}
-                        {clientInfo.commands.eject_0e && !isV2 && (
-                            <ControlButton horizontal icon={<EjectIcon />} debugAction="eject 0e" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject 0e', null, null, null, { targets: ejectCounts.status0ETargets })} disabled={disabled || ejectCounts.status0E === 0} label={`0E (${ejectCounts.status0E})`} className="bg-amber-100 hover:bg-amber-200 text-amber-800" />
-                        )}
-                        {clientInfo.commands.eject_multiple && (
-                            <>
-                                <ControlButton horizontal icon={<EjectIcon />} debugAction="eject count 5" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject count', null, null, null, { slotid: 5 })} disabled={disabled} label="5" className="bg-green-100 hover:bg-green-200 text-green-800" />
-                                <ControlButton horizontal icon={<EjectIcon />} debugAction="eject count 10" debugContext={debugContext} onClick={() => onCommand(kiosk.stationid, 'eject count', null, null, null, { slotid: 10 })} disabled={disabled} label="10" className="bg-green-100 hover:bg-green-200 text-green-800" />
-                            </>
-                        )}
-                    </div>
-                )}
+                {renderEjectControls()}
 
                 {canControlAudio && (
                     <V2AudioControl kiosk={kiosk} t={t} onCommand={onCommand} disabled={disabled} />

@@ -1,4 +1,4 @@
-export const PAYMENT_MIN_HEIGHT=.10;
+export const PAYMENT_MIN_HEIGHT=.15;
 export const PAYMENT_MAX_HEIGHT=.50;
 export const PAYMENT_DEFAULT_HEIGHT=.32;
 

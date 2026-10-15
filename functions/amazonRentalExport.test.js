@@ -214,6 +214,23 @@ test("enqueue is idempotent and freezes pricing before later rental changes", as
   assert.equal(original.rentalMessage.batterylevel, 90);
 });
 
+test("Amazon-owned V2 rental never enters legacy import or settlement audit, including PI-shaped interaction IDs", async () => {
+  for (const ownerLocation of ["rental", "interaction"]) {
+    for (const status of ["rented", "returned"]) {
+      const rental = {...RENTAL, status, interactionId: RENTAL.paymentIntentId,
+        ...(ownerLocation === "rental" ? {billingOwner: "amazon_v2"} : {}),
+        ...(status === "returned" ? {stripeReturnSettlement: {status: "completed"}} : {})};
+      const interaction = {...INTERACTION, ...(ownerLocation === "interaction" ? {billingOwner: "amazon_v2"} : {})};
+      const db = memoryDb({[CONFIG_PATH]: CONFIG, "kioskTerminalInteractions/interaction-test": interaction});
+      const service = createAmazonExportService({db, now: () => NOW,
+        getTransport: () => assert.fail("normal V2 rental already exists; no business publish is allowed")});
+      assert.equal(await service.enqueue(rental, RENTAL.paymentIntentId), null);
+      await service.retryPending();
+      assert.equal([...db.rows.keys()].some((path) => path.startsWith(OUTBOX_PATH + "/")), false);
+    }
+  }
+});
+
 test("incomplete new snapshot creates a visible blocked export rather than a malformed rental", async () => {
   const db = memoryDb({[CONFIG_PATH]: CONFIG,
     "kioskTerminalInteractions/interaction-test": {...INTERACTION, pricingSnapshot: null}});
@@ -232,4 +249,134 @@ test("disabled bridge can verify deployed broker access without importing record
   assert.deepEqual(await service.retryPending(), []);
   assert.equal(db.rows.get(CONFIG_PATH).lastBrokerCheck.status, "connected");
   assert.equal(db.rows.get(CONFIG_PATH).connectionCheckRequested, false);
+});
+
+test("FR8012 follows the explicit config allowlist through enqueue and matching Amazon ACK", async () => {
+  const stationId = "FR8012";
+  const config = {...CONFIG, stationIds: ["FR8011", stationId]};
+  const rental = {...RENTAL, rentalStationid: stationId};
+  const interaction = {...INTERACTION, stationId};
+  const db = memoryDb({[CONFIG_PATH]: config,
+    "kioskTerminalInteractions/interaction-test": interaction});
+  const {transport, calls} = transportHarness((client, topic, payload, callback) => {
+    callback(null);
+    if (topic === "kiosk/rental") {
+      assert.equal(payload.stationid, stationId);
+      client.emit("message", "kiosk/ack", JSON.stringify({
+        stationid: "FR8011", transactionid: payload.rawid, status: "logged"}));
+      client.emit("message", "kiosk/ack", JSON.stringify({
+        stationid: stationId, transactionid: payload.rawid, status: "logged"}));
+    } else {
+      assert.equal(topic, `tl/ck/${stationId}/rental-event`);
+      assert.equal(payload.stationid, stationId);
+      assert.equal(payload.authorizedAmountCents, 200);
+      assert.equal(payload.capturedAmountCents, 0);
+    }
+  });
+  const service = createAmazonExportService({db, now: () => NOW, getTransport: () => transport});
+  const id = await service.enqueue(rental, "pi_export_test");
+  assert.equal(id, "pi_export_test-vend");
+  assert.equal((await service.deliver(id)).status, "delivered");
+  assert.equal(db.rows.get(`${OUTBOX_PATH}/${id}`).amazonAck, "logged");
+  assert.equal(calls.filter((call) => call === "publish").length, 2);
+});
+
+test("disabled, missing and nonmatching allowlists prevent FR8012 enqueue and delivery", async () => {
+  const rental = {...RENTAL, rentalStationid: "FR8012"};
+  const interaction = {...INTERACTION, stationId: "FR8012"};
+  const allowed = {...CONFIG, stationIds: ["FR8012"]};
+  const row = prepare({rental, interaction, config: allowed});
+  for (const config of [{...allowed, enabled: false}, {...CONFIG},
+    {...allowed, stationIds: []}, {...allowed, stationIds: null},
+    {...allowed, stationIds: undefined}, {...allowed, stationIds: ["FR80120"]}]) {
+    assert.equal(prepare({rental, interaction, config}), null);
+    const db = memoryDb({[CONFIG_PATH]: config,
+      "kioskTerminalInteractions/interaction-test": interaction,
+      [`${OUTBOX_PATH}/${row.id}`]: row});
+    const service = createAmazonExportService({db, now: () => NOW,
+      getTransport: () => assert.fail("excluded station must not publish")});
+    assert.equal(await service.enqueue(rental, "pi_export_test"), null);
+    assert.ok(["disabled", "not-claimed"].includes((await service.deliver(row.id)).status));
+  }
+});
+
+test("allowlist revocation blocks an already enqueued FR8012 rental", async () => {
+  const config = {...CONFIG, stationIds: ["FR8011", "FR8012"]};
+  const rental = {...RENTAL, rentalStationid: "FR8012"};
+  const interaction = {...INTERACTION, stationId: "FR8012"};
+  const db = memoryDb({[CONFIG_PATH]: config,
+    "kioskTerminalInteractions/interaction-test": interaction});
+  const service = createAmazonExportService({db, now: () => NOW,
+    getTransport: () => assert.fail("revoked station must not publish")});
+  const id = await service.enqueue(rental, "pi_export_test");
+  db.rows.set(CONFIG_PATH, CONFIG);
+  assert.equal((await service.deliver(id)).status, "not-claimed");
+  assert.equal(db.rows.get(`${OUTBOX_PATH}/${id}`).attemptCount, 0);
+});
+
+test("FR8012 keeps frozen empty-pricing and historical timestamp guards", async () => {
+  const config = {...CONFIG, stationIds: ["FR8012"]};
+  const rental = {...RENTAL, rentalStationid: "FR8012"};
+  const interaction = {...INTERACTION, stationId: "FR8012"};
+  assert.equal(prepare({rental: {...rental, rentalTime: "2026-10-02T08:59:00Z"},
+    interaction, config}), null);
+  const blockedDb = memoryDb({[CONFIG_PATH]: config,
+    "kioskTerminalInteractions/interaction-test": {...interaction,
+      pricingSnapshot: {...INTERACTION.pricingSnapshot, rate: []}}});
+  const blocked = createAmazonExportService({db: blockedDb, now: () => NOW,
+    getTransport: () => assert.fail("empty frozen pricing must not publish")});
+  const blockedId = await blocked.enqueue(rental, "pi_export_test");
+  assert.equal(blockedDb.rows.get(`${OUTBOX_PATH}/${blockedId}`).status, "blocked");
+  assert.equal(blockedDb.rows.get(`${OUTBOX_PATH}/${blockedId}`).lastErrorCode, "missing-original-pricing");
+  const settlementId = await blocked.enqueue({...rental, status: "returned",
+    stripeReturnSettlement: {status: "completed", capturedCents: 0, finalChargeCents: 0,
+      refundCents: 0, releasedCents: 200, settledAt: NOW}}, "pi_export_test");
+  assert.equal(settlementId, "pi_export_test-settlement");
+  assert.equal(blockedDb.rows.get(`${OUTBOX_PATH}/${settlementId}`).status, "blocked");
+  assert.equal(blockedDb.rows.get(`${OUTBOX_PATH}/${settlementId}`).lastErrorCode, "missing-original-pricing");
+  const row = prepare({rental, interaction, config});
+  const staleDb = memoryDb({[CONFIG_PATH]: config, [`${OUTBOX_PATH}/${row.id}`]: row});
+  const stale = createAmazonExportService({db: staleDb,
+    now: () => new Date(NOW.getTime() + 180_000),
+    getTransport: () => assert.fail("stale FR8012 must not publish")});
+  await stale.deliver(row.id);
+  assert.equal(staleDb.rows.get(`${OUTBOX_PATH}/${row.id}`).lastErrorCode, "legacy-timestamp-window");
+});
+
+test("explicit allowlist controls future station assignment without another code pilot", () => {
+  const stationId = "FR9000";
+  const rental = {...RENTAL, rentalStationid: stationId};
+  const interaction = {...INTERACTION, stationId};
+  assert.equal(prepare({rental, interaction}), null);
+  const row = prepare({rental, interaction, config: {...CONFIG, stationIds: [" fr9000 "]}});
+  assert.equal(row.stationId, stationId);
+  assert.equal(row.rentalMessage.rawid, "pi_export_test");
+});
+
+test("FR8012 free return releases the EUR30 hold and exports one deterministic settlement event", async () => {
+  const config = {...CONFIG, stationIds: ["FR8012"]};
+  const interaction = {...INTERACTION, stationId: "FR8012", amountCents: 3000,
+    pricingSnapshot: {...INTERACTION.pricingSnapshot, authamount: 30, buyprice: 30, dailyprice: 30}};
+  const rental = {...RENTAL, rentalStationid: "FR8012", status: "returned",
+    paymentStatus: "authorization_released", stripeReturnSettlement: {status: "completed",
+      capturedCents: 0, finalChargeCents: 0, refundCents: 0, releasedCents: 3000, settledAt: NOW}};
+  const db = memoryDb({[CONFIG_PATH]: config,
+    "kioskTerminalInteractions/interaction-test": interaction});
+  const events = [];
+  const service = createAmazonExportService({db, now: () => NOW, getTransport: () => ({
+    publishRental() {assert.fail("settlement must not insert another rental");},
+    async publishEvent(topic, event) {events.push({topic, event});},
+  })});
+  const id = await service.enqueue(rental, "pi_export_test");
+  assert.equal(await service.enqueue(rental, "pi_export_test"), id);
+  assert.equal((await service.deliver(id)).status, "delivered");
+  assert.equal((await service.deliver(id)).status, "not-claimed");
+  assert.equal(events.length, 1);
+  assert.equal(events[0].topic, "tl/ck/FR8012/rental-event");
+  assert.equal(events[0].event.eventid, "firebase-pi_export_test-settlement-v1");
+  assert.equal(events[0].event.authorizedAmountCents, 3000);
+  assert.equal(events[0].event.capturedAmountCents, 0);
+  assert.equal(events[0].event.finalChargeCents, 0);
+  assert.equal(events[0].event.refundedAmountCents, 0);
+  assert.equal(events[0].event.releasedAmountCents, 3000);
 });
