@@ -256,3 +256,8 @@ body:has(.ms-app){margin:0}
 .ms-checkout-panel.out_of_order:not(.direct-tap):not(.compact) .ms-checkout-actions{width:60%;justify-self:end;align-self:center}
 
 .ms-checkout-panel .ms-checkout-help-qr,.ms-checkout-panel .ms-checkout-qr,.ms-checkout-panel .ms-return-qr-preview{background:#fff;border-radius:calc(var(--checkout-pixel) * 12);padding:calc(var(--checkout-pixel) * 8);box-sizing:border-box}
+
+/* Keep receipt loading and refreshes from changing the completion card's geometry. */
+.ms-checkout-panel.direct-tap .ms-return-qr-slot{display:flex;align-items:center;justify-content:center;flex:0 0 auto;width:var(--return-qr-size);height:var(--return-qr-size);min-height:var(--return-qr-size)}
+.ms-checkout-panel.direct-tap .ms-receipt-caption-stack{display:grid;min-width:0;width:100%}
+.ms-checkout-panel.direct-tap .ms-receipt-caption-stack>p{grid-area:1/1;align-self:end}

@@ -1,6 +1,6 @@
 import {MEDIA_HOSTED,mediaUrl,mediaFetch} from './mediaApi.js';
 /* eslint-disable react-refresh/only-export-components */
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useId, useMemo, useRef, useState } from 'react';
 import {createPortal} from 'react-dom';
 import {customerHelpQrDataUrl,customerHelpUrl,customerHelpTermsUrl,stripeQrDataUrl} from './stripeQr.js';
 
@@ -256,10 +256,12 @@ export function CheckoutPanel({checkout={},previewOnly=false,previewStage,previe
   const link=stage==='succeeded'?(showingVend?checkoutTransactionReceipt(vendNotice)?.url:checkoutVendReceipt(interaction)?.url):stage==='returned'?checkoutReturnReceiptUrl(profile,showingReturn?returnNotice:null,interaction):LINK_STAGES.has(stage)?checkoutLinkUrl(profile,stage,interaction,checkout,language):null;
   const mockLink=!link && MOCK_QR_STAGES.has(stage);
   const receiptPreview=previewOnly && checkout.receiptPreview===true && ['succeeded','returned'].includes(stage) && !link;
-  useEffect(()=>{
+  const receiptReady=!!(link && qrImage) || receiptPreview;
+  const receiptAlignmentKey=JSON.stringify([text('returnAnySlot'),text('returnConfirmationHint'),text('receiptScan'),text('receiptPending'),geometry.contentScale]);
+  useLayoutEffect(()=>{
     if(!directTap || stage!=='succeeded')return;
     const root=panel.current,group=root?.querySelector('.ms-checkout-vend-return');
-    const hint=group?.querySelector('small'),caption=root?.querySelector('.ms-return-receipt p');
+    const hint=group?.querySelector('small'),caption=root?.querySelector('.ms-return-receipt .ms-receipt-scan-caption');
     if(!group || !hint || !caption)return;
     let active=true;
     const baseline=node=>{
@@ -277,10 +279,10 @@ export function CheckoutPanel({checkout={},previewOnly=false,previewStage,previe
       group.style.marginTop=`${Math.max(0,gap+delta)}px`;
     };
     const observer=new ResizeObserver(align);
-    for(const node of [root,hint,caption])observer.observe(node);
+    for(const node of [root,caption])observer.observe(node);
     align();document.fonts?.ready.then(align);
     return()=>{active=false;observer.disconnect();group.style.removeProperty('margin-top');};
-  },[directTap,stage,profile,language,qrImage,link,receiptPreview,viewportWidth,viewportHeight,geometry.expandedHeight]);
+  },[directTap,stage,receiptAlignmentKey,language,viewportWidth,viewportHeight,geometry.expandedHeight]);
   const helpStationId=String(checkout.stationId || STATION).trim().toUpperCase(),helpTemplate=profile.links?.help || '',helpLink=directTap?customerHelpTermsUrl(helpTemplate,helpStationId,offer?.planCode || offer?.pricing?.planCode,language):customerHelpUrl(helpTemplate,helpStationId);
   const tapToRent=directTap && !currentPage && ['touch_ready','waiting_for_card'].includes(stage);
   const unavailableScreen=stage==='out_of_order';
@@ -344,7 +346,7 @@ export function CheckoutPanel({checkout={},previewOnly=false,previewStage,previe
     if(stage==='out_of_order')return null;
     if(INFORMATION_STAGES.has(stage))return <>{stage!=='terms' && link && button('openLink',()=>setQrOpen(true),{disabled:!qrImage,presentationOnly:true})}{button('back',back,{secondary:true,presentationOnly:true})}</>;
     if(stage==='returning')return <>{busyMessage('returnPending')}{button('cancel',()=>selectFlow({...IDLE_CHECKOUT_FLOW,step:'ready'}),{secondary:true,disabled:!!busy,presentationOnly:true})}</>;
-    if(stage==='returned' || stage==='succeeded')return <><div className="ms-return-receipt" aria-label={text('receipt.title')}>{link && qrImage?<><img className="ms-checkout-qr" src={qrImage} alt={text('receiptScan')}/><p>{text('receiptScan')}</p></>:receiptPreview?<><span className="ms-return-qr-preview" data-receipt-preview="true"><MockQrCode label={text('receiptScan')}/></span><p>{text('receiptScan')}</p></>:<p role="status" aria-live="polite">{text('receiptPending')}</p>}</div>{!directTap && button('done',done,{disabled:!!busy,presentationOnly:true})}</>;
+    if(stage==='returned' || stage==='succeeded')return <><div className="ms-return-receipt" aria-label={text('receipt.title')}>{directTap?<><span className="ms-return-qr-slot">{link && qrImage?<img className="ms-checkout-qr" src={qrImage} alt={text('receiptScan')}/>:receiptPreview?<span className="ms-return-qr-preview" data-receipt-preview="true"><MockQrCode label={text('receiptScan')}/></span>:null}</span><span className="ms-receipt-caption-stack"><p className="ms-receipt-scan-caption" style={{visibility:receiptReady?'visible':'hidden'}} aria-hidden={!receiptReady}>{text('receiptScan')}</p><p style={{visibility:receiptReady?'hidden':'visible'}} aria-hidden={receiptReady} role={receiptReady?undefined:'status'} aria-live={receiptReady?undefined:'polite'}>{text('receiptPending')}</p></span></>:link && qrImage?<><img className="ms-checkout-qr" src={qrImage} alt={text('receiptScan')}/><p>{text('receiptScan')}</p></>:receiptPreview?<><span className="ms-return-qr-preview" data-receipt-preview="true"><MockQrCode label={text('receiptScan')}/></span><p>{text('receiptScan')}</p></>:<p role="status" aria-live="polite">{text('receiptPending')}</p>}</div>{!directTap && button('done',done,{disabled:!!busy,presentationOnly:true})}</>;
     if(['declined','cancelled','failed'].includes(stage))return button('done',done,{disabled:!!busy,presentationOnly:true});
     return null;
   }
