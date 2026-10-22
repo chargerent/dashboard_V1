@@ -42,6 +42,7 @@ import { db, auth } from './firebase-config';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, documentId, getDoc, collection, onSnapshot, query, where } from 'firebase/firestore';
 
+const DemosPage = lazy(() => import('./pages/DemosPage.jsx'));
 const AdminPage = lazy(() => import('./pages/AdminPage.jsx'));
 const KioskEditorPage = lazy(() => import('./pages/KioskEditorPage.jsx'));
 const RentalsPage = lazy(() => import('./pages/RentalsPage.jsx'));
@@ -75,7 +76,7 @@ function readActivityNavigation() {
   return {
     page: import.meta.env.DEV && ['accounting-preview', 'payter-preview', 'profiles-preview', 'chargedrops-client-setup-preview', 'chargedrops-client-portal-preview', 'regional-partner-onboarding-preview', 'regional-partner-invite-preview'].includes(requestedPage)
       ? requestedPage
-      : requestedPage === 'activity'
+      : requestedPage === 'demos' ? 'demos' : requestedPage === 'activity'
         ? 'activity'
         : ['media', 'chargerent-media'].includes(requestedPage) ? 'media' : 'dashboard',
     stationId: String(params.get('station') || '').trim().toUpperCase(),
@@ -3235,6 +3236,7 @@ function App() {
       language={language}
       setLanguage={setLanguage}
       onNavigateToAdmin={() => setPage('admin')}
+      onNavigateToDemos={clientInfo?.isAdmin === true ? () => setPage('demos') : undefined}
       onNavigateToAiBooths={openObailixConciergeWorkspace}
       onNavigateToBinding={() => setPage('binding')}
       onNavigateToRentals={(selection = '7days') => {
@@ -3453,6 +3455,9 @@ function App() {
     }
 
     switch (page) {
+      case 'demos':
+        if (!clientInfo.isAdmin) return dashboard;
+        return <DemosPage currentUser={clientInfo} onLogout={handleLogout} onNavigateToDashboard={() => setPage('dashboard')} onNavigateToAdmin={() => setPage('admin')} t={t} />;
       case 'activity':
         if (clientInfo?.isAdmin !== true) {
           return dashboard;
@@ -3531,6 +3536,7 @@ function App() {
             onNavigateToAiBooths={openObailixConciergeWorkspace}
             onNavigateToPayouts={() => setPage('payouts')}
             onNavigateToAccounting={() => setPage('accounting')}
+            onNavigateToDemos={() => setPage('demos')}
             onNavigateToPayter={() => setPage('payter')}
             onNavigateToChargeDropsClientSetup={() => setPage('chargedrops-client-setup')}
             onNavigateToRegionalPartnerOnboarding={() => setPage('regional-partner-onboarding')}

@@ -43,6 +43,7 @@ function AdminPage({
   onNavigateToPayouts,
   onNavigateToAccounting,
   onNavigateToPayter,
+  onNavigateToDemos,
   onNavigateToChargeDropsClientSetup,
   onNavigateToRegionalPartnerOnboarding,
   currentUser,
@@ -621,6 +622,8 @@ function AdminPage({
                 <CalculatorIcon className="h-6 w-6" />
               </button>
             )}
+
+            {isAdmin && <button onClick={onNavigateToDemos} className="rounded-md bg-blue-100 px-3 py-2 font-semibold text-blue-800 hover:bg-blue-200" type="button">Demos</button>}
 
             {isAdmin && (
               <button onClick={onNavigateToPayter} className="p-2 rounded-md bg-cyan-100 text-cyan-800 hover:bg-cyan-200" title="Payter terminals">

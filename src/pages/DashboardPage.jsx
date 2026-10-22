@@ -114,7 +114,7 @@ const buildStationStatusIssues = (kiosk, referenceTime) => {
     return issues;
 };
 
-export default function DashboardPage({ _token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToAiBooths, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToActivity, onNavigateToPhoneControl, onNavigateToCustomerSupport, assignedPhoneStationIds = EMPTY_STATION_IDS, assignedPhoneDevicesByStationId = EMPTY_PHONE_DEVICE_MAP, onNavigateToReporting, onNavigateToTesting, rentalData, rentalDashboardStatsByStationId, useRentalDashboardSummaries = false, allStationsData, _setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, _setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, _ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, _setNgrokInfo, manageIgnoredKiosk, kiosksReady, sshConnectivityByStation = {}, ngrokConnectivityByStation = {}, initialSearch = '', sessionWarningOpen = false, sessionCountdown = 60, onStayLoggedIn, operationalActivityEnabled = false }) {
+export default function DashboardPage({ _token, onLogout, clientInfo, t, language, setLanguage, onNavigateToAdmin, onNavigateToAiBooths, onNavigateToDemos, onNavigateToBinding, onNavigateToRentals, onNavigateToChargers, onNavigateToActivity, onNavigateToPhoneControl, onNavigateToCustomerSupport, assignedPhoneStationIds = EMPTY_STATION_IDS, assignedPhoneDevicesByStationId = EMPTY_PHONE_DEVICE_MAP, onNavigateToReporting, onNavigateToTesting, rentalData, rentalDashboardStatsByStationId, useRentalDashboardSummaries = false, allStationsData, _setAllStationsData, onCommand, commandStatus, setCommandStatus, firestoreError, initialStatusCheck, setInitialStatusCheck, serverFlowVersion, serverUiVersion, pendingSlots, _setPendingSlots, ejectingSlots, setEjectingSlots, failedEjectSlots, lockingSlots, _ignoredKiosksRef, ngrokModalOpen, setNgrokModalOpen, ngrokInfo, _setNgrokInfo, manageIgnoredKiosk, kiosksReady, sshConnectivityByStation = {}, ngrokConnectivityByStation = {}, initialSearch = '', sessionWarningOpen = false, sessionCountdown = 60, onStayLoggedIn, operationalActivityEnabled = false }) {
     const [loading, setLoading] = useState(!kiosksReady);
     const [urgentIncidents, setUrgentIncidents] = useState([]);
     const [unresolvedSupportCount, setUnresolvedSupportCount] = useState(0);
@@ -772,6 +772,7 @@ return (
                         />
                     </div>
                     <div className="mt-3 flex flex-wrap items-center justify-end gap-2 sm:gap-4">
+                    {isAdminUser && onNavigateToDemos && <button onClick={onNavigateToDemos} className="rounded-md bg-blue-100 px-3 py-2 text-sm font-semibold text-blue-800 hover:bg-blue-200" type="button">Demos</button>}
                     {hasStatusAccess && (
                         <button
                             onClick={() => setShowInitialStatus(true)}
