@@ -1,7 +1,7 @@
 import { auth } from '../firebase-config';
 
-// Stable service origin; client-facing links always use the Chargerent domain.
-export const DEMO_API_ORIGIN = 'https://chargerent-client-demo.socialbowl16.chatgpt.site';
+// Public station screens and management requests share the branded demo origin.
+export const DEMO_API_ORIGIN = 'https://demo.chargerentstations.com';
 export const DEMO_PUBLIC_ORIGIN = 'https://demo.chargerentstations.com';
 const messages = {
   SIGN_IN_REQUIRED: 'Please sign in again.', ADMIN_REQUIRED: 'Only administrators can manage demos.',
